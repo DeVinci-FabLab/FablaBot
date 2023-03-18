@@ -8,7 +8,7 @@ import os
 GUILD_TOKEN = int(os.environ.get("GUILD_TOKEN"))
 MY_GUILD = discord.Object(id=GUILD_TOKEN)
 
-overwrite=[discord.PermissionOverwrite() for i in range(4)]
+overwrite=[discord.PermissionOverwrite() for i in range(3)]
 overwrite[0].send_messages = True
 overwrite[0].read_messages = True
 overwrite[1].send_messages = False
@@ -58,6 +58,9 @@ class gestion(commands.Cog):
             view.add_item(button)
             message = await ctx.send("Cliquez sur ce bouton pour recevoir le rôle Validé", view=view)
 
+      @commands.hybrid_command(name="reboot", with_app_command=True, description="Reeboot server")
+      async def reboot(self, ctx: commands.Context):
+          os.system("reboot")
 
 async def setup(client:commands.Bot) -> None:
          await client.add_cog(gestion(client))
