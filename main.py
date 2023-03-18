@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands
+from discord import app_commands
 from dotenv import load_dotenv
 import os
 
@@ -11,24 +12,24 @@ GUILD_TOKEN = int(os.environ.get("GUILD_TOKEN"))
 MY_GUILD = discord.Object(id=GUILD_TOKEN)
 
 
-
 class Client(commands.Bot):
     def __init__(self):
-        super().__init__(command_prefix=commands.when_mentioned_or('.'), intents=discord.Intents().all())
-        self.cogslist = ["cogs.music"]
+        super().__init__(command_prefix=commands.when_mentioned_or('$'), intents=discord.Intents().all())
+        self.MY_GUILD= MY_GUILD
+        self.cogslist = ["cogs.music","cogs.gestion","cogs.welcome"]
+
 
     async def setup_hook(self):
-        self.tree.copy_global_to(guild=MY_GUILD)
-        await self.tree.sync(guild=MY_GUILD)
         for ext in self.cogslist:
             await self.load_extension(ext)
+        self.tree.copy_global_to(guild=MY_GUILD)
+        await self.tree.sync(guild=MY_GUILD)
+
+
+    async def on_command_error(self, ctx, exception) :
+        await ctx.reply(exception,ephemeral=True)
 
 client = Client()
-
-@client.tree.command(name = "commandname", description = "My first application Command") #Add the guild ids in which the slash command will appear. If it should be in all, remove the argument, but note that it will take some time (up to an hour) to register the command if it's for all guilds.
-async def first_command(interaction):
-    await interaction.response.send_message("Hello!")
-
 
 
 client.run(DISCORD_TOKEN)
