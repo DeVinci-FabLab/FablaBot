@@ -16,7 +16,7 @@ class Client(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix=commands.when_mentioned_or('$'), intents=discord.Intents().all())
         self.MY_GUILD= MY_GUILD
-        self.cogslist = ["cogs.music","cogs.gestion","cogs.welcome"]
+        self.cogslist = ["cogs.music","cogs.gestion","cogs.welcome","cogs.formation"]
 
 
     async def setup_hook(self):

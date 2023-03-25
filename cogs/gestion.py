@@ -26,27 +26,20 @@ class gestion(commands.Cog):
       @commands.hybrid_command(name='channel', with_app_command=True,description="Create a new channel in a selected zone")
       @app_commands.guilds(MY_GUILD)
       @commands.has_permissions(administrator=True)
-      async def channel(self, ctx: commands.Context, channel : str, category : str):
+      async def channel(self, ctx: commands.Context, channel : str, category: discord.CategoryChannel):
             guild = ctx.guild
-            val = discord.utils.get(guild.categories, name=category) 
-            if (True if channel not in [i.name for i in val.channels] else False) if val is not None else False:
-                  await guild.create_text_channel (channel,category=val)
-                  await ctx.reply(f'Le salon "{channel}" a été créé dans {category} !')
-            elif val is None:
-                  await ctx.reply(f'La catégorie "{category}" n\'existe pas !')
+            if channel not in [i.name for i in category.channels]:
+                  await guild.create_text_channel (channel,category=category)
+                  await ctx.reply(f'Le salon "{channel}" a été créé dans {category.name} !')
             else:
-                  await ctx.reply(f"Un salon {channel} existe déjà dans {category}!")
-
+                  await ctx.reply(f"Un salon {channel} existe déjà dans {category.name} !")
+            #val = discord.utils.get(guild.categories, name=category)
 
       @commands.hybrid_command(name="perm", with_app_command=True, description="Change the permissions of a channel")
       @app_commands.guilds(MY_GUILD)
       @commands.has_permissions(administrator=True)
-      async def perm(self, ctx: commands.Context, channel : discord.TextChannel, role : discord.Role, perm : int, personne : discord.Member=None):
-            #get channel with name channel
-            channel = discord.utils.get(ctx.guild.channels, name=channel)
-
+      async def perm(self, ctx: commands.Context, channel : discord.TextChannel, role : discord.Role, perm : int ):#personne : discord.Member=None
             #get role with name role
-            role = discord.utils.get(ctx.guild.roles, name=role)
             await channel.set_permissions(role, overwrite=overwrite[perm])
             await ctx.reply(f"Les permissions du salon {channel} ont été modifiées !")
 
