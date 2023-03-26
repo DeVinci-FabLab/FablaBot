@@ -34,15 +34,37 @@ class gestion(commands.Cog):
             else:
                   await ctx.reply(f"Un salon {channel} existe déjà dans {category.name} !")
             #val = discord.utils.get(guild.categories, name=category)
-
-      @commands.hybrid_command(name="perm", with_app_command=True, description="Change the permissions of a channel")
-      @app_commands.guilds(MY_GUILD)
+            
+      @commands.hybrid_command(name="role_perm", with_app_command=True, description="Change the role permissions of a channel")
+      @app_commands.describe(permission='permission chosen')
+      @app_commands.choices(permission=[
+         app_commands.Choice(name="Admin", value=0),
+         app_commands.Choice(name="Peut Modifier", value=1),
+         app_commands.Choice(name="Invité", value=2),
+         app_commands.Choice(name="Perona Non Gratta", value=3),
+      ])
       @commands.has_permissions(administrator=True)
-      async def perm(self, ctx: commands.Context, channel : discord.TextChannel, role : discord.Role, perm : int ):#personne : discord.Member=None
+      async def role_perm(self, ctx: commands.Context ,channel : discord.TextChannel, role : discord.Role, perm : discord.app_commands.Choice[int] ):#personne : discord.Member=None
             #get role with name role
             await channel.set_permissions(role, overwrite=overwrite[perm])
             await ctx.reply(f"Les permissions du salon {channel} ont été modifiées !")
 
+      @commands.hybrid_command(name="user_perm", with_app_command=True, description="Change permission of a user in a channel")
+      @app_commands.describe(permission='permission chosen')
+      @app_commands.choices(permission=[
+         app_commands.Choice(name="Admin", value=0),
+         app_commands.Choice(name="Peut Modifier", value=1),
+         app_commands.Choice(name="Invité", value=2),
+         app_commands.Choice(name="Perona Non Gratta", value=3),
+      ])
+      @commands.has_permissions(administrator=True)
+      async def user_perm(self, ctx: commands.Context ,channel : discord.TextChannel, user : discord.User, permission : discord.app_commands.Choice[int] ):#personne : discord.Member=None
+            #get user with name user
+            await channel.set_permissions(user, overwrite=overwrite[permission.value])
+            await ctx.reply(f"Les permissions du salon {channel} ont été modifiées !")
+
+
+      
 
       @commands.hybrid_command(name="hello", with_app_command=True, description="Create a new role")
       async def hello(self, ctx: commands.Context):
