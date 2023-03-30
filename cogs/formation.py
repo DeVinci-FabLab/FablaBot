@@ -10,16 +10,6 @@ import asyncio
 GUILD_TOKEN = int(os.environ.get("GUILD_TOKEN"))
 MY_GUILD = discord.Object(id=GUILD_TOKEN)
 
-
-
-overwrite=[discord.PermissionOverwrite() for i in range(3)]
-overwrite[0].send_messages = True
-overwrite[0].read_messages = True
-overwrite[1].send_messages = False
-overwrite[1].read_messages = True
-overwrite[2].send_messages = False
-overwrite[2].read_messages = False
-
 form= {"Informatique":"INFO",
            "Electronique":"ELEC",
            "Mécanique":"MECA",
@@ -68,11 +58,6 @@ class formation(commands.Cog):
          file = embed.add_image("./cogs/data/File.png") 
          await ctx.send(file=file, embed=embed, view=view, ephemeral=visible) # 
 
-      @commands.hybrid_command(name="clear", with_app_command=True, description="clear channel")
-      async def clear(self, ctx: commands.Context):
-         await ctx.channel.purge(limit=100)
-         await ctx.send("Channel cleared", delete_after=5)
-
 
 
 
@@ -91,7 +76,6 @@ class mySelect(Select):
       await interaction.response.edit_message(view=myView(self))
       await interaction.followup.send(f"You've chosen {' '.join(self.values)}")
 
-      
       # await interaction.response.defer()
 
 class myView(View, mySelect):

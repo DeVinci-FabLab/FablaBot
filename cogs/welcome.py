@@ -16,10 +16,6 @@ class welcome(commands.Cog):
         async def on_member_join(self, member):
                 if discord.utils.get(member.guild.categories, name=member.name) is None:
                         await member.guild.create_category (member.name)
-                        category = discord.utils.get(member.guild.categories, name=member.name)
-                        await member.guild.create_text_channel ("Règlement ✅", category=category)
-                else:
-                        await member.send("Vous avez déjà un salon !")
 
 
 async def setup(client:commands.Bot) -> None:
