@@ -6,10 +6,12 @@ from discord import app_commands, Permissions
 from dotenv import load_dotenv
 from discord.ui import Button , View
 import os
+from datetime import datetime
 
 GUILD_TOKEN = int(os.environ.get("GUILD_TOKEN"))
 MY_GUILD = discord.Object(id=GUILD_TOKEN)
 PERSONNAL_ID = int(os.environ.get("PERSONNAL_ID"))
+CURRENT_TIME = datetime.now().strftime("%Y/%m/%d, %H:%M:%S")
 
 
 #define the different permissions [admin, invited, read only , blacklist]
@@ -53,6 +55,7 @@ class gestion(commands.Cog):
       @commands.hybrid_command(name='channel_creation', with_app_command=True,description="Create a new channel in a selected zone")
       @app_commands.guilds(MY_GUILD)
       async def channel_creation(self, ctx: commands.Context, channel : str, category: discord.CategoryChannel):
+            print(f"{CURRENT_TIME} channel_creation {ctx.author.name}:{ctx.author.id} {channel} {category}")
             #check if user has permission manage_permissions in channel
             if channel not in [i.name for i in category.channels]:
                   await ctx.guild.create_text_channel (channel,category=category)
@@ -69,13 +72,14 @@ class gestion(commands.Cog):
       @app_commands.describe(permission='permission chosen')
       #definition of the different permissions category
       @app_commands.choices(permission=[
-         app_commands.Choice(name="Admin", value=0),
-         app_commands.Choice(name="Invited User", value=1),
-         app_commands.Choice(name="Read Only", value=2),
-         app_commands.Choice(name="Blacklisted", value=3),
-         app_commands.Choice(name="Remove Permissions", value=4),
+            app_commands.Choice(name="Admin", value=0),
+            app_commands.Choice(name="Invited User", value=1),
+            app_commands.Choice(name="Read Only", value=2),
+            app_commands.Choice(name="Blacklisted", value=3),
+            app_commands.Choice(name="Remove Permissions", value=4),
       ])
       async def permission_role(self, ctx: commands.Context ,channel : discord.TextChannel, role : discord.Role, permission : discord.app_commands.Choice[int] ):
+            print(f"{CURRENT_TIME} permission_role {ctx.author.name}:{ctx.author.id} {channel} {role} {permission}")
             if is_a_super_user(ctx.author,channel):
                   await channel.set_permissions(role, overwrite=overwrite[permission.value])
                   await ctx.reply(f"Les permissions du salon {channel} ont été modifiées !")
@@ -89,13 +93,14 @@ class gestion(commands.Cog):
       @app_commands.describe(permission='permission chosen')
       #definition of the different permissions category
       @app_commands.choices(permission=[
-         app_commands.Choice(name="Admin", value=0),
-         app_commands.Choice(name="Peut Modifier", value=1),
-         app_commands.Choice(name="Invité", value=2),
-         app_commands.Choice(name="Blacklisted", value=3),
-         app_commands.Choice(name="Remove Permissions", value=4),
+            app_commands.Choice(name="Admin", value=0),
+            app_commands.Choice(name="Peut Modifier", value=1),
+            app_commands.Choice(name="Invité", value=2),
+            app_commands.Choice(name="Blacklisted", value=3),
+            app_commands.Choice(name="Remove Permissions", value=4),
       ])
       async def permission_user(self, ctx: commands.Context ,channel : discord.TextChannel, user : discord.User, permission : discord.app_commands.Choice[int] ):#personne : discord.Member=None
+            print(f"{CURRENT_TIME} permission_user {ctx.author.name}:{ctx.author.id} {channel} {user} {permission}")
             #get user with name user
             if is_a_super_user(ctx.author,channel):
                   await channel.set_permissions(user, overwrite=overwrite[permission.value])
@@ -107,13 +112,15 @@ class gestion(commands.Cog):
       #reboot th server to update commands
       @commands.hybrid_command(name="reboot", with_app_command=True, description="Reeboot server")
       async def reboot(self, ctx: commands.Context):
-          os.system("reboot")
+            print(f"{CURRENT_TIME} reboot {ctx.author.name}:{ctx.author.id} {ctx.author.name} {ctx.author.id}")
+            os.system("reboot")
 
       #clear channel
       @commands.hybrid_command(name="clear", with_app_command=True, description="clear channel")
       async def clear(self, ctx: commands.Context):
-         await ctx.send("Channel will  be cleared")
-         await ctx.channel.purge(limit=100)
+            print(f"{CURRENT_TIME} clear {ctx.author.name}:{ctx.author.id} {ctx.author.name} {ctx.author.id}")
+            await ctx.send("Channel will  be cleared")
+            await ctx.channel.purge(limit=100)
 
 
 async def setup(client:commands.Bot) -> None:

@@ -4,11 +4,13 @@ from discord import app_commands, Permissions
 from dotenv import load_dotenv
 from discord.ui import Button , View , Select
 import os
-import time
+from datetime import datetime
 import asyncio
 
 GUILD_TOKEN = int(os.environ.get("GUILD_TOKEN"))
 MY_GUILD = discord.Object(id=GUILD_TOKEN)
+CURRENT_TIME = datetime.now().strftime("%Y/%m/%d, %H:%M:%S")
+
 
 form= {"Informatique":"INFO",
            "Electronique":"ELEC",
@@ -31,13 +33,14 @@ class formation(commands.Cog):
          app_commands.Choice(name="Couture", value=3),
          app_commands.Choice(name="-1", value=4),
       ])
-      async def formation(self, ctx: commands.Context, formation : discord.app_commands.Choice[int], visible : bool=True):
+      async def formation(self, ctx: commands.Context, formation : discord.app_commands.Choice[int], hide : bool=True):
+         print(f"{CURRENT_TIME} formation : {ctx.author.name}:{ctx.author.id}  {formation.name} {hide}")
          #await ctx.send(f"formation chosen : {formation.name}", ephemeral=True)
          #read the file formation[formation.name]
          f= open(f"./cogs/data/{form[formation.name]}.puml", "r")   #{formation[str(formation.name)]}
-         await ctx.reply(f.read(), ephemeral=visible)
+         await ctx.reply(f.read(), ephemeral=hide)
 
-      @commands.hybrid_command(name="ajouterformation", with_app_command=True, description="Visualise les formations")
+      @commands.hybrid_command(name="add_formation", with_app_command=True, description="Visualise les formations")
       @app_commands.describe(formation='formation chosen')
       @commands.has_role("Formateur")
       @app_commands.choices(formation=[
@@ -47,16 +50,16 @@ class formation(commands.Cog):
          app_commands.Choice(name="Couture", value=3),
          app_commands.Choice(name="-1", value=4),
       ])
-      async def ajouterformation(self, ctx: commands.Context, formation : discord.app_commands.Choice[int], visible : bool=False):
-         await ctx.send(f"formation chosen : {formation.name}", ephemeral=visible, delete_after=5)
+      async def add_formation(self, ctx: commands.Context, formation : discord.app_commands.Choice[int], visible : bool=False):
+         print(f"add_formation : {ctx.author.name}:{ctx.author.id} {formation.name} {visible}")
+         await ctx.send(f"{CURRENT_TIME} formation chosen : {formation.name}", ephemeral=visible, delete_after=5)
          options=generateGraph(form[formation.name])
          await asyncio.sleep(5)
          select = mySelect(options=options)
-
          view= myView(select)
          embed = myEmbed({"title":"Title", "description":"Desc", "color":0xffffff}) #creates embed
          file = embed.add_image("./cogs/data/File.png") 
-         await ctx.send(file=file, embed=embed, view=view, ephemeral=visible) # 
+         await ctx.send(file=file, embed=embed, view=view, ephemeral=visible)
 
 
 

@@ -8,7 +8,6 @@ load_dotenv()
 
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")
 GUILD_TOKEN = int(os.environ.get("GUILD_TOKEN"))
-
 MY_GUILD = discord.Object(id=GUILD_TOKEN)
 
 
