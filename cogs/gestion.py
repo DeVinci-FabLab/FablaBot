@@ -38,10 +38,12 @@ overwrite+=[None]
 
 
 #create a function that permit to check if user is a super user
-def is_a_super_user(user: discord.user, channel : discord.channel) -> bool:
+def is_a_super_user(user: discord.user) -> bool:
       if user.id == PERSONNAL_ID or [roles for roles in [i.name for i in user.roles] if roles in ["Président.e","Vice-Président.e"]]:
             return True
-      if [i.name for i in user.roles if channel.overwrites_for(i).manage_messages==True]!=[]:
+      return False
+def is_a_super_channel_user(user: discord.user, channel : discord.channel) -> bool:
+      if [i.name for i in user.roles if channel.overwrites_for(i).manage_messages==True]!=[] or is_a_super_user(user):
             return True
       return False
 
@@ -80,7 +82,7 @@ class gestion(commands.Cog):
       ])
       async def permission_role(self, ctx: commands.Context ,channel : discord.TextChannel, role : discord.Role, permission : discord.app_commands.Choice[int] ):
             print(f"{CURRENT_TIME} permission_role {ctx.author.name}:{ctx.author.id} {channel} {role} {permission}")
-            if is_a_super_user(ctx.author,channel):
+            if is_a_super_channel_user(ctx.author,channel):
                   await channel.set_permissions(role, overwrite=overwrite[permission.value])
                   await ctx.reply(f"Les permissions du salon {channel} ont été modifiées !")
             else:
@@ -102,7 +104,7 @@ class gestion(commands.Cog):
       async def permission_user(self, ctx: commands.Context ,channel : discord.TextChannel, user : discord.User, permission : discord.app_commands.Choice[int] ):#personne : discord.Member=None
             print(f"{CURRENT_TIME} permission_user {ctx.author.name}:{ctx.author.id} {channel} {user} {permission}")
             #get user with name user
-            if is_a_super_user(ctx.author,channel):
+            if is_a_super_channel_user(ctx.author,channel):
                   await channel.set_permissions(user, overwrite=overwrite[permission.value])
                   await ctx.reply(f"Les permissions du salon {channel} ont été modifiées !")
             else:
@@ -112,30 +114,78 @@ class gestion(commands.Cog):
       #reboot th server to update commands
       @commands.hybrid_command(name="reboot", with_app_command=True, description="Reeboot server")
       async def reboot(self, ctx: commands.Context):
-            if is_a_super_user(ctx.author,ctx.channel):
+            if is_a_super_user(ctx.author):
                   print(f"{CURRENT_TIME} reboot {ctx.author.name}:{ctx.author.id}")
                   os.system("reboot")
 
       #clear channel
       @commands.hybrid_command(name="clear", with_app_command=True, description="clear channel")
       async def clear(self, ctx: commands.Context):
-            print(f"{CURRENT_TIME} clear {ctx.author.name}:{ctx.author.id}")
-            await ctx.send("Channel will  be cleared")
-            await ctx.channel.purge(limit=100)
+            if is_a_super_channel_user(ctx.author,ctx.channel):
+                  print(f"{CURRENT_TIME} clear {ctx.author.name}:{ctx.author.id}")
+                  await ctx.send("Channel will  be cleared")
+                  await ctx.channel.purge(limit=100)
+
 
       @commands.hybrid_command(name="op", with_app_command=True, description="op a user")
-      async def clear(self, ctx: commands.Context, user:discord.User, role:discord.Role):
-            print(f"{CURRENT_TIME} op {ctx.author.name}:{ctx.author.id} {user} {role}")
-            if is_a_super_user(ctx.author,ctx.channel):
-                  await user.add_roles(role)
-                  return
-            if role.name[0:2]=="F-" and [roles for roles in [i.name for i in user.roles] if roles in ["Respo Formation"]]!=[]:
-                  await user.add_roles(role)
+      async def op(self, ctx: commands.Context, user:discord.User):
+            print(f"{CURRENT_TIME} op {ctx.author.name}:{ctx.author.id} {user}")
+
+            ADMIN_ROLE=discord.utils.get(ctx.guild.roles,name="Admin -temp-")
+            if is_a_super_user(ctx.author):
+                  await user.add_roles(ADMIN_ROLE)
+                  await ctx.reply(f"Le rôle ADMIN a été ajouté à {user} !")
                   return
             else:
                   await ctx.reply("Vous n'avez pas la permission d'ajouter ce rôle !")
                   return
-            
+
+      @commands.hybrid_command(name="deop", with_app_command=True, description="deop a user")
+      async def deop(self, ctx: commands.Context, user:discord.User):
+            print(f"{CURRENT_TIME} deop {ctx.author.name}:{ctx.author.id} {user}")
+            ADMIN_ROLE=discord.utils.get(ctx.guild.roles,name="Admin -temp-")
+            if is_a_super_user(ctx.author):
+                  await user.remove_roles(ADMIN_ROLE)
+                  await ctx.reply(f"Le rôle ADMIN a été retiré à {user} !")
+                  return
+            else:
+                  await ctx.reply("Vous n'avez pas la permission de retirer ce rôle !")
+                  return
+
+
+      @commands.hybrid_command(name="user_role_add", with_app_command=True, description="add a role to a user")
+      async def user_role_add(self, ctx: commands.Context, user:discord.User, role:discord.Role):
+            print(f"{CURRENT_TIME} user_role_add {ctx.author.name}:{ctx.author.id} {user} {role}")
+            if is_a_super_user(ctx.author):
+                  await user.add_roles(role)
+                  await ctx.reply(f"Le rôle {role} a été ajouté à {user} !")
+                  return
+            if role.name[0:3]=="F -" and [roles for roles in [i.name for i in user.roles] if roles in ["Respo Formation"]]!=[]:
+                  #add permissions manage roles to user
+                  await user.add_roles(role)
+                  await ctx.reply(f"Le rôle {role} a été retiré à {user} !")
+                  return
+            else:
+                  await ctx.reply("Vous n'avez pas la permission d'ajouter ce rôle !")
+                  return
+
+      @commands.hybrid_command(name="user_role_remove", with_app_command=True, description="remove a role from a user")
+      async def user_role_remove(self, ctx: commands.Context, user:discord.User, role:discord.Role):
+            print(f"{CURRENT_TIME} user_role_remove {ctx.author.name}:{ctx.author.id} {user} {role}")
+            if is_a_super_user(ctx.author):
+                  await user.remove_roles(role)
+                  await ctx.reply(f"Le rôle {role} a été retiré à {user} !")
+                  return
+            if role.name[0:3]=="F -" and [roles for roles in [i.name for i in user.roles] if roles in ["Respo Formation"]]!=[]:
+                  #add permissions manage roles to user
+                  await user.remove_roles(role)
+                  await ctx.reply(f"Le rôle {role} a été retiré à {user} !")
+                  return
+            else:
+                  await ctx.reply("Vous n'avez pas la permission de retirer ce rôle !")
+                  return
+
+
 
 async def setup(client:commands.Bot) -> None:
       await client.add_cog(gestion(client))
