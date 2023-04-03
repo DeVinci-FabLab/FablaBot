@@ -112,16 +112,30 @@ class gestion(commands.Cog):
       #reboot th server to update commands
       @commands.hybrid_command(name="reboot", with_app_command=True, description="Reeboot server")
       async def reboot(self, ctx: commands.Context):
-            print(f"{CURRENT_TIME} reboot {ctx.author.name}:{ctx.author.id} {ctx.author.name} {ctx.author.id}")
-            os.system("reboot")
+            if is_a_super_user(ctx.author,ctx.channel):
+                  print(f"{CURRENT_TIME} reboot {ctx.author.name}:{ctx.author.id}")
+                  os.system("reboot")
 
       #clear channel
       @commands.hybrid_command(name="clear", with_app_command=True, description="clear channel")
       async def clear(self, ctx: commands.Context):
-            print(f"{CURRENT_TIME} clear {ctx.author.name}:{ctx.author.id} {ctx.author.name} {ctx.author.id}")
+            print(f"{CURRENT_TIME} clear {ctx.author.name}:{ctx.author.id}")
             await ctx.send("Channel will  be cleared")
             await ctx.channel.purge(limit=100)
 
+      @commands.hybrid_command(name="op", with_app_command=True, description="op a user")
+      async def clear(self, ctx: commands.Context, user:discord.User, role:discord.Role):
+            print(f"{CURRENT_TIME} op {ctx.author.name}:{ctx.author.id} {user} {role}")
+            if is_a_super_user(ctx.author,ctx.channel):
+                  await user.add_roles(role)
+                  return
+            if role.name[0:2]=="F-" and [roles for roles in [i.name for i in user.roles] if roles in ["Respo Formation"]]!=[]:
+                  await user.add_roles(role)
+                  return
+            else:
+                  await ctx.reply("Vous n'avez pas la permission d'ajouter ce rôle !")
+                  return
+            
 
 async def setup(client:commands.Bot) -> None:
       await client.add_cog(gestion(client))

@@ -12,10 +12,10 @@ class welcome(commands.Cog):
                 self.client = client
                 client.tree.copy_global_to(guild=MY_GUILD)
 
-        @commands.Cog.listener()
-        async def on_member_join(self, member):
-                if discord.utils.get(member.guild.categories, name=member.name) is None:
-                        await member.guild.create_category (member.name)
+        # @commands.Cog.listener()
+        # async def on_member_join(self, member):
+        #         if discord.utils.get(member.guild.categories, name=member.name) is None:
+        #                 await member.guild.create_category (member.name)
 
 
 async def setup(client:commands.Bot) -> None:
