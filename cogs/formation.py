@@ -177,6 +177,7 @@ class MyFormation(app_commands.Group):
          Latex=latex()
          driver=Latex.create_latex(name)
          await interaction.followup.send(Latex.get_link(name,driver))
+         driver.close()
 
 
 class formation(commands.Cog):
