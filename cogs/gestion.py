@@ -32,6 +32,9 @@ permissions={
       "attach_files":[True,True,False,False]
 }
 overwrite=[discord.PermissionOverwrite() for i in range(4)]
+for i in permissions:
+      for j in range(len(overwrite)):
+            overwrite[j].__setattr__(i,permissions[i][j])
 overwrite=[i.__setattr__(j, permissions[j][overwrite.index(i)]) for i in overwrite  for j in permissions]
 overwrite+=[None]
 
