@@ -7,7 +7,7 @@ import os
 GUILD_TOKEN = int(os.environ.get("GUILD_TOKEN"))
 MY_GUILD = discord.Object(id=GUILD_TOKEN)
 
-class welcome(commands.Cog):
+class Welcome(commands.Cog):
         def __init__(self, client: commands.Bot):
                 self.client = client
                 client.tree.copy_global_to(guild=MY_GUILD)
@@ -19,4 +19,4 @@ class welcome(commands.Cog):
 
 
 async def setup(client:commands.Bot) -> None:
-        await client.add_cog(welcome(client))
+        await client.add_cog(Welcome(client))

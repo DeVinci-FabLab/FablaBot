@@ -33,7 +33,7 @@ form= {"Informatique":"INFO",
            "-1":"-1"}
            
 async def setup(client:commands.Bot) -> None:
-         await client.add_cog(formation(client))
+         await client.add_cog(Formation(client))
 
 
 class latex:
@@ -180,7 +180,7 @@ class MyFormation(app_commands.Group):
          driver.close()
 
 
-class formation(commands.Cog):
+class Formation(commands.Cog):
       def __init__(self, client: commands.Bot):
          myformation=MyFormation(name="formation", description="Commandes autour des formations")
          self.client = client

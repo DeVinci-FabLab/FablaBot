@@ -187,7 +187,7 @@ class MyRole(app_commands.Group):
 
 
 
-class gestion(commands.Cog):
+class Gestion(commands.Cog):
       def __init__(self, client: commands.Bot):
             channel=MyChannel(name="channel",description="Gestion des salons")
             user=MyUser(name="user",description="Gestion des utilisateurs")
@@ -202,4 +202,4 @@ class gestion(commands.Cog):
 
 
 async def setup(client:commands.Bot) -> None:
-      await client.add_cog(gestion(client))
+      await client.add_cog(Gestion(client))
