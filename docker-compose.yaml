@@ -1,0 +1,12 @@
+version: "3"
+services:
+  python:
+    build:
+      context: .
+      dockerfile: dockerfile
+    volumes:
+      - ./BotFabLab:/home/BotFabLab   # Corrected the space here
+
+    command: python /home/BotFabLab/src/main.py
+    restart: always
+
