@@ -1,3 +1,6 @@
 *.env
 __pycache__
 *.puml
+.nox
+noxfile.py
+

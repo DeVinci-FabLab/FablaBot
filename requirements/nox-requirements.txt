@@ -1,0 +1,3 @@
+nox
+GitPython
+python-dotenv

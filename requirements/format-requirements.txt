@@ -1,0 +1,4 @@
+black
+isort
+
+-r nox-requirements.txt

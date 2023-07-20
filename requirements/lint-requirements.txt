@@ -1,0 +1,4 @@
+#all lint requirelments
+pylint
+
+-r nox-requirements.txt
