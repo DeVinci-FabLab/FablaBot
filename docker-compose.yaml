@@ -9,4 +9,3 @@ services:
 
     command: python /home/BotFabLab/main.py
     restart: always
-
