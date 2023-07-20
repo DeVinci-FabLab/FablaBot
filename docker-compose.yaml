@@ -5,8 +5,8 @@ services:
       context: .
       dockerfile: dockerfile
     volumes:
-      - ./BotFabLab:/home/BotFabLab   # Corrected the space here
+      - ./src:/home/BotFabLab   # Corrected the space here
 
-    command: python /home/BotFabLab/src/main.py
+    command: python /home/BotFabLab/main.py
     restart: always
 
