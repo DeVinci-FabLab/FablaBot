@@ -5,9 +5,6 @@ from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
 
-#env_folder_path = "../env"
-#env_file_path = os.path.join(env_folder_path, ".env")
-#load_dotenv(dotenv_path=env_file_path)
 load_dotenv()
 
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")

@@ -1,3 +1,0 @@
--r format-requirements.txt
--r requirements.txt
--r nox-requirements.txt

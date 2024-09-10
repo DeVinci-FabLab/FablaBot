@@ -1,11 +1,11 @@
-version: "3"
 services:
   python:
+    container_name: fablabot
     build:
       context: .
       dockerfile: dockerfile
     volumes:
-      - ./src:/home/BotFabLab   # Corrected the space here
+      - ./src:/home/BotFabLab
 
     command: python /home/BotFabLab/main.py
-    restart: always
+    restart: unless-stopped

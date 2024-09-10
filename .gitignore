@@ -1,6 +1,5 @@
+# Environments variables
 *.env
-__pycache__
-*.puml
-.nox
-noxfile.py
 
+# Python
+__pycache__
