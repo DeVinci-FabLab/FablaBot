@@ -1,10 +1,10 @@
 # BotFabLab
 
 ## 1. Inroduction
-Creation of a bot for my association fablab!
+Bot for the Devinci fablab
 
 
-Grantt diagramm of the rpoject
+Gantt diagramm of the rpoject
 
 ```mermaid
 gantt
@@ -48,13 +48,13 @@ gantt
 
          In comming
 
-   4. Welcom
+   4. Welcome
 
          In comming
 
 ```mermaid
 ---
-title: Representation of xurrent programm (simplified)
+title: Representation of current programm (simplified)
 ---
 classDiagram
     Bot <|-- Formation
