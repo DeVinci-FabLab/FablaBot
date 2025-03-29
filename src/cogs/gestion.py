@@ -4,13 +4,11 @@ import os
 from datetime import datetime
 
 import discord
-from discord import Permissions, app_commands
+from discord import app_commands
 from discord.ext import commands
 from discord.ui import Button, View
 from dotenv import load_dotenv
 
-GUILD_TOKEN = int(os.environ.get("GUILD_TOKEN"))
-MY_GUILD = discord.Object(id=GUILD_TOKEN)
 PERSONNAL_ID = int(os.environ.get("PERSONNAL_ID"))
 CURRENT_TIME = datetime.now().strftime("%Y/%m/%d, %H:%M:%S")
 
@@ -80,7 +78,7 @@ class MyChannel(app_commands.Group):
     @app_commands.command(
         name="creation", description="Create a new channel in a selected zone"
     )
-    @app_commands.guilds(MY_GUILD)
+    @app_commands.guilds()
     async def channelcreation(
         self,
         interaction: discord.Interaction,
@@ -308,7 +306,6 @@ class Gestion(commands.Cog):
         client.tree.add_command(user)
         client.tree.add_command(role)
         client.tree.add_command(bot)
-        client.tree.copy_global_to(guild=MY_GUILD)
 
 
 async def setup(client: commands.Bot) -> None:

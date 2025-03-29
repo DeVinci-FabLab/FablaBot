@@ -17,8 +17,6 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
-GUILD_TOKEN = int(os.environ.get("GUILD_TOKEN"))
-MY_GUILD = discord.Object(id=GUILD_TOKEN)
 CURRENT_TIME = datetime.now().strftime("%Y/%m/%d, %H:%M:%S")
 EMAIL = os.environ.get("MY_GMAIL_ACCOUNT")
 PASSWORD = os.environ.get("MY_GMAIL_PASSWORD")
@@ -32,6 +30,8 @@ form = {
     "-1": "-1",
 }
 
+# pourquoi utiliser selenium pour se connecter à Overleaf, alors que overleaf a une API
+# https://pt.overleaf.com/devs
 
 async def setup(client: commands.Bot) -> None:
     await client.add_cog(Formation(client))
@@ -266,7 +266,6 @@ class Formation(commands.Cog):
         )
         self.client = client
         client.tree.add_command(myformation)
-        client.tree.copy_global_to(guild=MY_GUILD)
 
 
 def generateGraph(title: str):
