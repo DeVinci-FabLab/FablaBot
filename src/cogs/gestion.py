@@ -4,12 +4,11 @@ import os
 from datetime import datetime
 
 import discord
-from discord import app_commands
+from discord import Permissions, app_commands
 from discord.ext import commands
 from discord.ui import Button, View
 from dotenv import load_dotenv
 
-PERSONNAL_ID = int(os.environ.get("PERSONNAL_ID"))
 CURRENT_TIME = datetime.now().strftime("%Y/%m/%d, %H:%M:%S")
 
 
@@ -44,7 +43,7 @@ overwrite += [None]
 
 # create a function that permit to check if user is a super user
 def is_a_super_user(interaction: discord.Interaction) -> bool:
-    if interaction.user.id == PERSONNAL_ID or [
+    if [
         roles
         for roles in [i.name for i in interaction.user.roles]
         if roles in ["Président.e", "Vice-Président.e"]
@@ -104,7 +103,7 @@ class MyChannel(app_commands.Group):
         # val = discord.utils.get(guild.categories, name=category)
 
 
-class MyUser(app_commands.Group):
+class MyUser(app_commands.Group): # le nom de la fonction n'a aucun sens
     @app_commands.command(name="op", description="op a user")
     async def op(self, interaction: discord.Interaction, user: discord.User):
         print(f"{CURRENT_TIME} op {interaction.user.name}:{interaction.user.id} {user}")
