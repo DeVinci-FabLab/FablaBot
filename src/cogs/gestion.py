@@ -159,7 +159,7 @@ class MyUser(app_commands.Group):
             role.name[0:3] == "F -"
             and [
                 roles
-                for roles in [i.name for i in user.roles]
+                for roles in [i.name for i in interaction.user.roles]
                 if roles in ["Respo Formation"]
             ]
             != []
@@ -167,7 +167,7 @@ class MyUser(app_commands.Group):
             # add permissions manage roles to user
             await user.add_roles(role)
             await interaction.response.send_message(
-                f"Le rôle {role} a été retiré à {user} !"
+                f"Le rôle {role} a été ajouté à {user} !"
             )
             return
         else:
