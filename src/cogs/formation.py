@@ -21,7 +21,6 @@ CURRENT_TIME = datetime.now().strftime("%Y/%m/%d, %H:%M:%S")
 EMAIL = os.environ.get("MY_GMAIL_ACCOUNT")
 PASSWORD = os.environ.get("MY_GMAIL_PASSWORD")
 
-
 form = {
     "Informatique": "INFO",
     "Electronique": "ELEC",
@@ -29,6 +28,7 @@ form = {
     "Couture": "COUTURE",
     "-1": "-1",
 }
+
 
 # pourquoi utiliser selenium pour se connecter à Overleaf, alors que overleaf a une API
 # https://pt.overleaf.com/devs
@@ -219,10 +219,10 @@ class MyFormation(app_commands.Group):
         ]
     )
     async def add_formation(
-        self,
-        interaction: discord.Interaction,
-        formation: discord.app_commands.Choice[int],
-        invisible: bool = False,
+            self,
+            interaction: discord.Interaction,
+            formation: discord.app_commands.Choice[int],
+            invisible: bool = False,
     ):
         print(
             f"add_formation : {interaction.user.name}:{interaction.user.id} {formation.name} {invisible}"

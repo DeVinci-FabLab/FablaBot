@@ -11,9 +11,7 @@ from dotenv import load_dotenv
 
 CURRENT_TIME = datetime.now().strftime("%Y/%m/%d, %H:%M:%S")
 
-
 # define the different permissions [admin, invited, read only , blacklist]
-overwrite = [discord.PermissionOverwrite() for i in range(4)]
 permissions = {
     "send_messages": [True, True, False, False],
     "read_messages": [True, True, True, False],
@@ -30,14 +28,10 @@ permissions = {
     "attach_files": [True, True, False, False],
 }
 overwrite = [discord.PermissionOverwrite() for i in range(4)]
-for i in permissions:
-    for j in range(len(overwrite)):
-        overwrite[j].__setattr__(i, permissions[i][j])
-overwrite = [
-    i.__setattr__(j, permissions[j][overwrite.index(i)])
-    for i in overwrite
-    for j in permissions
-]
+
+for perm_name in permissions:
+    for level in range(len(overwrite)):
+        overwrite[level].update(**{perm_name: permissions[perm_name][level]})
 overwrite += [None]
 
 
@@ -47,13 +41,13 @@ def is_a_super_user(interaction: discord.Interaction) -> bool:
         roles
         for roles in [i.name for i in interaction.user.roles]
         if roles in ["Président.e", "Vice-Président.e"]
-    ]:
+    ]:  # boucle IF mal structurée
         return True
     return False
 
 
 def is_a_super_channel_user(
-    interaction: discord.Interaction, channel: discord.channel
+        interaction: discord.Interaction, channel: discord.channel
 ) -> bool:
     if [
         i.name
@@ -79,10 +73,10 @@ class MyChannel(app_commands.Group):
     )
     @app_commands.guilds()
     async def channelcreation(
-        self,
-        interaction: discord.Interaction,
-        channel: str,
-        category: discord.CategoryChannel,
+            self,
+            interaction: discord.Interaction,
+            channel: str,
+            category: discord.CategoryChannel,
     ):
         print(
             f"{CURRENT_TIME} creation {interaction.user.name}:{interaction.user.id} {channel} {category}"
@@ -103,7 +97,7 @@ class MyChannel(app_commands.Group):
         # val = discord.utils.get(guild.categories, name=category)
 
 
-class MyUser(app_commands.Group): # le nom de la fonction n'a aucun sens
+class MyUser(app_commands.Group):  # le nom de la fonction n'a aucun sens
     @app_commands.command(name="op", description="op a user")
     async def op(self, interaction: discord.Interaction, user: discord.User):
         print(f"{CURRENT_TIME} op {interaction.user.name}:{interaction.user.id} {user}")
@@ -141,7 +135,7 @@ class MyUser(app_commands.Group): # le nom de la fonction n'a aucun sens
 
     @app_commands.command(name="add_role", description="add a role to a user")
     async def user_add_role(
-        self, interaction: discord.Interaction, user: discord.User, role: discord.Role
+            self, interaction: discord.Interaction, user: discord.User, role: discord.Role
     ):
         print(
             f"{CURRENT_TIME} user_role_add {interaction.user.name}:{interaction.user.id} {user} {role}"
@@ -153,13 +147,13 @@ class MyUser(app_commands.Group): # le nom de la fonction n'a aucun sens
             )
             return
         if (
-            role.name[0:3] == "F -"
-            and [
-                roles
-                for roles in [i.name for i in interaction.user.roles]
-                if roles in ["Respo Formation"]
-            ]
-            != []
+                role.name[0:3] == "F -"
+                and [
+            roles
+            for roles in [i.name for i in interaction.user.roles]
+            if roles in ["Respo Formation"]
+        ]
+                != []
         ):
             # add permissions manage roles to user
             await user.add_roles(role)
@@ -175,7 +169,7 @@ class MyUser(app_commands.Group): # le nom de la fonction n'a aucun sens
 
     @app_commands.command(name="remove_role", description="remove a role from a user")
     async def user_remove_role(
-        self, interaction: discord.Interaction, user: discord.User, role: discord.Role
+            self, interaction: discord.Interaction, user: discord.User, role: discord.Role
     ):
         print(
             f"{CURRENT_TIME} user_role_remove {interaction.user.name}:{interaction.user.id} {user} {role}"
@@ -187,13 +181,13 @@ class MyUser(app_commands.Group): # le nom de la fonction n'a aucun sens
             )
             return
         if (
-            role.name[0:3] == "F -"
-            and [
-                roles
-                for roles in [i.name for i in user.roles]
-                if roles in ["Respo Formation"]
-            ]
-            != []
+                role.name[0:3] == "F -"
+                and [
+            roles
+            for roles in [i.name for i in user.roles]
+            if roles in ["Respo Formation"]
+        ]
+                != []
         ):
             # add permissions manage roles to user
             await user.remove_roles(role)
@@ -223,11 +217,11 @@ class MyUser(app_commands.Group): # le nom de la fonction n'a aucun sens
         ]
     )
     async def user_permission_channel(
-        self,
-        interaction: discord.Interaction,
-        user: discord.User,
-        channel: discord.TextChannel,
-        permission: discord.app_commands.Choice[int],
+            self,
+            interaction: discord.Interaction,
+            user: discord.User,
+            channel: discord.TextChannel,
+            permission: discord.app_commands.Choice[int],
     ):  # personne : discord.Member=None
         print(
             f"{CURRENT_TIME} user_permission_channel {interaction.user.name}:{interaction.user.id} {channel} {user} {permission}"
@@ -273,11 +267,11 @@ class MyRole(app_commands.Group):
         ]
     )
     async def channel_permission(
-        self,
-        interaction: discord.Interaction,
-        channel: discord.TextChannel,
-        role: discord.Role,
-        permission: discord.app_commands.Choice[int],
+            self,
+            interaction: discord.Interaction,
+            channel: discord.TextChannel,
+            role: discord.Role,
+            permission: discord.app_commands.Choice[int],
     ):
         print(
             f"{CURRENT_TIME} channel_permission {interaction.user.name}:{interaction.user.id} {channel} {role} {permission}"

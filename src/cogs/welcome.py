@@ -1,9 +1,8 @@
-import os
-
 import discord
 from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
+
 
 class Welcome(commands.Cog):
     def __init__(self, client: commands.Bot):

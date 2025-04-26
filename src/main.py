@@ -9,6 +9,7 @@ load_dotenv()
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")
 DISCORD_TOKEN = "" if DISCORD_TOKEN is None else DISCORD_TOKEN
 
+
 class Client(commands.Bot):
     def __init__(self):
         super().__init__(
