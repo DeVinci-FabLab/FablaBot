@@ -156,7 +156,7 @@ class MyUser(app_commands.Group): # le nom de la fonction n'a aucun sens
             role.name[0:3] == "F -"
             and [
                 roles
-                for roles in [i.name for i in user.roles]
+                for roles in [i.name for i in interaction.user.roles]
                 if roles in ["Respo Formation"]
             ]
             != []
@@ -164,7 +164,7 @@ class MyUser(app_commands.Group): # le nom de la fonction n'a aucun sens
             # add permissions manage roles to user
             await user.add_roles(role)
             await interaction.response.send_message(
-                f"Le rôle {role} a été retiré à {user} !"
+                f"Le rôle {role} a été ajouté à {user} !"
             )
             return
         else:
@@ -247,7 +247,7 @@ class MyUser(app_commands.Group): # le nom de la fonction n'a aucun sens
 
 class MyBot(app_commands.Group):
     # reboot th server to update commands
-    @app_commands.command(name="reboot", description="Reeboot server")
+    @app_commands.command(name="reboot", description="Reboot server")
     @app_commands.check(is_a_super_user)
     async def reboot(self, interaction: discord.Interaction):
         print(f"{CURRENT_TIME} reboot {interaction.user.name}:{interaction.user.id}")
