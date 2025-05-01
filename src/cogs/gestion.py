@@ -240,7 +240,7 @@ class MyUser(app_commands.Group):  # le nom de la fonction n'a aucun sens
 
 
 class MyBot(app_commands.Group):
-    # reboot th server to update commands
+    # reboot the server to update commands
     @app_commands.command(name="reboot", description="Reboot server")
     @app_commands.check(is_a_super_user)
     async def reboot(self, interaction: discord.Interaction):
@@ -299,7 +299,6 @@ class Gestion(commands.Cog):
         client.tree.add_command(user)
         client.tree.add_command(role)
         client.tree.add_command(bot)
-
 
 async def setup(client: commands.Bot) -> None:
     await client.add_cog(Gestion(client))

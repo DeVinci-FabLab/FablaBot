@@ -3,6 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
 
+# Utilité non évidente de ce cog
 
 class Welcome(commands.Cog):
     def __init__(self, client: commands.Bot):

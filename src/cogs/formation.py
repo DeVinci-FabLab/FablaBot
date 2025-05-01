@@ -75,7 +75,7 @@ class latex:
                 )
             )
         except:
-            print("errorduring login")
+            print("error during login")
         return driver
 
     def create_latex(self, name):
