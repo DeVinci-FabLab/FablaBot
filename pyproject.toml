@@ -1,0 +1,17 @@
+[project]
+name = "fablabot"
+version = "0.1.0"
+description = "General purpose Discord bot for the DeVinci Fablab discord server."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = ["discord-py==2.2.2", "python-dotenv==1.0.0", "selenium==4.8.3", "webdriver-manager==3.8.5"]
+
+[build-system]
+requires = ["setuptools"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["fablabot*"]
+
+[project.scripts]
+main = "fablabot:main"
