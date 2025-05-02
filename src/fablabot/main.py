@@ -16,7 +16,7 @@ class Client(commands.Bot):
             command_prefix=commands.when_mentioned_or("$"),
             intents=discord.Intents().all(),
         )
-        self.cogslist = ["cogs.gestion", "cogs.welcome", "cogs.formation"]  # Add here the new cogs 
+        self.cogslist = ["cogs.gestion", "cogs.welcome", "cogs.formation"]  # Add here the new cogs
 
     async def setup_hook(self):
         for ext in self.cogslist:
@@ -28,6 +28,10 @@ class Client(commands.Bot):
         await ctx.reply(exception, ephemeral=True)
 
 
-client = Client()
+def main():
+    client = Client()
+    client.run(DISCORD_TOKEN)
 
-client.run(DISCORD_TOKEN)
+
+if __name__ == "__main__":
+    main()
