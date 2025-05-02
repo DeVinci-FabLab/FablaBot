@@ -15,7 +15,11 @@ include = ["fablabot*"]
 
 [project.scripts]
 main = "fablabot.main:main"
+doc_builder = "fablabot._build_docs:build_docs"
 
+
+[dependency-groups]
+dev = ["pdoc>=15.0.3"]
 
 [tool.ruff]
 line-length = 128

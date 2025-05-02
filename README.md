@@ -33,6 +33,18 @@ uv run src/main.py
 We **highly recommend** you to read the user guide before using the bot. It will help you understand the bot's features
 and how to use them. You can find the user guide [here](./docs/user-guide.md).
 
+### Building the technical documentation
+
+To build the documentation of a version of this project, you can use the provided `doc_builder` utility.
+
+```bash
+uv run doc_builder
+```
+
+You can then open the `docs/index.html` file in your browser to view the codebase's documentation.
+
+Add the `--help` flag to this command to see available options.
+
 ## Roadmap
 
 The library is still in active development. The next feature and bug resolutions are listed in

@@ -4,3 +4,8 @@
 # Python
 __pycache__
 *.egg-info
+
+# Docs
+docs/fablabot*
+docs/index.html
+docs/search.js
