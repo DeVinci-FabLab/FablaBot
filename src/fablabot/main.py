@@ -1,9 +1,10 @@
-import discord
 import os
+
+import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
-from fablabot.cogs import gestion, welcome, formation
+from fablabot.cogs import formation, gestion, welcome
 
 load_dotenv()
 

@@ -1,10 +1,10 @@
 from pathlib import Path
-import pdoc.render
-import pdoc.web
 import sys
 
-from fablabot import __name__ as module_name
+import pdoc.render
+import pdoc.web
 
+from fablabot import __name__ as module_name
 
 DOCS_PATH = Path("docs")  # Path is relative to project root
 
