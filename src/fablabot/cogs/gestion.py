@@ -4,10 +4,8 @@ import os
 from datetime import datetime
 
 import discord
-from discord import Permissions, app_commands
+from discord import app_commands
 from discord.ext import commands
-from discord.ui import Button, View
-from dotenv import load_dotenv
 
 CURRENT_TIME = datetime.now().strftime("%Y/%m/%d, %H:%M:%S")
 
@@ -38,22 +36,16 @@ overwrite += [None]
 # create a function that permit to check if user is a super user
 def is_a_super_user(interaction: discord.Interaction) -> bool:
     if [
-        roles
-        for roles in [i.name for i in interaction.user.roles]
-        if roles in ["Président.e", "Vice-Président.e"]
+        roles for roles in [i.name for i in interaction.user.roles] if roles in ["Président.e", "Vice-Président.e"]
     ]:  # boucle IF mal structurée
         return True
     return False
 
 
-def is_a_super_channel_user(
-        interaction: discord.Interaction, channel: discord.channel
-) -> bool:
-    if [
-        i.name
-        for i in interaction.user.roles
-        if channel.overwrites_for(i).manage_messages == True
-    ] != [] or is_a_super_user(interaction):
+def is_a_super_channel_user(interaction: discord.Interaction, channel: discord.channel) -> bool:
+    if [i.name for i in interaction.user.roles if channel.overwrites_for(i).manage_messages] != [] or is_a_super_user(
+        interaction
+    ):
         return True
     return False
 
@@ -68,32 +60,24 @@ class MyChannel(app_commands.Group):
         await interaction.channel.purge(limit=100)
 
     # create a command to create a new channel in a selected zone with hybride commands
-    @app_commands.command(
-        name="creation", description="Create a new channel in a selected zone"
-    )
+    @app_commands.command(name="creation", description="Create a new channel in a selected zone")
     @app_commands.guilds()
     async def channelcreation(
-            self,
-            interaction: discord.Interaction,
-            channel: str,
-            category: discord.CategoryChannel,
+        self,
+        interaction: discord.Interaction,
+        channel: str,
+        category: discord.CategoryChannel,
     ):
-        print(
-            f"{CURRENT_TIME} creation {interaction.user.name}:{interaction.user.id} {channel} {category}"
-        )
+        print(f"{CURRENT_TIME} creation {interaction.user.name}:{interaction.user.id} {channel} {category}")
         # check if user has permission manage_permissions in channel
         if channel not in [i.name for i in category.channels]:
             await interaction.guild.create_text_channel(channel, category=category)
-            await interaction.response.send_message(
-                f'Le salon "{channel}" a été créé dans {category.name} !'
-            )
+            await interaction.response.send_message(f'Le salon "{channel}" a été créé dans {category.name} !')
             # find the channel inside category
             channelData = discord.utils.get(category.channels, name=channel)
             await channelData.set_permissions(interaction.user, overwrite=overwrite[0])
         else:
-            await interaction.response.send_message(
-                f"Un salon {channel} existe déjà dans {category.name} !"
-            )
+            await interaction.response.send_message(f"Un salon {channel} existe déjà dans {category.name} !")
         # val = discord.utils.get(guild.categories, name=category)
 
 
@@ -105,100 +89,57 @@ class MyUser(app_commands.Group):  # le nom de la fonction n'a aucun sens
         ADMIN_ROLE = discord.utils.get(interaction.guild.roles, name="Admin -temp-")
         if is_a_super_user(interaction):
             await user.add_roles(ADMIN_ROLE)
-            await interaction.response.send_message(
-                f"Le rôle ADMIN a été ajouté à {user} !"
-            )
+            await interaction.response.send_message(f"Le rôle ADMIN a été ajouté à {user} !")
             return
         else:
-            await interaction.response.send_message(
-                "Vous n'avez pas la permission d'ajouter ce rôle !"
-            )
+            await interaction.response.send_message("Vous n'avez pas la permission d'ajouter ce rôle !")
             return
 
     @app_commands.command(name="deop", description="deop a user")
     async def deop(self, interaction: discord.Interaction, user: discord.User):
-        print(
-            f"{CURRENT_TIME} deop {interaction.user.name}:{interaction.user.id} {user}"
-        )
+        print(f"{CURRENT_TIME} deop {interaction.user.name}:{interaction.user.id} {user}")
         ADMIN_ROLE = discord.utils.get(interaction.guild.roles, name="Admin -temp-")
         if is_a_super_user(interaction):
             await user.remove_roles(ADMIN_ROLE)
-            await interaction.response.send_message(
-                f"Le rôle ADMIN a été retiré à {user} !"
-            )
+            await interaction.response.send_message(f"Le rôle ADMIN a été retiré à {user} !")
             return
         else:
-            await interaction.response.send_message(
-                "Vous n'avez pas la permission de retirer ce rôle !"
-            )
+            await interaction.response.send_message("Vous n'avez pas la permission de retirer ce rôle !")
             return
 
     @app_commands.command(name="add_role", description="add a role to a user")
-    async def user_add_role(
-            self, interaction: discord.Interaction, user: discord.User, role: discord.Role
-    ):
-        print(
-            f"{CURRENT_TIME} user_role_add {interaction.user.name}:{interaction.user.id} {user} {role}"
-        )
+    async def user_add_role(self, interaction: discord.Interaction, user: discord.User, role: discord.Role):
+        print(f"{CURRENT_TIME} user_role_add {interaction.user.name}:{interaction.user.id} {user} {role}")
         if is_a_super_user(interaction):
             await user.add_roles(role)
-            await interaction.response.send_message(
-                f"Le rôle {role} a été ajouté à {user} !"
-            )
+            await interaction.response.send_message(f"Le rôle {role} a été ajouté à {user} !")
             return
         if (
-                role.name[0:3] == "F -"
-                and [
-            roles
-            for roles in [i.name for i in interaction.user.roles]
-            if roles in ["Respo Formation"]
-        ]
-                != []
+            role.name[0:3] == "F -"
+            and [roles for roles in [i.name for i in interaction.user.roles] if roles in ["Respo Formation"]] != []
         ):
             # add permissions manage roles to user
             await user.add_roles(role)
-            await interaction.response.send_message(
-                f"Le rôle {role} a été ajouté à {user} !"
-            )
+            await interaction.response.send_message(f"Le rôle {role} a été ajouté à {user} !")
             return
         else:
-            await interaction.response.send_message(
-                "Vous n'avez pas la permission d'ajouter ce rôle !"
-            )
+            await interaction.response.send_message("Vous n'avez pas la permission d'ajouter ce rôle !")
             return
 
     @app_commands.command(name="remove_role", description="remove a role from a user")
-    async def user_remove_role(
-            self, interaction: discord.Interaction, user: discord.User, role: discord.Role
-    ):
-        print(
-            f"{CURRENT_TIME} user_role_remove {interaction.user.name}:{interaction.user.id} {user} {role}"
-        )
+    async def user_remove_role(self, interaction: discord.Interaction, user: discord.User, role: discord.Role):
+        print(f"{CURRENT_TIME} user_role_remove {interaction.user.name}:{interaction.user.id} {user} {role}")
         if is_a_super_user(interaction):
             await user.remove_roles(role)
-            await interaction.response.send_message(
-                f"Le rôle {role} a été retiré à {user} !"
-            )
+            await interaction.response.send_message(f"Le rôle {role} a été retiré à {user} !")
             return
-        if (
-                role.name[0:3] == "F -"
-                and [
-            roles
-            for roles in [i.name for i in user.roles]
-            if roles in ["Respo Formation"]
-        ]
-                != []
-        ):
+        if role.name[0:3] == "F -" and [roles for roles in [i.name for i in user.roles] if roles in ["Respo Formation"]] != []:
             # add permissions manage roles to user
             await user.remove_roles(role)
-            await interaction.response.send_message(
-                f"Le rôle {role} a été retiré à {user} !"
-            )
+            await interaction.response.send_message(f"Le rôle {role} a été retiré à {user} !")
             return
         else:
-            await interaction.response.send_message(
-                "Vous n'avez pas la permission de retirer ce rôle !"
-            )
+            await interaction.response.send_message("Vous n'avez pas la permission de retirer ce rôle !")
             return
 
     @app_commands.command(
@@ -217,11 +158,11 @@ class MyUser(app_commands.Group):  # le nom de la fonction n'a aucun sens
         ]
     )
     async def user_permission_channel(
-            self,
-            interaction: discord.Interaction,
-            user: discord.User,
-            channel: discord.TextChannel,
-            permission: discord.app_commands.Choice[int],
+        self,
+        interaction: discord.Interaction,
+        user: discord.User,
+        channel: discord.TextChannel,
+        permission: discord.app_commands.Choice[int],
     ):  # personne : discord.Member=None
         print(
             f"{CURRENT_TIME} user_permission_channel {interaction.user.name}:{interaction.user.id} {channel} {user} {permission}"
@@ -229,13 +170,9 @@ class MyUser(app_commands.Group):  # le nom de la fonction n'a aucun sens
         # get user with name user
         if is_a_super_channel_user(interaction, channel):
             await channel.set_permissions(user, overwrite=overwrite[permission.value])
-            await interaction.response.send_message(
-                f"Les permissions du salon {channel} ont été modifiées !"
-            )
+            await interaction.response.send_message(f"Les permissions du salon {channel} ont été modifiées !")
         else:
-            await interaction.response.send_message(
-                "Vous n'avez pas la permission de créer un salon !"
-            )
+            await interaction.response.send_message("Vous n'avez pas la permission de créer un salon !")
             return
 
 
@@ -267,24 +204,18 @@ class MyRole(app_commands.Group):
         ]
     )
     async def channel_permission(
-            self,
-            interaction: discord.Interaction,
-            channel: discord.TextChannel,
-            role: discord.Role,
-            permission: discord.app_commands.Choice[int],
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel,
+        role: discord.Role,
+        permission: discord.app_commands.Choice[int],
     ):
-        print(
-            f"{CURRENT_TIME} channel_permission {interaction.user.name}:{interaction.user.id} {channel} {role} {permission}"
-        )
+        print(f"{CURRENT_TIME} channel_permission {interaction.user.name}:{interaction.user.id} {channel} {role} {permission}")
         if is_a_super_channel_user(interaction, channel):
             await channel.set_permissions(role, overwrite=overwrite[permission.value])
-            await interaction.response.send_message(
-                f"Les permissions du salon {channel} ont été modifiées !"
-            )
+            await interaction.response.send_message(f"Les permissions du salon {channel} ont été modifiées !")
         else:
-            await interaction.response.send_message(
-                "Vous n'avez pas la permission de créer un salon !"
-            )
+            await interaction.response.send_message("Vous n'avez pas la permission de créer un salon !")
             return
 
 
@@ -299,6 +230,7 @@ class Gestion(commands.Cog):
         client.tree.add_command(user)
         client.tree.add_command(role)
         client.tree.add_command(bot)
+
 
 async def setup(client: commands.Bot) -> None:
     await client.add_cog(Gestion(client))
