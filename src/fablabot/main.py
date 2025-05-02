@@ -1,13 +1,13 @@
-import os
-
 import discord
+import os
 from discord.ext import commands
 from dotenv import load_dotenv
 
+from fablabot.cogs import gestion, welcome, formation
+
 load_dotenv()
 
-DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")
-DISCORD_TOKEN = "" if DISCORD_TOKEN is None else DISCORD_TOKEN
+DISCORD_TOKEN: str = os.environ.get("DISCORD_TOKEN") or ""
 
 
 class Client(commands.Bot):
@@ -16,16 +16,20 @@ class Client(commands.Bot):
             command_prefix=commands.when_mentioned_or("$"),
             intents=discord.Intents().all(),
         )
-        self.cogslist = ["cogs.gestion", "cogs.welcome", "cogs.formation"]  # Add here the new cogs
+        self.cogs_list = [
+            gestion.__name__,
+            welcome.__name__,
+            formation.__name__,
+        ]  # Add here the new cogs
 
     async def setup_hook(self):
-        for ext in self.cogslist:
+        for ext in self.cogs_list:
             await self.load_extension(ext)
         # Synchronisation globale des commandes
         await self.tree.sync()
 
-    async def on_command_error(self, ctx, exception):
-        await ctx.reply(exception, ephemeral=True)
+    async def on_command_error(self, ctx: commands.Context, exception: Exception):
+        await ctx.reply(str(exception), ephemeral=True)
 
 
 def main():
