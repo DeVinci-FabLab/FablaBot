@@ -44,7 +44,7 @@ def is_a_super_channel_user(interaction: discord.Interaction, channel: discord.c
     return any(channel.overwrites_for(i).manage_messages for i in interaction.user.roles) or is_a_super_user(interaction)
 
 
-class MyChannel(app_commands.Group):
+class ChannelManagement(app_commands.Group):
     # clear channel
     @app_commands.command(name="clear")  # description="clear channel"
     @commands.check(is_a_super_user)
@@ -75,7 +75,7 @@ class MyChannel(app_commands.Group):
         # val = discord.utils.get(guild.categories, name=category)
 
 
-class MyUser(app_commands.Group):  # le nom de la fonction n'a aucun sens
+class UserManagementGroup(app_commands.Group):  # le nom de la fonction n'a aucun sens
     @app_commands.command(name="op", description="op a user")
     async def op(self, interaction: discord.Interaction, user: discord.User):
         print(f"{CURRENT_TIME} op {interaction.user.name}:{interaction.user.id} {user}")
@@ -170,7 +170,7 @@ class MyUser(app_commands.Group):  # le nom de la fonction n'a aucun sens
             return
 
 
-class MyBot(app_commands.Group):
+class ServerManagement(app_commands.Group):
     # reboot the server to update commands
     @app_commands.command(name="reboot", description="Reboot server")
     @app_commands.check(is_a_super_user)
@@ -180,7 +180,7 @@ class MyBot(app_commands.Group):
         return
 
 
-class MyRole(app_commands.Group):
+class ChannelPermissionsManager(app_commands.Group):
     # Command that change the permissions for a certain role
     @app_commands.command(
         name="channel_permission",
@@ -213,12 +213,12 @@ class MyRole(app_commands.Group):
             return
 
 
-class Gestion(commands.Cog):
+class UserManagement(commands.Cog):
     def __init__(self, client: commands.Bot):
-        channel = MyChannel(name="channel", description="Gestion des salons")
-        user = MyUser(name="user", description="Gestion des utilisateurs")
-        role = MyRole(name="role", description="Gestion des rôles")
-        bot = MyBot(name="bot", description="Gestion du bot")
+        channel = ChannelManagement(name="channel", description="Gestion des salons")
+        user = UserManagementGroup(name="user", description="Gestion des utilisateurs")
+        role = ChannelPermissionsManager(name="role", description="Gestion des rôles")
+        bot = ServerManagement(name="bot", description="Gestion du bot")
         self.client = client
         client.tree.add_command(channel)
         client.tree.add_command(user)
@@ -227,4 +227,4 @@ class Gestion(commands.Cog):
 
 
 async def setup(client: commands.Bot) -> None:
-    await client.add_cog(Gestion(client))
+    await client.add_cog(UserManagement(client))

@@ -4,7 +4,7 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
-from src.fablabot.cogs import formation, gestion, welcome
+from src.fablabot.cogs import formation, usermanagement, welcome
 
 load_dotenv()
 
@@ -18,7 +18,7 @@ class Client(commands.Bot):
             intents=discord.Intents().all(),
         )
         self.cogs_list = [
-            gestion.__name__,
+            usermanagement.__name__,
             welcome.__name__,
             formation.__name__,
         ]  # Add here the new cogs
