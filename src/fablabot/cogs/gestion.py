@@ -35,19 +35,13 @@ overwrite += [None]
 
 # create a function that permit to check if user is a super user
 def is_a_super_user(interaction: discord.Interaction) -> bool:
-    if [
-        roles for roles in [i.name for i in interaction.user.roles] if roles in ["Président.e", "Vice-Président.e"]
-    ]:  # boucle IF mal structurée
-        return True
-    return False
+    # Vérifie si l'utilisateur a au moins un des rôles requis
+    allowed_roles = {"Président.e", "Vice-Président.e"}
+    return any(role.name in allowed_roles for role in interaction.user.roles)
 
-
+# determine if a user is a super user in the channel where the command is executed (for example, if the perms are given manually)
 def is_a_super_channel_user(interaction: discord.Interaction, channel: discord.channel) -> bool:
-    if [i.name for i in interaction.user.roles if channel.overwrites_for(i).manage_messages] != [] or is_a_super_user(
-        interaction
-    ):
-        return True
-    return False
+    return any(channel.overwrites_for(i).manage_messages for i in interaction.user.roles) or is_a_super_user(interaction)
 
 
 class MyChannel(app_commands.Group):

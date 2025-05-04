@@ -4,7 +4,7 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
-from fablabot.cogs import formation, gestion, welcome
+from src.fablabot.cogs import formation, gestion, welcome
 
 load_dotenv()
 
