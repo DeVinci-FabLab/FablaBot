@@ -49,7 +49,7 @@ def is_super_channel_user(interaction: discord.Interaction, channel: discord.Tex
     return is_super_user(interaction) or any(channel.overwrites_for(i).manage_messages for i in interaction.user.roles)
 
 
-class ChannelManagement(app_commands.Group):
+class ChannelManagement(app_commands.Group, name="channel", description="Gestion des salons"):
     # clear channel
     @app_commands.command(name="clear")  # description="clear channel"
     @commands.check(is_super_user)
@@ -80,7 +80,7 @@ class ChannelManagement(app_commands.Group):
         # val = discord.utils.get(guild.categories, name=category)
 
 
-class UserManagementGroup(app_commands.Group):  # le nom de la fonction n'a aucun sens
+class UserManagementGroup(app_commands.Group, name="user", description="Gestion des utilisateurs"):
     @app_commands.command(name="op", description="op a user")
     async def op(self, interaction: discord.Interaction, user: discord.User):
         print(f"{CURRENT_TIME} op {interaction.user.name}:{interaction.user.id} {user}")
@@ -175,7 +175,7 @@ class UserManagementGroup(app_commands.Group):  # le nom de la fonction n'a aucu
             return
 
 
-class ServerManagement(app_commands.Group):
+class ServerManagement(app_commands.Group, name="bot", description="Gestion du bot"):
     # reboot the server to update commands
     @app_commands.command(name="reboot", description="Reboot server")
     @app_commands.check(is_super_user)
@@ -185,7 +185,7 @@ class ServerManagement(app_commands.Group):
         return
 
 
-class ChannelPermissionsManager(app_commands.Group):
+class ChannelPermissionsManager(app_commands.Group, name="role", description="Gestion des rôles"):
     # Command that change the permissions for a certain role
     @app_commands.command(
         name="channel_permission",
@@ -222,10 +222,10 @@ class UserManagement(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         for group in (
-            ChannelManagement(name="channel", description="Gestion des salons"),
-            UserManagementGroup(name="user", description="Gestion des utilisateurs"),
-            ChannelPermissionsManager(name="role", description="Gestion des rôles"),
-            ServerManagement(name="bot", description="Gestion du bot"),
+            ChannelManagement(),
+            UserManagementGroup(),
+            ChannelPermissionsManager(),
+            ServerManagement(),
         ):
             self.bot.tree.add_command(group)
 

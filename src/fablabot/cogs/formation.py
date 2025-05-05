@@ -168,7 +168,7 @@ class myEmbed(discord.Embed):
         return file
 
 
-class MyFormation(app_commands.Group):
+class FormationGroup(app_commands.Group, name="formation", description="Commandes autour des formations"):
     @app_commands.command(name="add_formation", description="Visualise les formations")
     @app_commands.describe(formation="formation chosen")
     @commands.has_role("Pôle Formation")
@@ -217,7 +217,7 @@ class MyFormation(app_commands.Group):
 class Formation(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        for group in (MyFormation(name="formation", description="Commandes autour des formations"),):
+        for group in (FormationGroup(),):
             self.bot.tree.add_command(group)
 
 
