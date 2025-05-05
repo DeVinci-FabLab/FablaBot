@@ -1,7 +1,6 @@
 # this file introduce the channels management and permissions
 
 from datetime import datetime
-import os
 from warnings import deprecated
 
 import discord
@@ -175,16 +174,6 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             return
 
 
-class ServerManagement(app_commands.Group, name="bot", description="Gestion du bot"):
-    # reboot the server to update commands
-    @app_commands.command(name="reboot", description="Reboot server")
-    @app_commands.check(is_super_user)
-    async def reboot(self, interaction: discord.Interaction):
-        print(f"{CURRENT_TIME} reboot {interaction.user.name}:{interaction.user.id}")
-        os.system("reboot")
-        return
-
-
 class ChannelPermissionsManager(app_commands.Group, name="role", description="Gestion des rôles"):
     # Command that change the permissions for a certain role
     @app_commands.command(
@@ -225,7 +214,6 @@ class UserManagement(commands.Cog):
             ChannelManagement(),
             UserManagementGroup(),
             ChannelPermissionsManager(),
-            ServerManagement(),
         ):
             self.bot.tree.add_command(group)
 
