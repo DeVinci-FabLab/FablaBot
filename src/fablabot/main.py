@@ -15,7 +15,7 @@ class Client(commands.Bot):
     def __init__(self):
         super().__init__(
             command_prefix=commands.when_mentioned_or("$"),
-            intents=discord.Intents().all(),
+            intents=discord.Intents.all(),  # TODO: only enable intents we use, here and on the developer portal, this will make discord happy
         )
         self.cogs_list = [
             usermanagement.__name__,
