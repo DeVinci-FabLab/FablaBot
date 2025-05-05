@@ -23,6 +23,7 @@ dev = ["pdoc>=15.0.3"]
 
 [tool.ruff]
 line-length = 128
+target-version = "py313"
 [tool.ruff.format]
 docstring-code-format = true
 [tool.ruff.lint.pydocstyle]
