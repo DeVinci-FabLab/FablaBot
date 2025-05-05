@@ -2,6 +2,7 @@
 
 from datetime import datetime
 import os
+from warnings import deprecated
 
 import discord
 from discord import app_commands
@@ -218,17 +219,17 @@ class ChannelPermissionsManager(app_commands.Group):
 
 
 class UserManagement(commands.Cog):
-    def __init__(self, client: commands.Bot):
-        channel = ChannelManagement(name="channel", description="Gestion des salons")
-        user = UserManagementGroup(name="user", description="Gestion des utilisateurs")
-        role = ChannelPermissionsManager(name="role", description="Gestion des rôles")
-        bot = ServerManagement(name="bot", description="Gestion du bot")
-        self.client = client
-        client.tree.add_command(channel)
-        client.tree.add_command(user)
-        client.tree.add_command(role)
-        client.tree.add_command(bot)
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        for group in (
+            ChannelManagement(name="channel", description="Gestion des salons"),
+            UserManagementGroup(name="user", description="Gestion des utilisateurs"),
+            ChannelPermissionsManager(name="role", description="Gestion des rôles"),
+            ServerManagement(name="bot", description="Gestion du bot"),
+        ):
+            self.bot.tree.add_command(group)
 
 
-async def setup(client: commands.Bot) -> None:
-    await client.add_cog(UserManagement(client))
+@deprecated("Load the cog using `bot.add_cog()` instead.")
+async def setup(bot: commands.Bot) -> None:
+    await bot.add_cog(UserManagement(bot))

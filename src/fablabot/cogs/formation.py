@@ -2,6 +2,7 @@ import asyncio
 from datetime import datetime
 import os
 import time
+from warnings import deprecated
 
 import discord
 from discord import app_commands
@@ -32,10 +33,6 @@ form = {
 
 # pourquoi utiliser selenium pour se connecter à Overleaf, alors que overleaf a une API
 # https://pt.overleaf.com/devs
-
-
-async def setup(client: commands.Bot) -> None:
-    await client.add_cog(Formation(client))
 
 
 class latex:
@@ -218,10 +215,10 @@ class MyFormation(app_commands.Group):
 
 
 class Formation(commands.Cog):
-    def __init__(self, client: commands.Bot):
-        myformation = MyFormation(name="formation", description="Commandes autour des formations")
-        self.client = client
-        client.tree.add_command(myformation)
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        for group in (MyFormation(name="formation", description="Commandes autour des formations"),):
+            self.bot.tree.add_command(group)
 
 
 def generateGraph(title: str):
@@ -237,3 +234,8 @@ def generateGraph(title: str):
     liste = [i[6:] for i in fileInputs[1:-1] if i.startswith("State")]
     liste = list(set(liste))
     return [discord.SelectOption(label=str(liste[i])) for i in range(len(liste))]
+
+
+@deprecated("Load the cog using `bot.add_cog()` instead.")
+async def setup(bot: commands.Bot) -> None:
+    await bot.add_cog(Formation(bot))

@@ -1,17 +1,13 @@
+from warnings import deprecated
 from discord.ext import commands
 
-# Utilité non évidente de ce cog
 
-
+@deprecated("This cog does nothing.")
 class Welcome(commands.Cog):
-    def __init__(self, client: commands.Bot):
-        self.client = client
-
-    # @commands.Cog.listener()
-    # async def on_member_join(self, member):
-    #         if discord.utils.get(member.guild.categories, name=member.name) is None:
-    #                 await member.guild.create_category (member.name)
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
 
 
-async def setup(client: commands.Bot) -> None:
-    await client.add_cog(Welcome(client))
+@deprecated("Load the cog using `bot.add_cog()` instead.")
+async def setup(bot: commands.Bot) -> None:
+    await bot.add_cog(Welcome(bot))
