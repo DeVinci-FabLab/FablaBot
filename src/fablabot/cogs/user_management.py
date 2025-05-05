@@ -10,6 +10,7 @@ from discord.ext import commands
 CURRENT_TIME = datetime.now().strftime("%Y/%m/%d, %H:%M:%S")
 
 # define the different permissions [admin, invited, read only , blacklist]
+# TODO: replace with named tuple
 permissions = {
     "send_messages": [True, True, False, False],
     "read_messages": [True, True, True, False],
@@ -34,20 +35,23 @@ overwrite += [None]
 
 
 # create a function that permit to check if user is a super user
-def is_a_super_user(interaction: discord.Interaction) -> bool:
+def is_super_user(interaction: discord.Interaction) -> bool:
+    assert isinstance(interaction.user, discord.Member)  # Satisfies type checker
     # Vérifie si l'utilisateur a au moins un des rôles requis
     allowed_roles = {"Président.e", "Vice-Président.e"}
     return any(role.name in allowed_roles for role in interaction.user.roles)
 
+
 # determine if a user is a super user in the channel where the command is executed (for example, if the perms are given manually)
-def is_a_super_channel_user(interaction: discord.Interaction, channel: discord.channel) -> bool:
-    return any(channel.overwrites_for(i).manage_messages for i in interaction.user.roles) or is_a_super_user(interaction)
+def is_super_channel_user(interaction: discord.Interaction, channel: discord.TextChannel) -> bool:
+    assert isinstance(interaction.user, discord.Member)  # Satisfies type checker
+    return is_super_user(interaction) or any(channel.overwrites_for(i).manage_messages for i in interaction.user.roles)
 
 
 class ChannelManagement(app_commands.Group):
     # clear channel
     @app_commands.command(name="clear")  # description="clear channel"
-    @commands.check(is_a_super_user)
+    @commands.check(is_super_user)
     async def clear(self, interaction: discord.Interaction):
         print(f"{CURRENT_TIME} clear {interaction.user.name}:{interaction.user.id}")
         await interaction.response.send_message("Channel will  be cleared")
@@ -81,7 +85,7 @@ class UserManagementGroup(app_commands.Group):  # le nom de la fonction n'a aucu
         print(f"{CURRENT_TIME} op {interaction.user.name}:{interaction.user.id} {user}")
 
         ADMIN_ROLE = discord.utils.get(interaction.guild.roles, name="Admin -temp-")
-        if is_a_super_user(interaction):
+        if is_super_user(interaction):
             await user.add_roles(ADMIN_ROLE)
             await interaction.response.send_message(f"Le rôle ADMIN a été ajouté à {user} !")
             return
@@ -93,7 +97,7 @@ class UserManagementGroup(app_commands.Group):  # le nom de la fonction n'a aucu
     async def deop(self, interaction: discord.Interaction, user: discord.User):
         print(f"{CURRENT_TIME} deop {interaction.user.name}:{interaction.user.id} {user}")
         ADMIN_ROLE = discord.utils.get(interaction.guild.roles, name="Admin -temp-")
-        if is_a_super_user(interaction):
+        if is_super_user(interaction):
             await user.remove_roles(ADMIN_ROLE)
             await interaction.response.send_message(f"Le rôle ADMIN a été retiré à {user} !")
             return
@@ -104,7 +108,7 @@ class UserManagementGroup(app_commands.Group):  # le nom de la fonction n'a aucu
     @app_commands.command(name="add_role", description="add a role to a user")
     async def user_add_role(self, interaction: discord.Interaction, user: discord.User, role: discord.Role):
         print(f"{CURRENT_TIME} user_role_add {interaction.user.name}:{interaction.user.id} {user} {role}")
-        if is_a_super_user(interaction):
+        if is_super_user(interaction):
             await user.add_roles(role)
             await interaction.response.send_message(f"Le rôle {role} a été ajouté à {user} !")
             return
@@ -123,7 +127,7 @@ class UserManagementGroup(app_commands.Group):  # le nom de la fonction n'a aucu
     @app_commands.command(name="remove_role", description="remove a role from a user")
     async def user_remove_role(self, interaction: discord.Interaction, user: discord.User, role: discord.Role):
         print(f"{CURRENT_TIME} user_role_remove {interaction.user.name}:{interaction.user.id} {user} {role}")
-        if is_a_super_user(interaction):
+        if is_super_user(interaction):
             await user.remove_roles(role)
             await interaction.response.send_message(f"Le rôle {role} a été retiré à {user} !")
             return
@@ -162,7 +166,7 @@ class UserManagementGroup(app_commands.Group):  # le nom de la fonction n'a aucu
             f"{CURRENT_TIME} user_permission_channel {interaction.user.name}:{interaction.user.id} {channel} {user} {permission}"
         )
         # get user with name user
-        if is_a_super_channel_user(interaction, channel):
+        if is_super_channel_user(interaction, channel):
             await channel.set_permissions(user, overwrite=overwrite[permission.value])
             await interaction.response.send_message(f"Les permissions du salon {channel} ont été modifiées !")
         else:
@@ -173,7 +177,7 @@ class UserManagementGroup(app_commands.Group):  # le nom de la fonction n'a aucu
 class ServerManagement(app_commands.Group):
     # reboot the server to update commands
     @app_commands.command(name="reboot", description="Reboot server")
-    @app_commands.check(is_a_super_user)
+    @app_commands.check(is_super_user)
     async def reboot(self, interaction: discord.Interaction):
         print(f"{CURRENT_TIME} reboot {interaction.user.name}:{interaction.user.id}")
         os.system("reboot")
@@ -205,7 +209,7 @@ class ChannelPermissionsManager(app_commands.Group):
         permission: discord.app_commands.Choice[int],
     ):
         print(f"{CURRENT_TIME} channel_permission {interaction.user.name}:{interaction.user.id} {channel} {role} {permission}")
-        if is_a_super_channel_user(interaction, channel):
+        if is_super_channel_user(interaction, channel):
             await channel.set_permissions(role, overwrite=overwrite[permission.value])
             await interaction.response.send_message(f"Les permissions du salon {channel} ont été modifiées !")
         else:
