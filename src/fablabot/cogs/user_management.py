@@ -54,7 +54,7 @@ class ChannelManagement(app_commands.Group, name="channel", description="Gestion
     async def clear(self, interaction: discord.Interaction):
         """Clears the current channel of its last 100 messages."""
         print(f"{CURRENT_TIME} clear {interaction.user.name}:{interaction.user.id}")
-        if isinstance(interaction.channel, (discord.TextChannel, discord.channel.VocalGuildChannel, discord.Thread)):
+        if isinstance(interaction.channel, discord.TextChannel | discord.channel.VocalGuildChannel | discord.Thread):
             await interaction.channel.purge(limit=100)
 
     @app_commands.command()
@@ -86,11 +86,11 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         assert interaction.guild is not None  # Satisfies type checker
         print(f"{CURRENT_TIME} op {interaction.user.name}:{interaction.user.id} {user}")
 
-        ADMIN_ROLE = discord.utils.get(interaction.guild.roles, name="Admin -temp-")
-        if ADMIN_ROLE is None:
+        admin_role = discord.utils.get(interaction.guild.roles, name="Admin -temp-")
+        if admin_role is None:
             raise RuntimeError("Temporary admin role not found.")
 
-        await user.add_roles(ADMIN_ROLE)
+        await user.add_roles(admin_role)
         await interaction.response.send_message(f"Les droits administrateurs on été donnés à {user} !")
 
     @app_commands.command()
@@ -100,11 +100,11 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         assert interaction.guild is not None  # Satisfies type checker
         print(f"{CURRENT_TIME} deop {interaction.user.name}:{interaction.user.id} {user}")
 
-        ADMIN_ROLE = discord.utils.get(interaction.guild.roles, name="Admin -temp-")
-        if ADMIN_ROLE is None:
+        admin_role = discord.utils.get(interaction.guild.roles, name="Admin -temp-")
+        if admin_role is None:
             raise RuntimeError("Temporary admin role not found.")
 
-        await user.remove_roles(ADMIN_ROLE)
+        await user.remove_roles(admin_role)
         await interaction.response.send_message(f"Les droits administrateurs on été retirés à {user} !")
 
     @app_commands.command()
