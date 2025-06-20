@@ -8,7 +8,9 @@ from fablabot.cogs import formation, user_management
 
 load_dotenv()
 
-DISCORD_TOKEN: str = os.environ.get("DISCORD_TOKEN") or ""
+DISCORD_TOKEN_FILE = os.environ.get("DISCORD_TOKEN_FILE") or ""
+with open(DISCORD_TOKEN_FILE, 'r') as f:
+    DISCORD_TOKEN = f.read().strip()
 
 
 class Fablabot(commands.Bot):

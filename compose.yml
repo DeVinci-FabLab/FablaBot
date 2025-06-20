@@ -10,9 +10,9 @@ services:
       - ./src:/app/src
       - ./pyproject.toml:/app/pyproject.toml
     environment:
-      - DISCORD_TOKEN=/run/secrets/discord_token
-      - GUILD_TOKEN=/run/secrets/guild_token
-      - PERSONAL_ID=/run/secrets/personal_id
+      - DISCORD_TOKEN_FILE=/run/secrets/discord_token
+      - GUILD_TOKEN_FILE=/run/secrets/guild_token
+      - PERSONAL_ID_FILE=/run/secrets/personal_id
     secrets:
       - discord_token
       - guild_token
@@ -26,9 +26,9 @@ services:
     container_name: fablabot-prod
     restart: unless-stopped
     environment:
-      - DISCORD_TOKEN=/run/secrets/discord_token
-      - GUILD_TOKEN=/run/secrets/guild_token
-      - PERSONAL_ID=/run/secrets/personal_id
+      - DISCORD_TOKEN_FILE=/run/secrets/discord_token
+      - GUILD_TOKEN_FILE=/run/secrets/guild_token
+      - PERSONAL_ID_FILE=/run/secrets/personal_id
     secrets:
       - discord_token
       - guild_token
@@ -38,9 +38,9 @@ services:
     container_name: fablabot-prod
     restart: unless-stopped
     environment:
-      - DISCORD_TOKEN=/run/secrets/discord_token
-      - GUILD_TOKEN=/run/secrets/guild_token
-      - PERSONAL_ID=/run/secrets/personal_id
+      - DISCORD_TOKEN_FILE=/run/secrets/discord_token
+      - GUILD_TOKEN_FILE=/run/secrets/guild_token
+      - PERSONAL_ID_FILE=/run/secrets/personal_id
     secrets:
       - discord_token
       - guild_token
