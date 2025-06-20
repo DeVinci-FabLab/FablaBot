@@ -23,7 +23,7 @@ FROM base AS development
 # Copy only pyproject.toml for installing dependencies
 COPY pyproject.toml .
 # Install in development mode with dev dependencies
-RUN uv pip install .
+RUN uv pip install --system .
 
 # Production stage
 FROM base AS production
@@ -39,7 +39,7 @@ ENV CHROME_BIN=/usr/bin/chromium-browser \
 COPY . .
 
 # Install the application
-RUN uv pip install .
+RUN uv pip install --system .
 
 # Run the main module
 CMD ["uv", "run", "-m", "fablabot.main"]
