@@ -20,6 +20,26 @@ To create a Virtual Environment for the project and install the dependencies, yo
 uv sync
 ```
 
+### Environment variables
+
+You will need to create a `secrets/` folder into the project root directory and add three files:
+
+- `secrets/discord_token.secret`
+- `secrets/guild_token.secret`
+- `secrets/personal_id.secret`
+
+Here are some commands to help you create those:
+
+```bash
+mkdir secrets
+```
+
+```bash
+echo -n 'my_discord_token' > secrets/discord_token.secret
+echo -n 'my_personal_id' > secrets/personal_id.secret
+echo -n 'my_guild_token' > secrets/guild_token.secret
+```
+
 ### Running the project
 
 To run the code, you can then use:
