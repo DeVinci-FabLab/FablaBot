@@ -17,8 +17,7 @@ services:
       - discord_token
       - guild_token
       - personal_id
-    command: python -m fablabot.main
-
+    command: uv run -m fablabot.main
   python-prod-local:
     build:
       context: .

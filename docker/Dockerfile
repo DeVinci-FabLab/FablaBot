@@ -42,4 +42,4 @@ COPY . .
 RUN uv pip install .
 
 # Run the main module
-CMD ["python", "-m", "fablabot.main"]
+CMD ["uv", "run", "-m", "fablabot.main"]
