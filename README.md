@@ -35,8 +35,11 @@ mkdir secrets
 ```
 
 ```bash
+# Token for authenticating with the Discord API
 echo -n 'my_discord_token' > secrets/discord_token.secret
+# ID of the Discord guild (server) to connect to (DeVinci Fablab) [Unused ?]
 echo -n 'my_personal_id' > secrets/personal_id.secret
+# Personal user ID for the Discord bot or user (https://discord.com/developers/applications) [Unused ?]
 echo -n 'my_guild_token' > secrets/guild_token.secret
 ```
 
