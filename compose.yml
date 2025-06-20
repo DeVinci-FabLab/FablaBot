@@ -2,7 +2,7 @@ services:
   python-dev:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: docker/Dockerfile
       target: development
     container_name: fablabot-dev
     restart: unless-stopped
@@ -21,7 +21,7 @@ services:
   python-prod-local:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: docker/Dockerfile
       target: production
     container_name: fablabot-prod
     restart: unless-stopped
