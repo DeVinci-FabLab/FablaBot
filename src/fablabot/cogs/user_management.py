@@ -1,0 +1,191 @@
+# this file introduce the channels management and permissions
+
+from datetime import datetime
+from warnings import deprecated
+
+import discord
+from discord import app_commands
+from discord.ext import commands
+
+CURRENT_TIME = datetime.now().strftime("%Y/%m/%d, %H:%M:%S")
+
+# define the different permissions [admin, invited, read only , blacklist]
+# TODO: replace with named tuple
+permissions = {
+    "send_messages": [True, True, False, False],
+    "read_messages": [True, True, True, False],
+    "manage_messages": [True, False, False, False],
+    "manage_channels": [True, False, False, False],
+    "manage_roles": [True, False, False, False],
+    "manage_permissions": [True, False, False, False],
+    "manage_emojis": [True, True, False, False],
+    "mention_everyone": [True, False, False, False],
+    "create_private_threads": [True, True, False, False],
+    "create_public_threads": [True, True, False, False],
+    "read_message_history": [True, True, True, False],
+    "add_reactions": [True, True, True, False],
+    "attach_files": [True, True, False, False],
+}
+overwrite = [discord.PermissionOverwrite() for _ in range(4)]
+
+for perm_name in permissions:
+    for level in range(len(overwrite)):
+        overwrite[level].update(**{perm_name: permissions[perm_name][level]})
+overwrite += [None]
+
+
+# create a function that permit to check if user is a super user
+def is_super_user(interaction: discord.Interaction) -> bool:
+    assert isinstance(interaction.user, discord.Member)  # Satisfies type checker
+    # Vérifie si l'utilisateur a au moins un des rôles requis
+    allowed_roles = {"Président.e", "Vice-Président.e"}
+    return any(role.name in allowed_roles for role in interaction.user.roles)
+
+
+# determine if a user is a super user in the channel where the command is executed (for example, if the perms are given manually)
+def is_super_channel_user(interaction: discord.Interaction, channel: discord.TextChannel) -> bool:
+    assert isinstance(interaction.user, discord.Member)  # Satisfies type checker
+    return is_super_user(interaction) or any(channel.overwrites_for(i).manage_messages for i in interaction.user.roles)
+
+
+class ChannelManagement(app_commands.Group, name="channel", description="Gestion des salons"):
+    @app_commands.command()
+    @app_commands.check(is_super_user)
+    async def clear(self, interaction: discord.Interaction):
+        """Clears the current channel of its last 100 messages."""
+        print(f"{CURRENT_TIME} clear {interaction.user.name}:{interaction.user.id}")
+        if isinstance(interaction.channel, discord.TextChannel | discord.channel.VocalGuildChannel | discord.Thread):
+            await interaction.channel.purge(limit=100)
+
+    @app_commands.command()
+    async def create(
+        self,
+        interaction: discord.Interaction,
+        channel: str,
+        category: discord.CategoryChannel,
+    ):
+        """Creates a new channel in the passed category."""
+        assert interaction.guild is not None  # Satisfies type checker
+        assert isinstance(interaction.user, discord.Member)  # Satisfies type checker
+        print(f"{CURRENT_TIME} creation {interaction.user.name}:{interaction.user.id} {channel} {category}")
+
+        if channel not in [channel.name for channel in category.channels]:
+            new_channel = await interaction.guild.create_text_channel(channel, category=category)
+            await new_channel.set_permissions(interaction.user, overwrite=overwrite[0])
+
+            await interaction.response.send_message(f"Le salon {channel!r} a été créé dans {category.name} !")
+        else:
+            await interaction.response.send_message(f"Un salon {channel!r} existe déjà dans {category.name} !")
+
+
+class UserManagementGroup(app_commands.Group, name="user", description="Gestion des utilisateurs"):
+    @app_commands.command()
+    @app_commands.check(is_super_user)
+    async def op(self, interaction: discord.Interaction, user: discord.Member):
+        """Gives a user temporary administrator privileges."""
+        assert interaction.guild is not None  # Satisfies type checker
+        print(f"{CURRENT_TIME} op {interaction.user.name}:{interaction.user.id} {user}")
+
+        admin_role = discord.utils.get(interaction.guild.roles, name="Admin -temp-")
+        if admin_role is None:
+            raise RuntimeError("Temporary admin role not found.")
+
+        await user.add_roles(admin_role)
+        await interaction.response.send_message(f"Les droits administrateurs on été donnés à {user} !")
+
+    @app_commands.command()
+    @app_commands.check(is_super_user)
+    async def deop(self, interaction: discord.Interaction, user: discord.Member):
+        """Removes a user's temporary administrator privileges."""
+        assert interaction.guild is not None  # Satisfies type checker
+        print(f"{CURRENT_TIME} deop {interaction.user.name}:{interaction.user.id} {user}")
+
+        admin_role = discord.utils.get(interaction.guild.roles, name="Admin -temp-")
+        if admin_role is None:
+            raise RuntimeError("Temporary admin role not found.")
+
+        await user.remove_roles(admin_role)
+        await interaction.response.send_message(f"Les droits administrateurs on été retirés à {user} !")
+
+    @app_commands.command()
+    @app_commands.check(is_super_user)
+    async def add_role(self, interaction: discord.Interaction, user: discord.Member, role: discord.Role):
+        """Adds a role to a user."""
+        print(f"{CURRENT_TIME} user_role_add {interaction.user.name}:{interaction.user.id} {user} {role}")
+        await user.add_roles(role)
+        await interaction.response.send_message(f"Le rôle {role} a été ajouté à {user} !")
+
+    @app_commands.command()
+    @app_commands.check(is_super_user)
+    async def remove_role(self, interaction: discord.Interaction, user: discord.Member, role: discord.Role):
+        """Removes a role from a user."""
+        print(f"{CURRENT_TIME} user_role_remove {interaction.user.name}:{interaction.user.id} {user} {role}")
+        await user.remove_roles(role)
+        await interaction.response.send_message(f"Le rôle {role} a été retiré à {user} !")
+
+    @app_commands.command()
+    @app_commands.describe(permission="permission chosen")
+    @app_commands.choices(
+        permission=[
+            app_commands.Choice(name="Admin", value=0),
+            app_commands.Choice(name="Invited User", value=1),
+            app_commands.Choice(name="Read Only", value=2),
+            app_commands.Choice(name="Blacklisted", value=3),
+            app_commands.Choice(name="Remove Permissions", value=4),
+        ]
+    )
+    @app_commands.check(is_super_user)
+    async def permission_channel(
+        self,
+        interaction: discord.Interaction,
+        user: discord.Member,
+        channel: discord.TextChannel,
+        permission: discord.app_commands.Choice[int],
+    ):
+        """Changes the permissions for a user in a given channel."""
+        print(f"{CURRENT_TIME} permission_channel {interaction.user.name}:{interaction.user.id} {channel} {user} {permission}")
+        await channel.set_permissions(user, overwrite=overwrite[permission.value])
+        await interaction.response.send_message(f"Les permissions du salon {channel} ont été modifiées !")
+
+
+class ChannelPermissionsManager(app_commands.Group, name="role", description="Gestion des rôles"):
+    # Command that change the permissions for a certain role
+    @app_commands.command()
+    @app_commands.describe(permission="permission chosen")
+    @app_commands.choices(
+        permission=[
+            app_commands.Choice(name="Admin", value=0),
+            app_commands.Choice(name="Invited User", value=1),
+            app_commands.Choice(name="Read Only", value=2),
+            app_commands.Choice(name="Blacklisted", value=3),
+            app_commands.Choice(name="Remove Permissions", value=4),
+        ]
+    )
+    @app_commands.check(is_super_user)
+    async def channel_permission(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel,
+        role: discord.Role,
+        permission: discord.app_commands.Choice[int],
+    ):
+        """Changes the permissions of a user in a channel."""
+        print(f"{CURRENT_TIME} channel_permission {interaction.user.name}:{interaction.user.id} {channel} {role} {permission}")
+        await channel.set_permissions(role, overwrite=overwrite[permission.value])
+        await interaction.response.send_message(f"Les permissions du salon {channel} ont été modifiées !")
+
+
+class UserManagement(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        for group in (
+            ChannelManagement(),
+            UserManagementGroup(),
+            ChannelPermissionsManager(),
+        ):
+            self.bot.tree.add_command(group)
+
+
+@deprecated("Load the cog using `bot.add_cog()` instead.")
+async def setup(bot: commands.Bot) -> None:
+    await bot.add_cog(UserManagement(bot))

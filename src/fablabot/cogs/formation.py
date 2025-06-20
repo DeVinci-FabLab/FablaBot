@@ -1,28 +1,26 @@
 import asyncio
+from datetime import datetime
 import os
 import time
-from datetime import datetime
+from warnings import deprecated
 
 import discord
-from discord import Permissions, app_commands
+from discord import app_commands
 from discord.ext import commands
-from discord.ui import Button, Select, View
-from dotenv import load_dotenv
+from discord.ui import Select, View
+
 # import for selenium
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as ec
+from selenium.webdriver.support.wait import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
-GUILD_TOKEN = int(os.environ.get("GUILD_TOKEN"))
-MY_GUILD = discord.Object(id=GUILD_TOKEN)
 CURRENT_TIME = datetime.now().strftime("%Y/%m/%d, %H:%M:%S")
 EMAIL = os.environ.get("MY_GMAIL_ACCOUNT")
 PASSWORD = os.environ.get("MY_GMAIL_PASSWORD")
-
 
 form = {
     "Informatique": "INFO",
@@ -33,11 +31,11 @@ form = {
 }
 
 
-async def setup(client: commands.Bot) -> None:
-    await client.add_cog(Formation(client))
+# pourquoi utiliser selenium pour se connecter à Overleaf, alors que overleaf a une API
+# https://pt.overleaf.com/devs
 
 
-class latex:
+class Latex:
     def load_driver(self):
         print("loading driver")
         options = Options()
@@ -45,37 +43,25 @@ class latex:
         options.add_argument("window-size=1920,1080")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--headless")
-        driver = webdriver.Chrome(
-            service=Service(ChromeDriverManager().install()), options=options
-        )
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
-        driver = webdriver.Chrome(
-            service=Service(ChromeDriverManager().install()), options=options
-        )
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
         driver.get("https://www.overleaf.com/login")
 
         driver.get("https://www.overleaf.com/auth/orcid?intent=sign_in")
 
-        WebDriverWait(driver, 30).until(
-            EC.presence_of_element_located((By.CLASS_NAME, "mat-button-wrapper"))
-        )
-        driver.find_elements(By.CSS_SELECTOR, "input[formcontrolname='username']")[
-            0
-        ].send_keys(EMAIL)
-        driver.find_elements(By.CSS_SELECTOR, "input[formcontrolname='password']")[
-            0
-        ].send_keys(PASSWORD)
+        WebDriverWait(driver, 30).until(ec.presence_of_element_located((By.CLASS_NAME, "mat-button-wrapper")))
+        driver.find_elements(By.CSS_SELECTOR, "input[formcontrolname='username']")[0].send_keys(EMAIL)
+        driver.find_elements(By.CSS_SELECTOR, "input[formcontrolname='password']")[0].send_keys(PASSWORD)
 
         # click on button with type submit
         driver.find_elements(By.CSS_SELECTOR, "button[type='submit']")[0].click()
         try:
             WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located(
-                    (By.CSS_SELECTOR, "input[placeholder='Search projects…']")
-                )
+                ec.presence_of_element_located((By.CSS_SELECTOR, "input[placeholder='Search projects…']"))
             )
-        except:
-            print("errorduring login")
+        except Exception as e:
+            print(f"Error during login: {e}")
         return driver
 
     def create_latex(self, name):
@@ -92,14 +78,10 @@ class latex:
         time.sleep(3)
         elem.click()
         time.sleep(0.5)
-        INPUT = driver.find_element(
-            By.XPATH, "//input[@placeholder='New Project Name']"
-        )
-        INPUT.clear()
-        INPUT.send_keys(name)
-        driver.find_element(
-            By.XPATH, "//button[text()='Copy' and @type='submit']"
-        ).click()
+        input = driver.find_element(By.XPATH, "//input[@placeholder='New Project Name']")
+        input.clear()
+        input.send_keys(name)
+        driver.find_element(By.XPATH, "//button[text()='Copy' and @type='submit']").click()
         driver.refresh()
         driver.get("https://www.overleaf.com/project")
         return driver
@@ -108,19 +90,16 @@ class latex:
         print("finding latex")
         time.sleep(2)
         # find element with xpath with placeholder="Search projects...", and type='text'
-        NameInput = driver.find_elements(
+        name_input = driver.find_elements(
             By.XPATH,
             "//input[@placeholder='Search projects…' and @aria-label='Search projects…' and @type='text'] ",
         )[0]
-        NameInput.clear()
-        NameInput.send_keys(name)
+        name_input.clear()
+        name_input.send_keys(name)
         time.sleep(0.5)
         data = driver.find_elements(By.CSS_SELECTOR, "tbody tr")
         value = [
-            i.find_elements(By.CSS_SELECTOR, "td.dash-cell-name")[0]
-            .find_element(By.CSS_SELECTOR, "a")
-            .text
-            for i in data
+            i.find_elements(By.CSS_SELECTOR, "td.dash-cell-name")[0].find_element(By.CSS_SELECTOR, "a").text for i in data
         ].index(name)
         # get dash-cell-actions in data[value]
         return data[value]
@@ -128,45 +107,31 @@ class latex:
     def enter_latex(self, name, driver):
         print("entering latex")
         self.find_latex(name, driver)
-        [
+        next(
             i.find_element(By.CSS_SELECTOR, "a")
             for i in driver.find_elements(By.CSS_SELECTOR, "td.dash-cell-name")
             if i.find_element(By.CSS_SELECTOR, "a").text == name
-        ][
-            0
-        ].click()  # .find_element(By.CSS_SELECTOR, "a").click()
+        ).click()
 
     def get_link(self, name, driver):
         print("getting link")
         self.enter_latex(name, driver)
         # get the second button f the list
         time.sleep(5)
-        driver.find_elements(By.CSS_SELECTOR, "div.toolbar-right")[0].find_elements(
-            By.CSS_SELECTOR, "button"
-        )[1].click()
+        driver.find_elements(By.CSS_SELECTOR, "div.toolbar-right")[0].find_elements(By.CSS_SELECTOR, "button")[1].click()
         WebDriverWait(driver, 30).until(
-            EC.presence_of_element_located(
-                (By.XPATH, "//button [@class='btn-inline-link btn btn-link']")
-            )
+            ec.presence_of_element_located((By.XPATH, "//button [@class='btn-inline-link btn btn-link']"))
         )
-        button = driver.find_element(
-            By.XPATH, "//button [@class='btn-inline-link btn btn-link']"
-        )
+        button = driver.find_element(By.XPATH, "//button [@class='btn-inline-link btn btn-link']")
 
-        button.click() if button.text == "Turn on link sharing" else print(
-            "already sharing"
-        )
+        button.click() if button.text == "Turn on link sharing" else print("already sharing")
         driver.find_elements(By.CSS_SELECTOR, "pre.access-token")
-        WebDriverWait(driver, 30).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "pre.access-token"))
-        )
+        WebDriverWait(driver, 30).until(ec.presence_of_element_located((By.CSS_SELECTOR, "pre.access-token")))
         driver.find_elements(By.CSS_SELECTOR, "pre.access-token")
-        return [
-            i.text for i in driver.find_elements(By.CSS_SELECTOR, "pre.access-token")
-        ]
+        return [i.text for i in driver.find_elements(By.CSS_SELECTOR, "pre.access-token")]
 
 
-class mySelect(Select):
+class MySelect(Select):
     def __init__(self, options: list) -> None:
         super().__init__(
             placeholder="make the selection of the parent function",
@@ -177,26 +142,24 @@ class mySelect(Select):
 
     async def callback(self, interaction: discord.Interaction):
         self.disabled = True
-        await interaction.response.edit_message(view=myView(self))
+        await interaction.response.edit_message(view=MyView(self))
         await interaction.followup.send(f"You've chosen {' '.join(self.values)}")
 
 
-class myView(View, mySelect):
-    def __init__(self, select: mySelect) -> None:
+class MyView(View, MySelect):
+    def __init__(self, select: MySelect) -> None:
         super().__init__(timeout=5)
         self.add_item(select)
         self.timeout = None
 
 
-class myEmbed(discord.Embed):
+class MyEmbed(discord.Embed):
     def __init__(self, values: dict) -> None:
         super().__init__(
-            title=values["title"] if ("title" in values.keys()) else None,
-            description=values["description"]
-            if ("description" in values.keys())
-            else None,
-            color=values["color"] if ("color" in values.keys()) else None,
-            url=values["url"] if ("url" in values.keys()) else None,
+            title=values.get("title"),
+            description=values.get("description"),
+            color=values.get("color"),
+            url=values.get("url"),
         )
 
     def add_image(self, path: str):
@@ -205,7 +168,7 @@ class myEmbed(discord.Embed):
         return file
 
 
-class MyFormation(app_commands.Group):
+class FormationGroup(app_commands.Group, name="formation", description="Commandes autour des formations"):
     @app_commands.command(name="add_formation", description="Visualise les formations")
     @app_commands.describe(formation="formation chosen")
     @commands.has_role("Pôle Formation")
@@ -224,63 +187,57 @@ class MyFormation(app_commands.Group):
         formation: discord.app_commands.Choice[int],
         invisible: bool = False,
     ):
-        print(
-            f"add_formation : {interaction.user.name}:{interaction.user.id} {formation.name} {invisible}"
-        )
+        print(f"add_formation : {interaction.user.name}:{interaction.user.id} {formation.name} {invisible}")
         await interaction.response.send_message(
             f"{CURRENT_TIME} formation chosen : {formation.name}",
             ephemeral=invisible,
             delete_after=5,
         )
-        options = generateGraph(form[formation.name])
+        options = generate_graph(form[formation.name])
         await asyncio.sleep(5)
         print(options)
-        select = mySelect(options=options)
-        view = myView(select)
-        embed = myEmbed(
-            {"title": "Title", "description": "Desc", "color": 0xFFFFFF}
-        )  # creates embed
+        select = MySelect(options=options)
+        view = MyView(select)
+        embed = MyEmbed({"title": "Title", "description": "Desc", "color": 0xFFFFFF})  # creates embed
         file = embed.add_image("./cogs/data/File.png")
         print(2)
-        await interaction.followup.send(
-            file=file, embed=embed, view=view, ephemeral=invisible
-        )  # ,
+        await interaction.followup.send(file=file, embed=embed, view=view, ephemeral=invisible)  # ,
 
     @app_commands.command(name="add_latex", description="Visualise les formations")
     @commands.has_role("Pôle Formation")
     async def add_latex(self, interaction: discord.Interaction, name: str):
         print(f"add_latex : {interaction.user.name}:{interaction.user.id} {name}")
-        await interaction.response.send_message(
-            f"{CURRENT_TIME} formation created : {name}", delete_after=5
-        )
-        Latex = latex()
-        driver = Latex.create_latex(name)
-        await interaction.followup.send(Latex.get_link(name, driver))
+        await interaction.response.send_message(f"{CURRENT_TIME} formation created : {name}", delete_after=5)
+        latex = Latex()
+        driver = latex.create_latex(name)
+        await interaction.followup.send(latex.get_link(name, driver))  # type: ignore
         driver.close()
 
 
 class Formation(commands.Cog):
-    def __init__(self, client: commands.Bot):
-        myformation = MyFormation(
-            name="formation", description="Commandes autour des formations"
-        )
-        self.client = client
-        client.tree.add_command(myformation)
-        client.tree.copy_global_to(guild=MY_GUILD)
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        for group in (FormationGroup(),):
+            self.bot.tree.add_command(group)
 
 
-def generateGraph(title: str):
-    fileInputs = open(
-        f"./cogs/data/{title}.puml", "r", encoding="utf-8"
-    )  # {formation[str(formation.name)]}
-    file = open(f"./cogs/data/File.puml", "r", encoding="utf-8")
-    fileInputs = fileInputs.read().split("\n")
-    file = file.read().split("\n")
-    # add f to file on the -2 position
-    file[-2:-2] = fileInputs
-    with open(f"./cogs/data/File2.puml", "w", encoding="utf-8") as file2:
+def generate_graph(title: str):
+    with (
+        open(f"./cogs/data/{title}.puml", encoding="utf-8") as file_inputs,
+        open("./cogs/data/File.puml", encoding="utf-8") as file,
+        open("./cogs/data/File2.puml", "w", encoding="utf-8") as file2,
+    ):
+        file_inputs = file_inputs.read().split("\n")
+        file = file.read().split("\n")
+        # add f to file on the -2 position
+        file[-2:-2] = file_inputs
         file2.write("\n".join(file))
-    os.system(f"plantuml ./cogs/data/File2.puml")
-    liste = [i[6:] for i in fileInputs[1:-1] if i.startswith("State")]
+    os.system("plantuml ./cogs/data/File2.puml")
+    liste = [i[6:] for i in file_inputs[1:-1] if i.startswith("State")]
     liste = list(set(liste))
     return [discord.SelectOption(label=str(liste[i])) for i in range(len(liste))]
+
+
+@deprecated("Load the cog using `bot.add_cog()` instead.")
+async def setup(bot: commands.Bot) -> None:
+    await bot.add_cog(Formation(bot))
