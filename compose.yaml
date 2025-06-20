@@ -1,11 +1,57 @@
 services:
-  python:
-    container_name: fablabot
+  python-dev:
     build:
       context: .
-      dockerfile: dockerfile
-    volumes:
-      - ./src:/home/BotFabLab
-
-    command: python /home/BotFabLab/main.py
+      dockerfile: Dockerfile
+      target: development
+    container_name: fablabot-dev
     restart: unless-stopped
+    volumes:
+      - ./src:/app/src
+      - ./pyproject.toml:/app/pyproject.toml
+    environment:
+      - DISCORD_TOKEN_FILE=/run/secrets/discord_token
+      - GUILD_TOKEN_FILE=/run/secrets/guild_token
+      - PERSONAL_ID_FILE=/run/secrets/personal_id
+    secrets:
+      - discord_token
+      - guild_token
+      - personal_id
+    command: python -m fablabot.main
+
+  python-prod-local:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: fablabot-prod
+    restart: unless-stopped
+    environment:
+      - DISCORD_TOKEN_FILE=/run/secrets/discord_token
+      - GUILD_TOKEN_FILE=/run/secrets/guild_token
+      - PERSONAL_ID_FILE=/run/secrets/personal_id
+    secrets:
+      - discord_token
+      - guild_token
+      - personal_id
+  python-prod:
+    image: ghcr.io/devinci-fablab/fablabot:latest
+    container_name: fablabot-prod
+    restart: unless-stopped
+    environment:
+      - DISCORD_TOKEN_FILE=/run/secrets/discord_token
+      - GUILD_TOKEN_FILE=/run/secrets/guild_token
+      - PERSONAL_ID_FILE=/run/secrets/personal_id
+    secrets:
+      - discord_token
+      - guild_token
+      - personal_id
+    labels:
+      - 'com.centurylinklabs.watchtower.enable=true'
+secrets:
+  discord_token:
+    file: ./secrets/discord_token.secret
+  guild_token:
+    file: ./secrets/guild_token.secret
+  personal_id:
+    file: ./secrets/personal_id.secret

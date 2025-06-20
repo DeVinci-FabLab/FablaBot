@@ -9,3 +9,6 @@ __pycache__
 docs/fablabot*
 docs/index.html
 docs/search.js
+
+# Secrets
+secrets/
