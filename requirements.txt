@@ -1,5 +1,0 @@
-# DEPRECATED - Use uv instead
-discord.py==2.2.2
-python-dotenv==1.0.0
-selenium==4.8.3
-webdriver_manager==3.8.5
