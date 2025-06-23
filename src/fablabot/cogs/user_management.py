@@ -111,6 +111,9 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
     """
 
     @app_commands.command()
+    @app_commands.describe(
+        user="L'utilisateur à qui donner les droits administrateurs",
+    )
     async def op(self, interaction: discord.Interaction, user: discord.Member) -> None:
         """Gives a user temporary administrator privileges.
 
@@ -142,6 +145,9 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         await interaction.response.send_message(f"Les droits administrateurs on été donnés à {user} !")
 
     @app_commands.command()
+    @app_commands.describe(
+        user="L'utilisateur à qui retirer les droits administrateurs",
+    )
     async def deop(self, interaction: discord.Interaction, user: discord.Member) -> None:
         """Removes a user's temporary administrator privileges.
 
@@ -172,6 +178,10 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         await interaction.response.send_message(f"Les droits administrateurs on été retirés à {user} !")
 
     @app_commands.command()
+    @app_commands.describe(
+        user="L'utilisateur à qui donner le rôle",
+        role="Le rôle à donner à l'utilisateur",
+    )
     async def add_role(self, interaction: discord.Interaction, user: discord.Member, role: discord.Role) -> None:
         """Adds a role to a user.
 
@@ -197,6 +207,10 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         await interaction.response.send_message(f"Le rôle {role} a été ajouté à {user} !")
 
     @app_commands.command()
+    @app_commands.describe(
+        user="L'utilisateur à qui retirer le rôle",
+        role="Le rôle à retirer à l'utilisateur",
+    )
     async def remove_role(self, interaction: discord.Interaction, user: discord.Member, role: discord.Role) -> None:
         """Removes a role from a user.
 
