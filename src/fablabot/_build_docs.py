@@ -1,3 +1,5 @@
+"""Utility script used to build the project documentation."""
+
 from pathlib import Path
 import sys
 
@@ -8,11 +10,14 @@ from fablabot import __name__ as module_name
 
 DOCS_PATH = Path("docs")  # Path is relative to project root
 
+# TODO: Update dependency
 
-def build_docs():
-    """Builds the module documentation. @private
 
-    This function should not be called as is but is supposed to be called from the cli.
+def build_docs() -> None:
+    """Build the module documentation. @private.
+
+    This function should not be called as is but is supposed to be called from the
+    CLI.
     """
     if {"-h", "--help"}.intersection(sys.argv):
         print(f"Build documentation for {__package__}.")

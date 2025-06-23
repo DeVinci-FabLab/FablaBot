@@ -4,7 +4,12 @@ version = "0.1.0"
 description = "General purpose Discord bot for the DeVinci Fablab discord server."
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = ["discord-py==2.5.2", "python-dotenv==1.0.0", "selenium==4.8.3", "webdriver-manager==3.8.5"]
+dependencies = [
+    "discord-py==2.5.2",
+    "python-dotenv==1.0.0",
+    "selenium==4.8.3",
+    "webdriver-manager==3.8.5",
+]
 
 [build-system]
 requires = ["setuptools"]
@@ -28,7 +33,22 @@ target-version = "py313"
 docstring-code-format = true
 
 [tool.ruff.lint]
-select = ["B", "C4", "E", "F", "I", "N", "PIE", "PTH", "RET", "RUF", "SIM", "UP", "W"]  # TODO: add "D" option to enforce docstrings
+select = [
+    "B",
+    "C4",
+    "E",
+    "F",
+    "I",
+    "N",
+    "PIE",
+    "PTH",
+    "RET",
+    "RUF",
+    "SIM",
+    "UP",
+    "W",
+    "D",
+]
 ignore = ["D105", "E5", "PTH123", "W505"]
 [tool.ruff.lint.pydocstyle]
 convention = "google"

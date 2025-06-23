@@ -1,4 +1,6 @@
-# this file introduce the channels management and permissions
+"""Channel management commands and permission utilities."""
+
+from __future__ import annotations
 
 from datetime import datetime
 from warnings import deprecated
@@ -51,8 +53,12 @@ def is_super_channel_user(interaction: discord.Interaction, channel: discord.Tex
 class ChannelManagement(app_commands.Group, name="channel", description="Gestion des salons"):
     @app_commands.command()
     @app_commands.check(is_super_user)
-    async def clear(self, interaction: discord.Interaction):
-        """Clears the current channel of its last 100 messages."""
+    async def clear(self, interaction: discord.Interaction) -> None:
+        """Clears the current channel of its last 100 messages.
+
+        Args:
+            interaction: The interaction that triggered the command.
+        """
         print(f"{CURRENT_TIME} clear {interaction.user.name}:{interaction.user.id}")
         if isinstance(interaction.channel, discord.TextChannel | discord.channel.VocalGuildChannel | discord.Thread):
             await interaction.channel.purge(limit=100)
@@ -63,8 +69,14 @@ class ChannelManagement(app_commands.Group, name="channel", description="Gestion
         interaction: discord.Interaction,
         channel: str,
         category: discord.CategoryChannel,
-    ):
-        """Creates a new channel in the passed category."""
+    ) -> None:
+        """Create a new channel in the passed category.
+
+        Args:
+            interaction (discord.Interaction): The interaction object.
+            channel (str): The name of the channel to create.
+            category (discord.CategoryChannel): The category to create the channel in.
+        """
         assert interaction.guild is not None  # Satisfies type checker
         assert isinstance(interaction.user, discord.Member)  # Satisfies type checker
         print(f"{CURRENT_TIME} creation {interaction.user.name}:{interaction.user.id} {channel} {category}")
@@ -79,10 +91,29 @@ class ChannelManagement(app_commands.Group, name="channel", description="Gestion
 
 
 class UserManagementGroup(app_commands.Group, name="user", description="Gestion des utilisateurs"):
+    """Manages user-related commands.
+
+    Args:
+        app_commands (app_commands.Group): The app_commands group.
+        name (str, optional): The name of the group. Defaults to "user".
+        description (str, optional): The description of the group. Defaults to "Gestion des utilisateurs".
+
+    Raises:
+        RuntimeError: If the temporary admin role is not found.
+        RuntimeError: If the user is not found.
+    """
+
     @app_commands.command()
-    @app_commands.check(is_super_user)
-    async def op(self, interaction: discord.Interaction, user: discord.Member):
-        """Gives a user temporary administrator privileges."""
+    async def op(self, interaction: discord.Interaction, user: discord.Member) -> None:
+        """Gives a user temporary administrator privileges.
+
+        Args:
+            interaction (discord.Interaction): The interaction object.
+            user (discord.Member): The user to give privileges to.
+
+        Raises:
+            RuntimeError: If the temporary admin role is not found.
+        """
         assert interaction.guild is not None  # Satisfies type checker
         print(f"{CURRENT_TIME} op {interaction.user.name}:{interaction.user.id} {user}")
 
@@ -94,9 +125,16 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         await interaction.response.send_message(f"Les droits administrateurs on été donnés à {user} !")
 
     @app_commands.command()
-    @app_commands.check(is_super_user)
-    async def deop(self, interaction: discord.Interaction, user: discord.Member):
-        """Removes a user's temporary administrator privileges."""
+    async def deop(self, interaction: discord.Interaction, user: discord.Member) -> None:
+        """Removes a user's temporary administrator privileges.
+
+        Args:
+            interaction (discord.Interaction): The interaction object.
+            user (discord.Member): The user to remove privileges from.
+
+        Raises:
+            RuntimeError: If the temporary admin role is not found.
+        """
         assert interaction.guild is not None  # Satisfies type checker
         print(f"{CURRENT_TIME} deop {interaction.user.name}:{interaction.user.id} {user}")
 
@@ -176,7 +214,14 @@ class ChannelPermissionsManager(app_commands.Group, name="role", description="Ge
 
 
 class UserManagement(commands.Cog):
-    def __init__(self, bot: commands.Bot):
+    """Manages user permissions and roles."""
+
+    def __init__(self, bot: commands.Bot) -> None:
+        """Initialize the cog and register its command groups.
+
+        Args:
+            bot: The bot instance.
+        """
         self.bot = bot
         for group in (
             ChannelManagement(),
@@ -188,4 +233,9 @@ class UserManagement(commands.Cog):
 
 @deprecated("Load the cog using `bot.add_cog()` instead.")
 async def setup(bot: commands.Bot) -> None:
+    """Sets up the user management cog.
+
+    Args:
+        bot (commands.Bot): The bot instance.
+    """
     await bot.add_cog(UserManagement(bot))
