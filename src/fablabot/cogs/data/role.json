@@ -1,4 +1,162 @@
 {
-  "grade_0": {
+  "Admin -temp-": {
+    "id": 1,
+    "permissions_integer": 8189
+  },
+  "Administrateur": {
+    "id": 0,
+    "permissions_integer": 8189
+  },
+  "Ancien ✓": {
+    "id": 2,
+    "permissions_integer": 0
+  },
+  "Bot": {
+    "id": 2,
+    "permissions_integer": 0
+  },
+  "Membre ✓": {
+    "id": 2,
+    "permissions_integer": 0
+  },
+  "Membre Paris": {
+    "id": 2,
+    "permissions_integer": 0
+  },
+  "Membre Nantes": {
+    "id": 2,
+    "permissions_integer": 0
+  },
+  "Membre d’Honneur": {
+    "id": 4,
+    "permissions_integer": 0
+  },
+  "Membre Émérite": {
+    "id": 4,
+    "permissions_integer": 0
+  },
+  "Bureau": {
+    "id": 4,
+    "permissions_integer": 4096
+  },
+  "Bureau Nantes": {
+    "id": 4,
+    "permissions_integer": 4096
+  },
+  "Chargé Formations Nantes": {
+    "id": 8,
+    "permissions_integer": 0
+  },
+  "Chargé.e DD-RSE": {
+    "id": 8,
+    "permissions_integer": 0
+  },
+  "Chargé.e Premiers Secours": {
+    "id": 8,
+    "permissions_integer": 0
+  },
+  "Chargé.e VSS": {
+    "id": 8,
+    "permissions_integer": 0
+  },
+  "CoDir": {
+    "id": 16,
+    "permissions_integer": 6087,
+    "commentaire":"1+2+4+1984+4096"
+  },
+  "Comité de Contrôle": {
+    "id": 16,
+    "permissions_integer": 0
+  },
+  "Président.e": {
+    "id": 16,
+    "permissions_integer": 8191,
+    "commentaire":"1+2+4+8+16+32+1984+2048+4096"
+  },
+  "Secrétaire Général": {
+    "id": 16,
+    "permissions_integer": 6159,
+    "commentaire":"1+2+4+8+2048+4096"
+  },
+  "Trésorier.e": {
+    "id": 16,
+    "permissions_integer": 0
+  },
+  "Vice-Président.e": {
+    "id": 16,
+    "permissions_integer": 8191,
+    "commentaire":"1+2+4+8+16+32+1984+2048+4096"
+  },
+  "F - Elec": {
+    "id": 32,
+    "permissions_integer": 0
+  },
+  "F - Fabrication": {
+    "id": 32,
+    "permissions_integer": 0
+  },
+  "F - Info": {
+    "id": 32,
+    "permissions_integer": 0
+  },
+  "F - Textile": {
+    "id": 32,
+    "permissions_integer": 0
+  },
+  "Pôle Communication": {
+    "id": 64,
+    "permissions_integer": 0
+  },
+  "Pôle Events": {
+    "id": 128,
+    "permissions_integer": 0
+  },
+  "Pôle Formations": {
+    "id": 256,
+    "permissions_integer": 0
+  },
+  "Pôle Numérique": {
+    "id": 512,
+    "permissions_integer": 0
+  },
+  "Pôle Partenariats": {
+    "id": 1024,
+    "permissions_integer": 0
+  },
+  "Respo Communication": {
+    "id": 2048,
+    "permissions_integer": 64
+  },
+  "Respo CréaNantes": {
+    "id": 2048,
+    "permissions_integer": 0
+  },
+  "Respo Event": {
+    "id": 2048,
+    "permissions_integer": 128
+  },
+  "Respo Formations": {
+    "id": 2048,
+    "permissions_integer": 288
+  },
+  "Respo Numérique": {
+    "id": 2048,
+    "permissions_integer": 513
+  },
+  "Respo Partenariat": {
+    "id": 2048,
+    "permissions_integer": 1024
+  },
+  "Respo Polyvalent": {
+    "id": 2048,
+    "permissions_integer": 0
+  },
+  "Respo Projets": {
+    "id": 2048,
+    "permissions_integer": 0
+  },
+  "Sbire Bureau": {
+    "id": 4096,
+    "permissions_integer": 0
   }
 }
