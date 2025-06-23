@@ -29,6 +29,7 @@ dev = ["pdoc>=15.0.3"]
 [tool.ruff]
 line-length = 128
 target-version = "py313"
+
 [tool.ruff.format]
 docstring-code-format = true
 
@@ -50,9 +51,12 @@ select = [
     "D",
 ]
 ignore = ["D105", "E5", "PTH123", "W505"]
+
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
 [tool.ruff.lint.pycodestyle]
 max-doc-length = 128
+
 [tool.ruff.lint.isort]
 force-sort-within-sections = true

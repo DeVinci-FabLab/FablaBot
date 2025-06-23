@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+import logging
 from warnings import deprecated
 
 import discord
 from discord import app_commands
 from discord.ext import commands
+
+logger = logging.getLogger(__name__)
 
 CURRENT_TIME = datetime.now().strftime("%Y/%m/%d, %H:%M:%S")
 
@@ -51,6 +54,14 @@ def is_super_channel_user(interaction: discord.Interaction, channel: discord.Tex
 
 
 class ChannelManagement(app_commands.Group, name="channel", description="Gestion des salons"):
+    """Manages channel-related commands.
+
+    Args:
+        app_commands (app_commands.Group): The app_commands group.
+        name (str, optional): The name of the group. Defaults to "channel".
+        description (str, optional): The description of the group. Defaults to "Gestion des salons".
+    """
+
     @app_commands.command()
     @app_commands.check(is_super_user)
     async def clear(self, interaction: discord.Interaction) -> None:
@@ -59,8 +70,11 @@ class ChannelManagement(app_commands.Group, name="channel", description="Gestion
         Args:
             interaction: The interaction that triggered the command.
         """
-        print(f"{CURRENT_TIME} clear {interaction.user.name}:{interaction.user.id}")
-        if isinstance(interaction.channel, discord.TextChannel | discord.channel.VocalGuildChannel | discord.Thread):
+        logger.info("%s clear %s:%s", CURRENT_TIME, interaction.user.name, interaction.user.id)
+        if isinstance(
+            interaction.channel,
+            discord.TextChannel | discord.channel.VocalGuildChannel | discord.Thread,
+        ):
             await interaction.channel.purge(limit=100)
 
     @app_commands.command()
@@ -79,8 +93,14 @@ class ChannelManagement(app_commands.Group, name="channel", description="Gestion
         """
         assert interaction.guild is not None  # Satisfies type checker
         assert isinstance(interaction.user, discord.Member)  # Satisfies type checker
-        print(f"{CURRENT_TIME} creation {interaction.user.name}:{interaction.user.id} {channel} {category}")
-
+        logger.info(
+            "%s create %s:%s %s %s",
+            CURRENT_TIME,
+            interaction.user.name,
+            interaction.user.id,
+            channel,
+            category,
+        )
         if channel not in [channel.name for channel in category.channels]:
             new_channel = await interaction.guild.create_text_channel(channel, category=category)
             await new_channel.set_permissions(interaction.user, overwrite=overwrite[0])
@@ -115,7 +135,13 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             RuntimeError: If the temporary admin role is not found.
         """
         assert interaction.guild is not None  # Satisfies type checker
-        print(f"{CURRENT_TIME} op {interaction.user.name}:{interaction.user.id} {user}")
+        logger.info(
+            "%s op %s:%s %s",
+            CURRENT_TIME,
+            interaction.user.name,
+            interaction.user.id,
+            user,
+        )
 
         admin_role = discord.utils.get(interaction.guild.roles, name="Admin -temp-")
         if admin_role is None:
@@ -136,7 +162,13 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             RuntimeError: If the temporary admin role is not found.
         """
         assert interaction.guild is not None  # Satisfies type checker
-        print(f"{CURRENT_TIME} deop {interaction.user.name}:{interaction.user.id} {user}")
+        logger.info(
+            "%s deop %s:%s %s",
+            CURRENT_TIME,
+            interaction.user.name,
+            interaction.user.id,
+            user,
+        )
 
         admin_role = discord.utils.get(interaction.guild.roles, name="Admin -temp-")
         if admin_role is None:
@@ -146,18 +178,42 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         await interaction.response.send_message(f"Les droits administrateurs on été retirés à {user} !")
 
     @app_commands.command()
-    @app_commands.check(is_super_user)
-    async def add_role(self, interaction: discord.Interaction, user: discord.Member, role: discord.Role):
-        """Adds a role to a user."""
-        print(f"{CURRENT_TIME} user_role_add {interaction.user.name}:{interaction.user.id} {user} {role}")
+    async def add_role(self, interaction: discord.Interaction, user: discord.Member, role: discord.Role) -> None:
+        """Adds a role to a user.
+
+        Args:
+            interaction (discord.Interaction): The interaction object.
+            user (discord.Member): The user to add the role to.
+            role (discord.Role): The role to add to the user.
+        """
+        logger.info(
+            "%s user_role_add %s:%s %s %s",
+            CURRENT_TIME,
+            interaction.user.name,
+            interaction.user.id,
+            user,
+            role,
+        )
         await user.add_roles(role)
         await interaction.response.send_message(f"Le rôle {role} a été ajouté à {user} !")
 
     @app_commands.command()
-    @app_commands.check(is_super_user)
-    async def remove_role(self, interaction: discord.Interaction, user: discord.Member, role: discord.Role):
-        """Removes a role from a user."""
-        print(f"{CURRENT_TIME} user_role_remove {interaction.user.name}:{interaction.user.id} {user} {role}")
+    async def remove_role(self, interaction: discord.Interaction, user: discord.Member, role: discord.Role) -> None:
+        """Removes a role from a user.
+
+        Args:
+            interaction (discord.Interaction): The interaction object.
+            user (discord.Member): The user to remove the role from.
+            role (discord.Role): The role to remove from the user.
+        """
+        logger.info(
+            "%s user_role_remove %s:%s %s %s",
+            CURRENT_TIME,
+            interaction.user.name,
+            interaction.user.id,
+            user,
+            role,
+        )
         await user.remove_roles(role)
         await interaction.response.send_message(f"Le rôle {role} a été retiré à {user} !")
 
