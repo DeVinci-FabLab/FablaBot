@@ -51,7 +51,7 @@ class ChannelManagement(app_commands.Group, name="channel", description="Gestion
         description (str, optional): The description of the group. Defaults to "Gestion des salons".
     """
 
-    @app_commands.command()
+    @app_commands.command(name="clear", description="Nettoie le salon actuel de ses derniers 100 messages.")
     async def clear(self, interaction: discord.Interaction) -> None:
         """Clears the current channel of its last 100 messages.
 
@@ -65,7 +65,11 @@ class ChannelManagement(app_commands.Group, name="channel", description="Gestion
         ):
             await interaction.channel.purge(limit=100)
 
-    @app_commands.command()
+    @app_commands.command(name="create", description="Crée un nouveau salon dans la catégorie spécifiée.")
+    @app_commands.describe(
+        channel="Le nom du salon à créer",
+        category="La catégorie dans laquelle créer le salon",
+    )
     async def create(
         self,
         interaction: discord.Interaction,
@@ -111,10 +115,8 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         RuntimeError: If the user is not found.
     """
 
-    @app_commands.command()
-    @app_commands.describe(
-        user="L'utilisateur à qui donner les droits administrateurs",
-    )
+    @app_commands.command(name="op", description="Donne les droits administrateurs temporaires à un utilisateur.")
+    @app_commands.describe(user="L'utilisateur à qui donner les droits administrateurs")
     async def op(self, interaction: discord.Interaction, user: discord.Member) -> None:
         """Gives a user temporary administrator privileges.
 
@@ -145,10 +147,8 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         await user.add_roles(admin_role)
         await interaction.response.send_message(f"Les droits administrateurs on été donnés à {user} !")
 
-    @app_commands.command()
-    @app_commands.describe(
-        user="L'utilisateur à qui retirer les droits administrateurs",
-    )
+    @app_commands.command(name="deop", description="Retire les droits administrateurs temporaires d'un utilisateur.")
+    @app_commands.describe(user="L'utilisateur à qui retirer les droits administrateurs")
     async def deop(self, interaction: discord.Interaction, user: discord.Member) -> None:
         """Removes a user's temporary administrator privileges.
 
@@ -178,7 +178,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         await user.remove_roles(admin_role)
         await interaction.response.send_message(f"Les droits administrateurs on été retirés à {user} !")
 
-    @app_commands.command()
+    @app_commands.command(name="add_role", description="Donne un rôle à un utilisateur.")
     @app_commands.describe(
         user="L'utilisateur à qui donner le rôle",
         role="Le rôle à donner à l'utilisateur",
@@ -207,9 +207,38 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         await user.add_roles(role)
         await interaction.response.send_message(f"Le rôle {role} a été ajouté à {user} !")
 
-    @app_commands.command(name="add_roles", description="Ajoute un rôle à plusieurs utilisateurs")
+    @app_commands.command(name="remove_role", description="Retire un rôle à un utilisateur.")
     @app_commands.describe(
-        users="Les utilisateurs à qui donner le rôle (mentions séparées par espace)",
+        user="L'utilisateur à qui retirer le rôle",
+        role="Le rôle à retirer à l'utilisateur",
+    )
+    async def remove_role(self, interaction: discord.Interaction, user: discord.Member, role: discord.Role) -> None:
+        """Removes a role from a user.
+
+        Args:
+            interaction (discord.Interaction): The interaction object.
+            user (discord.Member): The user to remove the role from.
+            role (discord.Role): The role to remove from the user.
+        """
+        logger.info(
+            "%s user_role_remove %s:%s %s %s",
+            CURRENT_TIME,
+            interaction.user.name,
+            interaction.user.id,
+            user,
+            role,
+        )
+        roles = load_roles()
+        assert isinstance(interaction.user, discord.Member)
+        if not can_assign_role(interaction.user, role, roles):
+            await interaction.response.send_message("Vous n'avez pas la permission de retirer ce rôle.", ephemeral=True)
+            return
+        await user.remove_roles(role)
+        await interaction.response.send_message(f"Le rôle {role} a été retiré à {user} !")
+
+    @app_commands.command(name="add_roles", description="Donne un rôle à plusieurs utilisateurs.")
+    @app_commands.describe(
+        users="Les utilisateurs cibles (mentions séparées par espace)",
         role="Le rôle à donner aux utilisateurs",
     )
     async def add_roles(self, interaction: discord.Interaction, users: str, role: discord.Role) -> None:
@@ -243,38 +272,9 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             added.append(member.mention)
         await interaction.response.send_message(f"Le rôle {role.mention} a été ajouté à {', '.join(added)} !")
 
-    @app_commands.command(name="remove_role", description="Retire un rôle à un utilisateur")
+    @app_commands.command(name="remove_roles", description="Retire un rôle à plusieurs utilisateurs.")
     @app_commands.describe(
-        user="L'utilisateur à qui retirer le rôle",
-        role="Le rôle à retirer à l'utilisateur",
-    )
-    async def remove_role(self, interaction: discord.Interaction, user: discord.Member, role: discord.Role) -> None:
-        """Removes a role from a user.
-
-        Args:
-            interaction (discord.Interaction): The interaction object.
-            user (discord.Member): The user to remove the role from.
-            role (discord.Role): The role to remove from the user.
-        """
-        logger.info(
-            "%s user_role_remove %s:%s %s %s",
-            CURRENT_TIME,
-            interaction.user.name,
-            interaction.user.id,
-            user,
-            role,
-        )
-        roles = load_roles()
-        assert isinstance(interaction.user, discord.Member)
-        if not can_assign_role(interaction.user, role, roles):
-            await interaction.response.send_message("Vous n'avez pas la permission de retirer ce rôle.", ephemeral=True)
-            return
-        await user.remove_roles(role)
-        await interaction.response.send_message(f"Le rôle {role} a été retiré à {user} !")
-
-    @app_commands.command(name="remove_roles", description="Retire un rôle à plusieurs utilisateurs")
-    @app_commands.describe(
-        users="Les utilisateurs à qui retirer le rôle (mentions séparées par espace)",
+        users="Les utilisateurs cibles (mentions séparées par espace)",
         role="Le rôle à retirer aux utilisateurs",
     )
     async def remove_roles(self, interaction: discord.Interaction, users: str, role: discord.Role) -> None:
