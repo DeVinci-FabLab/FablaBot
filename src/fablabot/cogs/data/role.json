@@ -62,7 +62,7 @@
   "CoDir": {
     "id": 16,
     "permissions_integer": 6087,
-    "commentaire":"1+2+4+1984+4096"
+    "comment":"1+2+4+1984+4096"
   },
   "Comité de Contrôle": {
     "id": 16,
@@ -71,12 +71,12 @@
   "Président.e": {
     "id": 16,
     "permissions_integer": 8191,
-    "commentaire":"1+2+4+8+16+32+1984+2048+4096"
+    "comment":"1+2+4+8+16+32+1984+2048+4096"
   },
   "Secrétaire Général": {
     "id": 16,
     "permissions_integer": 6159,
-    "commentaire":"1+2+4+8+2048+4096"
+    "comment":"1+2+4+8+2048+4096"
   },
   "Trésorier.e": {
     "id": 16,
@@ -85,7 +85,7 @@
   "Vice-Président.e": {
     "id": 16,
     "permissions_integer": 8191,
-    "commentaire":"1+2+4+8+16+32+1984+2048+4096"
+    "comment":"1+2+4+8+16+32+1984+2048+4096"
   },
   "F - Elec": {
     "id": 32,
