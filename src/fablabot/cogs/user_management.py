@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 import logging
 import re
@@ -146,6 +147,8 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             return
         await user.add_roles(admin_role)
         await interaction.response.send_message(f"Les droits administrateurs on été donnés à {user} !")
+        await asyncio.sleep(86400)  # Wait for 24 hours
+        await user.remove_roles(admin_role)
 
     @app_commands.command(name="deop", description="Retire les droits administrateurs temporaires d'un utilisateur.")
     @app_commands.describe(user="L'utilisateur à qui retirer les droits administrateurs")
@@ -269,8 +272,8 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         added: list[str] = []
         for member in members:
             await member.add_roles(role)
-            added.append(member.mention)
-        await interaction.response.send_message(f"Le rôle {role.mention} a été ajouté à {', '.join(added)} !")
+            added.append(member.name)
+        await interaction.response.send_message(f"Le rôle {role} a été ajouté à {', '.join(added)} !")
 
     @app_commands.command(name="remove_roles", description="Retire un rôle à plusieurs utilisateurs.")
     @app_commands.describe(
@@ -305,8 +308,8 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         removed: list[str] = []
         for member in members:
             await member.remove_roles(role)
-            removed.append(member.mention)
-        await interaction.response.send_message(f"Le rôle {role.mention} a été retiré de {', '.join(removed)} !")
+            removed.append(member.name)
+        await interaction.response.send_message(f"Le rôle {role} a été retiré de {', '.join(removed)} !")
 
 
 class UserManagement(commands.Cog):
