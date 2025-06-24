@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import logging
+import re
 from warnings import deprecated
 
 import discord
@@ -206,7 +207,43 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         await user.add_roles(role)
         await interaction.response.send_message(f"Le rôle {role} a été ajouté à {user} !")
 
-    @app_commands.command()
+    @app_commands.command(name="add_roles", description="Ajoute un rôle à plusieurs utilisateurs")
+    @app_commands.describe(
+        users="Les utilisateurs à qui donner le rôle (mentions séparées par espace)",
+        role="Le rôle à donner aux utilisateurs",
+    )
+    async def add_roles(self, interaction: discord.Interaction, users: str, role: discord.Role) -> None:
+        """Adds a role to multiple users from mentions."""
+        logger.info(
+            "%s user_roles_add %s:%s %s %s",
+            CURRENT_TIME,
+            interaction.user.name,
+            interaction.user.id,
+            users,
+            role,
+        )
+        assert interaction.guild is not None
+        roles = load_roles()
+        assert isinstance(interaction.user, discord.Member)
+        if not can_assign_role(interaction.user, role, roles):
+            await interaction.response.send_message("Vous n'avez pas la permission d'ajouter ce rôle.", ephemeral=True)
+            return
+        ids = re.findall(r"<@!?(\d+)>", users)
+        members: list[discord.Member] = []
+        for uid in ids:
+            member = interaction.guild.get_member(int(uid))
+            if member:
+                members.append(member)
+        if not members:
+            await interaction.response.send_message("Aucun utilisateur valide trouvé dans la liste.", ephemeral=True)
+            return
+        added: list[str] = []
+        for member in members:
+            await member.add_roles(role)
+            added.append(member.mention)
+        await interaction.response.send_message(f"Le rôle {role.mention} a été ajouté à {', '.join(added)} !")
+
+    @app_commands.command(name="remove_role", description="Retire un rôle à un utilisateur")
     @app_commands.describe(
         user="L'utilisateur à qui retirer le rôle",
         role="Le rôle à retirer à l'utilisateur",
@@ -234,6 +271,42 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             return
         await user.remove_roles(role)
         await interaction.response.send_message(f"Le rôle {role} a été retiré à {user} !")
+
+    @app_commands.command(name="remove_roles", description="Retire un rôle à plusieurs utilisateurs")
+    @app_commands.describe(
+        users="Les utilisateurs à qui retirer le rôle (mentions séparées par espace)",
+        role="Le rôle à retirer aux utilisateurs",
+    )
+    async def remove_roles(self, interaction: discord.Interaction, users: str, role: discord.Role) -> None:
+        """Removes a role from multiple users from mentions."""
+        logger.info(
+            "%s user_roles_remove %s:%s %s %s",
+            CURRENT_TIME,
+            interaction.user.name,
+            interaction.user.id,
+            users,
+            role,
+        )
+        assert interaction.guild is not None
+        roles = load_roles()
+        assert isinstance(interaction.user, discord.Member)
+        if not can_assign_role(interaction.user, role, roles):
+            await interaction.response.send_message("Vous n'avez pas la permission de retirer ce rôle.", ephemeral=True)
+            return
+        ids = re.findall(r"<@!?(\d+)>", users)
+        members: list[discord.Member] = []
+        for uid in ids:
+            member = interaction.guild.get_member(int(uid))
+            if member:
+                members.append(member)
+        if not members:
+            await interaction.response.send_message("Aucun utilisateur valide trouvé dans la liste.", ephemeral=True)
+            return
+        removed: list[str] = []
+        for member in members:
+            await member.remove_roles(role)
+            removed.append(member.mention)
+        await interaction.response.send_message(f"Le rôle {role.mention} a été retiré de {', '.join(removed)} !")
 
 
 class UserManagement(commands.Cog):
