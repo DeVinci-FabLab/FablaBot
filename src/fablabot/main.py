@@ -9,7 +9,7 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
-from fablabot.cogs import user_management
+from fablabot.cogs import channel_management, user_management
 
 logger = logging.getLogger(__name__)
 load_dotenv()
@@ -30,7 +30,7 @@ class Fablabot(commands.Bot):
 
     async def setup_hook(self) -> None:
         """Load the bot extensions."""
-        for cog in (user_management.UserManagement(self),):
+        for cog in (channel_management.ChannelManagement(self), user_management.UserManagement(self)):
             await self.add_cog(cog)
             logger.info("Loaded cog %s", cog.__class__.__name__)
 
