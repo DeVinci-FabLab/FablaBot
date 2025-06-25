@@ -48,12 +48,14 @@ class ChannelManagementGroup(app_commands.Group, name="channel", description="Ge
         description (str, optional): The description of the group. Defaults to "Gestion des salons".
     """
 
-    @app_commands.command(name="clear", description="Nettoie le salon actuel de ses derniers 100 messages.")
-    async def clear(self, interaction: discord.Interaction) -> None:
-        """Clears the current channel of its last 100 messages.
+    @app_commands.command(name="clear", description="Nettoie le salon actuel de ses derniers messages.")
+    @app_commands.describe(messages="Le nombre de messages à supprimer (par défaut 5)")
+    async def clear(self, interaction: discord.Interaction, messages: int = 5) -> None:
+        """Clears the current channel of its last messages.
 
         Args:
             interaction: The interaction that triggered the command.
+            messages (int): The number of messages to purge (default: 5).
         """
         logger.info("%s clear %s:%s", CURRENT_TIME, interaction.user.name, interaction.user.id)
         if isinstance(
@@ -67,7 +69,7 @@ class ChannelManagementGroup(app_commands.Group, name="channel", description="Ge
                         "Nettoyage du salon en cours, veuillez patienter...",
                         ephemeral=True,
                     )
-                    await interaction.channel.purge(limit=100)
+                    await interaction.channel.purge(limit=messages)
                     await interaction.followup.send("Le salon a été nettoyé avec succès !", ephemeral=True)
                     return
             await interaction.response.send_message("Vous n'avez pas la permission de gérer les messages dans ce salon.")
