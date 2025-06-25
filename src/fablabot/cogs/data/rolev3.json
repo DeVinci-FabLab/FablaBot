@@ -1,0 +1,247 @@
+{
+    "Admin -temp-": {
+        "id": 1,
+        "right_on": [
+            1,
+            2,
+            4,
+            8,
+            16,
+            32,
+            64,
+            128,
+            256,
+            512,
+            1024,
+            2048,
+            4096
+        ]
+    },
+    "Administrateur": {
+        "id": 0,
+        "right_on": [
+            1,
+            2,
+            4,
+            8,
+            16,
+            32,
+            64,
+            128,
+            256,
+            512,
+            1024,
+            2048,
+            4096
+        ]
+    },
+    "Ancien ✓": {
+        "id": 2,
+        "right_on": []
+    },
+    "Bot": {
+        "id": 2,
+        "right_on": []
+    },
+    "Membre ✓": {
+        "id": 2,
+        "right_on": []
+    },
+    "Membre Paris": {
+        "id": 2,
+        "right_on": []
+    },
+    "Membre Nantes": {
+        "id": 2,
+        "right_on": []
+    },
+    "Membre d’Honneur": {
+        "id": 4,
+        "right_on": []
+    },
+    "Membre Émérite": {
+        "id": 4,
+        "right_on": []
+    },
+    "Bureau": {
+        "id": 4,
+        "right_on": [
+            4096
+        ]
+    },
+    "Bureau Nantes": {
+        "id": 4,
+        "right_on": [
+            4096
+        ]
+    },
+    "Chargé Formations Nantes": {
+        "id": 8,
+        "right_on": []
+    },
+    "Chargé.e DD-RSE": {
+        "id": 8,
+        "right_on": []
+    },
+    "Chargé.e Premiers Secours": {
+        "id": 8,
+        "right_on": []
+    },
+    "Chargé.e VSS": {
+        "id": 8,
+        "right_on": []
+    },
+    "CoDir": {
+        "id": 16,
+        "right_on": [
+            1,
+            2,
+            4,
+            64,
+            128,
+            256,
+            512,
+            1024,
+            4096
+        ]
+    },
+    "Comité de Contrôle": {
+        "id": 16,
+        "right_on": []
+    },
+    "Président.e": {
+        "id": 16,
+        "right_on": [
+            1,
+            2,
+            4,
+            8,
+            16,
+            32,
+            64,
+            128,
+            256,
+            512,
+            1024,
+            2048,
+            4096
+        ]
+    },
+    "Secrétaire Général": {
+        "id": 16,
+        "right_on": [
+            1,
+            2,
+            4,
+            8,
+            2048,
+            4096
+        ]
+    },
+    "Trésorier.e": {
+        "id": 16,
+        "right_on": []
+    },
+    "Vice-Président.e": {
+        "id": 16,
+        "right_on": [
+            1,
+            2,
+            4,
+            8,
+            16,
+            32,
+            64,
+            128,
+            256,
+            512,
+            1024,
+            2048,
+            4096
+        ]
+    },
+    "F - Elec": {
+        "id": 32,
+        "right_on": []
+    },
+    "F - Fabrication": {
+        "id": 32,
+        "right_on": []
+    },
+    "F - Info": {
+        "id": 32,
+        "right_on": []
+    },
+    "F - Textile": {
+        "id": 32,
+        "right_on": []
+    },
+    "Pôle Communication": {
+        "id": 64,
+        "right_on": []
+    },
+    "Pôle Events": {
+        "id": 128,
+        "right_on": []
+    },
+    "Pôle Formations": {
+        "id": 256,
+        "right_on": []
+    },
+    "Pôle Numérique": {
+        "id": 512,
+        "right_on": []
+    },
+    "Pôle Partenariats": {
+        "id": 1024,
+        "right_on": []
+    },
+    "Respo Communication": {
+        "id": 2048,
+        "right_on": [
+            64
+        ]
+    },
+    "Respo CréaNantes": {
+        "id": 2048,
+        "right_on": []
+    },
+    "Respo Event": {
+        "id": 2048,
+        "right_on": [
+            128
+        ]
+    },
+    "Respo Formations": {
+        "id": 2048,
+        "right_on": [
+            32,
+            256
+        ]
+    },
+    "Respo Numérique": {
+        "id": 2048,
+        "right_on": [
+            1,
+            512
+        ]
+    },
+    "Respo Partenariat": {
+        "id": 2048,
+        "right_on": [
+            1024
+        ]
+    },
+    "Respo Polyvalent": {
+        "id": 2048,
+        "right_on": []
+    },
+    "Respo Projets": {
+        "id": 2048,
+        "right_on": []
+    },
+    "Sbire Bureau": {
+        "id": 4096,
+        "right_on": []
+    }
+}

@@ -1,11 +1,11 @@
 {
   "Admin -temp-": {
     "id": 1,
-    "permissions_integer": 8189
+    "permissions_integer": 8191
   },
   "Administrateur": {
     "id": 0,
-    "permissions_integer": 8189
+    "permissions_integer": 8191
   },
   "Ancien ✓": {
     "id": 2,
