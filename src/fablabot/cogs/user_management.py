@@ -68,6 +68,9 @@ def _is_user_responsible_for_pole(member: discord.Member, target_role: discord.R
     """
     member_role_names = [role.name for role in member.roles]
 
+    if target_role.name == "Sbire Bureau" and "Bureau" in member_role_names:
+        return True
+
     if target_role.name.startswith("Pôle "):
         suffix = target_role.name[len("Pôle ") :]
         if f"Respo {suffix}" in member_role_names:
@@ -105,8 +108,12 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
     """
 
     @app_commands.command(name="op", description="Donne les droits administrateurs temporaires à un utilisateur.")
-    @app_commands.describe(user="L'utilisateur à qui donner les droits administrateurs")
-    async def op(self, interaction: discord.Interaction, user: discord.Member) -> None:
+    @app_commands.describe(
+        user="L'utilisateur à qui donner les droits administrateurs",
+        raison="La raison pour laquelle les droits sont donnés",
+        time="Durée en minutes pour laquelle les droits sont donnés (par défaut 5)",
+    )
+    async def op(self, interaction: discord.Interaction, user: discord.Member, raison: str, time: int = 5) -> None:
         """Gives a user temporary administrator privileges.
 
         Args:
@@ -126,16 +133,20 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         )
 
         admin_role = discord.utils.get(interaction.guild.roles, name="Admin -temp-")
+        codir_role = discord.utils.get(interaction.guild.roles, name="CoDir")
+        assert isinstance(codir_role, discord.Role)
         if admin_role is None:
             raise RuntimeError("Temporary admin role not found.")
 
         assert isinstance(interaction.user, discord.Member)
-        if not can_assign_role(interaction.user, admin_role) or "Respo Numérique" not in [role.name for role in user.roles]:
+        if not can_assign_role(interaction.user, admin_role) and "Respo Numérique" not in [role.name for role in user.roles]:
             await interaction.response.send_message("Vous n'avez pas la permission d'ajouter ce rôle.", ephemeral=True)
             return
         await user.add_roles(admin_role)
-        await interaction.response.send_message(f"Les droits administrateurs on été donnés à {user} !")
-        await asyncio.sleep(86400)  # Wait for 24 hours
+        await interaction.response.send_message(
+            f"{codir_role.mention} Les droits administrateurs on été donnés à {user} ! \nRaison: {raison} \nTemps: {time} minutes"
+        )
+        await asyncio.sleep(time * 60)  # Wait for the specified time in minutes
         await user.remove_roles(admin_role)
 
     @app_commands.command(name="deop", description="Retire les droits administrateurs temporaires d'un utilisateur.")
@@ -162,7 +173,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         if admin_role is None:
             raise RuntimeError("Temporary admin role not found.")
         assert isinstance(interaction.user, discord.Member)
-        if not can_assign_role(interaction.user, admin_role) or "Respo Numérique" not in [role.name for role in user.roles]:
+        if not can_assign_role(interaction.user, admin_role) and "Respo Numérique" not in [role.name for role in user.roles]:
             await interaction.response.send_message("Vous n'avez pas la permission de retirer ce rôle.", ephemeral=True)
             return
         await user.remove_roles(admin_role)
