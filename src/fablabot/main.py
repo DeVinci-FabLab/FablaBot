@@ -1,41 +1,62 @@
+"""Entry point for the FablaBot Discord bot."""
+
+from __future__ import annotations
+
+import logging
 import os
 
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
-from fablabot.cogs import formation, user_management
+from fablabot.cogs import channel_management, user_management
 
+logger = logging.getLogger(__name__)
 load_dotenv()
 
 DISCORD_TOKEN_FILE = os.environ.get("DISCORD_TOKEN_FILE") or ""
-with open(DISCORD_TOKEN_FILE, 'r') as f:
+with open(DISCORD_TOKEN_FILE, "r") as f:
     DISCORD_TOKEN = f.read().strip()
 
 
 class Fablabot(commands.Bot):
-    def __init__(self):
+    """Discord bot implementation for the DeVinci Fablab server."""
+
+    def __init__(self) -> None:
+        """Initialize the bot with the required intents."""
         super().__init__(
             command_prefix=commands.when_mentioned,
-            intents=discord.Intents.all(),  # TODO: only enable intents we use, here and on the developer portal, this will make discord happy
+            intents=discord.Intents.all(),  # TODO: only enable intents we use here and on the developer portal, this will make discord happy
         )
+        logger.info("Bot initialized")
 
-    async def setup_hook(self):
-        for cog in (
-            formation.Formation(self),
-            user_management.UserManagement(self),
-        ):
+    async def setup_hook(self) -> None:
+        """Load the bot extensions."""
+        for cog in (channel_management.ChannelManagement(self), user_management.UserManagement(self)):
             await self.add_cog(cog)
+            logger.info("Loaded cog %s", cog.__class__.__name__)
 
         # Synchronisation globale des commandes
         await self.tree.sync()
+        logger.info("Commands synced")
 
-    async def on_command_error(self, ctx: commands.Context, exception: Exception):
+    async def on_command_error(self, ctx: commands.Context, exception: Exception) -> None:
+        """Handle uncaught command errors.
+
+        Args:
+            ctx: The invocation context of the command.
+            exception: The raised exception.
+        """
+        logger.error("Unhandled command error: %s", exception)
         await ctx.reply(str(exception), ephemeral=True)
 
 
-def main():
+def main() -> None:
+    """Run the bot using the token from the environment."""
+    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s:%(name)s: %(message)s")
+    logger.info("Starting FablaBot")
     bot = Fablabot()
+    logger.info("Running bot")
     bot.run(DISCORD_TOKEN)
 
 
