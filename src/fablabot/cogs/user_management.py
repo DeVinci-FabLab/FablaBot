@@ -12,11 +12,83 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from fablabot.role_loader import can_assign_role, load_roles
-
 logger = logging.getLogger(__name__)
 
 CURRENT_TIME = datetime.now().strftime("%Y/%m/%d, %H:%M:%S")
+
+
+def can_assign_role(member: discord.Member, target_role: discord.Role):
+    """Checks if a member can assign a specific role.
+
+    Args:
+        member (discord.Member): The member attempting to assign the role.
+        target_role (discord.Role): The role to be assigned.
+
+    Returns:
+        bool: True if the member can assign the role, False otherwise.
+    """
+    if target_role.name == "Administrateur":
+        return False
+
+    return (
+        _is_user_server_admin(member)
+        or _is_user_responsible_for_pole(member, target_role)
+        or _is_user_responsible_for_trainers(member, target_role)
+    )
+
+
+def _is_user_server_admin(member: discord.Member) -> bool:
+    """Checks if a member is a server admin.
+
+    Args:
+        member (discord.Member): The member to check.
+
+    Returns:
+        bool: `True` if the member is a server admin, `False` otherwise.
+    """
+    member_role_names = [role.name for role in member.roles]
+    return (
+        "Admin -temp-" in member_role_names
+        or "Administrateur" in member_role_names
+        or "Président.e" in member_role_names
+        or "Vice-Président.e" in member_role_names
+        or "Secrétaire Général" in member_role_names
+    )
+
+
+def _is_user_responsible_for_pole(member: discord.Member, target_role: discord.Role) -> bool:
+    """Checks if a member is responsible for a specific pole.
+
+    Args:
+        member (discord.Member): The member to check.
+        target_role (discord.Role): The role to check against.
+
+    Returns:
+        bool: `True` if the member is responsible for the pole, `False` otherwise.
+    """
+    member_role_names = [role.name for role in member.roles]
+
+    if target_role.name.startswith("Pôle "):
+        suffix = target_role.name[len("Pôle ") :]
+        if f"Respo {suffix}" in member_role_names:
+            return True
+
+    return False
+
+
+def _is_user_responsible_for_trainers(member: discord.Member, target_role: discord.Role) -> bool:
+    """Checks if a member is responsible for a specific formation.
+
+    Args:
+        member (discord.Member): The member to check.
+        target_role (discord.Role): The role to check against.
+
+    Returns:
+        bool: `True` if the member is responsible for the formation, `False` otherwise.
+    """
+    member_role_names = [role.name for role in member.roles]
+
+    return "Respo Formations" in member_role_names and target_role.name.startswith("F - ")
 
 
 class UserManagementGroup(app_commands.Group, name="user", description="Gestion des utilisateurs"):
@@ -58,7 +130,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             raise RuntimeError("Temporary admin role not found.")
 
         assert isinstance(interaction.user, discord.Member)
-        if not can_assign_role(interaction.user, admin_role, load_roles()):
+        if not can_assign_role(interaction.user, admin_role) or "Respo Numérique" not in [role.name for role in user.roles]:
             await interaction.response.send_message("Vous n'avez pas la permission d'ajouter ce rôle.", ephemeral=True)
             return
         await user.add_roles(admin_role)
@@ -90,8 +162,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         if admin_role is None:
             raise RuntimeError("Temporary admin role not found.")
         assert isinstance(interaction.user, discord.Member)
-        roles = load_roles()
-        if not can_assign_role(interaction.user, admin_role, roles):
+        if not can_assign_role(interaction.user, admin_role) or "Respo Numérique" not in [role.name for role in user.roles]:
             await interaction.response.send_message("Vous n'avez pas la permission de retirer ce rôle.", ephemeral=True)
             return
         await user.remove_roles(admin_role)
@@ -118,9 +189,8 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             user,
             role,
         )
-        roles = load_roles()
         assert isinstance(interaction.user, discord.Member)
-        if not can_assign_role(interaction.user, role, roles):
+        if not can_assign_role(interaction.user, role):
             await interaction.response.send_message("Vous n'avez pas la permission d'ajouter ce rôle.", ephemeral=True)
             return
         await user.add_roles(role)
@@ -147,9 +217,8 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             user,
             role,
         )
-        roles = load_roles()
         assert isinstance(interaction.user, discord.Member)
-        if not can_assign_role(interaction.user, role, roles):
+        if not can_assign_role(interaction.user, role):
             await interaction.response.send_message("Vous n'avez pas la permission de retirer ce rôle.", ephemeral=True)
             return
         await user.remove_roles(role)
@@ -171,9 +240,8 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             role,
         )
         assert interaction.guild is not None
-        roles = load_roles()
         assert isinstance(interaction.user, discord.Member)
-        if not can_assign_role(interaction.user, role, roles):
+        if not can_assign_role(interaction.user, role):
             await interaction.response.send_message("Vous n'avez pas la permission d'ajouter ce rôle.", ephemeral=True)
             return
         ids = re.findall(r"<@!?(\d+)>", users)
@@ -207,9 +275,8 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             role,
         )
         assert interaction.guild is not None
-        roles = load_roles()
         assert isinstance(interaction.user, discord.Member)
-        if not can_assign_role(interaction.user, role, roles):
+        if not can_assign_role(interaction.user, role):
             await interaction.response.send_message("Vous n'avez pas la permission de retirer ce rôle.", ephemeral=True)
             return
         ids = re.findall(r"<@!?(\d+)>", users)
