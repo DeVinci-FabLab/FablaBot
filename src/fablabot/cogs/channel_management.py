@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from datetime import datetime
 import logging
 from warnings import deprecated
 
 import discord
-from discord import app_commands
+from discord import CategoryChannel, Guild, app_commands
 from discord.ext import commands
+from discord.utils import get
 
 logger = logging.getLogger(__name__)
 
@@ -121,8 +124,73 @@ class ChannelManagement(commands.Cog):
             bot: The bot instance.
         """
         self.bot = bot
+        self.remove_tasks: dict[int, asyncio.Task[None]] = {}
         for group in (ChannelManagementGroup(),):
             self.bot.tree.add_command(group)
+
+    @commands.Cog.listener()
+    async def on_voice_state_update(
+        self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState
+    ) -> None:
+        """Dynamically create and remove voice channels in the 'Association' category.
+
+        Args:
+            member (discord.Member): The member whose voice state changed.
+            before (discord.VoiceState): The voice state before the change.
+            after (discord.VoiceState): The voice state after the change.
+        """
+        guild = member.guild
+
+        assoc_cat = get(guild.categories, name="Association")
+        if not assoc_cat:
+            return
+        assoc_base_name = "general-vocal"
+
+        bureau_cat = get(guild.categories, name="Bureau")
+        if not bureau_cat:
+            return
+        bureau_base_name = "bureau-vocal"
+
+        new = after.channel
+        if isinstance(new, discord.VoiceChannel):
+            task = self.remove_tasks.pop(new.id, None)
+            if task:
+                task.cancel()
+
+        await self._manage_voice_channels(guild, assoc_cat, assoc_base_name)
+        await self._manage_voice_channels(guild, bureau_cat, bureau_base_name)
+
+    async def _manage_voice_channels(self, guild: Guild, category: CategoryChannel, base_name: str) -> None:
+        """Manage voice channels in a category.
+
+        Args:
+            guild (Guild): The guild where the channels are managed.
+            category (CategoryChannel): The category to manage channels in.
+            base_name (str): The base name for the channels.
+        """
+        empty_channels = [voice_channel for voice_channel in category.voice_channels if len(voice_channel.members) == 0]
+        empty_channels.sort(key=lambda c: c.name)
+        while len(empty_channels) > 1:
+            channel_to_delete = empty_channels[-1]
+            if channel_to_delete.id not in self.remove_tasks:
+                self.remove_tasks[channel_to_delete.id] = asyncio.create_task(self._delayed_delete(channel_to_delete))
+            del empty_channels[-1]
+
+        if len(empty_channels) == 0:
+            for n in range(1, len(category.voice_channels) + 1):
+                if get(category.voice_channels, name=f"{base_name}--{n}") is None:
+                    await guild.create_voice_channel(f"{base_name}--{n}", category=category)
+
+    async def _delayed_delete(self, channel: discord.VoiceChannel) -> None:
+        """Wait one minute then delete the channel if still empty.
+
+        Args:
+            channel (discord.VoiceChannel): The channel to delete.
+        """
+        await asyncio.sleep(30)
+        if len(channel.members) == 0:
+            with contextlib.suppress(Exception):
+                await channel.delete()
 
 
 @deprecated("Load the cog using `bot.add_cog()` instead.")
