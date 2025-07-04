@@ -10,8 +10,6 @@ from fablabot import __name__ as module_name
 
 DOCS_PATH = Path("docs")  # Path is relative to project root
 
-# TODO: Update dependency
-
 
 def build_docs() -> None:
     """Build the module documentation. @private.

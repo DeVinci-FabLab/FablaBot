@@ -42,13 +42,13 @@ for perm_name in permissions:
 overwrite += [None]
 
 
-class ChannelManagementGroup(app_commands.Group, name="channel", description="Gestion des salons"):
-    """Manages channel-related commands.
+class TextChannelManagementGroup(app_commands.Group, name="text", description="Gestion des salons textuels"):
+    """Manages text channel-related commands.
 
     Args:
         app_commands (app_commands.Group): The app_commands group.
-        name (str, optional): The name of the group. Defaults to "channel".
-        description (str, optional): The description of the group. Defaults to "Gestion des salons".
+        name (str, optional): The name of the group. Defaults to "text".
+        description (str, optional): The description of the group. Defaults to "Gestion des salons textuels".
     """
 
     @app_commands.command(name="clear", description="Nettoie le salon actuel de ses derniers messages.")
@@ -57,10 +57,10 @@ class ChannelManagementGroup(app_commands.Group, name="channel", description="Ge
         """Clears the current channel of its last messages.
 
         Args:
-            interaction: The interaction that triggered the command.
-            messages (int): The number of messages to purge (default: 5).
+            interaction (discord.Interaction): The interaction that triggered the command.
+            messages (int, optional): The number of messages to purge. Defaults to 5.
         """
-        logger.info("%s clear %s:%s", CURRENT_TIME, interaction.user.name, interaction.user.id)
+        logger.info("[text.clear] %s clear %s:%s", CURRENT_TIME, interaction.user.name, interaction.user.id)
         if isinstance(
             interaction.channel,
             discord.TextChannel | discord.channel.VocalGuildChannel | discord.Thread,
@@ -95,16 +95,11 @@ class ChannelManagementGroup(app_commands.Group, name="channel", description="Ge
             channel (str): The name of the channel to create.
             category (discord.CategoryChannel): The category to create the channel in.
         """
+        logger.info(
+            "[text.create] %s create %s:%s %s %s", CURRENT_TIME, interaction.user.name, interaction.user.id, channel, category
+        )
         assert interaction.guild is not None  # Satisfies type checker
         assert isinstance(interaction.user, discord.Member)  # Satisfies type checker
-        logger.info(
-            "%s create %s:%s %s %s",
-            CURRENT_TIME,
-            interaction.user.name,
-            interaction.user.id,
-            channel,
-            category,
-        )
         if channel not in [channel.name for channel in category.channels]:
             new_channel = await interaction.guild.create_text_channel(channel, category=category)
             await new_channel.set_permissions(interaction.user, overwrite=overwrite[0])
@@ -114,8 +109,84 @@ class ChannelManagementGroup(app_commands.Group, name="channel", description="Ge
             await interaction.response.send_message(f"Un salon {channel!r} existe déjà dans {category.name} !")
 
 
+class VocalChannelManagementGroup(app_commands.Group, name="vocal", description="Gestion des salons vocaux dynamiques"):
+    """Manages voice channel-related commands.
+
+    Args:
+        app_commands (app_commands.Group): The app_commands group.
+        name (str, optional): The name of the group. Defaults to "vocal".
+        description (str, optional): The description of the group. Defaults to "Gestion des salons vocaux dynamiques".
+    """
+
+    @app_commands.command(name="create", description="Crée un salon vocal personnalisé.")
+    @app_commands.describe(
+        name="Nom du salon vocal à créer",
+        max_user="Nombre max d'utilisateurs (défaut 25)",
+    )
+    async def create(self, interaction: discord.Interaction, name: str, max_user: int = 25) -> None:
+        """Create a custom voice channel in the specified category.
+
+        Args:
+            interaction (discord.Interaction): The Discord interaction.
+            name (str): The name of the voice channel to create.
+            max_user (int, optional): Maximum number of users in the channel. Defaults to 25.
+        """
+        logger.info(
+            "[vocal.create] %s create %s:%s %s max_user=%d",
+            CURRENT_TIME,
+            interaction.user.name,
+            interaction.user.id,
+            name,
+            max_user,
+        )
+        guild = interaction.guild
+        assert isinstance(guild, Guild)
+        category = get(guild.categories, name="Salons vocaux")
+        assert isinstance(category, CategoryChannel)
+        if name not in [channel.name for channel in category.voice_channels]:
+            await guild.create_voice_channel(f"{name}-temp", category=category, user_limit=max_user)
+            await interaction.response.send_message(
+                f"Le salon vocal {name!r} a été créé dans {category.name} ! (max {max_user} utilisateurs)."
+            )
+        else:
+            await interaction.response.send_message(f"Un salon {name!r} existe déjà dans {category.name} !")
+
+    @app_commands.command(name="rename", description="Renomme un salon vocal.")
+    @app_commands.describe(old_name="Nom actuel du salon", new_name="Nouveau nom du salon")
+    async def rename(self, interaction: discord.Interaction, old_name: str, new_name: str) -> None:
+        """Rename a voice channel.
+
+        Args:
+            interaction (discord.Interaction): The Discord interaction.
+            old_name (str): The current name of the voice channel.
+            new_name (str): The new name of the voice channel.
+        """
+        logger.info(
+            "[vocal.rename] %s rename %s:%s %s -> %s",
+            CURRENT_TIME,
+            interaction.user.name,
+            interaction.user.id,
+            old_name,
+            new_name,
+        )
+        guild = interaction.guild
+        assert isinstance(guild, Guild)
+        channel = get(guild.voice_channels, name=old_name)
+        if not channel:
+            channel = get(guild.voice_channels, name=f"{old_name}-temp")
+        if not channel:
+            await interaction.response.send_message(
+                f"Aucun salon vocal nommé '{old_name}' ou '{old_name}-temp' trouvé.", ephemeral=True
+            )
+            return
+        if not new_name.endswith("-temp"):
+            new_name += "-temp"
+        await channel.edit(name=new_name)
+        await interaction.response.send_message(f"Salon vocal renommé en '{new_name}'.")
+
+
 class ChannelManagement(commands.Cog):
-    """Manages channel."""
+    """Manages text and vocal channels."""
 
     def __init__(self, bot: commands.Bot) -> None:
         """Initialize the cog and register its command groups.
@@ -125,7 +196,7 @@ class ChannelManagement(commands.Cog):
         """
         self.bot = bot
         self.remove_tasks: dict[int, asyncio.Task[None]] = {}
-        for group in (ChannelManagementGroup(),):
+        for group in (TextChannelManagementGroup(), VocalChannelManagementGroup()):
             self.bot.tree.add_command(group)
 
     @commands.Cog.listener()
@@ -139,26 +210,34 @@ class ChannelManagement(commands.Cog):
             before (discord.VoiceState): The voice state before the change.
             after (discord.VoiceState): The voice state after the change.
         """
+        logger.debug(
+            "[vocal.voice_state_update] %s %s:%s before=%s after=%s",
+            CURRENT_TIME,
+            member.name,
+            member.id,
+            before.channel,
+            after.channel,
+        )
         guild = member.guild
 
-        assoc_cat = get(guild.categories, name="Association")
-        if not assoc_cat:
-            return
-        assoc_base_name = "general-vocal"
-
-        bureau_cat = get(guild.categories, name="Bureau")
-        if not bureau_cat:
-            return
-        bureau_base_name = "bureau-vocal"
-
-        new = after.channel
-        if isinstance(new, discord.VoiceChannel):
-            task = self.remove_tasks.pop(new.id, None)
+        new_channel = after.channel
+        if isinstance(new_channel, discord.VoiceChannel):
+            task = self.remove_tasks.pop(new_channel.id, None)
             if task:
                 task.cancel()
 
-        await self._manage_voice_channels(guild, assoc_cat, assoc_base_name)
-        await self._manage_voice_channels(guild, bureau_cat, bureau_base_name)
+        categories = [category for category in guild.categories if len(category.voice_channels) > 0]
+
+        for category in categories:
+            for voice_channel in category.voice_channels:
+                if voice_channel.name.endswith("-vocal"):
+                    await self._manage_voice_channels(guild, category, voice_channel.name)
+                elif (
+                    voice_channel.name.endswith("-temp")
+                    and len(voice_channel.members) == 0
+                    and voice_channel.id not in self.remove_tasks
+                ):
+                    self.remove_tasks[voice_channel.id] = asyncio.create_task(self._delayed_delete(voice_channel, timeout=60))
 
     async def _manage_voice_channels(self, guild: Guild, category: CategoryChannel, base_name: str) -> None:
         """Manage voice channels in a category.
@@ -168,26 +247,40 @@ class ChannelManagement(commands.Cog):
             category (CategoryChannel): The category to manage channels in.
             base_name (str): The base name for the channels.
         """
-        empty_channels = [voice_channel for voice_channel in category.voice_channels if len(voice_channel.members) == 0]
+        logger.debug(
+            "[vocal._manage_voice_channels] %s guild=%s category=%s base_name=%s",
+            CURRENT_TIME,
+            guild.name,
+            category.name,
+            base_name,
+        )
+        voice_channels = [
+            voice_channel for voice_channel in category.voice_channels if voice_channel.name.startswith(base_name)
+        ]
+        empty_channels = [voice_channel for voice_channel in voice_channels if len(voice_channel.members) == 0]
         empty_channels.sort(key=lambda c: c.name)
         while len(empty_channels) > 1:
             channel_to_delete = empty_channels[-1]
             if channel_to_delete.id not in self.remove_tasks:
-                self.remove_tasks[channel_to_delete.id] = asyncio.create_task(self._delayed_delete(channel_to_delete))
+                self.remove_tasks[channel_to_delete.id] = asyncio.create_task(
+                    self._delayed_delete(channel_to_delete, timeout=10)
+                )
             del empty_channels[-1]
 
         if len(empty_channels) == 0:
             for n in range(1, len(category.voice_channels) + 1):
-                if get(category.voice_channels, name=f"{base_name}--{n}") is None:
-                    await guild.create_voice_channel(f"{base_name}--{n}", category=category)
+                if get(category.voice_channels, name=f"{base_name}/{n}") is None:
+                    await guild.create_voice_channel(f"{base_name}/{n}", category=category)
 
-    async def _delayed_delete(self, channel: discord.VoiceChannel) -> None:
-        """Wait one minute then delete the channel if still empty.
+    async def _delayed_delete(self, channel: discord.VoiceChannel, timeout: int) -> None:
+        """Wait a specified amount of time then delete the channel if still empty.
 
         Args:
             channel (discord.VoiceChannel): The channel to delete.
+            timeout (int): The time to wait before deleting the channel in seconds.
         """
-        await asyncio.sleep(30)
+        logger.info("[vocal._delayed_delete] %s channel=%s timeout=%d", CURRENT_TIME, channel.name, timeout)
+        await asyncio.sleep(timeout)
         if len(channel.members) == 0:
             with contextlib.suppress(Exception):
                 await channel.delete()
