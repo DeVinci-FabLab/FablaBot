@@ -8,21 +8,21 @@ import logging
 import re
 from warnings import deprecated
 
-import discord
-from discord import app_commands
+from discord import Interaction, Member, Role, app_commands
 from discord.ext import commands
+from discord.utils import get
 
 logger = logging.getLogger(__name__)
 
 CURRENT_TIME = datetime.now().strftime("%Y/%m/%d, %H:%M:%S")
 
 
-def can_assign_role(member: discord.Member, target_role: discord.Role):
+def can_assign_role(member: Member, target_role: Role):
     """Checks if a member can assign a specific role.
 
     Args:
-        member (discord.Member): The member attempting to assign the role.
-        target_role (discord.Role): The role to be assigned.
+        member (Member): The member attempting to assign the role.
+        target_role (Role): The role to be assigned.
 
     Returns:
         bool: True if the member can assign the role, False otherwise.
@@ -37,11 +37,11 @@ def can_assign_role(member: discord.Member, target_role: discord.Role):
     )
 
 
-def _is_user_server_admin(member: discord.Member) -> bool:
+def _is_user_server_admin(member: Member) -> bool:
     """Checks if a member is a server admin.
 
     Args:
-        member (discord.Member): The member to check.
+        member (Member): The member to check.
 
     Returns:
         bool: `True` if the member is a server admin, `False` otherwise.
@@ -56,12 +56,12 @@ def _is_user_server_admin(member: discord.Member) -> bool:
     )
 
 
-def _is_user_responsible_for_pole(member: discord.Member, target_role: discord.Role) -> bool:
+def _is_user_responsible_for_pole(member: Member, target_role: Role) -> bool:
     """Checks if a member is responsible for a specific pole.
 
     Args:
-        member (discord.Member): The member to check.
-        target_role (discord.Role): The role to check against.
+        member (Member): The member to check.
+        target_role (Role): The role to check against.
 
     Returns:
         bool: `True` if the member is responsible for the pole, `False` otherwise.
@@ -79,12 +79,12 @@ def _is_user_responsible_for_pole(member: discord.Member, target_role: discord.R
     return False
 
 
-def _is_user_responsible_for_trainers(member: discord.Member, target_role: discord.Role) -> bool:
+def _is_user_responsible_for_trainers(member: Member, target_role: Role) -> bool:
     """Checks if a member is responsible for a specific formation.
 
     Args:
-        member (discord.Member): The member to check.
-        target_role (discord.Role): The role to check against.
+        member (Member): The member to check.
+        target_role (Role): The role to check against.
 
     Returns:
         bool: `True` if the member is responsible for the formation, `False` otherwise.
@@ -113,12 +113,14 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         raison="La raison pour laquelle les droits sont donnés",
         time="Durée en minutes pour laquelle les droits sont donnés (par défaut 5)",
     )
-    async def op(self, interaction: discord.Interaction, user: discord.Member, raison: str, time: int = 5) -> None:
+    async def op(self, interaction: Interaction, user: Member, raison: str, time: int = 5) -> None:
         """Gives a user temporary administrator privileges.
 
         Args:
-            interaction (discord.Interaction): The interaction object.
-            user (discord.Member): The user to give privileges to.
+            interaction (Interaction): The interaction object.
+            user (Member): The user to give privileges to.
+            raison (str): The reason for granting privileges.
+            time (int, optional): The duration in minutes for which privileges are granted. Defaults to 5.
 
         Raises:
             RuntimeError: If the temporary admin role is not found.
@@ -132,13 +134,13 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             user,
         )
 
-        admin_role = discord.utils.get(interaction.guild.roles, name="Admin -temp-")
-        codir_role = discord.utils.get(interaction.guild.roles, name="CoDir")
-        assert isinstance(codir_role, discord.Role)
+        admin_role = get(interaction.guild.roles, name="Admin -temp-")
+        codir_role = get(interaction.guild.roles, name="CoDir")
+        assert isinstance(codir_role, Role)
         if admin_role is None:
             raise RuntimeError("Temporary admin role not found.")
 
-        assert isinstance(interaction.user, discord.Member)
+        assert isinstance(interaction.user, Member)
         if not can_assign_role(interaction.user, admin_role) and "Respo Numérique" not in [role.name for role in user.roles]:
             await interaction.response.send_message("Vous n'avez pas la permission d'ajouter ce rôle.", ephemeral=True)
             return
@@ -151,12 +153,12 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
 
     @app_commands.command(name="deop", description="Retire les droits administrateurs temporaires d'un utilisateur.")
     @app_commands.describe(user="L'utilisateur à qui retirer les droits administrateurs")
-    async def deop(self, interaction: discord.Interaction, user: discord.Member) -> None:
+    async def deop(self, interaction: Interaction, user: Member) -> None:
         """Removes a user's temporary administrator privileges.
 
         Args:
-            interaction (discord.Interaction): The interaction object.
-            user (discord.Member): The user to remove privileges from.
+            interaction (Interaction): The interaction object.
+            user (Member): The user to remove privileges from.
 
         Raises:
             RuntimeError: If the temporary admin role is not found.
@@ -169,10 +171,10 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             interaction.user.id,
             user,
         )
-        admin_role = discord.utils.get(interaction.guild.roles, name="Admin -temp-")
+        admin_role = get(interaction.guild.roles, name="Admin -temp-")
         if admin_role is None:
             raise RuntimeError("Temporary admin role not found.")
-        assert isinstance(interaction.user, discord.Member)
+        assert isinstance(interaction.user, Member)
         if not can_assign_role(interaction.user, admin_role) and "Respo Numérique" not in [role.name for role in user.roles]:
             await interaction.response.send_message("Vous n'avez pas la permission de retirer ce rôle.", ephemeral=True)
             return
@@ -184,13 +186,13 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         user="L'utilisateur à qui donner le rôle",
         role="Le rôle à donner à l'utilisateur",
     )
-    async def add_role(self, interaction: discord.Interaction, user: discord.Member, role: discord.Role) -> None:
+    async def add_role(self, interaction: Interaction, user: Member, role: Role) -> None:
         """Adds a role to a user.
 
         Args:
-            interaction (discord.Interaction): The interaction object.
-            user (discord.Member): The user to add the role to.
-            role (discord.Role): The role to add to the user.
+            interaction (Interaction): The interaction object.
+            user (Member): The user to add the role to.
+            role (Role): The role to add to the user.
         """
         logger.info(
             "%s user_role_add %s:%s %s %s",
@@ -200,7 +202,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             user,
             role,
         )
-        assert isinstance(interaction.user, discord.Member)
+        assert isinstance(interaction.user, Member)
         if not can_assign_role(interaction.user, role):
             await interaction.response.send_message("Vous n'avez pas la permission d'ajouter ce rôle.", ephemeral=True)
             return
@@ -212,13 +214,13 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         user="L'utilisateur à qui retirer le rôle",
         role="Le rôle à retirer à l'utilisateur",
     )
-    async def remove_role(self, interaction: discord.Interaction, user: discord.Member, role: discord.Role) -> None:
+    async def remove_role(self, interaction: Interaction, user: Member, role: Role) -> None:
         """Removes a role from a user.
 
         Args:
-            interaction (discord.Interaction): The interaction object.
-            user (discord.Member): The user to remove the role from.
-            role (discord.Role): The role to remove from the user.
+            interaction (Interaction): The interaction object.
+            user (Member): The user to remove the role from.
+            role (Role): The role to remove from the user.
         """
         logger.info(
             "%s user_role_remove %s:%s %s %s",
@@ -228,7 +230,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             user,
             role,
         )
-        assert isinstance(interaction.user, discord.Member)
+        assert isinstance(interaction.user, Member)
         if not can_assign_role(interaction.user, role):
             await interaction.response.send_message("Vous n'avez pas la permission de retirer ce rôle.", ephemeral=True)
             return
@@ -240,8 +242,14 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         users="Les utilisateurs cibles (mentions séparées par espace)",
         role="Le rôle à donner aux utilisateurs",
     )
-    async def add_roles(self, interaction: discord.Interaction, users: str, role: discord.Role) -> None:
-        """Adds a role to multiple users from mentions."""
+    async def add_roles(self, interaction: Interaction, users: str, role: Role) -> None:
+        """Adds a role to multiple users from mentions.
+
+        Args:
+            interaction (Interaction): The interaction object.
+            users (str): The users to add the role to, specified as mentions separated by spaces.
+            role (Role): The role to add to the users.
+        """
         logger.info(
             "%s user_roles_add %s:%s %s %s",
             CURRENT_TIME,
@@ -251,12 +259,12 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             role,
         )
         assert interaction.guild is not None
-        assert isinstance(interaction.user, discord.Member)
+        assert isinstance(interaction.user, Member)
         if not can_assign_role(interaction.user, role):
             await interaction.response.send_message("Vous n'avez pas la permission d'ajouter ce rôle.", ephemeral=True)
             return
         ids = re.findall(r"<@!?(\d+)>", users)
-        members: list[discord.Member] = []
+        members: list[Member] = []
         for uid in ids:
             member = interaction.guild.get_member(int(uid))
             if member:
@@ -275,8 +283,14 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         users="Les utilisateurs cibles (mentions séparées par espace)",
         role="Le rôle à retirer aux utilisateurs",
     )
-    async def remove_roles(self, interaction: discord.Interaction, users: str, role: discord.Role) -> None:
-        """Removes a role from multiple users from mentions."""
+    async def remove_roles(self, interaction: Interaction, users: str, role: Role) -> None:
+        """Removes a role from multiple users from mentions.
+
+        Args:
+            interaction (Interaction): The interaction object.
+            users (str): The users to remove the role from, specified as mentions separated by spaces.
+            role (Role): The role to remove from the users.
+        """
         logger.info(
             "%s user_roles_remove %s:%s %s %s",
             CURRENT_TIME,
@@ -286,12 +300,12 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             role,
         )
         assert interaction.guild is not None
-        assert isinstance(interaction.user, discord.Member)
+        assert isinstance(interaction.user, Member)
         if not can_assign_role(interaction.user, role):
             await interaction.response.send_message("Vous n'avez pas la permission de retirer ce rôle.", ephemeral=True)
             return
         ids = re.findall(r"<@!?(\d+)>", users)
-        members: list[discord.Member] = []
+        members: list[Member] = []
         for uid in ids:
             member = interaction.guild.get_member(int(uid))
             if member:
