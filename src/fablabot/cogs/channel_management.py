@@ -110,9 +110,8 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
         logger.info(
             "[text.create] %s create %s:%s %s %s", CURRENT_TIME, interaction.user.name, interaction.user.id, channel, category
         )
-        assert interaction.guild is not None  # Satisfies type checker
-        assert isinstance(interaction.user, Member)  # Satisfies type checker
-        if not interaction.user.guild_permissions.manage_channels:
+        assert isinstance(interaction.user, Member)
+        if not category.permissions_for(interaction.user).manage_channels:
             await interaction.response.send_message("Vous n'avez pas la permission de créer des salons.", ephemeral=True)
             return
         if channel not in [channel.name for channel in category.channels]:
@@ -221,13 +220,13 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
             await interaction.response.send_message(f"Un salon {name!r} existe déjà dans {category.name} !")
 
     @app_commands.command(name="rename", description="Renomme un salon vocal.")
-    @app_commands.describe(old_name="Nom actuel du salon", new_name="Nouveau nom du salon")
-    async def rename(self, interaction: discord.Interaction, old_name: str, new_name: str) -> None:
+    @app_commands.describe(channel="Le salon vocal à renommer", new_name="Nouveau nom du salon")
+    async def rename(self, interaction: Interaction, channel: VoiceChannel, new_name: str) -> None:
         """Rename a voice channel.
 
         Args:
-            interaction (discord.Interaction): The Discord interaction.
-            old_name (str): The current name of the voice channel.
+            interaction (Interaction): The Discord interaction.
+            channel (VoiceChannel): The voice channel to rename.
             new_name (str): The new name of the voice channel.
         """
         logger.info(
@@ -235,23 +234,24 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
             CURRENT_TIME,
             interaction.user.name,
             interaction.user.id,
-            old_name,
+            channel.name,
             new_name,
         )
-        guild = interaction.guild
-        assert isinstance(guild, Guild)
-        channel = get(guild.voice_channels, name=old_name)
-        if not channel:
-            channel = get(guild.voice_channels, name=f"{old_name}-temp")
-        if not channel:
+        assert isinstance(interaction.guild, Guild)
+        assert isinstance(channel.category, CategoryChannel)
+        assert isinstance(interaction.user, Member)
+        if channel.name.endswith("-temp") and not new_name.endswith("-temp"):
+            new_name += "-temp"
+        if channel.category.permissions_for(interaction.user).manage_channels:
+            old_name = channel.name
+            await channel.edit(name=new_name)
             await interaction.response.send_message(
-                f"Aucun salon vocal nommé '{old_name}' ou '{old_name}-temp' trouvé.", ephemeral=True
+                f"Le salon vocal {channel.mention}, anciennement {old_name!r} a été renommé."
             )
             return
-        if not new_name.endswith("-temp"):
-            new_name += "-temp"
-        await channel.edit(name=new_name)
-        await interaction.response.send_message(f"Salon vocal renommé en '{new_name}'.")
+        await interaction.response.send_message(
+            f"Vous n'avez pas la permission de renommer le salon vocal {channel.mention}.", ephemeral=True
+        )
 
     @app_commands.command(name="delete", description="Supprime un salon vocal.")
     @app_commands.describe(channel="Le salon vocal à supprimer")
