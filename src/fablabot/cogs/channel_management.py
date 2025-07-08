@@ -15,7 +15,6 @@ from discord import (
     GroupChannel,
     Interaction,
     Member,
-    PermissionOverwrite,
     TextChannel,
     VoiceChannel,
     VoiceState,
@@ -25,31 +24,6 @@ from discord.ext import commands
 
 logger = logging.getLogger(__name__)
 
-CURRENT_TIME = datetime.now().strftime("%Y/%m/%d, %H:%M:%S")
-
-# define the different permissions [admin, invited, read only , blacklist]
-# TODO: replace with named tuple
-permissions = {
-    "send_messages": [True, True, False, False],
-    "read_messages": [True, True, True, False],
-    "manage_messages": [True, False, False, False],
-    "manage_channels": [True, False, False, False],
-    "manage_roles": [True, False, False, False],
-    "manage_permissions": [True, False, False, False],
-    "manage_emojis": [True, True, False, False],
-    "mention_everyone": [True, False, False, False],
-    "create_private_threads": [True, True, False, False],
-    "create_public_threads": [True, True, False, False],
-    "read_message_history": [True, True, True, False],
-    "add_reactions": [True, True, True, False],
-    "attach_files": [True, True, False, False],
-}
-overwrite = [PermissionOverwrite() for _ in range(4)]
-
-for perm_name in permissions:
-    for level in range(len(overwrite)):
-        overwrite[level].update(**{perm_name: permissions[perm_name][level]})
-overwrite += [None]
 
 def log_request(command_name: str, interaction: Interaction, **kwargs: Any) -> None:
     """Logs a request made to a command.
@@ -121,7 +95,6 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
             await interaction.response.send_message(f"Un salon {channel!r} existe déjà dans {category.name}.", ephemeral=True)
             return
         new_channel = await category.create_text_channel(channel)
-        await new_channel.set_permissions(interaction.user, overwrite=PERMISSION_OVERWRITES[0])
         logger.info("Created text channel %r in category %r", new_channel, category.name)
         await interaction.response.send_message(f"Le salon {new_channel.mention} a été créé dans {category.name}.")
 
