@@ -253,6 +253,30 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
         await channel.edit(name=new_name)
         await interaction.response.send_message(f"Salon vocal renommé en '{new_name}'.")
 
+    @app_commands.command(name="delete", description="Supprime un salon vocal.")
+    @app_commands.describe(channel="Le salon vocal à supprimer")
+    async def delete(self, interaction: Interaction, channel: VoiceChannel) -> None:
+        """Delete a voice channel.
+
+        Args:
+            interaction (Interaction): The Discord interaction.
+            channel (VoiceChannel): The voice channel to delete.
+        """
+        logger.info("[vocal.delete] %s delete %s:%s %s", CURRENT_TIME, interaction.user.name, interaction.user.id, channel.name)
+        assert isinstance(interaction.user, Member)
+        assert isinstance(channel.category, CategoryChannel)
+        if len(channel.members) != 0:
+            await interaction.response.send_message(
+                f"Le salon vocal {channel.name} ne peut pas être supprimé car il contient des membres.", ephemeral=True
+            )
+        if channel.category.permissions_for(interaction.user).manage_channels:
+            await channel.delete()
+            await interaction.response.send_message(f"Le salon {channel.name!r} a été supprimé.")
+            return
+        await interaction.response.send_message(
+            f"Vous n'avez pas la permission de supprimer le salon {channel.mention}.", ephemeral=True
+        )
+
 
 class ChannelManagement(commands.Cog):
     """Manages text and vocal channels."""
