@@ -189,15 +189,26 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
     @app_commands.command(name="create", description="Crée un salon vocal personnalisé.")
     @app_commands.describe(
         name="Nom du salon vocal à créer",
-        max_user="Nombre max d'utilisateurs (défaut 25)",
+        category="Catégorie dans laquelle créer le salon vocal",
+        is_temporary="Salon temporaire (supprimé après 60 secondes d'inactivité, par défaut True)",
+        max_user="Nombre max d'utilisateurs (défaut illimité, None pour aucun maximum)",
     )
-    async def create(self, interaction: discord.Interaction, name: str, max_user: int = 25) -> None:
+    async def create(
+        self,
+        interaction: Interaction,
+        name: str,
+        category: CategoryChannel,
+        is_temporary: bool = True,
+        max_user: int | None = None,
+    ) -> None:
         """Create a custom voice channel in the specified category.
 
         Args:
-            interaction (discord.Interaction): The Discord interaction.
+            interaction (Interaction): The Discord interaction.
             name (str): The name of the voice channel to create.
-            max_user (int, optional): Maximum number of users in the channel. Defaults to 25.
+            category (CategoryChannel): The category in which to create the voice channel.
+            is_temporary (bool, optional): Whether the channel is temporary. Defaults to True.
+            max_user (int | None, optional): The maximum number of users allowed in the channel. Defaults to None.
         """
         logger.info(
             "[vocal.create] %s create %s:%s %s max_user=%d",
@@ -207,17 +218,19 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
             name,
             max_user,
         )
-        guild = interaction.guild
-        assert isinstance(guild, Guild)
-        category = get(guild.categories, name="Salons vocaux")
-        assert isinstance(category, CategoryChannel)
+        assert isinstance(interaction.user, Member)
+        if not category.permissions_for(interaction.user).manage_channels:
+            await interaction.response.send_message("Vous n'avez pas la permission de créer des salons.", ephemeral=True)
+            return
         if name not in [channel.name for channel in category.voice_channels]:
-            await guild.create_voice_channel(f"{name}-temp", category=category, user_limit=max_user)
+            if is_temporary:
+                channel = await category.create_voice_channel(f"{name}-temp", user_limit=max_user)
+            else:
+                channel = await category.create_voice_channel(f"{name}", user_limit=max_user)
             await interaction.response.send_message(
-                f"Le salon vocal {name!r} a été créé dans {category.name} ! (max {max_user} utilisateurs)."
+                f"Le salon vocal {'temporaire' if is_temporary else 'permanent'} {channel.mention} a été créé dans {category.name} !{f' (max {max_user} utilisateurs).' if max_user is not None else ''}"
             )
-        else:
-            await interaction.response.send_message(f"Un salon {name!r} existe déjà dans {category.name} !")
+        await interaction.response.send_message(f"Un salon {name!r} existe déjà dans {category.name} !")
 
     @app_commands.command(name="rename", description="Renomme un salon vocal.")
     @app_commands.describe(channel="Le salon vocal à renommer", new_name="Nouveau nom du salon")
