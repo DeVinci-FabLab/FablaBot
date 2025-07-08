@@ -1,24 +1,34 @@
-"""User management commands and permission utilities."""
+"""User management commands and permission utilities for Discord Bot. Provides slash commands for temporary admin and role assignments."""
 
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
 import logging
 import re
+from typing import Any
 from warnings import deprecated
 
-from discord import Interaction, Member, Role, app_commands
+from discord import Guild, Interaction, Member, Role, app_commands
 from discord.ext import commands
 from discord.utils import get
 
 logger = logging.getLogger(__name__)
 
-CURRENT_TIME = datetime.now().strftime("%Y/%m/%d, %H:%M:%S")
+
+def log_request(command_name: str, interaction: Interaction, **kwargs: Any) -> None:
+    """Logs a request made to a command.
+
+    Args:
+        command_name (str): The name of the command.
+        interaction (Interaction): The interaction object representing the command invocation.
+        **kwargs: Additional details to log.
+    """
+    details = " ".join(f"{k}={v}" for k, v in kwargs.items())
+    logger.info(f"[{command_name}] user={interaction.user} id={interaction.user.id} {details}")
 
 
-def can_assign_role(member: Member, target_role: Role):
-    """Checks if a member can assign a specific role.
+def can_assign_role(member: Member, target_role: Role) -> bool:
+    """Checks if the member can assign a specific role.
 
     Args:
         member (Member): The member attempting to assign the role.
@@ -38,7 +48,7 @@ def can_assign_role(member: Member, target_role: Role):
 
 
 def _is_user_server_admin(member: Member) -> bool:
-    """Checks if a member is a server admin.
+    """Checks if the member has an administrative role.
 
     Args:
         member (Member): The member to check.
@@ -46,18 +56,12 @@ def _is_user_server_admin(member: Member) -> bool:
     Returns:
         bool: `True` if the member is a server admin, `False` otherwise.
     """
-    member_role_names = [role.name for role in member.roles]
-    return (
-        "Admin -temp-" in member_role_names
-        or "Administrateur" in member_role_names
-        or "Président.e" in member_role_names
-        or "Vice-Président.e" in member_role_names
-        or "Secrétaire Général" in member_role_names
-    )
+    role_names = {role.name for role in member.roles}
+    return bool(role_names & {"Admin -temp-", "Administrateur", "Président.e", "Vice-Président.e", "Secrétaire Général"})
 
 
 def _is_user_responsible_for_pole(member: Member, target_role: Role) -> bool:
-    """Checks if a member is responsible for a specific pole.
+    """Checks if member is responsible for the 'pole' of the target role.
 
     Args:
         member (Member): The member to check.
@@ -66,21 +70,18 @@ def _is_user_responsible_for_pole(member: Member, target_role: Role) -> bool:
     Returns:
         bool: `True` if the member is responsible for the pole, `False` otherwise.
     """
-    member_role_names = [role.name for role in member.roles]
-
-    if target_role.name == "Sbire Bureau" and "Bureau" in member_role_names:
+    role_names = {role.name for role in member.roles}
+    if target_role.name == "Sbire Bureau" and "Bureau" in role_names:
         return True
-
     if target_role.name.startswith("Pôle "):
-        suffix = target_role.name[len("Pôle ") :]
-        if f"Respo {suffix}" in member_role_names:
+        suffix = target_role.name.split("Pôle ", 1)[1]
+        if f"Respo {suffix}" in role_names:
             return True
-
     return False
 
 
 def _is_user_responsible_for_trainers(member: Member, target_role: Role) -> bool:
-    """Checks if a member is responsible for a specific formation.
+    """Checks if member manages formations for the target role.
 
     Args:
         member (Member): The member to check.
@@ -89,9 +90,8 @@ def _is_user_responsible_for_trainers(member: Member, target_role: Role) -> bool
     Returns:
         bool: `True` if the member is responsible for the formation, `False` otherwise.
     """
-    member_role_names = [role.name for role in member.roles]
-
-    return "Respo Formations" in member_role_names and target_role.name.startswith("F - ")
+    role_names = {role.name for role in member.roles}
+    return "Respo Formations" in role_names and target_role.name.startswith("F - ")
 
 
 class UserManagementGroup(app_commands.Group, name="user", description="Gestion des utilisateurs"):
@@ -107,54 +107,45 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         RuntimeError: If the user is not found.
     """
 
-    @app_commands.command(name="op", description="Donne les droits administrateurs temporaires à un utilisateur.")
-    @app_commands.describe(
-        user="L'utilisateur à qui donner les droits administrateurs",
-        raison="La raison pour laquelle les droits sont donnés",
-        time="Durée en minutes pour laquelle les droits sont donnés (par défaut 5)",
-    )
+    @app_commands.command(name="op", description="Donne des droits admin temporaires à un utilisateur.")
+    @app_commands.describe(user="L'utilisateur cible", raison="Raison de l'attribution", time="Durée en minutes (par défaut 5)")
     async def op(self, interaction: Interaction, user: Member, raison: str, time: int = 5) -> None:
-        """Gives a user temporary administrator privileges.
+        """Grant temporary admin privileges to a user.
 
         Args:
             interaction (Interaction): The interaction object.
             user (Member): The user to give privileges to.
             raison (str): The reason for granting privileges.
             time (int, optional): The duration in minutes for which privileges are granted. Defaults to 5.
-
-        Raises:
-            RuntimeError: If the temporary admin role is not found.
         """
-        assert interaction.guild is not None  # Satisfies type checker
-        logger.info(
-            "%s op %s:%s %s",
-            CURRENT_TIME,
-            interaction.user.name,
-            interaction.user.id,
-            user,
-        )
-
+        log_request("user.op", interaction, target=user, reason=raison, duration=time)
+        assert isinstance(interaction.guild, Guild)
         admin_role = get(interaction.guild.roles, name="Admin -temp-")
         codir_role = get(interaction.guild.roles, name="CoDir")
-        assert isinstance(codir_role, Role)
-        if admin_role is None:
-            raise RuntimeError("Temporary admin role not found.")
-
+        if admin_role is None or codir_role is None:
+            logger.error("Required role not found: Admin -temp- or CoDir")
+            await interaction.response.send_message("Rôles administratifs manquants sur le serveur.", ephemeral=True)
+            return
         assert isinstance(interaction.user, Member)
-        if not can_assign_role(interaction.user, admin_role) and "Respo Numérique" not in [role.name for role in user.roles]:
+        if not can_assign_role(interaction.user, admin_role) and "Respo Numérique" not in [
+            r.name for r in interaction.user.roles
+        ]:
             await interaction.response.send_message("Vous n'avez pas la permission d'ajouter ce rôle.", ephemeral=True)
+            logger.warning("Unauthorized op attempt by %s", interaction.user)
             return
         await user.add_roles(admin_role)
         await interaction.response.send_message(
-            f"{codir_role.mention} Les droits administrateurs on été donnés à {user} ! \nRaison: {raison} \nTemps: {time} minutes"
+            f"{codir_role.mention} Droits admin donnés à {user.mention} pour {time} minutes. Raison: {raison}"
         )
-        await asyncio.sleep(time * 60)  # Wait for the specified time in minutes
+        logger.info("Granted %s temporary admin for %d min", user, time)
+        await asyncio.sleep(time * 60)
         await user.remove_roles(admin_role)
+        logger.info("Removed temporary admin from %s after timeout", user)
 
-    @app_commands.command(name="deop", description="Retire les droits administrateurs temporaires d'un utilisateur.")
-    @app_commands.describe(user="L'utilisateur à qui retirer les droits administrateurs")
+    @app_commands.command(name="deop", description="Retire les droits admin temporaires d'un utilisateur.")
+    @app_commands.describe(user="L'utilisateur cible")
     async def deop(self, interaction: Interaction, user: Member) -> None:
-        """Removes a user's temporary administrator privileges.
+        """Revoke temporary admin privileges from a user.
 
         Args:
             interaction (Interaction): The interaction object.
@@ -163,85 +154,66 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         Raises:
             RuntimeError: If the temporary admin role is not found.
         """
-        assert interaction.guild is not None  # Satisfies type checker
-        logger.info(
-            "%s deop %s:%s %s",
-            CURRENT_TIME,
-            interaction.user.name,
-            interaction.user.id,
-            user,
-        )
+        log_request("user.deop", interaction, target=user)
+        assert isinstance(interaction.guild, Guild)
         admin_role = get(interaction.guild.roles, name="Admin -temp-")
         if admin_role is None:
-            raise RuntimeError("Temporary admin role not found.")
+            logger.error("Role Admin -temp- not found")
+            await interaction.response.send_message("Rôle temporaire admin introuvable.", ephemeral=True)
+            return
         assert isinstance(interaction.user, Member)
-        if not can_assign_role(interaction.user, admin_role) and "Respo Numérique" not in [role.name for role in user.roles]:
+        if not can_assign_role(interaction.user, admin_role) and "Respo Numérique" not in [
+            r.name for r in interaction.user.roles
+        ]:
             await interaction.response.send_message("Vous n'avez pas la permission de retirer ce rôle.", ephemeral=True)
+            logger.warning("Unauthorized deop attempt by %s", interaction.user)
             return
         await user.remove_roles(admin_role)
-        await interaction.response.send_message(f"Les droits administrateurs on été retirés à {user} !")
+        await interaction.response.send_message(f"Droits admin retirés de {user.mention} !")
+        logger.info("Revoked temporary admin from %s", user)
 
     @app_commands.command(name="add_role", description="Donne un rôle à un utilisateur.")
-    @app_commands.describe(
-        user="L'utilisateur à qui donner le rôle",
-        role="Le rôle à donner à l'utilisateur",
-    )
+    @app_commands.describe(user="L'utilisateur cible", role="Le rôle à attribuer")
     async def add_role(self, interaction: Interaction, user: Member, role: Role) -> None:
-        """Adds a role to a user.
+        """Add a role to a single user.
 
         Args:
             interaction (Interaction): The interaction object.
             user (Member): The user to add the role to.
             role (Role): The role to add to the user.
         """
-        logger.info(
-            "%s user_role_add %s:%s %s %s",
-            CURRENT_TIME,
-            interaction.user.name,
-            interaction.user.id,
-            user,
-            role,
-        )
+        log_request("user.add_role", interaction, target=user, role=role)
         assert isinstance(interaction.user, Member)
         if not can_assign_role(interaction.user, role):
             await interaction.response.send_message("Vous n'avez pas la permission d'ajouter ce rôle.", ephemeral=True)
+            logger.warning("Unauthorized add_role by %s", interaction.user)
             return
         await user.add_roles(role)
-        await interaction.response.send_message(f"Le rôle {role} a été ajouté à {user} !")
+        await interaction.response.send_message(f"Le rôle {role.name!r} a été ajouté à {user.mention}.")
+        logger.info("Added role %s to %s", role.name, user.name)
 
     @app_commands.command(name="remove_role", description="Retire un rôle à un utilisateur.")
-    @app_commands.describe(
-        user="L'utilisateur à qui retirer le rôle",
-        role="Le rôle à retirer à l'utilisateur",
-    )
+    @app_commands.describe(user="L'utilisateur cible", role="Le rôle à retirer")
     async def remove_role(self, interaction: Interaction, user: Member, role: Role) -> None:
-        """Removes a role from a user.
+        """Remove a role from a single user.
 
         Args:
             interaction (Interaction): The interaction object.
             user (Member): The user to remove the role from.
             role (Role): The role to remove from the user.
         """
-        logger.info(
-            "%s user_role_remove %s:%s %s %s",
-            CURRENT_TIME,
-            interaction.user.name,
-            interaction.user.id,
-            user,
-            role,
-        )
+        log_request("user.remove_role", interaction, target=user, role=role)
         assert isinstance(interaction.user, Member)
         if not can_assign_role(interaction.user, role):
             await interaction.response.send_message("Vous n'avez pas la permission de retirer ce rôle.", ephemeral=True)
+            logger.warning("Unauthorized remove_role by %s", interaction.user)
             return
         await user.remove_roles(role)
-        await interaction.response.send_message(f"Le rôle {role} a été retiré à {user} !")
+        await interaction.response.send_message(f"Le rôle {role.name!r} a été retiré à {user.name!r}.")
+        logger.info("Removed role %s from %s", role, user)
 
     @app_commands.command(name="add_roles", description="Donne un rôle à plusieurs utilisateurs.")
-    @app_commands.describe(
-        users="Les utilisateurs cibles (mentions séparées par espace)",
-        role="Le rôle à donner aux utilisateurs",
-    )
+    @app_commands.describe(users="Mentions séparées par espaces", role="Le rôle à attribuer")
     async def add_roles(self, interaction: Interaction, users: str, role: Role) -> None:
         """Adds a role to multiple users from mentions.
 
@@ -250,18 +222,12 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             users (str): The users to add the role to, specified as mentions separated by spaces.
             role (Role): The role to add to the users.
         """
-        logger.info(
-            "%s user_roles_add %s:%s %s %s",
-            CURRENT_TIME,
-            interaction.user.name,
-            interaction.user.id,
-            users,
-            role,
-        )
-        assert interaction.guild is not None
+        log_request("user.add_roles", interaction, mentions=users, role=role)
+        assert isinstance(interaction.guild, Guild)
         assert isinstance(interaction.user, Member)
         if not can_assign_role(interaction.user, role):
-            await interaction.response.send_message("Vous n'avez pas la permission d'ajouter ce rôle.", ephemeral=True)
+            await interaction.response.send_message("Permission refusée.", ephemeral=True)
+            logger.warning("Unauthorized add_roles by %s", interaction.user)
             return
         ids = re.findall(r"<@!?(\d+)>", users)
         members: list[Member] = []
@@ -269,20 +235,20 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             member = interaction.guild.get_member(int(uid))
             if member:
                 members.append(member)
+            else:
+                logger.warning("User with ID %s not found in guild %s", uid, interaction.guild.name)
         if not members:
-            await interaction.response.send_message("Aucun utilisateur valide trouvé dans la liste.", ephemeral=True)
+            await interaction.response.send_message("Aucun utilisateur valide trouvé.", ephemeral=True)
             return
         added: list[str] = []
-        for member in members:
-            await member.add_roles(role)
-            added.append(member.name)
-        await interaction.response.send_message(f"Le rôle {role} a été ajouté à {', '.join(added)} !")
+        for m in members:
+            await m.add_roles(role)
+            added.append(m.mention)
+        await interaction.response.send_message(f"Rôle {role.mention} ajouté à {', '.join(added)}.")
+        logger.info("Added role %s to multiple users: %s", role, added)
 
     @app_commands.command(name="remove_roles", description="Retire un rôle à plusieurs utilisateurs.")
-    @app_commands.describe(
-        users="Les utilisateurs cibles (mentions séparées par espace)",
-        role="Le rôle à retirer aux utilisateurs",
-    )
+    @app_commands.describe(users="Mentions séparées par espaces", role="Le rôle à retirer")
     async def remove_roles(self, interaction: Interaction, users: str, role: Role) -> None:
         """Removes a role from multiple users from mentions.
 
@@ -291,18 +257,12 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             users (str): The users to remove the role from, specified as mentions separated by spaces.
             role (Role): The role to remove from the users.
         """
-        logger.info(
-            "%s user_roles_remove %s:%s %s %s",
-            CURRENT_TIME,
-            interaction.user.name,
-            interaction.user.id,
-            users,
-            role,
-        )
-        assert interaction.guild is not None
+        log_request("user.remove_roles", interaction, mentions=users, role=role)
+        assert isinstance(interaction.guild, Guild)
         assert isinstance(interaction.user, Member)
         if not can_assign_role(interaction.user, role):
-            await interaction.response.send_message("Vous n'avez pas la permission de retirer ce rôle.", ephemeral=True)
+            await interaction.response.send_message("Permission refusée.", ephemeral=True)
+            logger.warning("Unauthorized remove_roles by %s", interaction.user)
             return
         ids = re.findall(r"<@!?(\d+)>", users)
         members: list[Member] = []
@@ -310,18 +270,21 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             member = interaction.guild.get_member(int(uid))
             if member:
                 members.append(member)
+            else:
+                logger.warning("User with ID %s not found in guild %s", uid, interaction.guild.name)
         if not members:
-            await interaction.response.send_message("Aucun utilisateur valide trouvé dans la liste.", ephemeral=True)
+            await interaction.response.send_message("Aucun utilisateur valide trouvé.", ephemeral=True)
             return
         removed: list[str] = []
-        for member in members:
-            await member.remove_roles(role)
-            removed.append(member.name)
-        await interaction.response.send_message(f"Le rôle {role} a été retiré de {', '.join(removed)} !")
+        for m in members:
+            await m.remove_roles(role)
+            removed.append(m.mention)
+        await interaction.response.send_message(f"Rôle {role.mention} retiré de {', '.join(removed)}.")
+        logger.info("Removed role %s from multiple users: %s", role, removed)
 
 
 class UserManagement(commands.Cog):
-    """Manages user permissions and roles."""
+    """Cog to register user management commands."""
 
     def __init__(self, bot: commands.Bot) -> None:
         """Initialize the cog and register its command groups.
@@ -330,13 +293,12 @@ class UserManagement(commands.Cog):
             bot: The bot instance.
         """
         self.bot = bot
-        for group in (UserManagementGroup(),):
-            self.bot.tree.add_command(group)
+        self.bot.tree.add_command(UserManagementGroup())
 
 
 @deprecated("Load the cog using `bot.add_cog()` instead.")
 async def setup(bot: commands.Bot) -> None:
-    """Sets up the user management cog.
+    """Setup function to load the UserManagement cog.
 
     Args:
         bot (commands.Bot): The bot instance.
