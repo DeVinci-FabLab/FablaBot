@@ -219,8 +219,16 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
                 f"Vous n'avez pas la permission de renommer le salon vocal {channel.mention}.", ephemeral=True
             )
             return
+        if channel.name[:-1].endswith("-vocal/"):
+            logger.warning("Attempt to rename a dynamic voice channel: %r", channel.name)
+            await interaction.response.send_message(
+                f"Le salon vocal {channel.mention} est un salon dynamique et ne peut pas être renommé.", ephemeral=True
+            )
+            return
         if channel.name.endswith("-temp") and not new_name.endswith("-temp"):
             new_name += "-temp"
+        if channel.name.endswith("-vocal") and not new_name.endswith("-vocal"):
+            new_name += "-vocal"
         old_name = channel.name
         await channel.edit(name=new_name)
         logger.info("Renamed voice channel %r from %r to %r", channel, old_name, new_name)
