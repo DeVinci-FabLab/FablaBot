@@ -107,6 +107,12 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         RuntimeError: If the user is not found.
     """
 
+    def __init__(self) -> None:
+        """Initialize the UserManagementGroup with the specified name and description."""
+        super().__init__(name="user", description="Gestion des utilisateurs")
+        self.deop_tasks: dict[int, asyncio.Task[None]] = {}
+        logger.info("UserManagementGroup initialized")
+
     @app_commands.command(name="op", description="Donne des droits admin temporaires à un utilisateur.")
     @app_commands.describe(user="L'utilisateur cible", raison="Raison de l'attribution", time="Durée en minutes (par défaut 5)")
     async def op(self, interaction: Interaction, user: Member, raison: str, time: int = 5) -> None:
@@ -134,14 +140,15 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             await interaction.response.send_message("Permissions insuffisantes.", ephemeral=True)
             return
         await user.add_roles(admin_role)
+        old_task = self.deop_tasks.pop(user.id, None)
+        if old_task:
+            old_task.cancel()
+        task = asyncio.create_task(self._schedule_deop(user, time, admin_role, interaction))
+        self.deop_tasks[user.id] = task
         logger.info("Granted %s temporary admin for %d min", user, time)
         await interaction.response.send_message(
             f"{codir_role.mention} Droits admin donnés à {user.mention} pour {time} minutes. Raison: {raison}"
         )
-        logger.info("Granted %s temporary admin for %d min", user, time)
-        await asyncio.sleep(time * 60)
-        await user.remove_roles(admin_role)
-        logger.info("Removed temporary admin from %s after timeout", user)
 
     @app_commands.command(name="deop", description="Retire les droits admin temporaires d'un utilisateur.")
     @app_commands.describe(user="L'utilisateur cible")
@@ -169,6 +176,9 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             logger.warning("Unauthorized deop attempt by %s", interaction.user)
             await interaction.response.send_message("Permissions insuffisantes.", ephemeral=True)
             return
+        task = self.deop_tasks.pop(user.id, None)
+        if task:
+            task.cancel()
         await user.remove_roles(admin_role)
         logger.info("Revoked temporary admin from %s", user)
         await interaction.response.send_message(f"Droits admin retirés de {user.mention} !")
@@ -214,7 +224,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         await interaction.response.send_message(f"Le rôle {role.name!r} a été retiré à {user.name!r}.")
 
     @app_commands.command(name="add_roles", description="Donne un rôle à plusieurs utilisateurs.")
-    @app_commands.describe(users="Mentions séparées par espaces", role="Le rôle à attribuer")
+    @app_commands.describe(users="Les utilisateurs cibles (mentions à la suite)", role="Le rôle à attribuer")
     async def add_roles(self, interaction: Interaction, users: str, role: Role) -> None:
         """Adds a role to multiple users from mentions.
 
@@ -259,7 +269,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             )
 
     @app_commands.command(name="remove_roles", description="Retire un rôle à plusieurs utilisateurs.")
-    @app_commands.describe(users="Mentions à la suite", role="Le rôle à retirer")
+    @app_commands.describe(users="Les utilisateurs cibles (mentions à la suite)", role="Le rôle à retirer")
     async def remove_roles(self, interaction: Interaction, users: str, role: Role) -> None:
         """Removes a role from multiple users from mentions.
 
@@ -302,6 +312,25 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             await interaction.followup.send(
                 f"Rôle {role.mention} déjà absent chez {', '.join(m.mention for m in users_without_role)}.", ephemeral=True
             )
+
+    async def _schedule_deop(self, user: Member, time: int, admin_role: Role, interaction: Interaction) -> None:
+        """Schedule removal of temporary admin role after timeout.
+
+        Args:
+            user (Member): The user to remove the role from.
+            time (int): The time in minutes to wait before removing the role.
+            admin_role (Role): The admin role to remove.
+            interaction (Interaction): The interaction that triggered the deop.
+        """
+        try:
+            await asyncio.sleep(time * 60)
+            if user.id in self.deop_tasks and admin_role in user.roles:
+                await user.remove_roles(admin_role)
+                logger.info("Revoked temporary admin from %s after %d minutes", user, time)
+                await interaction.followup.send(f"Droits admin retirés de {user.mention} après {time} minutes.")
+            self.deop_tasks.pop(user.id, None)
+        except asyncio.CancelledError:
+            logger.debug("Deop timer cancelled for %s", user)
 
 
 class UserManagement(commands.Cog):
