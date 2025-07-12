@@ -330,7 +330,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
                 await interaction.followup.send(f"Droits admin retirés de {user.mention} après {time} minutes.")
             self.deop_tasks.pop(user.id, None)
         except asyncio.CancelledError:
-            logger.debug("Deop timer cancelled for %s", user)
+            logger.info("Deop timer cancelled for %s", user)
 
 
 class UserManagement(commands.Cog):

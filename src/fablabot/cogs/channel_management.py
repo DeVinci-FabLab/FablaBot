@@ -65,7 +65,7 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
             return
         await interaction.response.send_message("Nettoyage en cours...", ephemeral=True)
         deleted = await interaction.channel.purge(limit=messages)
-        logger.debug("Deleted %d messages in channel %r", len(deleted), interaction.channel.name)
+        logger.info("Deleted %d messages in channel %r", len(deleted), interaction.channel.name)
         await interaction.followup.send(f"{len(deleted)} messages supprimés avec succès !", ephemeral=True)
 
     @app_commands.command(name="create", description="Crée un nouveau salon dans la catégorie spécifiée.")
@@ -290,6 +290,7 @@ class ChannelManagement(commands.Cog):
             task = self.remove_tasks.pop(after.channel.id, None)
             if task:
                 task.cancel()
+                logger.info("Cancelled remove task for channel %s", after.channel.name)
 
         for category in member.guild.categories:
             for voice_channel in category.voice_channels:
