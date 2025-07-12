@@ -196,10 +196,10 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
             return
         new_channel = await category.create_voice_channel(channel_name, user_limit=max_user)
         logger.info("Created voice channel %r in category %r", new_channel, category.name)
-        desc = f"Salon vocal {'temporaire' if is_temporary else 'permanent'} créé: {new_channel.mention}"
+        channel_creation_message = f"Salon vocal {'temporaire' if is_temporary else 'permanent'} créé: {new_channel.mention}"
         if max_user:
-            desc += f" (max {max_user} utilisateurs)"
-        await interaction.response.send_message(desc)
+            channel_creation_message += f" (max {max_user} utilisateurs)"
+        await interaction.response.send_message(channel_creation_message)
 
     @app_commands.command(name="rename", description="Renomme un salon vocal.")
     @app_commands.describe(channel="Le salon vocal à renommer", new_name="Nouveau nom du salon")
