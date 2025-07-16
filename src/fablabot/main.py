@@ -32,9 +32,12 @@ class Fablabot(commands.Bot):
 
     async def setup_hook(self) -> None:
         """Load the bot extensions."""
-        for cog in (channel_management.ChannelManagement(self), user_management.UserManagement(self)):
+        for cog in (
+            channel_management.ChannelManagement(self),
+            user_management.UserManagement(self),
+        ):
             await self.add_cog(cog)
-            logger.info("Loaded cog %s", cog.__class__.__name__)
+            logger.info(f"Loaded cog {cog.__class__.__name__}")
 
         # Synchronisation globale des commandes
         await self.tree.sync()
@@ -47,7 +50,7 @@ class Fablabot(commands.Bot):
             ctx: The invocation context of the command.
             exception: The raised exception.
         """
-        logger.error("Unhandled command error: %s", exception)
+        logger.error(f"Unhandled command error: {exception}")
         await ctx.reply(str(exception), ephemeral=True)
 
 
