@@ -24,6 +24,10 @@ from discord.ext import commands
 
 logger = logging.getLogger(__name__)
 
+DYNAMIC_SUFFIX = "-vocal"
+INDEX_SEPARATOR = "/"
+EPHEMERAL_SUFFIX = "-temp"
+
 
 def log_request(command_name: str, interaction: Interaction, **kwargs: Any) -> None:
     """Logs a request made to a command.
@@ -89,8 +93,7 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
                 "Vous n'avez pas la permission de créer des salons dans cette catégorie.", ephemeral=True
             )
             return
-        existing_names = {c.name for c in category.channels}
-        if channel in existing_names:
+        if channel in (c.name for c in category.channels):
             logger.info(f"Text channel {channel!r} already exists in {category!r}")
             await interaction.response.send_message(f"Un salon {channel!r} existe déjà dans {category.name!r}.", ephemeral=True)
             return
@@ -187,7 +190,7 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
             await interaction.response.send_message("Vous n'avez pas la permission de créer des salons vocaux.", ephemeral=True)
             return
         existing = {vc.name for vc in category.voice_channels}
-        channel_name = f"{name}-temp" if is_temporary else name
+        channel_name = f"{name}{EPHEMERAL_SUFFIX}" if is_temporary else name
         if channel_name in existing:
             logger.info(f"Voice channel {channel_name!r} already exists in {category!r}")
             await interaction.response.send_message(
@@ -219,16 +222,16 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
                 f"Vous n'avez pas la permission de renommer le salon vocal {channel.mention}.", ephemeral=True
             )
             return
-        if channel.name[:-1].endswith("-vocal/"):
+        if channel.name[:-1].endswith(f"{DYNAMIC_SUFFIX}{INDEX_SEPARATOR}"):
             logger.warning(f"Attempt to rename a dynamic voice channel: {channel.name}")
             await interaction.response.send_message(
                 f"Le salon vocal {channel.mention} est un salon dynamique et ne peut pas être renommé.", ephemeral=True
             )
             return
-        if channel.name.endswith("-temp") and not new_name.endswith("-temp"):
-            new_name += "-temp"
-        if channel.name.endswith("-vocal") and not new_name.endswith("-vocal"):
-            new_name += "-vocal"
+        if channel.name.endswith(EPHEMERAL_SUFFIX) and not new_name.endswith(EPHEMERAL_SUFFIX):
+            new_name += EPHEMERAL_SUFFIX
+        if channel.name.endswith(DYNAMIC_SUFFIX) and not new_name.endswith(DYNAMIC_SUFFIX):
+            new_name += DYNAMIC_SUFFIX
         old_name = channel.name
         await channel.edit(name=new_name)
         logger.info(f"Renamed voice channel {channel} from {old_name!r} to {new_name!r}")
@@ -294,10 +297,10 @@ class ChannelManagement(commands.Cog):
 
         for category in member.guild.categories:
             for voice_channel in category.voice_channels:
-                if voice_channel.name.endswith("-vocal"):
+                if voice_channel.name.endswith(DYNAMIC_SUFFIX):
                     await self._manage_voice_channels(category, voice_channel)
                 elif (
-                    voice_channel.name.endswith("-temp")
+                    voice_channel.name.endswith(EPHEMERAL_SUFFIX)
                     and not voice_channel.members
                     and voice_channel.id not in self.remove_tasks
                 ):
@@ -320,8 +323,8 @@ class ChannelManagement(commands.Cog):
                 self.remove_tasks[vc.id] = asyncio.create_task(self._delayed_delete(vc, 10))
         if not empty:
             for idx in range(1, len(channels) + 1):
-                if f"{base_channel.name}/{idx}" not in [c.name for c in channels]:
-                    new_name = f"{base_channel.name}/{idx}"
+                if f"{base_channel.name}{INDEX_SEPARATOR}{idx}" not in (c.name for c in channels):
+                    new_name = f"{base_channel.name}{INDEX_SEPARATOR}{idx}"
                     await category.create_voice_channel(
                         new_name,
                         bitrate=base_channel.bitrate,

@@ -14,6 +14,8 @@ from discord.utils import get
 
 logger = logging.getLogger(__name__)
 
+ADMIN_ROLES = {"Admin -temp-", "Administrateur", "Président.e", "Vice-Président.e", "Secrétaire Général"}
+
 
 def log_request(command_name: str, interaction: Interaction, **kwargs: Any) -> None:
     """Logs a request made to a command.
@@ -56,8 +58,8 @@ def _is_user_server_admin(member: Member) -> bool:
     Returns:
         bool: `True` if the member is a server admin, `False` otherwise.
     """
-    role_names = {role.name for role in member.roles}
-    return bool(role_names & {"Admin -temp-", "Administrateur", "Président.e", "Vice-Président.e", "Secrétaire Général"})
+    member_role_names = {role.name for role in member.roles}
+    return bool(member_role_names & ADMIN_ROLES)
 
 
 def _is_user_responsible_for_pole(member: Member, target_role: Role) -> bool:
@@ -170,9 +172,9 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             await interaction.response.send_message("Rôle temporaire admin introuvable.", ephemeral=True)
             return
         assert isinstance(interaction.user, Member)
-        if not can_assign_role(interaction.user, admin_role) and "Respo Numérique" not in [
+        if not can_assign_role(interaction.user, admin_role) and "Respo Numérique" not in (
             r.name for r in interaction.user.roles
-        ]:
+        ):
             logger.warning(f"Unauthorized deop attempt by {interaction.user}")
             await interaction.response.send_message("Permissions insuffisantes.", ephemeral=True)
             return
