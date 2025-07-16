@@ -32,7 +32,10 @@ class Fablabot(commands.Bot):
 
     async def setup_hook(self) -> None:
         """Load the bot extensions."""
-        for cog in (channel_management.ChannelManagement(self), user_management.UserManagement(self)):
+        for cog in (
+            channel_management.ChannelManagement(self),
+            user_management.UserManagement(self),
+        ):
             await self.add_cog(cog)
             logger.info(f"Loaded cog {cog.__class__.__name__}")
 

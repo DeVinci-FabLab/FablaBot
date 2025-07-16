@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 from typing import Any
 from warnings import deprecated
 
@@ -216,25 +217,32 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
         """
         log_request("vocal.rename", interaction, channel=channel.name, new_name=new_name)
         assert isinstance(interaction.user, Member)
+        assert isinstance(channel.category, CategoryChannel)
         if not channel.permissions_for(interaction.user).manage_channels:
             logger.warning(f"Insufficient permissions for rename voice channel: {interaction.user}")
             await interaction.response.send_message(
                 f"Vous n'avez pas la permission de renommer le salon vocal {channel.mention}.", ephemeral=True
             )
             return
-        if channel.name[:-1].endswith(f"{DYNAMIC_SUFFIX}{INDEX_SEPARATOR}"):
+        if re.search(rf"{DYNAMIC_SUFFIX}{INDEX_SEPARATOR}\d+$", channel.name):
             logger.warning(f"Attempt to rename a dynamic voice channel: {channel.name}")
             await interaction.response.send_message(
                 f"Le salon vocal {channel.mention} est un salon dynamique et ne peut pas être renommé.", ephemeral=True
             )
             return
-        if channel.name.endswith(EPHEMERAL_SUFFIX) and not new_name.endswith(EPHEMERAL_SUFFIX):
-            new_name += EPHEMERAL_SUFFIX
-        if channel.name.endswith(DYNAMIC_SUFFIX) and not new_name.endswith(DYNAMIC_SUFFIX):
-            new_name += DYNAMIC_SUFFIX
         old_name = channel.name
+        if old_name.endswith(EPHEMERAL_SUFFIX) and not new_name.endswith(EPHEMERAL_SUFFIX):
+            new_name += EPHEMERAL_SUFFIX
+        if old_name.endswith(DYNAMIC_SUFFIX) and not new_name.endswith(DYNAMIC_SUFFIX):
+            new_name += DYNAMIC_SUFFIX
         await channel.edit(name=new_name)
         logger.info(f"Renamed voice channel {channel} from {old_name!r} to {new_name!r}")
+        for vc in channel.category.voice_channels:
+            if vc.name.startswith(f"{old_name}{INDEX_SEPARATOR}"):
+                suffix = vc.name[len(old_name) :]
+                new_vc_name = f"{new_name}{suffix}"
+                await vc.edit(name=new_vc_name)
+                logger.info(f"Renamed associated dynamic channel {vc} from {old_name + suffix!r} to {new_vc_name!r}")
         await interaction.response.send_message(
             f"Le salon vocal {channel.mention}, anciennement {old_name!r}, a été renommé en {new_name!r}."
         )
