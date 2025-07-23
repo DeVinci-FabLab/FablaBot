@@ -325,9 +325,10 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             admin_role (Role): The admin role to remove.
             interaction (Interaction): The interaction that triggered the deop.
         """
+        logger.debug(f"Scheduling deop for {user} after {time} minutes")
         try:
             await asyncio.sleep(time * 60)
-            if user.id in self.deop_tasks and admin_role in user.roles:
+            if user.id in self.deop_tasks:
                 await user.remove_roles(admin_role)
                 logger.info(f"Revoked temporary admin from {user} after {time} minutes")
                 await interaction.followup.send(f"Droits admin retirés de {user.mention} après {time} minutes.")
