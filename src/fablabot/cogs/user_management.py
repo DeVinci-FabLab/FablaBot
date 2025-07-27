@@ -116,17 +116,17 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         logger.info("UserManagementGroup initialized")
 
     @app_commands.command(name="op", description="Donne des droits admin temporaires à un utilisateur.")
-    @app_commands.describe(user="L'utilisateur cible", raison="Raison de l'attribution", time="Durée en minutes (par défaut 5)")
-    async def op(self, interaction: Interaction, user: Member, raison: str, time: int = 5) -> None:
+    @app_commands.describe(user="L'utilisateur cible", reason="Raison de l'attribution", time="Durée en minutes (par défaut 5)")
+    async def op(self, interaction: Interaction, user: Member, reason: str, time: int = 5) -> None:
         """Grant temporary admin privileges to a user.
 
         Args:
             interaction (Interaction): The interaction object.
             user (Member): The user to give privileges to.
-            raison (str): The reason for granting privileges.
+            reason (str): The reason for granting privileges.
             time (int, optional): The duration in minutes for which privileges are granted. Defaults to 5.
         """
-        log_request("user.op", interaction, target=user, reason=raison, duration=time)
+        log_request("user.op", interaction, target=user, reason=reason, duration=time)
         assert isinstance(interaction.guild, Guild)
         admin_role = get(interaction.guild.roles, name="Admin -temp-")
         codir_role = get(interaction.guild.roles, name="CoDir")
@@ -147,9 +147,9 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             old_task.cancel()
         task = asyncio.create_task(self._schedule_deop(user, time, admin_role, interaction))
         self.deop_tasks[user.id] = task
-        logger.info(f"Granted {user} temporary admin for {time} minutes")
+        logger.info(f"Granted {user} temporary admin for {time} minutes for reason: {reason}")
         await interaction.response.send_message(
-            f"{codir_role.mention} Droits admin donnés à {user.mention} pour {time} minutes. Raison: {raison}"
+            f"{codir_role.mention} Droits admin donnés à {user.mention} pour {time} minutes. Raison: {reason}"
         )
 
     @app_commands.command(name="deop", description="Retire les droits admin temporaires d'un utilisateur.")
@@ -259,7 +259,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
                 continue
             await m.add_roles(role)
             added.append(m)
-        logger.debug(f"Members to add role: {members}, Added: {added}, Already has role: {already_has_role}")
+        logger.debug(f"Members to add role: {members},\nAdded: {added},\nAlready has role: {already_has_role}")
         if not members or not added:
             logger.info("No valid users found for role addition")
             await interaction.response.send_message("Aucun utilisateur valide trouvé.", ephemeral=True)
@@ -325,9 +325,10 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             admin_role (Role): The admin role to remove.
             interaction (Interaction): The interaction that triggered the deop.
         """
+        logger.debug(f"Scheduling deop for {user} after {time} minutes")
         try:
             await asyncio.sleep(time * 60)
-            if user.id in self.deop_tasks and admin_role in user.roles:
+            if user.id in self.deop_tasks:
                 await user.remove_roles(admin_role)
                 logger.info(f"Revoked temporary admin from {user} after {time} minutes")
                 await interaction.followup.send(f"Droits admin retirés de {user.mention} après {time} minutes.")
