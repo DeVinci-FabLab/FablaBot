@@ -68,6 +68,13 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
                 "Vous n'avez pas la permission de gérer les messages dans ce salon.", ephemeral=True
             )
             return
+        if interaction.channel.name == "commandes_bot":
+            logger.warning("Attempt to clear commandes_bot channel")
+            await interaction.response.send_message(
+                "Vous ne pouvez pas nettoyer le salon commandes_bot. Veuillez contacter le pôle numérique si nécessaire.",
+                ephemeral=True,
+            )
+            return
         await interaction.response.send_message("Nettoyage en cours...", ephemeral=True)
         deleted = await interaction.channel.purge(limit=messages)
         logger.info(f"Deleted {len(deleted)} messages in channel {interaction.channel.name}")
