@@ -36,7 +36,7 @@ def log_request(command_name: str, interaction: Interaction, **kwargs: Any) -> N
     Args:
         command_name (str): The name of the command.
         interaction (Interaction): The interaction object representing the command invocation.
-        **kwargs: Additional details to log.
+        **kwargs (Any): Additional details to log.
     """
     details = " ".join(f"{k}={v}" for k, v in kwargs.items())
     logger.info(f"[{command_name}]: user={interaction.user!s} id={interaction.user.id} {details}")
@@ -280,7 +280,7 @@ class ChannelManagement(commands.Cog):
         """Initialize the cog and register its command groups.
 
         Args:
-            bot: The bot instance.
+            bot (commands.Bot): The bot instance.
         """
         self.bot = bot
         self.remove_tasks: dict[int, asyncio.Task[None]] = {}

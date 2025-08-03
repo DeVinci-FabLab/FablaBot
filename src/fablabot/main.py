@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 DISCORD_TOKEN_FILE = os.environ.get("DISCORD_TOKEN_FILE") or ""
-with open(DISCORD_TOKEN_FILE, "r") as f:
+with open(DISCORD_TOKEN_FILE) as f:
     DISCORD_TOKEN = f.read().strip()
 
 
@@ -47,8 +47,8 @@ class Fablabot(commands.Bot):
         """Handle uncaught command errors.
 
         Args:
-            ctx: The invocation context of the command.
-            exception: The raised exception.
+            ctx (commands.Context): The invocation context of the command.
+            exception (Exception): The raised exception.
         """
         logger.error(f"Unhandled command error: {exception}")
         await ctx.reply(str(exception), ephemeral=True)

@@ -13,7 +13,7 @@ class Welcome(commands.Cog):
         """Initialize the Welcome cog.
 
         Args:
-            bot: The bot instance.
+            bot (commands.Bot): The bot instance.
         """
         self.bot = bot
 

@@ -23,7 +23,7 @@ def log_request(command_name: str, interaction: Interaction, **kwargs: Any) -> N
     Args:
         command_name (str): The name of the command.
         interaction (Interaction): The interaction object representing the command invocation.
-        **kwargs: Additional details to log.
+        **kwargs (Any): Additional details to log.
     """
     details = " ".join(f"{k}={v}" for k, v in kwargs.items())
     logger.info(f"[{command_name}] user={interaction.user} id={interaction.user.id} {details}")
@@ -97,17 +97,7 @@ def _is_user_responsible_for_trainers(member: Member, target_role: Role) -> bool
 
 
 class UserManagementGroup(app_commands.Group, name="user", description="Gestion des utilisateurs"):
-    """Manages user-related commands.
-
-    Args:
-        app_commands (app_commands.Group): The app_commands group.
-        name (str, optional): The name of the group. Defaults to "user".
-        description (str, optional): The description of the group. Defaults to "Gestion des utilisateurs".
-
-    Raises:
-        RuntimeError: If the temporary admin role is not found.
-        RuntimeError: If the user is not found.
-    """
+    """Manages user-related commands."""
 
     def __init__(self) -> None:
         """Initialize the UserManagementGroup with the specified name and description."""
@@ -161,8 +151,6 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             interaction (Interaction): The interaction object.
             user (Member): The user to remove privileges from.
 
-        Raises:
-            RuntimeError: If the temporary admin role is not found.
         """
         log_request("user.deop", interaction, target=user)
         assert isinstance(interaction.guild, Guild)
@@ -344,7 +332,7 @@ class UserManagement(commands.Cog):
         """Initialize the cog and register its command groups.
 
         Args:
-            bot: The bot instance.
+            bot (commands.Bot): The bot instance.
         """
         self.bot = bot
         self.bot.tree.add_command(UserManagementGroup())
