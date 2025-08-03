@@ -8,7 +8,17 @@ import re
 from typing import Any
 from warnings import deprecated
 
-from discord import Guild, Interaction, Member, Role, app_commands
+from discord import (
+    AuditLogAction,
+    Guild,
+    Interaction,
+    Member,
+    Message,
+    RawMessageDeleteEvent,
+    Role,
+    TextChannel,
+    app_commands,
+)
 from discord.ext import commands
 from discord.utils import get
 
@@ -336,6 +346,62 @@ class UserManagement(commands.Cog):
         """
         self.bot = bot
         self.bot.tree.add_command(UserManagementGroup())
+
+    @commands.Cog.listener()
+    async def on_message_delete(self, message: Message) -> None:
+        """Handle message deletion events.
+
+        Args:
+            message (Message): The deleted message.
+        """
+        logger.debug(f"Message {message} deleted")
+        if isinstance(message.channel, TextChannel) and message.channel.name == "commandes_bot":
+            assert isinstance(message.guild, Guild)
+            codir_role = get(message.guild.roles, name="CoDir")
+            if codir_role is None:
+                logger.error("Required role CoDir not found.")
+                await message.channel.send("Rôle CoDir manquant sur le serveur.", delete_after=60)
+                return
+            async for entry in message.guild.audit_logs(limit=1, action=AuditLogAction.message_delete):
+                deleter = entry.user
+                assert isinstance(deleter, Member)
+                logger.warning(f"Message deleted in channel commandes_bot by {deleter.name!r} : {message.content}")
+                await message.channel.send(
+                    f"{codir_role.mention} Un message a été supprimé par {deleter.mention} :\n> {message.content}"
+                )
+
+    @commands.Cog.listener()
+    async def on_raw_message_delete(self, payload: RawMessageDeleteEvent) -> None:
+        """Handle raw message deletion events.
+
+        Args:
+            payload (app_commands.RawMessageDeleteEvent): The raw event payload data.
+        """
+        logger.debug(f"raw_message_delete: {payload.message_id} in channel {payload.channel_id} in guild {payload.guild_id}")
+        if payload.cached_message:
+            return
+        if payload.guild_id is None:
+            return
+        guild = self.bot.get_guild(payload.guild_id)
+        if guild is None:
+            return
+        channel = self.bot.get_channel(payload.channel_id)
+        if not isinstance(channel, TextChannel) or channel.name != "commandes_bot":
+            return
+        codir_role = get(guild.roles, name="CoDir")
+        if codir_role is None:
+            logger.error("Required role CoDir not found.")
+            await channel.send("Rôle CoDir manquant sur le serveur.", delete_after=60)
+            return
+        async for entry in guild.audit_logs(limit=1, action=AuditLogAction.message_delete):
+            deleter = entry.user
+            assert isinstance(deleter, Member)
+            logger.warning(
+                f"Message with ID {payload.message_id} not found in channel {channel.name}. Deleted by {deleter.name!r}."
+            )
+            await channel.send(
+                f"{codir_role.mention} Un message irrécupérable a été supprimé par {deleter.mention}.\nID du message : {payload.message_id}."
+            )
 
 
 @deprecated("Load the cog using `bot.add_cog()` instead.")
