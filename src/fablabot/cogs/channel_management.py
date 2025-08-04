@@ -10,18 +10,23 @@ from typing import Any
 from warnings import deprecated
 
 from discord import (
+    AuditLogAction,
     CategoryChannel,
     DMChannel,
     ForumChannel,
     GroupChannel,
+    Guild,
     Interaction,
     Member,
+    Message,
+    RawMessageDeleteEvent,
     TextChannel,
     VoiceChannel,
     VoiceState,
     app_commands,
 )
 from discord.ext import commands
+from discord.utils import get
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +73,10 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
                 "Vous n'avez pas la permission de gérer les messages dans ce salon.", ephemeral=True
             )
             return
-        if interaction.channel.name == "commandes_bot":
-            logger.warning("Attempt to clear commandes_bot channel")
+        if interaction.channel.name.endswith("_bot"):
+            logger.warning(f"Attempt to clear {interaction.channel.name} channel")
             await interaction.response.send_message(
-                "Vous ne pouvez pas nettoyer le salon commandes_bot. Veuillez contacter le pôle numérique si nécessaire.",
+                f"Vous ne pouvez pas nettoyer le salon {interaction.channel.name}. Veuillez contacter le pôle numérique si nécessaire.",
                 ephemeral=True,
             )
             return
@@ -295,6 +300,67 @@ class ChannelManagement(commands.Cog):
         self.bot.tree.add_command(VocalChannelManagementGroup())
 
     @commands.Cog.listener()
+    async def on_message_delete(self, message: Message) -> None:
+        """Handle message deletion events.
+
+        Args:
+            message (Message): The deleted message.
+        """
+        logger.debug(f"Message {message} deleted")
+        if not isinstance(message.channel, TextChannel):
+            logger.debug(f"Message {message.id} deleted in non-text channel {message.channel}")
+            return
+        if message.channel.name == "commandes_bot" or (message.channel.name == "log_bot" and message.author == self.bot.user):
+            assert isinstance(message.guild, Guild)
+            codir_role = get(message.guild.roles, name="CoDir")
+            if codir_role is None:
+                logger.error("Required role CoDir not found.")
+                await message.channel.send("Rôle CoDir manquant sur le serveur.", delete_after=60)
+                return
+            async for entry in message.guild.audit_logs(limit=1, action=AuditLogAction.message_delete):
+                deleter = entry.user
+                assert isinstance(deleter, Member)
+                logger.warning(f"Message deleted in channel {message.channel.name!r} by {deleter.name!r} : {message.content}")
+                await message.channel.send(
+                    f"{codir_role.mention} Un message a été supprimé par {deleter.mention} :\n> {message.content}"
+                )
+
+    @commands.Cog.listener()
+    async def on_raw_message_delete(self, payload: RawMessageDeleteEvent) -> None:
+        """Handle raw message deletion events.
+
+        Args:
+            payload (app_commands.RawMessageDeleteEvent): The raw event payload data.
+        """
+        logger.debug(f"raw_message_delete: {payload.message_id} in channel {payload.channel_id} in guild {payload.guild_id}")
+        if payload.cached_message:
+            return
+        if payload.guild_id is None:
+            return
+        guild = self.bot.get_guild(payload.guild_id)
+        if guild is None:
+            return
+        channel = self.bot.get_channel(payload.channel_id)
+        if not isinstance(channel, TextChannel):
+            return
+        if channel.name != "commandes_bot" and channel.name != "log_bot":
+            return
+        codir_role = get(guild.roles, name="CoDir")
+        if codir_role is None:
+            logger.error("Required role CoDir not found.")
+            await channel.send("Rôle CoDir manquant sur le serveur.", delete_after=60)
+            return
+        async for entry in guild.audit_logs(limit=1, action=AuditLogAction.message_delete):
+            deleter = entry.user
+            assert isinstance(deleter, Member)
+            logger.warning(
+                f"Message with ID {payload.message_id} not found in channel {channel.name}. Deleted by {deleter.name!r}."
+            )
+            await channel.send(
+                f"{codir_role.mention} Un message irrécupérable a été supprimé par {deleter.mention}.\nID du message : {payload.message_id}."
+            )
+
+    @commands.Cog.listener()
     async def on_voice_state_update(self, member: Member, before: VoiceState, after: VoiceState) -> None:
         """Dynamically create and remove voice channels in the 'Association' category.
 
@@ -358,7 +424,7 @@ class ChannelManagement(commands.Cog):
             channel (VoiceChannel): The channel to delete.
             timeout (int): The time to wait before deleting the channel in seconds.
         """
-        logger.info(f"_delayed_delete: channel={channel} timeout={timeout}")
+        logger.debug(f"_delayed_delete: channel={channel} timeout={timeout}")
         await asyncio.sleep(timeout)
         if not channel.members:
             with contextlib.suppress(Exception):
