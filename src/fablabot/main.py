@@ -10,7 +10,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 
 from fablabot import DiscordLogHandler
-from fablabot.cogs import channel_management, user_management
+from fablabot.cogs import ChannelManagement, UserManagement
 
 logger = logging.getLogger(__name__)
 load_dotenv()
@@ -37,10 +37,7 @@ class Fablabot(commands.Bot):
         handler.setLevel(logging.INFO)
         logging.getLogger().addHandler(handler)
         logging.getLogger().setLevel(logging.INFO)
-        for cog in (
-            channel_management.ChannelManagement(self),
-            user_management.UserManagement(self),
-        ):
+        for cog in (ChannelManagement(self), UserManagement(self)):
             await self.add_cog(cog)
             logger.info(f"Loaded cog {cog.__class__.__name__}")
 
