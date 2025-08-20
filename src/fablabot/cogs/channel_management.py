@@ -343,7 +343,7 @@ class ChannelManagement(commands.Cog):
         channel = self.bot.get_channel(payload.channel_id)
         if not isinstance(channel, TextChannel):
             return
-        if channel.name != "commandes_bot" and channel.name != "log_bot":
+        if not channel.name.endswith("_bot"):
             return
         codir_role = get(guild.roles, name="CoDir")
         if codir_role is None:
