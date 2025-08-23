@@ -8,19 +8,21 @@ import re
 from typing import Any
 from warnings import deprecated
 
-from discord import (
-    Guild,
-    Interaction,
-    Member,
-    Role,
-    app_commands,
-)
+from discord import Guild, Interaction, Member, Role, TextChannel, app_commands
 from discord.ext import commands
 from discord.utils import get
 
 logger = logging.getLogger(__name__)
 
-ADMIN_ROLES = {"Admin -temp-", "Administrateur", "Président.e", "Vice-Président.e", "Secrétaire Général"}
+COMMANDS_CHANNEL_NAME = "commandes_bot"
+
+ADMIN_ROLES = {
+    "Admin -temp-",
+    "Administrateur",
+    "Président.e",
+    "Vice-Président.e",
+    "Secrétaire Général",
+}
 
 
 def log_request(command_name: str, interaction: Interaction, **kwargs: Any) -> None:
@@ -33,6 +35,23 @@ def log_request(command_name: str, interaction: Interaction, **kwargs: Any) -> N
     """
     details = " ".join(f"{k}={v}" for k, v in kwargs.items())
     logger.info(f"[{command_name}] user={interaction.user} id={interaction.user.id} {details}")
+
+
+async def is_in_allowed_channel(interaction: Interaction) -> bool:
+    assert isinstance(interaction.guild, Guild)
+    assert isinstance(interaction.channel, TextChannel)
+    commands_channel = get(interaction.guild.channels, name=COMMANDS_CHANNEL_NAME)
+    assert isinstance(commands_channel, TextChannel)
+    if interaction.channel != commands_channel:
+        logger.warning(
+            f"Attempt to use command in a different channel than {COMMANDS_CHANNEL_NAME}: {interaction.channel.name}"
+        )
+        await interaction.response.send_message(
+            f"Vous ne pouvez pas utiliser de commandes en dehors du salon {commands_channel.mention}.",
+            ephemeral=True,
+        )
+        return False
+    return True
 
 
 def can_assign_role(member: Member, target_role: Role) -> bool:
@@ -123,6 +142,9 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             time (int, optional): The duration in minutes for which privileges are granted. Defaults to 5.
         """
         log_request("user.op", interaction, target=user, reason=reason, duration=time)
+        if not await is_in_allowed_channel(interaction):
+            return
+
         assert isinstance(interaction.guild, Guild)
         admin_role = get(interaction.guild.roles, name="Admin -temp-")
         codir_role = get(interaction.guild.roles, name="CoDir")
@@ -159,6 +181,9 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
 
         """
         log_request("user.deop", interaction, target=user)
+        if not await is_in_allowed_channel(interaction):
+            return
+
         assert isinstance(interaction.guild, Guild)
         admin_role = get(interaction.guild.roles, name="Admin -temp-")
         if admin_role is None:
@@ -190,6 +215,9 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             role (Role): The role to add to the user.
         """
         log_request("user.add_role", interaction, target=user, role=role)
+        if not await is_in_allowed_channel(interaction):
+            return
+
         assert isinstance(interaction.user, Member)
         if not can_assign_role(interaction.user, role):
             logger.warning(f"Unauthorized add_role by {interaction.user}")
@@ -210,6 +238,9 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             role (Role): The role to remove from the user.
         """
         log_request("user.remove_role", interaction, target=user, role=role)
+        if not await is_in_allowed_channel(interaction):
+            return
+
         assert isinstance(interaction.user, Member)
         if not can_assign_role(interaction.user, role):
             logger.warning(f"Unauthorized remove_role by {interaction.user}")
@@ -230,6 +261,9 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             role (Role): The role to add to the users.
         """
         log_request("user.add_roles", interaction, mentions=users, role=role)
+        if not await is_in_allowed_channel(interaction):
+            return
+
         assert isinstance(interaction.guild, Guild)
         assert isinstance(interaction.user, Member)
         if not can_assign_role(interaction.user, role):
@@ -276,6 +310,9 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             role (Role): The role to remove from the users.
         """
         log_request("user.remove_roles", interaction, mentions=users, role=role)
+        if not await is_in_allowed_channel(interaction):
+            return
+
         assert isinstance(interaction.guild, Guild)
         assert isinstance(interaction.user, Member)
         if not can_assign_role(interaction.user, role):

@@ -30,6 +30,8 @@ from discord.utils import get
 
 logger = logging.getLogger(__name__)
 
+COMMANDS_CHANNEL_NAME = "commandes_bot"
+
 DYNAMIC_SUFFIX = "-vocal"
 INDEX_SEPARATOR = "/"
 EPHEMERAL_SUFFIX = "-temp"
@@ -45,6 +47,23 @@ def log_request(command_name: str, interaction: Interaction, **kwargs: Any) -> N
     """
     details = " ".join(f"{k}={v}" for k, v in kwargs.items())
     logger.info(f"[{command_name}]: user={interaction.user!s} id={interaction.user.id} {details}")
+
+
+async def is_in_allowed_channel(interaction: Interaction) -> bool:
+    assert isinstance(interaction.guild, Guild)
+    assert isinstance(interaction.channel, TextChannel)
+    commands_channel = get(interaction.guild.channels, name=COMMANDS_CHANNEL_NAME)
+    assert isinstance(commands_channel, TextChannel)
+    if interaction.channel != commands_channel:
+        logger.warning(
+            f"Attempt to use command in a different channel than {COMMANDS_CHANNEL_NAME}: {interaction.channel.name}"
+        )
+        await interaction.response.send_message(
+            f"Vous ne pouvez pas utiliser de commandes en dehors du salon {commands_channel.mention}.",
+            ephemeral=True,
+        )
+        return False
+    return True
 
 
 class TextChannelManagementGroup(app_commands.Group, name="text", description="Gestion des salons textuels"):
@@ -99,6 +118,9 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
             category (CategoryChannel): The category to create the channel in.
         """
         log_request("text.create", interaction, channel=channel, category=category.name)
+        if not await is_in_allowed_channel(interaction):
+            return
+
         assert isinstance(interaction.user, Member)
         if not category.permissions_for(interaction.user).manage_channels:
             logger.warning(f"Insufficient permissions for manage_channels: {interaction.user}")
@@ -125,6 +147,9 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
             new_name (str): The new name of the channel.
         """
         log_request("text.rename", interaction, channel=channel.name, new_name=new_name)
+        if not await is_in_allowed_channel(interaction):
+            return
+
         assert isinstance(interaction.user, Member)
         if not channel.permissions_for(interaction.user).manage_channels:
             logger.warning(f"Insufficient permissions for rename: {interaction.user}")
@@ -149,6 +174,9 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
             channel (TextChannel): The channel to delete.
         """
         log_request("text.delete", interaction, channel=channel.name)
+        if not await is_in_allowed_channel(interaction):
+            return
+
         assert isinstance(interaction.user, Member)
         if not channel.permissions_for(interaction.user).manage_channels:
             logger.warning(f"Insufficient permissions for delete: {interaction.user}")
@@ -197,6 +225,9 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
         log_request(
             "vocal.create", interaction, name=name, category=category.name, is_temporary=is_temporary, max_user=max_user
         )
+        if not await is_in_allowed_channel(interaction):
+            return
+
         assert isinstance(interaction.user, Member)
         if not category.permissions_for(interaction.user).manage_channels:
             logger.warning(f"Insufficient permissions for create voice channel: {interaction.user}")
@@ -228,6 +259,9 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
             new_name (str): The new name of the voice channel.
         """
         log_request("vocal.rename", interaction, channel=channel.name, new_name=new_name)
+        if not await is_in_allowed_channel(interaction):
+            return
+
         assert isinstance(interaction.user, Member)
         assert isinstance(channel.category, CategoryChannel)
         if not channel.permissions_for(interaction.user).manage_channels:
@@ -269,6 +303,9 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
             channel (VoiceChannel): The voice channel to delete.
         """
         log_request("vocal.delete", interaction, channel=channel.name)
+        if not await is_in_allowed_channel(interaction):
+            return
+
         assert isinstance(interaction.user, Member)
         if not channel.permissions_for(interaction.user).manage_channels:
             logger.warning(f"Insufficient permissions for delete voice channel: {interaction.user}")
