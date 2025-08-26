@@ -133,7 +133,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             logger.warning(f"Unauthorized op attempt by {interaction.user}")
             await interaction.response.send_message("Permissions insuffisantes.", ephemeral=True)
             return
-        await user.add_roles(admin_role)
+        await user.add_roles(admin_role, reason=f"Add with op command by {interaction.user}")
         old_task = self.deop_tasks.pop(user.id, None)
         if old_task:
             old_task.cancel()
@@ -174,7 +174,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         task = self.deop_tasks.pop(user.id, None)
         if task:
             task.cancel()
-        await user.remove_roles(admin_role)
+        await user.remove_roles(admin_role, reason=f"Remove with op command by {interaction.user}")
         logger.info(f"Revoked temporary admin from {user}")
         await interaction.response.send_message(f"Droits admin retirés de {user.mention} !")
 
@@ -197,7 +197,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             logger.warning(f"Unauthorized add_role by {interaction.user}")
             await interaction.response.send_message("Vous n'avez pas la permission d'ajouter ce rôle.", ephemeral=True)
             return
-        await user.add_roles(role)
+        await user.add_roles(role, reason=f"Add with add_role command by {interaction.user}")
         logger.info(f"Added role {role} to {user}")
         await interaction.response.send_message(f"Le rôle {role.name!r} a été ajouté à {user.mention}.")
 
@@ -220,7 +220,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             logger.warning(f"Unauthorized remove_role by {interaction.user}")
             await interaction.response.send_message("Vous n'avez pas la permission de retirer ce rôle.", ephemeral=True)
             return
-        await user.remove_roles(role)
+        await user.remove_roles(role, reason=f"Remove with remove_role command by {interaction.user}")
         logger.info(f"Removed role {role} from {user}")
         await interaction.response.send_message(f"Le rôle {role.name!r} a été retiré à {user.name!r}.")
 
@@ -262,7 +262,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
                 logger.warning(f"User {m} already has role {role}")
                 already_has_role.append(m)
                 continue
-            await m.add_roles(role)
+            await m.add_roles(role, reason=f"Bulk add by {interaction.user}")
             added.append(m)
         logger.debug(f"Members to add role: {members},\nAdded: {added},\nAlready has role: {already_has_role}")
         if not members or not added:
@@ -312,7 +312,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
                 logger.warning(f"User {m} does not have role {role}")
                 users_without_role.append(m)
                 continue
-            await m.remove_roles(role)
+            await m.remove_roles(role, reason=f"Bulk remove by {interaction.user}")
             removed.append(m)
         if not members or not removed:
             logger.info("No valid users found for role removal")
@@ -339,7 +339,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         try:
             await asyncio.sleep(time * 60)
             if user.id in self.deop_tasks:
-                await user.remove_roles(admin_role)
+                await user.remove_roles(admin_role, reason="Remove op after time")
                 logger.info(f"Revoked temporary admin from {user} after {time} minutes")
                 await interaction.followup.send(f"Droits admin retirés de {user.mention} après {time} minutes.")
             self.deop_tasks.pop(user.id, None)

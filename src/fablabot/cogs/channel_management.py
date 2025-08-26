@@ -76,7 +76,7 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
             )
             return
         await interaction.response.send_message("Nettoyage en cours...", ephemeral=True)
-        deleted = await interaction.channel.purge(limit=messages)
+        deleted = await interaction.channel.purge(limit=messages, reason=f"With clear command by {interaction.user}")
         logger.info(f"Deleted {len(deleted)} messages in channel {interaction.channel.name}")
         await interaction.followup.send(f"{len(deleted)} messages supprimés avec succès !", ephemeral=True)
 
@@ -112,7 +112,7 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
                 ephemeral=True,
             )
             return
-        new_channel = await category.create_text_channel(channel)
+        new_channel = await category.create_text_channel(channel, reason=f"With create command by {interaction.user}")
         logger.info(f"Created text channel {new_channel!r} in category {category!r}")
         await interaction.response.send_message(f"Le salon {new_channel.mention} a été créé dans {category.name!r}.")
 
@@ -139,7 +139,7 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
             )
             return
         old_name = channel.name
-        await channel.edit(name=new_name)
+        await channel.edit(name=new_name, reason=f"With rename command by {interaction.user}")
         logger.info(f"Renamed channel {channel} from {old_name!r} to {new_name!r}")
         await interaction.response.send_message(
             f"Le salon {channel.mention}, anciennement {old_name!r}, a été renommé en {new_name!r}."
@@ -166,7 +166,7 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
                 ephemeral=True,
             )
             return
-        await channel.delete()
+        await channel.delete(reason=f"With delete command by {interaction.user}")
         logger.info(f"Deleted text channel {channel.name!r}")
         await interaction.response.send_message(f"Le salon {channel.name!r} a été supprimé.")
 
@@ -233,7 +233,11 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
                 ephemeral=True,
             )
             return
-        new_channel = await category.create_voice_channel(channel_name, user_limit=max_user)
+        new_channel = await category.create_voice_channel(
+            channel_name,
+            user_limit=max_user,
+            reason=f"With create command by {interaction.user}",
+        )
         logger.info(f"Created voice channel {new_channel!r} in category {category.name!r}")
         channel_creation_message = f"Salon vocal {'temporaire' if is_temporary else 'permanent'} créé: {new_channel.mention}"
         if max_user:
@@ -275,7 +279,7 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
             new_name += EPHEMERAL_SUFFIX
         if old_name.endswith(DYNAMIC_SUFFIX) and not new_name.endswith(DYNAMIC_SUFFIX):
             new_name += DYNAMIC_SUFFIX
-        await channel.edit(name=new_name)
+        await channel.edit(name=new_name, reason=f"With rename command by {interaction.user}")
         logger.info(f"Renamed voice channel {channel} from {old_name!r} to {new_name!r}")
         for vc in channel.category.voice_channels:
             if vc.name.startswith(f"{old_name}{INDEX_SEPARATOR}"):
@@ -312,7 +316,7 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
             logger.warning(f"Attempt to delete non-empty voice channel: {channel}")
             await interaction.response.send_message(f"Le salon vocal {channel.mention} n'est pas vide.", ephemeral=True)
             return
-        await channel.delete()
+        await channel.delete(reason=f"With delete command by {interaction.user}")
         logger.info(f"Deleted voice channel {channel.name!r}")
         await interaction.response.send_message(f"Le salon vocal {channel.name!r} a été supprimé.")
 
