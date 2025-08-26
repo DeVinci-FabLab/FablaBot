@@ -6,7 +6,6 @@ import asyncio
 import contextlib
 import logging
 import re
-from typing import Any
 from warnings import deprecated
 
 from discord import (
@@ -28,42 +27,14 @@ from discord import (
 from discord.ext import commands
 from discord.utils import get
 
+from .utils import is_in_allowed_channel, log_request
+
 logger = logging.getLogger(__name__)
 
-COMMANDS_CHANNEL_NAME = "commandes_bot"
 
 DYNAMIC_SUFFIX = "-vocal"
 INDEX_SEPARATOR = "/"
 EPHEMERAL_SUFFIX = "-temp"
-
-
-def log_request(command_name: str, interaction: Interaction, **kwargs: Any) -> None:
-    """Logs a request made to a command.
-
-    Args:
-        command_name (str): The name of the command.
-        interaction (Interaction): The interaction object representing the command invocation.
-        **kwargs (Any): Additional details to log.
-    """
-    details = " ".join(f"{k}={v}" for k, v in kwargs.items())
-    logger.info(f"[{command_name}]: user={interaction.user!s} id={interaction.user.id} {details}")
-
-
-async def is_in_allowed_channel(interaction: Interaction) -> bool:
-    assert isinstance(interaction.guild, Guild)
-    assert isinstance(interaction.channel, TextChannel)
-    commands_channel = get(interaction.guild.channels, name=COMMANDS_CHANNEL_NAME)
-    assert isinstance(commands_channel, TextChannel)
-    if interaction.channel != commands_channel:
-        logger.warning(
-            f"Attempt to use command in a different channel than {COMMANDS_CHANNEL_NAME}: {interaction.channel.name}"
-        )
-        await interaction.response.send_message(
-            f"Vous ne pouvez pas utiliser de commandes en dehors du salon {commands_channel.mention}.",
-            ephemeral=True,
-        )
-        return False
-    return True
 
 
 class TextChannelManagementGroup(app_commands.Group, name="text", description="Gestion des salons textuels"):
@@ -84,7 +55,7 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
             interaction (Interaction): The interaction that triggered the command.
             messages (int, optional): The number of messages to purge. Defaults to 5.
         """
-        log_request("text.clear", interaction, messages=messages)
+        log_request(logger, "text.clear", interaction, messages=messages)
         assert not isinstance(interaction.channel, ForumChannel | CategoryChannel | DMChannel | GroupChannel | None)
         if not interaction.permissions.manage_messages:
             logger.warning(f"Insufficient permissions for manage_messages: {interaction.user}")
@@ -117,8 +88,8 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
             channel (str): The name of the channel to create.
             category (CategoryChannel): The category to create the channel in.
         """
-        log_request("text.create", interaction, channel=channel, category=category.name)
-        if not await is_in_allowed_channel(interaction):
+        log_request(logger, "text.create", interaction, channel=channel, category=category.name)
+        if not await is_in_allowed_channel(logger, interaction):
             return
 
         assert isinstance(interaction.user, Member)
@@ -146,8 +117,8 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
             channel (TextChannel): The channel to rename.
             new_name (str): The new name of the channel.
         """
-        log_request("text.rename", interaction, channel=channel.name, new_name=new_name)
-        if not await is_in_allowed_channel(interaction):
+        log_request(logger, "text.rename", interaction, channel=channel.name, new_name=new_name)
+        if not await is_in_allowed_channel(logger, interaction):
             return
 
         assert isinstance(interaction.user, Member)
@@ -173,8 +144,8 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
             interaction (Interaction): The interaction object.
             channel (TextChannel): The channel to delete.
         """
-        log_request("text.delete", interaction, channel=channel.name)
-        if not await is_in_allowed_channel(interaction):
+        log_request(logger, "text.delete", interaction, channel=channel.name)
+        if not await is_in_allowed_channel(logger, interaction):
             return
 
         assert isinstance(interaction.user, Member)
@@ -223,9 +194,9 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
             max_user (int | None, optional): The maximum number of users allowed in the channel. Defaults to None.
         """
         log_request(
-            "vocal.create", interaction, name=name, category=category.name, is_temporary=is_temporary, max_user=max_user
+            logger, "vocal.create", interaction, name=name, category=category.name, is_temporary=is_temporary, max_user=max_user
         )
-        if not await is_in_allowed_channel(interaction):
+        if not await is_in_allowed_channel(logger, interaction):
             return
 
         assert isinstance(interaction.user, Member)
@@ -258,8 +229,8 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
             channel (VoiceChannel): The voice channel to rename.
             new_name (str): The new name of the voice channel.
         """
-        log_request("vocal.rename", interaction, channel=channel.name, new_name=new_name)
-        if not await is_in_allowed_channel(interaction):
+        log_request(logger, "vocal.rename", interaction, channel=channel.name, new_name=new_name)
+        if not await is_in_allowed_channel(logger, interaction):
             return
 
         assert isinstance(interaction.user, Member)
@@ -302,8 +273,8 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
             interaction (Interaction): The Discord interaction.
             channel (VoiceChannel): The voice channel to delete.
         """
-        log_request("vocal.delete", interaction, channel=channel.name)
-        if not await is_in_allowed_channel(interaction):
+        log_request(logger, "vocal.delete", interaction, channel=channel.name)
+        if not await is_in_allowed_channel(logger, interaction):
             return
 
         assert isinstance(interaction.user, Member)
