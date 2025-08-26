@@ -56,17 +56,22 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
             messages (int, optional): The number of messages to purge. Defaults to 5.
         """
         log_request(logger, "text.clear", interaction, messages=messages)
-        assert not isinstance(interaction.channel, ForumChannel | CategoryChannel | DMChannel | GroupChannel | None)
+        assert not isinstance(
+            interaction.channel,
+            ForumChannel | CategoryChannel | DMChannel | GroupChannel | None,
+        )
         if not interaction.permissions.manage_messages:
             logger.warning(f"Insufficient permissions for manage_messages: {interaction.user}")
             await interaction.response.send_message(
-                "Vous n'avez pas la permission de gérer les messages dans ce salon.", ephemeral=True
+                "Vous n'avez pas la permission de gérer les messages dans ce salon.",
+                ephemeral=True,
             )
             return
         if interaction.channel.name.endswith("_bot"):
             logger.warning(f"Attempt to clear {interaction.channel.name} channel")
             await interaction.response.send_message(
-                f"Vous ne pouvez pas nettoyer le salon {interaction.channel.name}. Veuillez contacter le pôle numérique si nécessaire.",
+                f"Vous ne pouvez pas nettoyer le salon {interaction.channel.name}."
+                f" Veuillez contacter le pôle numérique si nécessaire.",
                 ephemeral=True,
             )
             return
@@ -96,12 +101,16 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
         if not category.permissions_for(interaction.user).manage_channels:
             logger.warning(f"Insufficient permissions for manage_channels: {interaction.user}")
             await interaction.response.send_message(
-                "Vous n'avez pas la permission de créer des salons dans cette catégorie.", ephemeral=True
+                "Vous n'avez pas la permission de créer des salons dans cette catégorie.",
+                ephemeral=True,
             )
             return
         if channel in (c.name for c in category.channels):
             logger.info(f"Text channel {channel!r} already exists in {category!r}")
-            await interaction.response.send_message(f"Un salon {channel!r} existe déjà dans {category.name!r}.", ephemeral=True)
+            await interaction.response.send_message(
+                f"Un salon {channel!r} existe déjà dans {category.name!r}.",
+                ephemeral=True,
+            )
             return
         new_channel = await category.create_text_channel(channel)
         logger.info(f"Created text channel {new_channel!r} in category {category!r}")
@@ -125,7 +134,8 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
         if not channel.permissions_for(interaction.user).manage_channels:
             logger.warning(f"Insufficient permissions for rename: {interaction.user}")
             await interaction.response.send_message(
-                f"Vous n'avez pas la permission de renommer le salon {channel.mention}.", ephemeral=True
+                f"Vous n'avez pas la permission de renommer le salon {channel.mention}.",
+                ephemeral=True,
             )
             return
         old_name = channel.name
@@ -152,7 +162,8 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
         if not channel.permissions_for(interaction.user).manage_channels:
             logger.warning(f"Insufficient permissions for delete: {interaction.user}")
             await interaction.response.send_message(
-                f"Vous n'avez pas la permission de supprimer le salon {channel.mention}.", ephemeral=True
+                f"Vous n'avez pas la permission de supprimer le salon {channel.mention}.",
+                ephemeral=True,
             )
             return
         await channel.delete()
@@ -194,7 +205,13 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
             max_user (int | None, optional): The maximum number of users allowed in the channel. Defaults to None.
         """
         log_request(
-            logger, "vocal.create", interaction, name=name, category=category.name, is_temporary=is_temporary, max_user=max_user
+            logger,
+            "vocal.create",
+            interaction,
+            name=name,
+            category=category.name,
+            is_temporary=is_temporary,
+            max_user=max_user,
         )
         if not await is_in_allowed_channel(logger, interaction):
             return
@@ -202,14 +219,18 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
         assert isinstance(interaction.user, Member)
         if not category.permissions_for(interaction.user).manage_channels:
             logger.warning(f"Insufficient permissions for create voice channel: {interaction.user}")
-            await interaction.response.send_message("Vous n'avez pas la permission de créer des salons vocaux.", ephemeral=True)
+            await interaction.response.send_message(
+                "Vous n'avez pas la permission de créer des salons vocaux.",
+                ephemeral=True,
+            )
             return
         existing = {vc.name for vc in category.voice_channels}
         channel_name = f"{name}{EPHEMERAL_SUFFIX}" if is_temporary else name
         if channel_name in existing:
             logger.info(f"Voice channel {channel_name!r} already exists in {category!r}")
             await interaction.response.send_message(
-                f"Un salon vocal {name!r} existe déjà dans {category.name!r}.", ephemeral=True
+                f"Un salon vocal {name!r} existe déjà dans {category.name!r}.",
+                ephemeral=True,
             )
             return
         new_channel = await category.create_voice_channel(channel_name, user_limit=max_user)
@@ -238,13 +259,15 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
         if not channel.permissions_for(interaction.user).manage_channels:
             logger.warning(f"Insufficient permissions for rename voice channel: {interaction.user}")
             await interaction.response.send_message(
-                f"Vous n'avez pas la permission de renommer le salon vocal {channel.mention}.", ephemeral=True
+                f"Vous n'avez pas la permission de renommer le salon vocal {channel.mention}.",
+                ephemeral=True,
             )
             return
         if re.search(rf"{DYNAMIC_SUFFIX}{INDEX_SEPARATOR}\d+$", channel.name):
             logger.warning(f"Attempt to rename a dynamic voice channel: {channel.name}")
             await interaction.response.send_message(
-                f"Le salon vocal {channel.mention} est un salon dynamique et ne peut pas être renommé.", ephemeral=True
+                f"Le salon vocal {channel.mention} est un salon dynamique et ne peut pas être renommé.",
+                ephemeral=True,
             )
             return
         old_name = channel.name
@@ -281,7 +304,8 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
         if not channel.permissions_for(interaction.user).manage_channels:
             logger.warning(f"Insufficient permissions for delete voice channel: {interaction.user}")
             await interaction.response.send_message(
-                f"Vous n'avez pas la permission de supprimer le salon vocal {channel.mention}.", ephemeral=True
+                f"Vous n'avez pas la permission de supprimer le salon vocal {channel.mention}.",
+                ephemeral=True,
             )
             return
         if len(channel.members) > 0:
@@ -338,7 +362,7 @@ class ChannelManagement(commands.Cog):
         """Handle raw message deletion events.
 
         Args:
-            payload (app_commands.RawMessageDeleteEvent): The raw event payload data.
+            payload (RawMessageDeleteEvent): The raw event payload data.
         """
         logger.debug(f"raw_message_delete: {payload.message_id} in channel {payload.channel_id} in guild {payload.guild_id}")
         if payload.cached_message:
@@ -365,7 +389,8 @@ class ChannelManagement(commands.Cog):
                 f"Message with ID {payload.message_id} not found in channel {channel.name}. Deleted by {deleter.name!r}."
             )
             await channel.send(
-                f"{codir_role.mention} Un message irrécupérable a été supprimé par {deleter.mention}.\nID du message : {payload.message_id}."
+                f"{codir_role.mention} Un message irrécupérable a été supprimé par {deleter.mention}."
+                f"\nID du message : {payload.message_id}."
             )
 
     @commands.Cog.listener()

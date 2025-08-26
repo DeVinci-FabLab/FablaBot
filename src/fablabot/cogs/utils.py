@@ -5,11 +5,7 @@ from __future__ import annotations
 from logging import Logger
 from typing import Any
 
-from discord import (
-    Guild,
-    Interaction,
-    TextChannel,
-)
+from discord import Guild, Interaction, TextChannel
 from discord.utils import get
 
 COMMANDS_CHANNEL_NAME = "commandes_bot"

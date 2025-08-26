@@ -1,2 +1,3 @@
 """Handles music commands."""
+
 # TODO

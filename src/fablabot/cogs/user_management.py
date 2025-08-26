@@ -101,7 +101,11 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         logger.info("UserManagementGroup initialized")
 
     @app_commands.command(name="op", description="Donne des droits admin temporaires à un utilisateur.")
-    @app_commands.describe(user="L'utilisateur cible", reason="Raison de l'attribution", time="Durée en minutes (par défaut 5)")
+    @app_commands.describe(
+        user="L'utilisateur cible",
+        reason="Raison de l'attribution",
+        time="Durée en minutes (par défaut 5)",
+    )
     async def op(self, interaction: Interaction, user: Member, reason: str, time: int = 5) -> None:
         """Grant temporary admin privileges to a user.
 
@@ -221,7 +225,10 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         await interaction.response.send_message(f"Le rôle {role.name!r} a été retiré à {user.name!r}.")
 
     @app_commands.command(name="add_roles", description="Donne un rôle à plusieurs utilisateurs.")
-    @app_commands.describe(users="Les utilisateurs cibles (mentions à la suite)", role="Le rôle à attribuer")
+    @app_commands.describe(
+        users="Les utilisateurs cibles (mentions à la suite)",
+        role="Le rôle à attribuer",
+    )
     async def add_roles(self, interaction: Interaction, users: str, role: Role) -> None:
         """Adds a role to multiple users from mentions.
 
@@ -266,7 +273,8 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         await interaction.response.send_message(f"Rôle {role.name!r} ajouté à {', '.join(m.mention for m in added)}.")
         if already_has_role:
             await interaction.followup.send(
-                f"Rôle {role.mention} déjà attribué à {', '.join(m.mention for m in already_has_role)}.", ephemeral=True
+                f"Rôle {role.mention} déjà attribué à {', '.join(m.mention for m in already_has_role)}.",
+                ephemeral=True,
             )
 
     @app_commands.command(name="remove_roles", description="Retire un rôle à plusieurs utilisateurs.")
@@ -314,7 +322,8 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         await interaction.response.send_message(f"Rôle {role.name!r} retiré de {', '.join(m.mention for m in removed)}.")
         if users_without_role:
             await interaction.followup.send(
-                f"Rôle {role.mention} déjà absent chez {', '.join(m.mention for m in users_without_role)}.", ephemeral=True
+                f"Rôle {role.mention} déjà absent chez {', '.join(m.mention for m in users_without_role)}.",
+                ephemeral=True,
             )
 
     async def _schedule_deop(self, user: Member, time: int, admin_role: Role, interaction: Interaction) -> None:

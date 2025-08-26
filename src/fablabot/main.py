@@ -26,7 +26,8 @@ class Fablabot(commands.Bot):
         """Initialize the bot with the required intents."""
         super().__init__(
             command_prefix=commands.when_mentioned,
-            intents=discord.Intents.all(),  # TODO: only enable intents we use here and on the developer portal, this will make discord happy
+            intents=discord.Intents.all(),
+            # TODO: only enable intents we use here and on the developer portal, this will make discord happy
         )
         logger.info("Bot initialized")
 
