@@ -4,10 +4,21 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
+from typing import Any, Literal
 from warnings import deprecated
 
-from discord import Forbidden, Guild, HTTPException, Interaction, Member, Role, app_commands
+from discord import (
+    ButtonStyle,
+    Forbidden,
+    Guild,
+    HTTPException,
+    Interaction,
+    Member,
+    Role,
+    TextChannel,
+    app_commands,
+    ui,
+)
 from discord.ext import commands
 from discord.utils import get
 
@@ -269,140 +280,56 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         logger.info(f"Removed role {role} from {user}")
         await interaction.response.send_message(f"Le rôle {role.name!r} a été retiré à {user.name!r}.")
 
-    @app_commands.command(name="add_roles", description="Donne un rôle à plusieurs utilisateurs.")
-    @app_commands.describe(
-        users="Les utilisateurs cibles (mentions à la suite)",
-        role="Le rôle à attribuer",
+    @app_commands.command(
+        name="add_roles",
+        description="Donne un rôle à plusieurs utilisateurs via un sélecteur.",
     )
-    async def add_roles(self, interaction: Interaction, users: str, role: Role) -> None:
-        """Adds a role to multiple users from mentions.
+    @app_commands.describe(role="Le rôle à attribuer")
+    async def add_roles(self, interaction: Interaction, role: Role) -> None:
+        """Open a multi-user selector to add a role in bulk.
 
         Args:
             interaction (Interaction): The interaction object.
-            users (str): The users to add the role to, specified as mentions separated by spaces.
             role (Role): The role to add to the users.
         """
-        log_request(logger, "user.add_roles", interaction, mentions=users, role=role)
+        log_request(logger, "user.add_roles", interaction, role=role)
         if not await is_in_allowed_channel(logger, interaction):
             return
 
-        assert isinstance(interaction.guild, Guild)
         assert isinstance(interaction.user, Member)
         if not can_assign_role(interaction.user, role):
             logger.warning(f"Unauthorized add_roles by {interaction.user}")
             await interaction.response.send_message("Vous n'avez pas la permission d'ajouter ce rôle.", ephemeral=True)
             return
 
-        ids = re.findall(r"<@!?(\d+)>", users)
-        members: list[Member] = []
-        for uid in ids:
-            member = interaction.guild.get_member(int(uid))
-            if member:
-                members.append(member)
-            else:
-                logger.warning(f"User with ID {uid} not found in guild {interaction.guild.name}")
+        view = BulkRoleView(role, interaction.user, action="add")
+        await interaction.response.send_message(
+            f"Sélectionnez les membres à qui ajouter {role.mention} puis cliquez sur **Confirmer**.", view=view, ephemeral=True
+        )
 
-        added: list[Member] = []
-        already: list[Member] = []
-        failed: list[Member] = []
-        for m in members:
-            if role in m.roles:
-                logger.warning(f"User {m} already has role {role}")
-                already.append(m)
-                continue
-
-            try:
-                await m.add_roles(role, reason=f"Bulk add by {interaction.user}")
-                added.append(m)
-            except Forbidden:
-                logger.error(f"Forbidden to add role {role} to {m}")
-                failed.append(m)
-            except HTTPException as e:
-                logger.error(f"HTTP error while adding {role} to {m}: {e}")
-                failed.append(m)
-
-        logger.debug(f"Members to add role: {members},\nAdded: {added},\nAlready has role: {already},\nFailed: {failed}")
-        if not members or not added:
-            logger.info("No valid users found for role addition")
-            await interaction.response.send_message("Aucun utilisateur valide trouvé.", ephemeral=True)
-            return
-        logger.info(f"Added role {role} to multiple users: {added}")
-        await interaction.response.send_message(f"Rôle {role.name!r} ajouté à {', '.join(m.mention for m in added)}.")
-
-        lines: list[str] = []
-        if already:
-            lines.append(f"Rôle {role.mention} déjà attribué à {', '.join(m.mention for m in already)}.")
-        if failed:
-            lines.append(f"Échec de l'attribution du rôle {role.mention} à {', '.join(m.mention for m in failed)}.")
-        if lines:
-            await interaction.followup.send("\n".join(lines), ephemeral=True)
-
-    @app_commands.command(name="remove_roles", description="Retire un rôle à plusieurs utilisateurs.")
-    @app_commands.describe(users="Les utilisateurs cibles (mentions à la suite)", role="Le rôle à retirer")
-    async def remove_roles(self, interaction: Interaction, users: str, role: Role) -> None:
-        """Removes a role from multiple users from mentions.
+    @app_commands.command(name="remove_roles", description="Retire un rôle à plusieurs utilisateurs via un sélecteur.")
+    @app_commands.describe(role="Le rôle à retirer")
+    async def remove_roles(self, interaction: Interaction, role: Role) -> None:
+        """Open a multi-user selector to remove a role in bulk.
 
         Args:
             interaction (Interaction): The interaction object.
-            users (str): The users to remove the role from, specified as mentions separated by spaces.
             role (Role): The role to remove from the users.
         """
-        log_request(logger, "user.remove_roles", interaction, mentions=users, role=role)
+        log_request(logger, "user.remove_roles", interaction, role=role)
         if not await is_in_allowed_channel(logger, interaction):
             return
 
-        assert isinstance(interaction.guild, Guild)
         assert isinstance(interaction.user, Member)
         if not can_assign_role(interaction.user, role):
             logger.warning(f"Unauthorized remove_roles by {interaction.user}")
             await interaction.response.send_message("Vous n'avez pas la permission de retirer ce rôle.", ephemeral=True)
             return
 
-        ids = re.findall(r"<@!?(\d+)>", users)
-        members: list[Member] = []
-        for uid in ids:
-            member = interaction.guild.get_member(int(uid))
-            if member:
-                members.append(member)
-            else:
-                logger.warning(f"User with ID {uid} not found in guild {interaction.guild.name}")
-
-        removed: list[Member] = []
-        already: list[Member] = []
-        failed: list[Member] = []
-        for m in members:
-            if role not in m.roles:
-                logger.warning(f"User {m} does not have role {role}")
-                already.append(m)
-                continue
-
-            try:
-                await m.remove_roles(role, reason=f"Bulk remove by {interaction.user}")
-                removed.append(m)
-            except Forbidden:
-                logger.error(f"Forbidden to remove role {role} from {m}")
-                failed.append(m)
-            except HTTPException as e:
-                logger.error(f"HTTP error while removing {role} from {m}: {e}")
-                failed.append(m)
-
-        logger.debug(
-            f"Members to remove role: {members},\nRemoved: {removed},\nAlready without role: {already},\nFailed: {failed}"
+        view = BulkRoleView(role, interaction.user, action="remove")
+        await interaction.response.send_message(
+            f"Sélectionnez les membres à qui retirer {role.mention} puis cliquez sur **Confirmer**.", view=view, ephemeral=True
         )
-        if not members or not removed:
-            logger.info("No valid users found for role removal")
-            await interaction.response.send_message("Aucun utilisateur valide trouvé.", ephemeral=True)
-            return
-        logger.info(f"Removed role {role} from multiple users: {removed}")
-        await interaction.response.send_message(f"Rôle {role.name!r} retiré de {', '.join(m.mention for m in removed)}.")
-
-        lines: list[str] = []
-        if already:
-            lines.append(f"Rôle {role.mention} déjà absent chez {', '.join(m.mention for m in already)}.")
-        if failed:
-            lines.append(f"Échec de la suppression du rôle {role.mention} chez {', '.join(m.mention for m in failed)}.")
-        if lines:
-            await interaction.followup.send("\n".join(lines), ephemeral=True)
 
     async def _schedule_deop(
         self, interaction: Interaction, user: Member, time: int, admin_role: Role, codir_role: Role
@@ -463,3 +390,119 @@ async def setup(bot: commands.Bot) -> None:
         bot (commands.Bot): The bot instance.
     """
     await bot.add_cog(UserManagement(bot))
+
+
+class BulkRoleView(ui.View):
+    """View for bulk role assignment/removal."""
+
+    def __init__(
+        self,
+        role: Role,
+        user: Member,
+        *,
+        action: Literal["add", "remove"],
+        timeout: float = 180.0,
+    ) -> None:
+        """View for bulk role assignment/removal.
+
+        Args:
+            role (Role): The role to assign.
+            user (Member): The member initiating the role assignment.
+            action (Literal["add", "remove"]): "add" to add the role, "remove" to remove it.
+            timeout (float, optional): The timeout duration in seconds. Defaults to 180.0.
+        """
+        super().__init__(timeout=timeout)
+        self.role = role
+        self.user = user
+        self.action = action
+
+        async def _on_select(interaction: Interaction) -> None:
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+
+        self.select: ui.UserSelect[Any] = ui.UserSelect(
+            placeholder="Sélectionne les membres…",
+            min_values=1,
+            max_values=25,
+        )
+        self.select.callback = _on_select
+
+        self.confirm_button = ui.Button(label="Confirmer", style=ButtonStyle.primary)
+        self.confirm_button.callback = self.confirm
+
+        self.add_item(self.select)
+        self.add_item(self.confirm_button)
+
+    async def confirm(self, interaction: Interaction) -> None:
+        """Confirm the bulk role assignment/removal.
+
+        Args:
+            interaction (Interaction): The interaction instance.
+        """
+        members: list[Member] = [m for m in self.select.values if isinstance(m, Member)]
+        if not members:
+            await interaction.response.send_message("Aucun membre sélectionné.", ephemeral=True)
+            return
+
+        channel = interaction.channel
+        assert isinstance(channel, TextChannel)
+
+        modified: list[Member] = []
+        already: list[Member] = []
+        failed: list[Member] = []
+
+        if self.action == "add":
+            for m in members:
+                if self.role in m.roles:
+                    logger.info(f"User {m} already has role {self.role}")
+                    already.append(m)
+                    continue
+
+                try:
+                    await m.add_roles(self.role, reason=f"Bulk add by {self.user}")
+                    modified.append(m)
+                except Forbidden:
+                    failed.append(m)
+                except HTTPException as e:
+                    logger.error(f"HTTP error while adding {self.role} to {m}: {e}")
+                    failed.append(m)
+
+        elif self.action == "remove":
+            for m in members:
+                if self.role not in m.roles:
+                    logger.info("User %s does not have role %s", m, self.role)
+                    already.append(m)
+                    continue
+                try:
+                    await m.remove_roles(self.role, reason=f"Bulk remove by {self.user}")
+                    modified.append(m)
+                except Forbidden:
+                    failed.append(m)
+                except HTTPException as e:
+                    logger.error("HTTP error while removing %s from %s: %s", self.role, m, e)
+                    failed.append(m)
+
+        logger.info(
+            f"Members to {self.action} role {self.role}: {members},\nSuccess:{modified},\nAlready: {already},\nFailed: {failed}",
+        )
+
+        lines: list[str] = [f"Rôle {self.role.name!r} :"]
+        if modified:
+            if self.action == "add":
+                lines.append(f"Ajouté avec succès : {', '.join(m.mention for m in modified)}")
+            else:
+                lines.append(f"Retiré avec succès : {', '.join(m.mention for m in modified)}")
+        if already:
+            if self.action == "add":
+                lines.append(f"Déjà présent chez : {', '.join(m.mention for m in already)}")
+            else:
+                lines.append(f"Déjà absent chez : {', '.join(m.mention for m in already)}")
+        if failed:
+            lines.append(f"Échec : {', '.join(m.mention for m in failed)}")
+
+        for child in self.children:
+            if isinstance(child, ui.Button | ui.UserSelect):
+                child.disabled = True
+        await interaction.response.edit_message(view=self)
+
+        await channel.send("\n".join(lines))
