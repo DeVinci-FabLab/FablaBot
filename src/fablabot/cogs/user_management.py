@@ -133,11 +133,22 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             logger.warning(f"Unauthorized op attempt by {interaction.user}")
             await interaction.response.send_message("Permissions insuffisantes.", ephemeral=True)
             return
-        await user.add_roles(admin_role, reason=f"Add with op command by {interaction.user}")
+
+        try:
+            await user.add_roles(admin_role, reason=f"Add with op command by {interaction.user}")
+        except Forbidden:
+            logger.error(f"Forbidden to add role {admin_role} to {user}")
+            await interaction.response.send_message("Impossible d'ajouter le rôle.", ephemeral=True)
+            return
+        except HTTPException as e:
+            logger.error(f"Failed to add role {admin_role} to {user}: {e}")
+            await interaction.response.send_message("Une erreur est survenue lors de l'ajout du rôle.", ephemeral=True)
+            return
+
         old_task = self.deop_tasks.pop(user.id, None)
         if old_task:
             old_task.cancel()
-        task = asyncio.create_task(self._schedule_deop(user, time, admin_role, interaction))
+        task = asyncio.create_task(self._schedule_deop(interaction, user, time, admin_role, codir_role))
         self.deop_tasks[user.id] = task
         logger.info(f"Granted {user} temporary admin for {time} minutes for reason: {reason}")
         await interaction.response.send_message(
@@ -171,10 +182,22 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             logger.warning(f"Unauthorized deop attempt by {interaction.user}")
             await interaction.response.send_message("Permissions insuffisantes.", ephemeral=True)
             return
+
+        try:
+            await user.remove_roles(admin_role, reason=f"Remove with op command by {interaction.user}")
+        except Forbidden:
+            logger.error(f"Forbidden to remove role {admin_role} from {user}")
+            await interaction.response.send_message("Impossible de retirer le rôle.", ephemeral=True)
+            return
+        except HTTPException as e:
+            logger.error(f"Failed to remove role {admin_role} from {user}: {e}")
+            await interaction.response.send_message("Une erreur est survenue lors du retrait du rôle.", ephemeral=True)
+            return
+
         task = self.deop_tasks.pop(user.id, None)
         if task:
             task.cancel()
-        await user.remove_roles(admin_role, reason=f"Remove with op command by {interaction.user}")
+
         logger.info(f"Revoked temporary admin from {user}")
         await interaction.response.send_message(f"Droits admin retirés de {user.mention} !")
 
@@ -197,7 +220,18 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             logger.warning(f"Unauthorized add_role by {interaction.user}")
             await interaction.response.send_message("Vous n'avez pas la permission d'ajouter ce rôle.", ephemeral=True)
             return
-        await user.add_roles(role, reason=f"Add with add_role command by {interaction.user}")
+
+        try:
+            await user.add_roles(role, reason=f"Add with add_role command by {interaction.user}")
+        except Forbidden:
+            logger.error(f"Forbidden to add role {role} to {user}")
+            await interaction.response.send_message("Impossible d'ajouter le rôle.", ephemeral=True)
+            return
+        except HTTPException as e:
+            logger.error(f"Failed to add role {role} to {user}: {e}")
+            await interaction.response.send_message("Une erreur est survenue lors de l'ajout du rôle.", ephemeral=True)
+            return
+
         logger.info(f"Added role {role} to {user}")
         await interaction.response.send_message(f"Le rôle {role.name!r} a été ajouté à {user.mention}.")
 
@@ -220,7 +254,18 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             logger.warning(f"Unauthorized remove_role by {interaction.user}")
             await interaction.response.send_message("Vous n'avez pas la permission de retirer ce rôle.", ephemeral=True)
             return
-        await user.remove_roles(role, reason=f"Remove with remove_role command by {interaction.user}")
+
+        try:
+            await user.remove_roles(role, reason=f"Remove with remove_role command by {interaction.user}")
+        except Forbidden:
+            logger.error(f"Forbidden to remove role {role} from {user}")
+            await interaction.response.send_message("Impossible de retirer le rôle.", ephemeral=True)
+            return
+        except HTTPException as e:
+            logger.error(f"Failed to remove role {role} from {user}: {e}")
+            await interaction.response.send_message("Une erreur est survenue lors du retrait du rôle.", ephemeral=True)
+            return
+
         logger.info(f"Removed role {role} from {user}")
         await interaction.response.send_message(f"Le rôle {role.name!r} a été retiré à {user.name!r}.")
 
@@ -247,6 +292,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             logger.warning(f"Unauthorized add_roles by {interaction.user}")
             await interaction.response.send_message("Vous n'avez pas la permission d'ajouter ce rôle.", ephemeral=True)
             return
+
         ids = re.findall(r"<@!?(\d+)>", users)
         members: list[Member] = []
         for uid in ids:
@@ -255,27 +301,41 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
                 members.append(member)
             else:
                 logger.warning(f"User with ID {uid} not found in guild {interaction.guild.name}")
+
         added: list[Member] = []
-        already_has_role: list[Member] = []
+        already: list[Member] = []
+        failed: list[Member] = []
         for m in members:
             if role in m.roles:
                 logger.warning(f"User {m} already has role {role}")
-                already_has_role.append(m)
+                already.append(m)
                 continue
-            await m.add_roles(role, reason=f"Bulk add by {interaction.user}")
-            added.append(m)
-        logger.debug(f"Members to add role: {members},\nAdded: {added},\nAlready has role: {already_has_role}")
+
+            try:
+                await m.add_roles(role, reason=f"Bulk add by {interaction.user}")
+                added.append(m)
+            except Forbidden:
+                logger.error(f"Forbidden to add role {role} to {m}")
+                failed.append(m)
+            except HTTPException as e:
+                logger.error(f"HTTP error while adding {role} to {m}: {e}")
+                failed.append(m)
+
+        logger.debug(f"Members to add role: {members},\nAdded: {added},\nAlready has role: {already},\nFailed: {failed}")
         if not members or not added:
             logger.info("No valid users found for role addition")
             await interaction.response.send_message("Aucun utilisateur valide trouvé.", ephemeral=True)
             return
         logger.info(f"Added role {role} to multiple users: {added}")
         await interaction.response.send_message(f"Rôle {role.name!r} ajouté à {', '.join(m.mention for m in added)}.")
-        if already_has_role:
-            await interaction.followup.send(
-                f"Rôle {role.mention} déjà attribué à {', '.join(m.mention for m in already_has_role)}.",
-                ephemeral=True,
-            )
+
+        lines: list[str] = []
+        if already:
+            lines.append(f"Rôle {role.mention} déjà attribué à {', '.join(m.mention for m in already)}.")
+        if failed:
+            lines.append(f"Échec de l'attribution du rôle {role.mention} à {', '.join(m.mention for m in failed)}.")
+        if lines:
+            await interaction.followup.send("\n".join(lines), ephemeral=True)
 
     @app_commands.command(name="remove_roles", description="Retire un rôle à plusieurs utilisateurs.")
     @app_commands.describe(users="Les utilisateurs cibles (mentions à la suite)", role="Le rôle à retirer")
@@ -297,6 +357,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             logger.warning(f"Unauthorized remove_roles by {interaction.user}")
             await interaction.response.send_message("Vous n'avez pas la permission de retirer ce rôle.", ephemeral=True)
             return
+
         ids = re.findall(r"<@!?(\d+)>", users)
         members: list[Member] = []
         for uid in ids:
@@ -305,41 +366,75 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
                 members.append(member)
             else:
                 logger.warning(f"User with ID {uid} not found in guild {interaction.guild.name}")
+
         removed: list[Member] = []
-        users_without_role: list[Member] = []
+        already: list[Member] = []
+        failed: list[Member] = []
         for m in members:
             if role not in m.roles:
                 logger.warning(f"User {m} does not have role {role}")
-                users_without_role.append(m)
+                already.append(m)
                 continue
-            await m.remove_roles(role, reason=f"Bulk remove by {interaction.user}")
-            removed.append(m)
+
+            try:
+                await m.remove_roles(role, reason=f"Bulk remove by {interaction.user}")
+                removed.append(m)
+            except Forbidden:
+                logger.error(f"Forbidden to remove role {role} from {m}")
+                failed.append(m)
+            except HTTPException as e:
+                logger.error(f"HTTP error while removing {role} from {m}: {e}")
+                failed.append(m)
+
+        logger.debug(
+            f"Members to remove role: {members},\nRemoved: {removed},\nAlready without role: {already},\nFailed: {failed}"
+        )
         if not members or not removed:
             logger.info("No valid users found for role removal")
             await interaction.response.send_message("Aucun utilisateur valide trouvé.", ephemeral=True)
             return
         logger.info(f"Removed role {role} from multiple users: {removed}")
         await interaction.response.send_message(f"Rôle {role.name!r} retiré de {', '.join(m.mention for m in removed)}.")
-        if users_without_role:
-            await interaction.followup.send(
-                f"Rôle {role.mention} déjà absent chez {', '.join(m.mention for m in users_without_role)}.",
-                ephemeral=True,
-            )
 
-    async def _schedule_deop(self, user: Member, time: int, admin_role: Role, interaction: Interaction) -> None:
+        lines: list[str] = []
+        if already:
+            lines.append(f"Rôle {role.mention} déjà absent chez {', '.join(m.mention for m in already)}.")
+        if failed:
+            lines.append(f"Échec de la suppression du rôle {role.mention} chez {', '.join(m.mention for m in failed)}.")
+        if lines:
+            await interaction.followup.send("\n".join(lines), ephemeral=True)
+
+    async def _schedule_deop(
+        self, interaction: Interaction, user: Member, time: int, admin_role: Role, codir_role: Role
+    ) -> None:
         """Schedule removal of temporary admin role after timeout.
 
         Args:
+            interaction (Interaction): The interaction that triggered the deop.
             user (Member): The user to remove the role from.
             time (int): The time in minutes to wait before removing the role.
             admin_role (Role): The admin role to remove.
-            interaction (Interaction): The interaction that triggered the deop.
+            codir_role (Role): The CoDir role to prevent if there is an error.
         """
         logger.debug(f"Scheduling deop for {user} after {time} minutes")
         try:
             await asyncio.sleep(time * 60)
             if user.id in self.deop_tasks:
-                await user.remove_roles(admin_role, reason="Remove op after time")
+                try:
+                    await user.remove_roles(admin_role, reason="Remove op after time")
+                except Forbidden:
+                    logger.error(f"Forbidden to remove admin role from {user}")
+                    await interaction.followup.send(
+                        f"{codir_role.mention} Je ne peux pas retirer le rôle admin de {user.mention}."
+                    )
+                    return
+                except HTTPException as e:
+                    logger.error(f"HTTP error while removing admin role from {user}: {e}")
+                    await interaction.followup.send(
+                        f"{codir_role.mention} Erreur HTTP lors de la suppression du rôle admin de {user.mention}."
+                    )
+                    return
+
                 logger.info(f"Revoked temporary admin from {user} after {time} minutes")
                 await interaction.followup.send(f"Droits admin retirés de {user.mention} après {time} minutes.")
             self.deop_tasks.pop(user.id, None)
