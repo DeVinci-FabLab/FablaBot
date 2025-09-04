@@ -7,7 +7,7 @@ import logging
 import re
 from warnings import deprecated
 
-from discord import Guild, Interaction, Member, Role, app_commands
+from discord import Forbidden, Guild, HTTPException, Interaction, Member, Role, app_commands
 from discord.ext import commands
 from discord.utils import get
 
