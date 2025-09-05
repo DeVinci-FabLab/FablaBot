@@ -146,7 +146,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             return
 
         try:
-            await user.add_roles(admin_role, reason=f"Add with op command by {interaction.user}")
+            await user.add_roles(admin_role, reason=f"Add with op command by {interaction.user} for {reason}")
         except Forbidden:
             logger.error(f"Forbidden to add role {admin_role} to {user}")
             await interaction.response.send_message("Impossible d'ajouter le rôle.", ephemeral=True)
