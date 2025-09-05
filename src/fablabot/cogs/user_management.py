@@ -470,7 +470,7 @@ class BulkRoleView(ui.View):
         elif self.action == "remove":
             for m in members:
                 if self.role not in m.roles:
-                    logger.info("User %s does not have role %s", m, self.role)
+                    logger.info(f"User {m} does not have role {self.role}")
                     already.append(m)
                     continue
                 try:
@@ -479,7 +479,7 @@ class BulkRoleView(ui.View):
                 except Forbidden:
                     failed.append(m)
                 except HTTPException as e:
-                    logger.error("HTTP error while removing %s from %s: %s", self.role, m, e)
+                    logger.error(f"HTTP error while removing {self.role} from {m}: {e}")
                     failed.append(m)
 
         logger.info(
