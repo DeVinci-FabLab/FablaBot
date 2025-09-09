@@ -75,6 +75,12 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
                 ephemeral=True,
             )
             return
+        if messages < 1 or messages > 50:
+            logger.warning(f"Attempt to clear an invalid number of messages: {messages}")
+            await interaction.response.send_message(
+                "Vous ne pouvez pas supprimer moins de 1 message ou plus de 50 messages.", ephemeral=True
+            )
+            return
         await interaction.response.send_message("Nettoyage en cours...", ephemeral=True)
         deleted = await interaction.channel.purge(limit=messages, reason=f"With clear command by {interaction.user}")
         logger.info(f"Deleted {len(deleted)} messages in channel {interaction.channel.name}")
