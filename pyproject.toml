@@ -24,7 +24,10 @@ doc_builder = "fablabot._build_docs:build_docs"
 
 
 [dependency-groups]
-dev = ["pdoc>=15.0.3"]
+dev = [
+    "pdoc>=15.0.3",
+    "ruff>=0.12.9",
+]
 
 [tool.ruff]
 line-length = 128
