@@ -5,7 +5,7 @@ from __future__ import annotations
 from logging import Logger
 from typing import Any
 
-from discord import Guild, Interaction, TextChannel
+from discord import Interaction, TextChannel
 from discord.utils import get
 
 COMMANDS_CHANNEL_NAME = "commandes_bot"
@@ -35,8 +35,14 @@ async def is_in_allowed_channel(logger: Logger, interaction: Interaction) -> boo
         bool: ``True`` if the interaction was made in the allowed commands channel,
             ``False`` otherwise.
     """
-    assert isinstance(interaction.guild, Guild)
-    assert isinstance(interaction.channel, TextChannel)
+    assert interaction.guild is not None
+    if not isinstance(interaction.channel, TextChannel):
+        logger.warning(f"Attempt to use command in a non-text channel: {interaction.channel} ({type(interaction.channel)})")
+        await interaction.response.send_message(
+            "Vous ne pouvez pas utiliser de commandes en dehors d'un salon textuel.",
+            ephemeral=True,
+        )
+        return False
     commands_channel = get(interaction.guild.channels, name=COMMANDS_CHANNEL_NAME)
     assert isinstance(commands_channel, TextChannel)
     if interaction.channel != commands_channel:
