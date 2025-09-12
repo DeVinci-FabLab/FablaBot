@@ -304,7 +304,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
 
         view = BulkRoleView(role, interaction.user, action="add")
         await interaction.response.send_message(
-            f"Sélectionnez les membres à qui ajouter {role.mention} puis cliquez sur **Confirmer**.", view=view, ephemeral=True
+            f"Sélectionnez les membres à qui ajouter {role.mention} puis cliquez sur **Confirmer**.", view=view
         )
 
     @app_commands.command(name="remove_roles", description="Retire un rôle à plusieurs utilisateurs via un sélecteur.")
@@ -328,7 +328,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
 
         view = BulkRoleView(role, interaction.user, action="remove")
         await interaction.response.send_message(
-            f"Sélectionnez les membres à qui retirer {role.mention} puis cliquez sur **Confirmer**.", view=view, ephemeral=True
+            f"Sélectionnez les membres à qui retirer {role.mention} puis cliquez sur **Confirmer**.", view=view
         )
 
     async def _schedule_deop(
@@ -505,4 +505,4 @@ class BulkRoleView(ui.View):
                 child.disabled = True
         await interaction.response.edit_message(view=self)
 
-        await channel.send("\n".join(lines))
+        await interaction.edit_original_response(content="\n".join(lines), view=None)
