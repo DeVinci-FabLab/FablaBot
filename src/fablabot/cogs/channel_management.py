@@ -14,7 +14,6 @@ from discord import (
     DMChannel,
     ForumChannel,
     GroupChannel,
-    Guild,
     Interaction,
     Member,
     Message,
@@ -38,13 +37,7 @@ EPHEMERAL_SUFFIX = "-temp"
 
 
 class TextChannelManagementGroup(app_commands.Group, name="text", description="Gestion des salons textuels"):
-    """Manages text channel-related commands.
-
-    Args:
-        app_commands (app_commands.Group): The app_commands group.
-        name (str, optional): The name of the group. Defaults to "text".
-        description (str, optional): The description of the group. Defaults to "Gestion des salons textuels".
-    """
+    """Manages text channel-related commands."""
 
     @app_commands.command(name="clear", description="Nettoie le salon actuel de ses derniers messages.")
     @app_commands.describe(messages="Le nombre de messages à supprimer (par défaut 5)")
@@ -178,13 +171,7 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
 
 
 class VocalChannelManagementGroup(app_commands.Group, name="vocal", description="Gestion des salons vocaux dynamiques"):
-    """Manages voice channel-related commands.
-
-    Args:
-        app_commands (app_commands.Group): The app_commands group.
-        name (str, optional): The name of the group. Defaults to "vocal".
-        description (str, optional): The description of the group. Defaults to "Gestion des salons vocaux dynamiques".
-    """
+    """Manages voice channel-related commands."""
 
     @app_commands.command(name="create", description="Crée un salon vocal personnalisé.")
     @app_commands.describe(
@@ -265,7 +252,7 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
             return
 
         assert isinstance(interaction.user, Member)
-        assert isinstance(channel.category, CategoryChannel)
+        assert channel.category is not None
         if not channel.permissions_for(interaction.user).manage_channels:
             logger.warning(f"Insufficient permissions for rename voice channel: {interaction.user}")
             await interaction.response.send_message(
@@ -355,7 +342,7 @@ class ChannelManagement(commands.Cog):
         if not message.channel.name.endswith("_bot"):
             return
 
-        assert isinstance(message.guild, Guild)
+        assert message.guild is not None
         codir_role = get(message.guild.roles, name="CoDir")
         if codir_role is None:
             logger.error("Required role CoDir not found.")

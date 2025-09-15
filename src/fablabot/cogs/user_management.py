@@ -10,7 +10,6 @@ from warnings import deprecated
 from discord import (
     ButtonStyle,
     Forbidden,
-    Guild,
     HTTPException,
     Interaction,
     Member,
@@ -130,7 +129,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         if not await is_in_allowed_channel(logger, interaction):
             return
 
-        assert isinstance(interaction.guild, Guild)
+        assert interaction.guild is not None
         admin_role = get(interaction.guild.roles, name="Admin -temp-")
         codir_role = get(interaction.guild.roles, name="CoDir")
         if admin_role is None or codir_role is None:
@@ -180,7 +179,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         if not await is_in_allowed_channel(logger, interaction):
             return
 
-        assert isinstance(interaction.guild, Guild)
+        assert interaction.guild is not None
         admin_role = get(interaction.guild.roles, name="Admin -temp-")
         if admin_role is None:
             logger.error("Role Admin -temp- not found")
