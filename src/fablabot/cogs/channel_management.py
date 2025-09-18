@@ -36,12 +36,39 @@ INDEX_SEPARATOR = "/"
 EPHEMERAL_SUFFIX = "-temp"
 
 
-class TextChannelManagementGroup(app_commands.Group, name="text", description="Gestion des salons textuels"):
-    """Manages text channel-related commands."""
+class ChannelManagement(commands.Cog):
+    """Cog to register text and voice channel management commands and listeners.
 
-    @app_commands.command(name="clear", description="Nettoie le salon actuel de ses derniers messages.")
+    Commands:
+    - /text clear: Clear the current text channel of its last messages.
+    - /text create: Create a new text channel in the specified category.
+    - /text rename: Rename an existing text channel.
+    - /text delete: Delete a text channel.
+    - /vocal create: Create a new voice channel in the specified category.
+    - /vocal rename: Rename an existing voice channel.
+    - /vocal delete: Delete a voice channel.
+
+    Listeners:
+    - on_message_delete: Notify when a message is deleted in a bot channel, log the deleter and resend the content.
+    - on_raw_message_delete: Notify when a message is deleted in a bot channel (for uncached messages).
+    - on_voice_state_update: Create and remove dynamic voice channels in categories with a base channel named *-vocal.
+    """
+
+    def __init__(self, bot: commands.Bot) -> None:
+        """Initialize the cog and register its command groups.
+
+        Args:
+            bot (commands.Bot): The bot instance.
+        """
+        self.bot = bot
+        self.remove_tasks: dict[int, asyncio.Task[None]] = {}
+
+    # region ====== Text Slash Group ======
+    text_group = app_commands.Group(name="text", description="Gestion des salons textuels")
+
+    @text_group.command(name="clear", description="Nettoie le salon actuel de ses derniers messages.")
     @app_commands.describe(messages="Le nombre de messages à supprimer (par défaut 5)")
-    async def clear(self, interaction: Interaction, messages: int = 5) -> None:
+    async def text_clear(self, interaction: Interaction, messages: int = 5) -> None:
         """Clears the current channel of its last messages.
 
         Args:
@@ -79,12 +106,12 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
         logger.info(f"Deleted {len(deleted)} messages in channel {interaction.channel.name}")
         await interaction.followup.send(f"{len(deleted)} messages supprimés avec succès !", ephemeral=True)
 
-    @app_commands.command(name="create", description="Crée un nouveau salon dans la catégorie spécifiée.")
+    @text_group.command(name="create", description="Crée un nouveau salon dans la catégorie spécifiée.")
     @app_commands.describe(
         channel="Le nom du salon à créer",
         category="La catégorie dans laquelle créer le salon",
     )
-    async def create(self, interaction: Interaction, channel: str, category: CategoryChannel) -> None:
+    async def text_create(self, interaction: Interaction, channel: str, category: CategoryChannel) -> None:
         """Create a text channel in the passed category.
 
         Args:
@@ -115,9 +142,9 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
         logger.info(f"Created text channel {new_channel!r} in category {category!r}")
         await interaction.response.send_message(f"Le salon {new_channel.mention} a été créé dans {category.name!r}.")
 
-    @app_commands.command(name="rename", description="Renomme un salon textuel.")
+    @text_group.command(name="rename", description="Renomme un salon textuel.")
     @app_commands.describe(channel="Salon à renommer", new_name="Nouveau nom du salon")
-    async def rename(self, interaction: Interaction, channel: TextChannel, new_name: str) -> None:
+    async def text_rename(self, interaction: Interaction, channel: TextChannel, new_name: str) -> None:
         """Rename a text channel.
 
         Args:
@@ -144,9 +171,9 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
             f"Le salon {channel.mention}, anciennement {old_name!r}, a été renommé en {new_name!r}."
         )
 
-    @app_commands.command(name="delete", description="Supprime un salon textuel.")
+    @text_group.command(name="delete", description="Supprime un salon textuel.")
     @app_commands.describe(channel="Le salon à supprimer")
-    async def delete(self, interaction: Interaction, channel: TextChannel) -> None:
+    async def text_delete(self, interaction: Interaction, channel: TextChannel) -> None:
         """Delete a text channel.
 
         Args:
@@ -169,18 +196,19 @@ class TextChannelManagementGroup(app_commands.Group, name="text", description="G
         logger.info(f"Deleted text channel {channel.name!r}")
         await interaction.response.send_message(f"Le salon {channel.name!r} a été supprimé.")
 
+    # endregion Text Slash Group
 
-class VocalChannelManagementGroup(app_commands.Group, name="vocal", description="Gestion des salons vocaux dynamiques"):
-    """Manages voice channel-related commands."""
+    # region ====== Vocal Slash Group ======
+    vocal_group = app_commands.Group(name="vocal", description="Gestion des salons vocaux dynamiques")
 
-    @app_commands.command(name="create", description="Crée un salon vocal personnalisé.")
+    @vocal_group.command(name="create", description="Crée un salon vocal personnalisé.")
     @app_commands.describe(
         name="Nom du salon vocal à créer",
         category="Catégorie dans laquelle créer le salon vocal",
         is_temporary="Salon temporaire (supprimé après inactivité)",
         max_user="Nombre max d'utilisateurs (None pour illimité)",
     )
-    async def create(
+    async def vocal_create(
         self,
         interaction: Interaction,
         name: str,
@@ -237,9 +265,9 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
             channel_creation_message += f" (max {max_user} utilisateurs)"
         await interaction.response.send_message(channel_creation_message)
 
-    @app_commands.command(name="rename", description="Renomme un salon vocal.")
+    @vocal_group.command(name="rename", description="Renomme un salon vocal.")
     @app_commands.describe(channel="Le salon vocal à renommer", new_name="Nouveau nom du salon")
-    async def rename(self, interaction: Interaction, channel: VoiceChannel, new_name: str) -> None:
+    async def vocal_rename(self, interaction: Interaction, channel: VoiceChannel, new_name: str) -> None:
         """Rename a voice channel.
 
         Args:
@@ -284,9 +312,9 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
             f"Le salon vocal {channel.mention}, anciennement {old_name!r}, a été renommé en {new_name!r}."
         )
 
-    @app_commands.command(name="delete", description="Supprime un salon vocal.")
+    @vocal_group.command(name="delete", description="Supprime un salon vocal.")
     @app_commands.describe(channel="Le salon vocal à supprimer")
-    async def delete(self, interaction: Interaction, channel: VoiceChannel) -> None:
+    async def vocal_delete(self, interaction: Interaction, channel: VoiceChannel) -> None:
         """Delete a voice channel.
 
         Args:
@@ -313,21 +341,9 @@ class VocalChannelManagementGroup(app_commands.Group, name="vocal", description=
         logger.info(f"Deleted voice channel {channel.name!r}")
         await interaction.response.send_message(f"Le salon vocal {channel.name!r} a été supprimé.")
 
+    # endregion Vocal Slash Group
 
-class ChannelManagement(commands.Cog):
-    """Cog to register text and voice channel management commands and listeners."""
-
-    def __init__(self, bot: commands.Bot) -> None:
-        """Initialize the cog and register its command groups.
-
-        Args:
-            bot (commands.Bot): The bot instance.
-        """
-        self.bot = bot
-        self.remove_tasks: dict[int, asyncio.Task[None]] = {}
-        self.bot.tree.add_command(TextChannelManagementGroup())
-        self.bot.tree.add_command(VocalChannelManagementGroup())
-
+    # region ====== Listeners ======
     @commands.Cog.listener()
     async def on_message_delete(self, message: Message) -> None:
         """Handle message deletion events.
@@ -424,6 +440,9 @@ class ChannelManagement(commands.Cog):
                 ):
                     self.remove_tasks[voice_channel.id] = asyncio.create_task(self._delayed_delete(voice_channel, 60))
 
+    # endregion Listeners
+
+    # region ====== Helpers ======
     async def _manage_voice_channels(self, category: CategoryChannel, base_channel: VoiceChannel) -> None:
         """Manage voice channels in a category.
 
@@ -467,6 +486,8 @@ class ChannelManagement(commands.Cog):
             with contextlib.suppress(Exception):
                 await channel.delete()
                 logger.info(f"Deleted empty voice channel {channel.name!r} after timeout")
+
+    # endregion Helpers
 
 
 @deprecated("Load the cog using `bot.add_cog()` instead.")

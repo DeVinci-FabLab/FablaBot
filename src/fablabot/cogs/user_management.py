@@ -34,89 +34,38 @@ ADMIN_ROLES = {
 }
 
 
-def can_assign_role(member: Member, target_role: Role) -> bool:
-    """Checks if the member can assign a specific role.
+class UserManagement(commands.Cog):
+    """Cog to register user management commands.
 
-    Args:
-        member (Member): The member attempting to assign the role.
-        target_role (Role): The role to be assigned.
-
-    Returns:
-        bool: True if the member can assign the role, False otherwise.
+    Commands:
+    - /user op: Grant temporary admin privileges to a user.
+    - /user deop: Revoke temporary admin privileges from a user.
+    - /user add_role: Add a role to a single user.
+    - /user remove_role: Remove a role from a single user.
+    - /user add_roles: Add a role to multiple users via a selector.
+    - /user remove_roles: Remove a role from multiple users via a selector.
     """
-    if target_role.name == "Administrateur":
-        return False
 
-    return (
-        _is_user_server_admin(member)
-        or _is_user_responsible_for_pole(member, target_role)
-        or _is_user_responsible_for_trainers(member, target_role)
-    )
+    def __init__(self, bot: commands.Bot) -> None:
+        """Initialize the cog and register its command groups.
 
-
-def _is_user_server_admin(member: Member) -> bool:
-    """Checks if the member has an administrative role.
-
-    Args:
-        member (Member): The member to check.
-
-    Returns:
-        bool: `True` if the member is a server admin, `False` otherwise.
-    """
-    member_role_names = {role.name for role in member.roles}
-    return bool(member_role_names & ADMIN_ROLES)
-
-
-def _is_user_responsible_for_pole(member: Member, target_role: Role) -> bool:
-    """Checks if member is responsible for the 'pole' of the target role.
-
-    Args:
-        member (Member): The member to check.
-        target_role (Role): The role to check against.
-
-    Returns:
-        bool: `True` if the member is responsible for the pole, `False` otherwise.
-    """
-    role_names = {role.name for role in member.roles}
-    if target_role.name == "Sbire Bureau" and "Bureau" in role_names:
-        return True
-    if target_role.name.startswith("Pôle "):
-        suffix = target_role.name.split("Pôle ", 1)[1]
-        if f"Respo {suffix}" in role_names:
-            return True
-    return False
-
-
-def _is_user_responsible_for_trainers(member: Member, target_role: Role) -> bool:
-    """Checks if member manages formations for the target role.
-
-    Args:
-        member (Member): The member to check.
-        target_role (Role): The role to check against.
-
-    Returns:
-        bool: `True` if the member is responsible for the formation, `False` otherwise.
-    """
-    role_names = {role.name for role in member.roles}
-    return "Respo Formations" in role_names and target_role.name.startswith("F - ")
-
-
-class UserManagementGroup(app_commands.Group, name="user", description="Gestion des utilisateurs"):
-    """Manages user-related commands."""
-
-    def __init__(self) -> None:
-        """Initialize the UserManagementGroup with the specified name and description."""
-        super().__init__(name="user", description="Gestion des utilisateurs")
+        Args:
+            bot (commands.Bot): The bot instance.
+        """
+        self.bot = bot
         self.deop_tasks: dict[int, asyncio.Task[None]] = {}
-        logger.info("UserManagementGroup initialized")
+        logger.info("UserManagement initialized")
 
-    @app_commands.command(name="op", description="Donne des droits admin temporaires à un utilisateur.")
+    # region ====== User Slash Group ======
+    user_group = app_commands.Group(name="user", description="Gestion des utilisateurs")
+
+    @user_group.command(name="op", description="Donne des droits admin temporaires à un utilisateur.")
     @app_commands.describe(
         user="L'utilisateur cible",
         reason="Raison de l'attribution",
         time="Durée en minutes (par défaut 5)",
     )
-    async def op(self, interaction: Interaction, user: Member, reason: str, time: int = 5) -> None:
+    async def user_op(self, interaction: Interaction, user: Member, reason: str, time: int = 5) -> None:
         """Grant temporary admin privileges to a user.
 
         Args:
@@ -137,7 +86,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             await interaction.response.send_message("Rôles administratifs manquants sur le serveur.", ephemeral=True)
             return
         assert isinstance(interaction.user, Member)
-        if not can_assign_role(interaction.user, admin_role) and "Respo Numérique" not in (
+        if not self._can_assign_role(interaction.user, admin_role) and "Respo Numérique" not in (
             r.name for r in interaction.user.roles
         ):
             logger.warning(f"Unauthorized op attempt by {interaction.user}")
@@ -165,9 +114,9 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             f"{codir_role.mention} Droits admin donnés à {user.mention} pour {time} minutes. Raison: {reason}"
         )
 
-    @app_commands.command(name="deop", description="Retire les droits admin temporaires d'un utilisateur.")
+    @user_group.command(name="deop", description="Retire les droits admin temporaires d'un utilisateur.")
     @app_commands.describe(user="L'utilisateur cible")
-    async def deop(self, interaction: Interaction, user: Member) -> None:
+    async def user_deop(self, interaction: Interaction, user: Member) -> None:
         """Revoke temporary admin privileges from a user.
 
         Args:
@@ -186,7 +135,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             await interaction.response.send_message("Rôle temporaire admin introuvable.", ephemeral=True)
             return
         assert isinstance(interaction.user, Member)
-        if not can_assign_role(interaction.user, admin_role) and "Respo Numérique" not in (
+        if not self._can_assign_role(interaction.user, admin_role) and "Respo Numérique" not in (
             r.name for r in interaction.user.roles
         ):
             logger.warning(f"Unauthorized deop attempt by {interaction.user}")
@@ -211,9 +160,9 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         logger.info(f"Revoked temporary admin from {user}")
         await interaction.response.send_message(f"Droits admin retirés de {user.mention} !")
 
-    @app_commands.command(name="add_role", description="Donne un rôle à un utilisateur.")
+    @user_group.command(name="add_role", description="Donne un rôle à un utilisateur.")
     @app_commands.describe(user="L'utilisateur cible", role="Le rôle à attribuer")
-    async def add_role(self, interaction: Interaction, user: Member, role: Role) -> None:
+    async def user_add_role(self, interaction: Interaction, user: Member, role: Role) -> None:
         """Add a role to a single user.
 
         Args:
@@ -226,7 +175,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             return
 
         assert isinstance(interaction.user, Member)
-        if not can_assign_role(interaction.user, role):
+        if not self._can_assign_role(interaction.user, role):
             logger.warning(f"Unauthorized add_role by {interaction.user}")
             await interaction.response.send_message("Vous n'avez pas la permission d'ajouter ce rôle.", ephemeral=True)
             return
@@ -245,9 +194,9 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         logger.info(f"Added role {role} to {user}")
         await interaction.response.send_message(f"Le rôle {role.name!r} a été ajouté à {user.mention}.")
 
-    @app_commands.command(name="remove_role", description="Retire un rôle à un utilisateur.")
+    @user_group.command(name="remove_role", description="Retire un rôle à un utilisateur.")
     @app_commands.describe(user="L'utilisateur cible", role="Le rôle à retirer")
-    async def remove_role(self, interaction: Interaction, user: Member, role: Role) -> None:
+    async def user_remove_role(self, interaction: Interaction, user: Member, role: Role) -> None:
         """Remove a role from a single user.
 
         Args:
@@ -260,7 +209,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             return
 
         assert isinstance(interaction.user, Member)
-        if not can_assign_role(interaction.user, role):
+        if not self._can_assign_role(interaction.user, role):
             logger.warning(f"Unauthorized remove_role by {interaction.user}")
             await interaction.response.send_message("Vous n'avez pas la permission de retirer ce rôle.", ephemeral=True)
             return
@@ -277,14 +226,14 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             return
 
         logger.info(f"Removed role {role} from {user}")
-        await interaction.response.send_message(f"Le rôle {role.name!r} a été retiré à {user.name!r}.")
+        await interaction.response.send_message(f"Le rôle {role.name!r} a été retiré à {user.mention}.")
 
-    @app_commands.command(
+    @user_group.command(
         name="add_roles",
         description="Donne un rôle à plusieurs utilisateurs via un sélecteur.",
     )
     @app_commands.describe(role="Le rôle à attribuer")
-    async def add_roles(self, interaction: Interaction, role: Role) -> None:
+    async def user_add_roles(self, interaction: Interaction, role: Role) -> None:
         """Open a multi-user selector to add a role in bulk.
 
         Args:
@@ -296,7 +245,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             return
 
         assert isinstance(interaction.user, Member)
-        if not can_assign_role(interaction.user, role):
+        if not self._can_assign_role(interaction.user, role):
             logger.warning(f"Unauthorized add_roles by {interaction.user}")
             await interaction.response.send_message("Vous n'avez pas la permission d'ajouter ce rôle.", ephemeral=True)
             return
@@ -306,9 +255,9 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             f"Sélectionnez les membres à qui ajouter {role.mention} puis cliquez sur **Confirmer**.", view=view
         )
 
-    @app_commands.command(name="remove_roles", description="Retire un rôle à plusieurs utilisateurs via un sélecteur.")
+    @user_group.command(name="remove_roles", description="Retire un rôle à plusieurs utilisateurs via un sélecteur.")
     @app_commands.describe(role="Le rôle à retirer")
-    async def remove_roles(self, interaction: Interaction, role: Role) -> None:
+    async def user_remove_roles(self, interaction: Interaction, role: Role) -> None:
         """Open a multi-user selector to remove a role in bulk.
 
         Args:
@@ -320,7 +269,7 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             return
 
         assert isinstance(interaction.user, Member)
-        if not can_assign_role(interaction.user, role):
+        if not self._can_assign_role(interaction.user, role):
             logger.warning(f"Unauthorized remove_roles by {interaction.user}")
             await interaction.response.send_message("Vous n'avez pas la permission de retirer ce rôle.", ephemeral=True)
             return
@@ -330,6 +279,9 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
             f"Sélectionnez les membres à qui retirer {role.mention} puis cliquez sur **Confirmer**.", view=view
         )
 
+    # endregion User Slash Group
+
+    # region ====== Helpers ======
     async def _schedule_deop(
         self, interaction: Interaction, user: Member, time: int, admin_role: Role, codir_role: Role
     ) -> None:
@@ -367,18 +319,74 @@ class UserManagementGroup(app_commands.Group, name="user", description="Gestion 
         except asyncio.CancelledError:
             logger.info(f"Deop timer cancelled for {user}")
 
-
-class UserManagement(commands.Cog):
-    """Cog to register user management commands."""
-
-    def __init__(self, bot: commands.Bot) -> None:
-        """Initialize the cog and register its command groups.
+    @staticmethod
+    def _can_assign_role(member: Member, target_role: Role) -> bool:
+        """Checks if the member can assign a specific role.
 
         Args:
-            bot (commands.Bot): The bot instance.
+            member (Member): The member attempting to assign the role.
+            target_role (Role): The role to be assigned.
+
+        Returns:
+            bool: True if the member can assign the role, False otherwise.
         """
-        self.bot = bot
-        self.bot.tree.add_command(UserManagementGroup())
+        if target_role.name == "Administrateur":
+            return False
+
+        return (
+            UserManagement._is_user_server_admin(member)
+            or UserManagement._is_user_responsible_for_pole(member, target_role)
+            or UserManagement._is_user_responsible_for_trainers(member, target_role)
+        )
+
+    @staticmethod
+    def _is_user_server_admin(member: Member) -> bool:
+        """Checks if the member has an administrative role.
+
+        Args:
+            member (Member): The member to check.
+
+        Returns:
+            bool: `True` if the member is a server admin, `False` otherwise.
+        """
+        member_role_names = {role.name for role in member.roles}
+        return bool(member_role_names & ADMIN_ROLES)
+
+    @staticmethod
+    def _is_user_responsible_for_pole(member: Member, target_role: Role) -> bool:
+        """Checks if member is responsible for the 'pole' of the target role.
+
+        Args:
+            member (Member): The member to check.
+            target_role (Role): The role to check against.
+
+        Returns:
+            bool: `True` if the member is responsible for the pole, `False` otherwise.
+        """
+        role_names = {role.name for role in member.roles}
+        if target_role.name == "Sbire Bureau" and "Bureau" in role_names:
+            return True
+        if target_role.name.startswith("Pôle "):
+            suffix = target_role.name.split("Pôle ", 1)[1]
+            if f"Respo {suffix}" in role_names:
+                return True
+        return False
+
+    @staticmethod
+    def _is_user_responsible_for_trainers(member: Member, target_role: Role) -> bool:
+        """Checks if member manages formations for the target role.
+
+        Args:
+            member (Member): The member to check.
+            target_role (Role): The role to check against.
+
+        Returns:
+            bool: `True` if the member is responsible for the formation, `False` otherwise.
+        """
+        role_names = {role.name for role in member.roles}
+        return "Respo Formations" in role_names and target_role.name.startswith("F - ")
+
+    # endregion Helpers
 
 
 @deprecated("Load the cog using `bot.add_cog()` instead.")
