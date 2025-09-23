@@ -38,6 +38,7 @@ class UserManagement(commands.Cog):
     """Cog to register user management commands.
 
     Commands:
+    - /user help: Display help for user management commands.
     - /user op: Grant temporary admin privileges to a user.
     - /user deop: Revoke temporary admin privileges from a user.
     - /user add_role: Add a role to a single user.
@@ -58,6 +59,28 @@ class UserManagement(commands.Cog):
 
     # region ====== User Slash Group ======
     user_group = app_commands.Group(name="user", description="Gestion des utilisateurs")
+
+    @user_group.command(name="help", description="Affiche l'aide pour les commandes de gestion des utilisateurs.")
+    async def user_help(self, interaction: Interaction) -> None:
+        """Display help for user management commands.
+
+        Args:
+            interaction (Interaction): The interaction object.
+        """
+        help_text = (
+            "**Commandes de gestion des utilisateurs :**\n"
+            "- `/user op <user>` : Donne des droits admin temporaires à un utilisateur.\n"
+            "- `/user deop <user>` : Retire les droits admin temporaires d'un utilisateur.\n"
+            "- `/user add_role <user> <role>` : Donne un rôle à un utilisateur.\n"
+            "- `/user remove_role <user> <role>` : Retire un rôle à un utilisateur.\n"
+            "- `/user add_roles <role>` : Donne un rôle à plusieurs utilisateurs via un sélecteur.\n"
+            "- `/user remove_roles <role>` : Retire un rôle à plusieurs utilisateurs via un sélecteur.\n"
+            "- `/user dm <message>` : Envoie un message privé à plusieurs utilisateurs via un sélecteur.\n"
+            "- `/user help` : Affiche cette aide pour les commandes de gestion des utilisateurs.\n"
+            "\n"
+            "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
+        )
+        await interaction.response.send_message(help_text, ephemeral=True)
 
     @user_group.command(name="op", description="Donne des droits admin temporaires à un utilisateur.")
     @app_commands.describe(

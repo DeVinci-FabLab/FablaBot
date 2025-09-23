@@ -40,10 +40,12 @@ class ChannelManagement(commands.Cog):
     """Cog to register text and voice channel management commands and listeners.
 
     Commands:
+    - /text help: Display help for text channel management commands.
     - /text clear: Clear the current text channel of its last messages.
     - /text create: Create a new text channel in the specified category.
     - /text rename: Rename an existing text channel.
     - /text delete: Delete a text channel.
+    - /vocal help: Display help for voice channel management commands.
     - /vocal create: Create a new voice channel in the specified category.
     - /vocal rename: Rename an existing voice channel.
     - /vocal delete: Delete a voice channel.
@@ -65,6 +67,25 @@ class ChannelManagement(commands.Cog):
 
     # region ====== Text Slash Group ======
     text_group = app_commands.Group(name="text", description="Gestion des salons textuels")
+
+    @text_group.command(name="help", description="Affiche l'aide pour les commandes de gestion des salons textuels.")
+    async def text_help(self, interaction: Interaction) -> None:
+        """Display help for text channel management commands.
+
+        Args:
+            interaction (Interaction): The interaction that triggered the command.
+        """
+        help_message = (
+            "**Commandes de gestion des salons textuels :**\n"
+            "- `/text clear [messages]`: Nettoie le salon actuel de ses derniers messages. Par défaut, 5 messages sont supprimés.\n"
+            "- `/text create <channel> <category>`: Crée un nouveau salon textuel dans la catégorie spécifiée.\n"
+            "- `/text rename <channel> <new_name>`: Renomme un salon textuel existant.\n"
+            "- `/text delete <channel>`: Supprime un salon textuel existant.\n"
+            "- `/text help`: Affiche cette aide pour les commandes de gestion des salons textuels.\n"
+            "\n"
+            "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
+        )
+        await interaction.response.send_message(help_message, ephemeral=True)
 
     @text_group.command(name="clear", description="Nettoie le salon actuel de ses derniers messages.")
     @app_commands.describe(messages="Le nombre de messages à supprimer (par défaut 5)")
@@ -200,6 +221,24 @@ class ChannelManagement(commands.Cog):
 
     # region ====== Vocal Slash Group ======
     vocal_group = app_commands.Group(name="vocal", description="Gestion des salons vocaux dynamiques")
+
+    @vocal_group.command(name="help", description="Affiche l'aide pour les commandes de gestion des salons vocaux.")
+    async def vocal_help(self, interaction: Interaction) -> None:
+        """Display help for vocal channel management commands.
+
+        Args:
+            interaction (Interaction): The interaction that triggered the command.
+        """
+        help_message = (
+            "**Commandes de gestion des salons vocaux :**\n"
+            "- `/vocal create <name> <category> [is_temporary] [max_user]`: Crée un nouveau salon vocal dans la catégorie spécifiée. Par défaut, le salon est temporaire et illimité.\n"
+            "- `/vocal rename <channel> <new_name>`: Renomme un salon vocal existant.\n"
+            "- `/vocal delete <channel>`: Supprime un salon vocal existant.\n"
+            "- `/vocal help`: Affiche cette aide pour les commandes de gestion des salons vocaux.\n"
+            "\n"
+            "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
+        )
+        await interaction.response.send_message(help_message, ephemeral=True)
 
     @vocal_group.command(name="create", description="Crée un salon vocal personnalisé.")
     @app_commands.describe(
