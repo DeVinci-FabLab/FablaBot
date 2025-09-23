@@ -135,7 +135,7 @@ class UserManagement(commands.Cog):
         self.deop_tasks[user.id] = task
         logger.info(f"Granted {user} temporary admin for {time} minutes for reason: {reason}")
         await interaction.response.send_message(
-            f"{codir_role.mention} Droits admin donnés à {user.mention} pour {time} minutes. Raison: {reason}"
+            f"{codir_role.mention} Droits admin donnés à {user.mention}({user.name!r}) pour {time} minutes. Raison: {reason}"
         )
 
     @user_group.command(name="deop", description="Retire les droits admin temporaires d'un utilisateur.")
@@ -182,7 +182,8 @@ class UserManagement(commands.Cog):
             task.cancel()
 
         logger.info(f"Revoked temporary admin from {user}")
-        await interaction.response.send_message(f"Droits admin retirés de {user.mention} !")
+        await interaction.response.send_message("Retrait des droits admin en cours...")
+        await interaction.edit_original_response(content=f"Droits admin retirés de {user.mention}({user.name!r}) !")
 
     @user_group.command(name="add_role", description="Donne un rôle à un utilisateur.")
     @app_commands.describe(user="L'utilisateur cible", role="Le rôle à attribuer")
@@ -216,7 +217,10 @@ class UserManagement(commands.Cog):
             return
 
         logger.info(f"Added role {role} to {user}")
-        await interaction.response.send_message(f"Le rôle {role.name!r} a été ajouté à {user.mention}.")
+        await interaction.response.send_message("Le rôle est en cours d'ajout...")
+        await interaction.edit_original_response(
+            content=f"Le rôle {role.mention}({role.name!r}) a été ajouté à {user.mention}({user.name!r})."
+        )
 
     @user_group.command(name="remove_role", description="Retire un rôle à un utilisateur.")
     @app_commands.describe(user="L'utilisateur cible", role="Le rôle à retirer")
@@ -250,7 +254,10 @@ class UserManagement(commands.Cog):
             return
 
         logger.info(f"Removed role {role} from {user}")
-        await interaction.response.send_message(f"Le rôle {role.name!r} a été retiré à {user.mention}.")
+        await interaction.response.send_message("Le rôle est en cours de retrait...")
+        await interaction.edit_original_response(
+            content=f"Le rôle {role.mention}({role.name!r}) a été retiré à {user.mention}({user.name!r})."
+        )
 
     @user_group.command(
         name="add_roles",
@@ -276,7 +283,7 @@ class UserManagement(commands.Cog):
 
         view = BulkRoleView(role, interaction.user, action="add")
         await interaction.response.send_message(
-            f"Sélectionnez les membres à qui ajouter {role.mention} puis cliquez sur **Confirmer**.", view=view
+            f"Sélectionnez les membres à qui ajouter {role.name!r} puis cliquez sur **Confirmer**.", view=view
         )
 
     @user_group.command(name="remove_roles", description="Retire un rôle à plusieurs utilisateurs via un sélecteur.")
@@ -300,7 +307,7 @@ class UserManagement(commands.Cog):
 
         view = BulkRoleView(role, interaction.user, action="remove")
         await interaction.response.send_message(
-            f"Sélectionnez les membres à qui retirer {role.mention} puis cliquez sur **Confirmer**.", view=view
+            f"Sélectionnez les membres à qui retirer {role.name!r} puis cliquez sur **Confirmer**.", view=view
         )
 
     @user_group.command(
@@ -362,18 +369,18 @@ class UserManagement(commands.Cog):
                 except Forbidden:
                     logger.error(f"Forbidden to remove admin role from {user}")
                     await interaction.followup.send(
-                        f"{codir_role.mention} Je ne peux pas retirer le rôle admin de {user.mention}."
+                        f"{codir_role.mention} Je ne peux pas retirer le rôle admin de {user.mention}({user.name!r})."
                     )
                     return
                 except HTTPException as e:
                     logger.error(f"HTTP error while removing admin role from {user}: {e}")
                     await interaction.followup.send(
-                        f"{codir_role.mention} Erreur HTTP lors de la suppression du rôle admin de {user.mention}."
+                        f"{codir_role.mention} Erreur HTTP lors de la suppression du rôle admin de {user.mention}({user.name!r})."
                     )
                     return
 
                 logger.info(f"Revoked temporary admin from {user} after {time} minutes")
-                await interaction.followup.send(f"Droits admin retirés de {user.mention} après {time} minutes.")
+                await interaction.followup.send(f"Droits admin retirés de {user.mention}({user.name!r}) après {time} minutes.")
             self.deop_tasks.pop(user.id, None)
         except asyncio.CancelledError:
             logger.info(f"Deop timer cancelled for {user}")
@@ -552,19 +559,16 @@ class BulkRoleView(ui.View):
             f"Members to {self.action} role {self.role}: {members},\nSuccess:{modified},\nAlready: {already},\nFailed: {failed}",
         )
 
+        action_str = {"add": "Ajouté", "remove": "Retiré"}
+        already_str = {"add": "présent", "remove": "absent"}
+
         lines: list[str] = [f"Rôle {self.role.name!r} :"]
         if modified:
-            if self.action == "add":
-                lines.append(f"Ajouté avec succès : {', '.join(m.mention for m in modified)}")
-            else:
-                lines.append(f"Retiré avec succès : {', '.join(m.mention for m in modified)}")
+            lines.append(f"{action_str[self.action]} avec succès : {', '.join(f'{m.mention}({m.name!r})' for m in modified)}")
         if already:
-            if self.action == "add":
-                lines.append(f"Déjà présent chez : {', '.join(m.mention for m in already)}")
-            else:
-                lines.append(f"Déjà absent chez : {', '.join(m.mention for m in already)}")
+            lines.append(f"Déjà {already_str[self.action]} chez : {', '.join(f'{m.mention}({m.name!r})' for m in already)}")
         if failed:
-            lines.append(f"Échec : {', '.join(m.mention for m in failed)}")
+            lines.append(f"Échec : {', '.join(f'{m.mention}({m.name!r})' for m in failed)}")
 
         for child in self.children:
             if isinstance(child, ui.Button | ui.UserSelect):
@@ -640,9 +644,9 @@ class BulkDMView(ui.View):
 
         lines: list[str] = ["Envoi des messages terminé."]
         if delivered:
-            lines.append("Succès : " + ", ".join(member.mention for member in delivered))
+            lines.append("Succès : " + ", ".join(f"{member.mention}({member.name!r})" for member in delivered))
         if failed:
-            lines.append("Échecs : " + ", ".join(member.mention for member, _ in failed))
+            lines.append("Échecs : " + ", ".join(f"{member.mention}({member.name!r})" for member, _ in failed))
         lines.append("Contenu envoyé :")
         lines.append(f">>> {self.message}")
 
