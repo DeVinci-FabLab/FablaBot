@@ -27,6 +27,7 @@ doc_builder = "fablabot._build_docs:build_docs"
 dev = [
     "pdoc>=15.0.3",
     "ruff>=0.12.9",
+    "typing-extensions>=4.15.0",
 ]
 
 [tool.ruff]
