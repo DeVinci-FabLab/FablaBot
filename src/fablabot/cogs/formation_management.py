@@ -88,8 +88,10 @@ class FormationManagement(commands.Cog):
     """Hebdo formations management cog (Draft -> Publish -> Export).
 
     - /fm start intro:<str> end:<str>
-    - /fm add ...
+    - /fm edit_text [intro] [end]
+    - /fm add emoji:<str> name:<str> trainer:<@Member> date:<YYYY-MM-DD> hour:<HH:MM> duration:<str> seats:<int> description:<str>
     - /fm remove index:<int>
+    - /fm edit index:<int> [emoji] [name] [trainer] [date] [hour] [duration] [seats] [description]
     - /fm clear
     - /fm preview
     - /fm publish channel:<#salon>
@@ -162,6 +164,71 @@ class FormationManagement(commands.Cog):
             "Brouillon initialisé.\nUtilise **/fm add** pour ajouter des formations. **/fm preview** pour voir le rendu.",
             embed=Embed(
                 title="Aperçu brouillon — 0 formation",
+                description=f"{content or '_(vide)_'}",
+            ),
+            ephemeral=True,
+        )
+
+    @fm_group.command(name="edit_text", description="Modifier l'introduction et/ou la conclusion du brouillon.")
+    @app_commands.describe(
+        intro="Nouveau texte d'introduction (laisser vide pour conserver)",
+        end="Nouveau texte de conclusion (laisser vide pour conserver)",
+    )
+    async def fm_edit_text(
+        self,
+        interaction: Interaction,
+        intro: str | None = None,
+        end: str | None = None,
+    ) -> None:
+        """Edit the draft introduction and/or ending.
+
+        Args:
+            interaction (Interaction): The interaction context.
+            intro (str | None): The new introduction text.
+            end (str | None): The new ending text.
+        """
+        log_request(logger, "fm.edit_text", interaction, intro=intro, end=end)
+        if not await is_in_allowed_channel(logger, interaction):
+            return
+
+        if intro is None and end is None:
+            await interaction.response.send_message(
+                "Aucun champ à modifier. Fournis au moins `intro` ou `end`.",
+                ephemeral=True,
+            )
+            return
+
+        assert interaction.guild is not None
+        draft = self._get_guild_draft(interaction.guild.id)
+
+        current_intro = draft.get("intro", "")
+        current_end = draft.get("end", "")
+
+        updated_intro = current_intro if intro is None else intro.strip()
+        updated_end = current_end if end is None else end.strip()
+
+        if updated_intro == current_intro and updated_end == current_end:
+            await interaction.response.send_message(
+                "Aucune modification détectée.",
+                ephemeral=True,
+            )
+            return
+
+        draft["intro"] = updated_intro
+        draft["end"] = updated_end
+        self._set_guild_draft(interaction.guild.id, draft)
+
+        fms = [Formation(**x) if isinstance(x, dict) else x for x in draft.get("fms", [])]
+        content = self._render_message(draft["intro"], fms, draft["end"])
+
+        logger.info(
+            f"Guild {interaction.guild.id} updated draft intro/end (intro_changed={intro is not None}, end_changed={end is not None})."
+        )
+
+        await interaction.response.send_message(
+            "Brouillon mis à jour.",
+            embed=Embed(
+                title=f"Aperçu brouillon — {len(fms)} formation(s)",
                 description=f"{content or '_(vide)_'}",
             ),
             ephemeral=True,
@@ -298,6 +365,164 @@ class FormationManagement(commands.Cog):
         logger.info(f"Guild {interaction.guild.id} removed formation {removed.name!r} ({removed.start_iso}) from draft.")
         await interaction.response.send_message(
             f"Supprimé: {removed.emoji} {removed.name}",
+            embed=Embed(
+                title=f"Aperçu brouillon — {len(fms)} formation(s)",
+                description=f"{preview or '_(vide)_'}",
+            ),
+            ephemeral=True,
+        )
+
+    @fm_group.command(name="edit", description="Modifier une formation existante (champs optionnels).")
+    @app_commands.describe(
+        index="Position de la FM dans l'aperçu trié (1..n)",
+        emoji="Nouvel émoji pour cette formation",
+        name="Nouveau nom de la formation",
+        trainer="Nouveau formateur ou nouvelle formatrice",
+        date="Nouvelle date au format YYYY-MM-DD",
+        hour="Nouvelle heure au format HH:MM (24h)",
+        duration="Nouvelle durée affichée",
+        seats="Nouveau nombre de places",
+        description="Nouvelle description",
+    )
+    async def fm_edit(
+        self,
+        interaction: Interaction,
+        index: app_commands.Range[int, 1, 1000],
+        emoji: str | None = None,
+        name: str | None = None,
+        trainer: Member | None = None,
+        date: str | None = None,
+        hour: str | None = None,
+        duration: str | None = None,
+        seats: app_commands.Range[int, 1, 500] | None = None,
+        description: str | None = None,
+    ) -> None:
+        """Edit a formation in the draft while keeping other entries untouched.
+
+        Args:
+            interaction (Interaction): The interaction context.
+            index (app_commands.Range[int, 1, 1000]): The index of the formation to edit (1-based).
+            emoji (str | None, optional): New emoji for the formation. Defaults to None.
+            name (str | None, optional): New name for the formation. Defaults to None.
+            trainer (Member | None, optional): New trainer for the formation. Defaults to None.
+            date (str | None, optional): New date for the formation. Defaults to None.
+            hour (str | None, optional): New hour for the formation. Defaults to None.
+            duration (str | None, optional): New duration for the formation. Defaults to None.
+            seats (app_commands.Range[int, 1, 500] | None, optional): New number of seats for the formation. Defaults to None.
+            description (str | None, optional): New description for the formation. Defaults to None.
+        """
+        log_request(
+            logger,
+            "fm.edit",
+            interaction,
+            index=index,
+            emoji=emoji,
+            name=name,
+            trainer=trainer,
+            date=date,
+            hour=hour,
+            duration=duration,
+            seats=seats,
+        )
+        if not await is_in_allowed_channel(logger, interaction):
+            return
+
+        assert interaction.guild is not None
+        draft: dict[str, Any] = self._get_guild_draft(interaction.guild.id)
+        fms: list[Formation] = [Formation(**x) for x in draft.get("fms", [])]
+        fms.sort(key=lambda x: x.start_dt)
+
+        if index > len(fms):
+            logger.warning(
+                f"Guild {interaction.guild.id} tried to edit out-of-bounds formation index {index}.",
+            )
+            await interaction.response.send_message(
+                f"Index hors limites (il y a {len(fms)} FM).",
+                ephemeral=True,
+            )
+            return
+
+        original = fms[index - 1]
+
+        new_emoji = original.emoji
+        if emoji is not None:
+            candidate = emoji.strip()
+            if not candidate:
+                logger.warning(f"Guild {interaction.guild.id} provided an empty emoji while editing a formation.")
+                await interaction.response.send_message("Émoji invalide.", ephemeral=True)
+                return
+            if any(i != index - 1 and fm.emoji == candidate for i, fm in enumerate(fms)):
+                logger.warning(f"Guild {interaction.guild.id} tried to reuse emoji {candidate} while editing formation.")
+                await interaction.response.send_message("Cet émoji est déjà utilisé par une autre formation.", ephemeral=True)
+                return
+            new_emoji = candidate
+
+        new_name = original.name if name is None else name.strip()
+        if new_name == "":
+            logger.warning(f"Guild {interaction.guild.id} provided an empty name while editing a formation.")
+            await interaction.response.send_message("Nom invalide.", ephemeral=True)
+            return
+
+        new_trainer = original.trainer_mention if trainer is None else trainer.mention
+        new_duration = original.duration if duration is None else duration.strip()
+        if new_duration == "":
+            logger.warning(f"Guild {interaction.guild.id} provided an empty duration while editing a formation.")
+            await interaction.response.send_message("Durée invalide.", ephemeral=True)
+            return
+
+        new_description = original.description if description is None else description.strip()
+        if new_description == "":
+            logger.warning(f"Guild {interaction.guild.id} provided an empty description while editing a formation.")
+            await interaction.response.send_message("Description invalide.", ephemeral=True)
+            return
+
+        new_seats = original.seats if seats is None else int(seats)
+        if new_seats <= 0:
+            logger.warning(f"Guild {interaction.guild.id} provided non-positive seats while editing a formation.")
+            await interaction.response.send_message("Nombre de places invalide.", ephemeral=True)
+            return
+
+        new_start_iso = original.start_iso
+        if date is not None or hour is not None:
+            date_part = date.strip() if date is not None else original.start_dt.strftime("%Y-%m-%d")
+            hour_part = hour.strip() if hour is not None else original.start_dt.strftime("%H:%M")
+            try:
+                new_start_iso = self._parse_date_time(date_part, hour_part).isoformat()
+            except Exception:
+                logger.warning(
+                    f"Guild {interaction.guild.id} provided invalid date/hour while editing formation: {date_part} {hour_part}.",
+                )
+                await interaction.response.send_message(
+                    "Date/heure invalides. Exemples: date `2025-09-15`, heure `18:08`.",
+                    ephemeral=True,
+                )
+                return
+
+        updated = Formation(
+            emoji=new_emoji,
+            name=new_name,
+            trainer_mention=new_trainer,
+            start_iso=new_start_iso,
+            duration=new_duration,
+            seats=new_seats,
+            description=new_description,
+        )
+
+        fms[index - 1] = updated
+        fms.sort(key=lambda x: x.start_dt)
+
+        draft["fms"] = [fm.to_dict() for fm in fms]
+        self._set_guild_draft(interaction.guild.id, draft)
+
+        preview = self._render_message(draft.get("intro", ""), fms, draft.get("end", ""))
+        new_position = fms.index(updated) + 1
+
+        logger.info(
+            f"Guild {interaction.guild.id} edited formation {original.name!r} -> {updated.name!r} (index {index} → {new_position}).",
+        )
+
+        await interaction.response.send_message(
+            f"Mise à jour: {updated.emoji} {updated.name} (position {new_position}).",
             embed=Embed(
                 title=f"Aperçu brouillon — {len(fms)} formation(s)",
                 description=f"{preview or '_(vide)_'}",
@@ -892,6 +1117,5 @@ async def setup(bot: commands.Bot) -> None:
 # TODO: dans fms avoir les inscrits et les en attentes ?
 # HACK: si inscription alors que plus de places, dm en mode on sait que t'es interessé mais il y a plus de places, tu es xème sur liste d'attente
 # HACK: allowed channel + log + response message
-# TODO: commandes de modification
 # TODO: dm les gens la veille de leurs formations à x heures / cmd
 # TODO: quand tu publish clean le draft, garder les logs des anciennes fms ? delete après x messages ? gérer tout ça
