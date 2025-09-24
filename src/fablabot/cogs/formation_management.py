@@ -572,15 +572,16 @@ class FormationManagement(commands.Cog):
         if not await is_in_allowed_channel(logger, interaction):
             return
 
+        await interaction.response.send_message("Génération du message en cours...")
         assert interaction.guild is not None
         draft = self._get_guild_draft(interaction.guild.id)
         fms = [Formation(**x) if isinstance(x, dict) else x for x in draft.get("fms", [])]
         fms.sort(key=lambda x: x.start_dt)
 
-        content = self._render_message(draft["intro"], fms, draft["end"], mention=False)
+        content = self._render_message(draft["intro"], fms, draft["end"])
         logger.info(f"Guild {interaction.guild.id} previewed the formations draft.")
-        await interaction.response.send_message(
-            f"{content or '_(vide)_'}",
+        await interaction.edit_original_response(
+            content=f"{content or '_(vide)_'}",
             embed=Embed(description="Utilise **/fm publish** pour le publier."),
         )
 
@@ -782,22 +783,19 @@ class FormationManagement(commands.Cog):
         time_part = dt.strftime("%Hh%M")
         return f"**{day_name} {date_part} à {time_part}**"
 
-    def _render_message(self, intro: str, fms: list[Formation], end: str, *, mention: bool = True) -> str:
+    def _render_message(self, intro: str, fms: list[Formation], end: str) -> str:
         """Render the message for the formations.
 
         Args:
             intro (str): The introduction text.
             fms (list[Formation]): The list of formations to include in the message.
             end (str): The ending text.
-            mention (bool): Whether to include mentions in the intro text.
 
         Returns:
             str: The rendered message.
         """
         lines: list[str] = []
         if intro.strip():
-            if not mention:
-                intro = intro.replace("@", "@\\")
             lines.append(intro.strip())
             lines.append("")
 
