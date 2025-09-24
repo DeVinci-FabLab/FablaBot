@@ -26,7 +26,7 @@ class Fablabot(commands.Bot):
         """Initialize the bot with the required intents."""
         super().__init__(
             command_prefix=commands.when_mentioned,
-            intents=Intents(guilds=True, members=True, voice_states=True, guild_messages=True),
+            intents=Intents(guilds=True, members=True, voice_states=True, guild_messages=True, reactions=True),
         )
         logger.info("Bot initialized")
 
