@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import csv
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 import io
 import json
@@ -47,6 +47,8 @@ class Formation:
         duration (str): Duration of the formation in text format.
         seats (int): Number of seats available for the formation.
         description (str): Brief description of the formation.
+        registered_users (list[dict[str, Any]]): Ordered list of registered users metadata.
+        waitlisted_users (list[dict[str, Any]]): Ordered list of waitlisted users metadata.
     """
 
     emoji: str
@@ -63,8 +65,16 @@ class Formation:
     """Number of seats available for the formation."""
     description: str
     """Brief description of the formation."""
-    register: int = 0
-    """Number of registered users for the formation."""
+    registered_users: list[dict[str, Any]] = field(default_factory=list)
+    """Registered users metadata (order preserved)."""
+    waitlisted_users: list[dict[str, Any]] = field(default_factory=list)
+    """Waitlisted users metadata (order preserved)."""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.registered_users, list):
+            self.registered_users = list(self.registered_users or [])
+        if not isinstance(self.waitlisted_users, list):
+            self.waitlisted_users = list(self.waitlisted_users or [])
 
     @property
     def start_dt(self) -> datetime:
@@ -803,7 +813,7 @@ class FormationManagement(commands.Cog):
             line_block = [
                 f"{fm.emoji} **{fm.name}** avec {fm.trainer_mention}",
                 f":date: {self._humanize_dt(fm.start_dt)}  — "
-                f":hourglass_flowing_sand: {fm.duration}  — :busts_in_silhouette: {fm.register}/{fm.seats} place(s)",
+                f":hourglass_flowing_sand: {fm.duration}  — :busts_in_silhouette: {len(fm.registered_users)}/{fm.seats} place(s)",
                 f"{fm.description}",
             ]
             lines.append("\n".join(line_block))
@@ -1013,18 +1023,51 @@ class FormationManagement(commands.Cog):
         draft = self._get_guild_draft(guild_id)
         fms = [Formation(**x) if isinstance(x, dict) else x for x in draft.get("fms", [])]
 
-        emoji_to_count: dict[str, int] = {}
+        history = self._get_reaction_history(guild_id, message_id)
+
+        last_add: dict[tuple[str, int], datetime] = {}
+        for event in history:
+            if event.get("action") != "add":
+                continue
+            emoji = str(event.get("emoji", ""))
+            user_id = event.get("user_id")
+            if not emoji or user_id is None:
+                continue
+            try:
+                ts = datetime.fromisoformat(event.get("ts_iso", ""))
+            except (TypeError, ValueError):
+                ts = datetime.min
+            key = (emoji, int(user_id))
+            if key not in last_add or ts > last_add[key]:
+                last_add[key] = ts
+
+        reactions_snapshot: dict[str, dict[int, str]] = {}
         for reaction in msg.reactions:
             emoji_str = str(reaction.emoji)
-            if emoji_str in emojis:
-                count = 0
-                async for user in reaction.users():
-                    if not user.bot:
-                        count += 1
-                emoji_to_count[emoji_str] = count
+            if emoji_str not in emojis:
+                continue
+            async for user in reaction.users():
+                if user.bot:
+                    continue
+                username = getattr(user, "name", None) or user.name
+                reactions_snapshot.setdefault(emoji_str, {})[user.id] = username
 
         for fm in fms:
-            fm.register = emoji_to_count.get(fm.emoji, 0)
+            current_users = reactions_snapshot.get(fm.emoji, {})
+            ordered_users = sorted(
+                ((uid, last_add.get((fm.emoji, uid), datetime.min), username) for uid, username in current_users.items()),
+                key=lambda item: (item[1], item[0]),
+            )
+            registered: list[dict[str, Any]] = []
+            waitlisted: list[dict[str, Any]] = []
+            for position, (uid, _, username) in enumerate(ordered_users):
+                entry = {"user_id": uid, "username": username}
+                if position < max(fm.seats, 0):
+                    registered.append(entry)
+                else:
+                    waitlisted.append(entry)
+            fm.registered_users = registered
+            fm.waitlisted_users = waitlisted
 
         draft["fms"] = [fm.to_dict() for fm in fms]
         self._set_guild_draft(guild_id, draft)
