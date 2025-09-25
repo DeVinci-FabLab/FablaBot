@@ -1,5 +1,6 @@
 # Environments variables
 *.env
+data/
 
 # Python
 __pycache__
