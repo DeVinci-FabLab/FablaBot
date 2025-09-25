@@ -26,11 +26,12 @@ from discord import (
 from discord.ext import commands
 from discord.utils import get
 
-from .utils import is_in_allowed_channel, log_request
+from .utils import check_has_role, is_in_allowed_channel, log_request
 
 logger = logging.getLogger(__name__)
 
 
+ALLOWED_ROLES = {"Respo Formations", "Admin -temp-", "Administrateur"}
 DATA_FILE = "data/formations_state.json"
 MAX_MSG_CHARS = 1900
 
@@ -157,6 +158,8 @@ class FormationManagement(commands.Cog):
         log_request(logger, "fm.start", interaction, intro=intro)
         if not await is_in_allowed_channel(logger, interaction):
             return
+        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+            return
 
         assert interaction.guild is not None
         assert isinstance(interaction.channel, TextChannel)
@@ -199,6 +202,8 @@ class FormationManagement(commands.Cog):
         """
         log_request(logger, "fm.edit_text", interaction, intro=intro, end=end)
         if not await is_in_allowed_channel(logger, interaction):
+            return
+        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
             return
 
         if intro is None and end is None:
@@ -295,6 +300,8 @@ class FormationManagement(commands.Cog):
         )
         if not await is_in_allowed_channel(logger, interaction):
             return
+        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+            return
 
         assert interaction.guild is not None
         draft = self._get_guild_draft(interaction.guild.id)
@@ -354,6 +361,8 @@ class FormationManagement(commands.Cog):
         """
         log_request(logger, "fm.remove", interaction, index=index)
         if not await is_in_allowed_channel(logger, interaction):
+            return
+        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
             return
 
         assert interaction.guild is not None
@@ -435,6 +444,8 @@ class FormationManagement(commands.Cog):
             seats=seats,
         )
         if not await is_in_allowed_channel(logger, interaction):
+            return
+        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
             return
 
         assert interaction.guild is not None
@@ -550,6 +561,8 @@ class FormationManagement(commands.Cog):
         log_request(logger, "fm.clear", interaction)
         if not await is_in_allowed_channel(logger, interaction):
             return
+        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+            return
 
         assert interaction.guild is not None
         draft: dict[str, Any] = self._get_guild_draft(interaction.guild.id)
@@ -581,6 +594,8 @@ class FormationManagement(commands.Cog):
         log_request(logger, "fm.preview", interaction)
         if not await is_in_allowed_channel(logger, interaction):
             return
+        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+            return
 
         await interaction.response.send_message("Génération du message en cours...")
         assert interaction.guild is not None
@@ -606,6 +621,8 @@ class FormationManagement(commands.Cog):
         """
         log_request(logger, "fm.publish", interaction, channel=channel)
         if not await is_in_allowed_channel(logger, interaction):
+            return
+        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
             return
 
         assert interaction.guild is not None
@@ -649,6 +666,8 @@ class FormationManagement(commands.Cog):
         """
         log_request(logger, "fm.export", interaction, message_id=message_id)
         if not await is_in_allowed_channel(logger, interaction):
+            return
+        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
             return
 
         assert interaction.guild is not None
@@ -1155,8 +1174,6 @@ async def setup(bot: commands.Bot) -> None:
 
 # TODO: formatage du message final, style, fin, etc.
 # TODO: meilleur export => indiquer nb de places, segmenter par inscrits et en attente
-# TODO: dans fms avoir les inscrits et les en attentes ?
-# HACK: si inscription alors que plus de places, dm en mode on sait que t'es interessé mais il y a plus de places, tu es xème sur liste d'attente
-# HACK: allowed channel + log + response message
+# HACK: si inscription alors que plus de places, dm en mode on sait que t'es interessé mais il y a plus de places, tu es xème sur liste d'attente. Ce message a été envoyé par un bot, pour plus d'information merci de contacter
 # TODO: dm les gens la veille de leurs formations à x heures / cmd
 # TODO: quand tu publish clean le draft, garder les logs des anciennes fms ? delete après x messages ? gérer tout ça

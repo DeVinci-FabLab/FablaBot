@@ -5,7 +5,7 @@ from __future__ import annotations
 from logging import Logger
 from typing import Any
 
-from discord import Interaction, TextChannel
+from discord import Interaction, Member, TextChannel
 from discord.utils import get
 
 COMMANDS_CHANNEL_NAME = "commandes_bot"
@@ -51,6 +51,38 @@ async def is_in_allowed_channel(logger: Logger, interaction: Interaction) -> boo
         )
         await interaction.response.send_message(
             f"Vous ne pouvez pas utiliser de commandes en dehors du salon {commands_channel.mention}.",
+            ephemeral=True,
+        )
+        return False
+    return True
+
+
+async def check_has_role(logger: Logger, interaction: Interaction, roles: set[str]) -> bool:
+    """Check if the interaction user has any of the specified roles.
+
+    Args:
+        logger (Logger): The logger of the cog.
+        interaction (Interaction): The interaction context.
+        roles (set[str]): The set of role names to check.
+
+    Returns:
+        bool: True if the user has any of the roles, False otherwise.
+    """
+    assert interaction.guild is not None
+    guild_roles = {role.name: role for role in interaction.guild.roles}
+    missing_roles = [role for role in roles if role not in guild_roles]
+    if missing_roles:
+        logger.warning(f"Missing roles {missing_roles} for guild {interaction.guild}")
+        await interaction.response.send_message(
+            f"Les rôles suivants ne sont pas configurés sur ce serveur : {', '.join(missing_roles)}."
+        )
+        return False
+    assert isinstance(interaction.user, Member)
+    member_role_names = {role.name for role in interaction.user.roles}
+    if not bool(member_role_names & roles):
+        logger.warning(f"User {interaction.user} doesn't have any of the roles {roles} in the guild {interaction.guild.id}")
+        await interaction.response.send_message(
+            f"Il est requis d'avoir au moins l'un des rôles suivants pour utiliser cette commande : {', '.join(roles)}.",
             ephemeral=True,
         )
         return False

@@ -465,6 +465,9 @@ async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(UserManagement(bot))
 
 
+# region ====== Bulk View ======
+
+
 class BulkRoleView(ui.View):
     """View for bulk role assignment/removal."""
 
@@ -656,3 +659,6 @@ class BulkDMView(ui.View):
         await interaction.response.edit_message(view=self)
 
         await interaction.edit_original_response(content="\n".join(lines), view=None)
+
+
+# endregion Bulk View
