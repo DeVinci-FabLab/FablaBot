@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 
-import discord
+from discord import Intents
 from discord.ext import commands
 from dotenv import load_dotenv
 
@@ -26,8 +26,7 @@ class Fablabot(commands.Bot):
         """Initialize the bot with the required intents."""
         super().__init__(
             command_prefix=commands.when_mentioned,
-            intents=discord.Intents.all(),
-            # TODO: only enable intents we use here and on the developer portal, this will make discord happy
+            intents=Intents(guilds=True, members=True, voice_states=True, guild_messages=True),
         )
         logger.info("Bot initialized")
 
