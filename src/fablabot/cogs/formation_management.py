@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import csv
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 import io
 import json
 import logging
@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 ALLOWED_ROLES = {"Respo Formations", "Admin -temp-", "Administrateur"}
 DATA_FILE = "data/formations_state.json"
 MAX_MSG_CHARS = 1900
+REACTION_LOG_RETENTION = timedelta(days=30)
 
 
 @dataclass
@@ -139,6 +140,7 @@ class FormationManagement(commands.Cog):
         }
         ```
         """
+        self._purge_all_reaction_logs()
         logger.info("FormationManagement initialized")
 
     # region ====== Fm Slash Group ======
@@ -964,6 +966,7 @@ class FormationManagement(commands.Cog):
             action (str): The action taken (e.g., "add" or "remove").
             user_name (str | None, optional): The name of the user. Defaults to None.
         """
+        self._purge_all_reaction_logs()
         guild_state = self._get_guild_state(guild_id)
         log = guild_state.get("reactions_log") or []
         normalized_action = action[9:].lower()
@@ -982,6 +985,42 @@ class FormationManagement(commands.Cog):
         )
         guild_state["reactions_log"] = log
         self._set_guild_state(guild_id, guild_state)
+
+    def _purge_all_reaction_logs(self) -> None:
+        """Apply retention to all guild reaction logs and persist changes."""
+        changed = False
+        for guild_state in self.state.values():
+            log = guild_state.get("reactions_log")
+            if not log:
+                continue
+            filtered = self._purge_reaction_log(list(log))
+            if len(filtered) != len(log):
+                guild_state["reactions_log"] = filtered
+                changed = True
+        if changed:
+            self._save_state(self.state)
+
+    @staticmethod
+    def _purge_reaction_log(log: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Remove reaction log entries older than the retention window.
+
+        Args:
+            log (list[dict[str, Any]]): The reaction log to purge.
+
+        Returns:
+            list[dict[str, Any]]: The filtered reaction log.
+        """
+        cutoff = datetime.now() - REACTION_LOG_RETENTION
+        filtered: list[dict[str, Any]] = []
+        for entry in log:
+            ts_iso = entry.get("ts_iso")
+            if not ts_iso:
+                filtered.append(entry)
+                continue
+            ts = datetime.fromisoformat(ts_iso)
+            if ts >= cutoff:
+                filtered.append(entry)
+        return filtered
 
     @staticmethod
     def _get_last_known_user_name(log: list[dict[str, Any]], message_id: int, user_id: int) -> str | None:
@@ -1185,4 +1224,3 @@ async def setup(bot: commands.Bot) -> None:
 
 # HACK: si inscription alors que plus de places, dm en mode on sait que t'es interessé mais il y a plus de places, tu es xème sur liste d'attente. Ce message a été envoyé par un bot, pour plus d'information merci de contacter [liste des membres (<@45321>) ayant le rôle Respo Formations séparés par "ou"]
 # TODO: dm les gens la veille de leurs formations à x heures / cmd
-# TODO: quand tu publish clean le draft, garder les logs des anciennes fms ? delete après x messages ? gérer tout ça. tous les mois ?
