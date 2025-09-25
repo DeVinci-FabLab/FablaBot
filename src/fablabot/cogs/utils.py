@@ -74,7 +74,8 @@ async def check_has_role(logger: Logger, interaction: Interaction, roles: set[st
     if missing_roles:
         logger.warning(f"Missing roles {missing_roles} for guild {interaction.guild}")
         await interaction.response.send_message(
-            f"Les rôles suivants ne sont pas configurés sur ce serveur : {', '.join(missing_roles)}."
+            f"Les rôles suivants ne sont pas configurés sur ce serveur : {', '.join(missing_roles)}.",
+            ephemeral=True,
         )
         return False
     assert isinstance(interaction.user, Member)

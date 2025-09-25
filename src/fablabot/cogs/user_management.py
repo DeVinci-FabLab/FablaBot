@@ -183,7 +183,7 @@ class UserManagement(commands.Cog):
 
         logger.info(f"Revoked temporary admin from {user}")
         await interaction.response.send_message("Retrait des droits admin en cours...")
-        await interaction.edit_original_response(content=f"Droits admin retirés de {user.mention}({user.name!r}) !")
+        await interaction.edit_original_response(content=f"Droits admin retirés de {user.mention}({user.name!r})")
 
     @user_group.command(name="add_role", description="Donne un rôle à un utilisateur.")
     @app_commands.describe(user="L'utilisateur cible", role="Le rôle à attribuer")

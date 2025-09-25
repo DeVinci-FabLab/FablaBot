@@ -124,11 +124,12 @@ class FormationManagement(commands.Cog):
         {
           "<guild_id>": {
               "draft": { "intro": str, "fms": [Formation as dict] },
-              "published": { "message_id": int, "channel_id": int, "emojis": [str] },
+              "published": { "message_id": int, "channel_id": int, "fm_by_emoji": { str: { "name": str, "seats": int } } },
               "reactions_log": [
                 {
                   "message_id": int,
                   "user_id": int,
+                  "user_name": str,
                   "emoji": str,
                   "action": "add"|"remove",
                   "ts_iso": str
@@ -637,22 +638,22 @@ class FormationManagement(commands.Cog):
 
         msg = await channel.send(content, suppress_embeds=True)
 
-        fm_emojis = []
+        fm_by_emoji = {}
         for fm in fms:
             try:
                 await msg.add_reaction(fm.emoji)
-                fm_emojis.append(fm.emoji)
+                fm_by_emoji[fm.emoji] = {"name": fm.name, "seats": fm.seats}
             except HTTPException:
                 pass
 
         self._set_last_published_in_guild(
             interaction.guild.id,
-            {"message_id": msg.id, "channel_id": channel.id, "emojis": fm_emojis},
+            {"message_id": msg.id, "channel_id": channel.id, "fm_by_emoji": fm_by_emoji},
         )
 
         logger.info(f"Guild {interaction.guild.id} published the formations draft in {channel}.")
         await interaction.response.send_message(
-            f"Message publié dans {channel.mention} (ID: `{msg.id}`) avec {len(fm_emojis)} réaction(s) ajoutée(s)."
+            f"Message publié dans {channel.mention} (ID: `{msg.id}`) avec {len(fm_by_emoji)} réaction(s) ajoutée(s)."
         )
 
     @fm_group.command(name="export", description="Exporter la liste des membres ayant (dé)réagi aux émojis des FMs.")
@@ -681,36 +682,34 @@ class FormationManagement(commands.Cog):
 
         target_message_id = int(message_id) if message_id else int(published["message_id"])  # type: ignore
         target_channel_id: int = published["channel_id"] if published else interaction.channel_id  # type: ignore
-        fm_emojis = set(published.get("emojis", []) if published else [])
+        fm_by_emoji = published.get("fm_by_emoji", {}) if published else {}
 
         channel = interaction.guild.get_channel(target_channel_id) or await interaction.guild.fetch_channel(target_channel_id)
         assert isinstance(channel, TextChannel)
         msg = await channel.fetch_message(target_message_id)
 
-        draft = self._get_guild_draft(interaction.guild.id)
-        fm_by_emoji = {fm["emoji"]: fm["name"] for fm in draft.get("fms", [])}
-
         history = self._get_reaction_history(interaction.guild.id, target_message_id)
 
         history_csv = io.StringIO()
         hist_writer = csv.writer(history_csv, lineterminator="\n")
-        hist_writer.writerow(["timestamp_iso", "action", "emoji", "formationuser_name", "user_id"])
+        hist_writer.writerow(["timestamp_iso", "action", "emoji", "formation_name", "user_name", "user_id", "formation_seats"])
         for ev in history:
             hist_writer.writerow(
                 [
                     ev.get("ts_iso", ""),
                     ev.get("action", ""),
                     ev.get("emoji", ""),
-                    fm_by_emoji.get(ev.get("emoji", ""), ""),
+                    fm_by_emoji.get(ev.get("emoji", ""), {}).get("name", ""),
                     ev.get("user_name", ""),
                     ev.get("user_id", ""),
+                    fm_by_emoji.get(ev.get("emoji", ""), {}).get("seats", ""),
                 ]
             )
 
         reactions_snapshot: dict[str, dict[int, dict[str, str]]] = {}
         for reaction in msg.reactions:
             emoji_str = str(reaction.emoji)
-            if fm_emojis and emoji_str not in fm_emojis:
+            if fm_by_emoji and emoji_str not in fm_by_emoji:
                 continue
 
             reactions_snapshot.setdefault(emoji_str, {})
@@ -758,7 +757,7 @@ class FormationManagement(commands.Cog):
             return
 
         emoji_str = str(payload.emoji)
-        fm_emojis = set(pub.get("emojis", []))
+        fm_emojis = set(pub.get("fm_by_emoji", {}).keys())
         if fm_emojis and emoji_str not in fm_emojis:
             return
 
@@ -1028,8 +1027,8 @@ class FormationManagement(commands.Cog):
         guild = self.bot.get_guild(guild_id)
         channel_id = pub.get("channel_id")
         message_id = pub.get("message_id")
-        emojis = pub.get("emojis", [])
-        if not guild or not channel_id or not message_id or not emojis:
+        fm_by_emoji = pub.get("fm_by_emoji", {})
+        if not guild or not channel_id or not message_id or not fm_by_emoji:
             return
         channel = guild.get_channel(channel_id)
         if not isinstance(channel, TextChannel):
@@ -1063,7 +1062,7 @@ class FormationManagement(commands.Cog):
         reactions_snapshot: dict[str, dict[int, str]] = {}
         for reaction in msg.reactions:
             emoji_str = str(reaction.emoji)
-            if emoji_str not in emojis:
+            if emoji_str not in fm_by_emoji:
                 continue
             async for user in reaction.users():
                 if user.bot:
@@ -1096,18 +1095,18 @@ class FormationManagement(commands.Cog):
         with contextlib.suppress(HTTPException):
             await msg.edit(content=content, suppress=True)
 
-    @staticmethod
     def _format_current_registrations(
+        self,
         history: list[dict[str, Any]],
         reactions_snapshot: dict[str, dict[int, dict[str, str]]],
-        fm_by_emoji: dict[str, str],
+        fm_meta: dict[str, dict[str, Any]],
     ) -> tuple[str, io.BytesIO | None]:
         """Format the current registrations for each formation.
 
         Args:
             history (list[dict[str, Any]]): The history of reactions.
             reactions_snapshot (dict[str, dict[int, dict[str, str]]]): The current reactions snapshot.
-            fm_by_emoji (dict[str, str]): The mapping of emojis to formation names.
+            fm_meta (dict[str, dict[str, Any]]): The mapping of emojis to formation metadata.
 
         Returns:
             tuple[str, io.BytesIO | None]: The formatted message and an optional file object.
@@ -1129,25 +1128,37 @@ class FormationManagement(commands.Cog):
         lines.append("**Inscriptions actuelles par formation (ordre d'inscription)**")
         lines.append("")
 
-        for emoji in sorted(reactions_snapshot.keys(), key=lambda e: fm_by_emoji.get(e, e)):
-            name = fm_by_emoji.get(emoji, "")
+        emojis = set(reactions_snapshot.keys()) | set(fm_meta.keys())
+        for emoji in emojis:
+            name = fm_meta.get(emoji, {}).get("name", "")
+            seats = fm_meta.get(emoji, {}).get("seats", 0)
             header = f"{emoji} **{name}**" if name else f"{emoji}"
+            header += f" ({seats} place{'s' if seats != 1 else ''})"
             lines.append(header)
 
             current_users = reactions_snapshot.get(emoji, {})
-            ordering: list[tuple[int, datetime, str]] = []
-            for uid, meta in current_users.items():
+            ordering: list[tuple[int, datetime]] = []
+            for uid, _meta in current_users.items():
                 ts = last_add.get((emoji, uid), datetime.min)
-                username = meta.get("username", "")
-                ordering.append((uid, ts, username))
-            ordering.sort(key=lambda t: t[1])
+                ordering.append((uid, ts))
+            ordering.sort(key=lambda item: (item[1], item[0]))
 
-            if not ordering:
-                lines.append("_(aucune inscription actuelle)_")
-            else:
-                for pos, (uid, ts, _) in enumerate(ordering, start=1):
-                    when = ts.isoformat() if ts != datetime.min else "n/a"
+            split_index = len(ordering) if seats is None else min(seats, len(ordering))
+            registered_entries = ordering[:split_index]
+            waitlisted_entries = ordering[split_index:]
+
+            if registered_entries:
+                for pos, (uid, ts) in enumerate(registered_entries, start=1):
+                    when = self._humanize_dt(ts).lower()[2:-2] if ts != datetime.min else "n/a"
                     lines.append(f"{pos}. <@{uid}> · inscrit·e le {when}")
+            else:
+                lines.append("_(aucune inscription)_")
+
+            if waitlisted_entries:
+                for pos, (uid, ts) in enumerate(waitlisted_entries, start=len(registered_entries) + 1):
+                    when = self._humanize_dt(ts).lower()[2:-2] if ts != datetime.min else "n/a"
+                    lines.append(f"{pos}. <@{uid}> · inscrit·e le {when} (en attente)")
+
             lines.append("")
 
         text = "\n".join(lines).strip()
@@ -1172,8 +1183,6 @@ async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(FormationManagement(bot))
 
 
-# TODO: formatage du message final, style, fin, etc.
-# TODO: meilleur export => indiquer nb de places, segmenter par inscrits et en attente
-# HACK: si inscription alors que plus de places, dm en mode on sait que t'es interessé mais il y a plus de places, tu es xème sur liste d'attente. Ce message a été envoyé par un bot, pour plus d'information merci de contacter
+# HACK: si inscription alors que plus de places, dm en mode on sait que t'es interessé mais il y a plus de places, tu es xème sur liste d'attente. Ce message a été envoyé par un bot, pour plus d'information merci de contacter [liste des membres (<@45321>) ayant le rôle Respo Formations séparés par "ou"]
 # TODO: dm les gens la veille de leurs formations à x heures / cmd
-# TODO: quand tu publish clean le draft, garder les logs des anciennes fms ? delete après x messages ? gérer tout ça
+# TODO: quand tu publish clean le draft, garder les logs des anciennes fms ? delete après x messages ? gérer tout ça. tous les mois ?
