@@ -1354,4 +1354,5 @@ async def setup(bot: commands.Bot) -> None:
 # TODO: prévenir des doubles émojis
 # FIXME: message de dm : 1ème
 # TODO: message c'est bon t'es pris
-# TODO: sécuriser les non émojis
+# TODO: sécuriser les str non émojis lors de l'ajout de formation dans fm_add
+# TODO: role id au départ à choisir (en fonction du serveur cf projets)
