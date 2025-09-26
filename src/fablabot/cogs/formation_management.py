@@ -26,6 +26,7 @@ from discord import (
 )
 from discord.ext import commands
 from discord.utils import get
+from emoji import emojize, is_emoji
 
 from .utils import check_has_role, is_in_allowed_channel, log_request
 
@@ -314,9 +315,19 @@ class FormationManagement(commands.Cog):
         assert interaction.guild is not None
         draft = self._get_guild_draft(interaction.guild.id)
 
-        if not emoji.strip():
-            logger.warning(f"Guild {interaction.guild.id} tried to add formation with empty emoji.")
+        emoji_clean = emoji.strip()
+
+        if not emoji_clean or not is_emoji(emojize(emoji_clean)):
+            logger.warning(f"Guild {interaction.guild.id} tried to add formation with invalid emoji: {emoji_clean!r}.")
             await interaction.response.send_message("Émoji invalide.", ephemeral=True)
+            return
+
+        fms: list[Formation] = [Formation(**x) for x in draft.get("fms", [])]
+        if any(existing.emoji == emoji_clean for existing in fms):
+            logger.warning(f"Guild {interaction.guild.id} tried to add formation with duplicate emoji {emoji_clean!r}.")
+            await interaction.response.send_message(
+                "Cet émoji est deja utilisé pour une autre formation dans ce brouillon.", ephemeral=True
+            )
             return
 
         try:
@@ -329,7 +340,7 @@ class FormationManagement(commands.Cog):
             return
 
         fm = Formation(
-            emoji=emoji.strip(),
+            emoji=emoji_clean,
             name=name.strip(),
             trainer_mention=trainer.mention,
             start_iso=start_dt.isoformat(),
@@ -338,14 +349,12 @@ class FormationManagement(commands.Cog):
             description=description.strip(),
         )
 
-        fms: list[Formation] = [Formation(**x) for x in draft.get("fms", [])]
         fms.append(fm)
         fms.sort(key=lambda x: x.start_dt)
 
         draft["fms"] = [x.to_dict() for x in fms]
         self._set_guild_draft(interaction.guild.id, draft)
 
-        fms = [Formation(**x) if isinstance(x, dict) else x for x in draft.get("fms", [])]
         preview = self._render_message(draft["intro"], fms, draft["end"])
         logger.info(f"Guild {interaction.guild.id} added formation {fm.name!r} ({fm.start_iso}) to draft.")
         await interaction.response.send_message(
@@ -1351,8 +1360,7 @@ async def setup(bot: commands.Bot) -> None:
 # TODO: Test history des anciens messages sans bug
 # TODO: securiser les .get("xx", yy) ou ["xx"] en fonction des cas
 # TODO: sécuriser des actions avec des try
-# TODO: prévenir des doubles émojis
 # FIXME: message de dm : 1ème
 # TODO: message c'est bon t'es pris
-# TODO: sécuriser les str non émojis lors de l'ajout de formation dans fm_add
 # TODO: role id au départ à choisir (en fonction du serveur cf projets)
+# TODO: add avec une date avec un format plus simple
