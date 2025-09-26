@@ -89,14 +89,16 @@ class UserManagement(commands.Cog):
         reason="Raison de l'attribution",
         time="Durée en minutes (par défaut 5)",
     )
-    async def user_op(self, interaction: Interaction, user: Member, reason: str, time: int = 5) -> None:
+    async def user_op(
+        self, interaction: Interaction, user: Member, reason: str, time: app_commands.Range[int, 1, 90] = 5
+    ) -> None:
         """Grant temporary admin privileges to a user.
 
         Args:
             interaction (Interaction): The interaction object.
             user (Member): The user to give privileges to.
             reason (str): The reason for granting privileges.
-            time (int, optional): The duration in minutes for which privileges are granted. Defaults to 5.
+            time (app_commands.Range[int, 1, 90], optional): The duration in minutes for which privileges are granted. Defaults to 5.
         """
         log_request(logger, "user.op", interaction, target=user, reason=reason, duration=time)
         if not await is_in_allowed_channel(logger, interaction):
