@@ -16,6 +16,7 @@ from warnings import deprecated
 from discord import (
     Embed,
     File,
+    Guild,
     HTTPException,
     Interaction,
     Member,
@@ -856,6 +857,55 @@ class FormationManagement(commands.Cog):
             lines.pop()
         return "\n".join(lines)
 
+    def _format_respo_contacts(self, guild: Guild) -> str:
+        """Build the contact string for formation managers.
+
+        Args:
+            guild (Guild): The guild to get the role from.
+
+        Returns:
+            str: The contact string.
+        """
+        role = get(guild.roles, name="Respo Formations")
+        if role is None:
+            return "un·e membre du Pôle Formations"
+        members = [member for member in role.members if not member.bot]
+        if not members:
+            return "un·e membre du Pôle Formations"
+        mentions = [member.mention for member in members]
+        return " ou ".join(mentions)
+
+    async def _send_waitlist_dm(
+        self,
+        guild: Guild,
+        user_id: int,
+        formation_name: str,
+        waitlist_position: int,
+        contacts: str,
+    ) -> None:
+        """Notify a user that they joined the waitlist for a formation.
+
+        Args:
+            guild (Guild): The guild where the user is located.
+            user_id (int): The ID of the user to notify.
+            formation_name (str): The name of the formation.
+            waitlist_position (int): The user's position on the waitlist.
+            contacts (str): The contact string for formation managers.
+        """
+        member = guild.get_member(user_id) or await guild.fetch_member(user_id)
+        if member.bot:
+            return
+
+        position_text = f"{waitlist_position}ème"
+        message = (
+            f"Salut {member.display_name} !\n"
+            f"On sait que tu es intéressé·e par **{formation_name}**, mais il n'y a plus de places disponibles.\n"
+            f"Tu es {position_text} dans la liste d'attente.\n\n"
+            f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
+        )
+        with contextlib.suppress(HTTPException):
+            await member.send(message)
+
     @staticmethod
     def _load_state() -> dict[str, dict[str, Any]]:
         """Load the state from the JSON file.
@@ -1109,7 +1159,11 @@ class FormationManagement(commands.Cog):
                 username = getattr(user, "name", None) or user.name
                 reactions_snapshot.setdefault(emoji_str, {})[user.id] = username
 
+        waitlist_notifications: list[tuple[int, str, int]] = []
+
         for fm in fms:
+            prev_registered_ids = {entry.get("user_id") for entry in fm.registered_users if entry.get("user_id") is not None}
+            prev_waitlisted_ids = {entry.get("user_id") for entry in fm.waitlisted_users if entry.get("user_id") is not None}
             current_users = reactions_snapshot.get(fm.emoji, {})
             ordered_users = sorted(
                 ((uid, last_add.get((fm.emoji, uid), datetime.min), username) for uid, username in current_users.items()),
@@ -1123,6 +1177,8 @@ class FormationManagement(commands.Cog):
                     registered.append(entry)
                 else:
                     waitlisted.append(entry)
+                    if uid not in prev_waitlisted_ids and uid not in prev_registered_ids:
+                        waitlist_notifications.append((uid, fm.name, len(waitlisted)))
             fm.registered_users = registered
             fm.waitlisted_users = waitlisted
 
@@ -1133,6 +1189,11 @@ class FormationManagement(commands.Cog):
 
         with contextlib.suppress(HTTPException):
             await msg.edit(content=content, suppress=True)
+
+        if waitlist_notifications:
+            contacts = self._format_respo_contacts(guild)
+            for user_id, fm_name, waitlist_index in waitlist_notifications:
+                await self._send_waitlist_dm(guild, user_id, fm_name, waitlist_index, contacts)
 
     def _format_current_registrations(
         self,
@@ -1222,5 +1283,4 @@ async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(FormationManagement(bot))
 
 
-# HACK: si inscription alors que plus de places, dm en mode on sait que t'es interessé mais il y a plus de places, tu es xème sur liste d'attente. Ce message a été envoyé par un bot, pour plus d'information merci de contacter [liste des membres (<@45321>) ayant le rôle Respo Formations séparés par "ou"]
 # TODO: dm les gens la veille de leurs formations à x heures / cmd
