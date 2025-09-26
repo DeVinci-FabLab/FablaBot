@@ -43,8 +43,16 @@ async def is_in_allowed_channel(logger: Logger, interaction: Interaction) -> boo
             ephemeral=True,
         )
         return False
+
     commands_channel = get(interaction.guild.channels, name=COMMANDS_CHANNEL_NAME)
-    assert isinstance(commands_channel, TextChannel)
+    if not isinstance(commands_channel, TextChannel):
+        logger.warning(f"Commands channel {COMMANDS_CHANNEL_NAME} not found in guild {interaction.guild.id}")
+        await interaction.response.send_message(
+            f"Le salon {COMMANDS_CHANNEL_NAME} n'est pas configuré sur ce serveur.",
+            ephemeral=True,
+        )
+        return False
+
     if interaction.channel != commands_channel:
         logger.warning(
             f"Attempt to use command in a different channel than {COMMANDS_CHANNEL_NAME}: {interaction.channel.name}"
@@ -77,14 +85,21 @@ async def check_has_role(logger: Logger, interaction: Interaction, roles: set[st
             f"Les rôles suivants ne sont pas configurés sur ce serveur : {', '.join(missing_roles)}.",
             ephemeral=True,
         )
-        return False
+
     assert isinstance(interaction.user, Member)
     member_role_names = {role.name for role in interaction.user.roles}
     if not bool(member_role_names & roles):
         logger.warning(f"User {interaction.user} doesn't have any of the roles {roles} in the guild {interaction.guild.id}")
-        await interaction.response.send_message(
-            f"Il est requis d'avoir au moins l'un des rôles suivants pour utiliser cette commande : {', '.join(roles)}.",
-            ephemeral=True,
-        )
+        msg = f"Il est requis d'avoir au moins l'un des rôles suivants pour utiliser cette commande : {', '.join(roles)}."
+        if interaction.response.is_done():
+            await interaction.followup.send(
+                msg,
+                ephemeral=True,
+            )
+        else:
+            await interaction.response.send_message(
+                msg,
+                ephemeral=True,
+            )
         return False
     return True
