@@ -16,7 +16,6 @@ from discord import (
     Embed,
     File,
     Guild,
-    HTTPException,
     Interaction,
     Member,
     RawReactionActionEvent,
@@ -245,7 +244,8 @@ class FormationManagement(commands.Cog):
         content = self._render_message(draft["intro"], fms, draft["end"])
 
         logger.info(
-            f"Guild {interaction.guild.id} updated draft intro/end (intro_changed={intro is not None}, end_changed={end is not None})."
+            f"Guild {interaction.guild} updated draft intro/end "
+            f"(intro_changed={intro is not None}, end_changed={end is not None})."
         )
 
         await interaction.response.send_message(
@@ -332,7 +332,7 @@ class FormationManagement(commands.Cog):
         try:
             start_dt = self._parse_date_time(date, hour)
         except Exception:
-            logger.warning(f"Guild {interaction.guild.id} tried to add formation with invalid date/hour: {date} {hour}.")
+            logger.exception(f"Guild {interaction.guild.id} tried to add formation with invalid date/hour: {date} {hour}.")
             await interaction.response.send_message(
                 "Date/heure invalides. Exemples: date `2025-09-15`, heure `18:08`.", ephemeral=True
             )
@@ -526,7 +526,7 @@ class FormationManagement(commands.Cog):
             try:
                 new_start_iso = self._parse_date_time(date_part, hour_part).isoformat()
             except Exception:
-                logger.warning(
+                logger.exception(
                     f"Guild {interaction.guild.id} provided invalid date/hour while editing formation: {date_part} {hour_part}.",
                 )
                 await interaction.response.send_message(
@@ -759,8 +759,8 @@ class FormationManagement(commands.Cog):
             )
             assert isinstance(channel, TextChannel)
             msg = await channel.fetch_message(target_message_id)
-        except HTTPException:
-            logger.error(
+        except Exception:
+            logger.exception(
                 f"Guild {interaction.guild.id} failed to fetch message {target_message_id} in channel {target_channel_id}."
             )
             await interaction.response.send_message(content="Impossible de récupérer le message cible.", ephemeral=True)
@@ -860,7 +860,9 @@ class FormationManagement(commands.Cog):
         """
         y, m, d = map(int, date_str.split("-"))
         hh, mm = map(int, hour_str.split(":"))
-        return datetime(y, m, d, hh, mm)
+        dt = datetime(y, m, d, hh, mm)
+        logger.debug(f"Parsed formation schedule {date_str} {hour_str} -> {dt.isoformat()}")
+        return dt
 
     @staticmethod
     def _humanize_dt(dt: datetime) -> str:
@@ -889,6 +891,7 @@ class FormationManagement(commands.Cog):
         Returns:
             str: The rendered message.
         """
+        logger.debug("Rendering formations message.")
         lines: list[str] = []
         if intro.strip():
             lines.append(intro.strip())
@@ -930,13 +933,17 @@ class FormationManagement(commands.Cog):
         Returns:
             str: The contact string.
         """
+        logger.debug(f"Resolving formation contacts for guild {guild.id}.")
         role = get(guild.roles, name="Respo Formations")
         if role is None:
+            logger.debug(f"Role 'Respo Formations' missing in guild {guild.id}; using fallback contacts.")
             return "un·e membre du Pôle Formations"
         members = [member for member in role.members if not member.bot]
         if not members:
+            logger.debug(f"Role 'Respo Formations' has no human members in guild {guild.id}; using fallback contacts.")
             return "un·e membre du Pôle Formations"
         mentions = [member.mention for member in members]
+        logger.debug(f"Resolved {len(mentions)} formation manager contacts for guild {guild.id}.")
         return " ou ".join(mentions)
 
     async def _send_waitlist_dm(
@@ -956,16 +963,18 @@ class FormationManagement(commands.Cog):
             waitlist_position (int): The user's position on the waitlist.
             contacts (str): The contact string for formation managers.
         """
+        logger.debug(
+            f"Preparing waitlist DM for guild {guild.id} user {user_id} formation {formation_name} position {waitlist_position}."
+        )
         try:
             member = guild.get_member(user_id) or await guild.fetch_member(user_id)
-        except Exception as exc:
-            logger.error(
-                f"Unexpected error while fetching member {user_id} in guild {guild.id}.",
-                exc_info=exc,
-            )
+        except Exception:
+            logger.exception(f"Unexpected error while fetching member {user_id} in guild {guild.id}.")
             return
         if member.bot:
             return
+
+        logger.debug(f"Resolved member {member.id} ({member.display_name}) for waitlist DM in guild {guild.id}.")
 
         position_text = f"{waitlist_position}ème"
         message = (
@@ -976,8 +985,12 @@ class FormationManagement(commands.Cog):
         )
         try:
             await member.send(message)
-        except Exception as exc:
-            logger.exception(f"Failed to send waitlist DM to user {user_id} in guild {guild.id}.", exc_info=exc)
+        except Exception:
+            logger.exception(f"Failed to send waitlist DM to user {user_id} in guild {guild.id}.")
+        else:
+            logger.info(
+                f"Sent waitlist DM to user {user_id} in guild {guild.id} for formation {formation_name} (position {waitlist_position})."
+            )
 
     @staticmethod
     def _load_state() -> dict[str, dict[str, Any]]:
@@ -988,9 +1001,18 @@ class FormationManagement(commands.Cog):
         """
         try:
             with open(DATA_FILE, encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
+                state = json.load(f)
+        except FileNotFoundError:
+            logger.debug(f"Formations state file {DATA_FILE} not found; starting with empty state.")
             return {}
+        except json.JSONDecodeError:
+            logger.exception(f"Failed to decode formations state from {DATA_FILE}.")
+            return {}
+        except Exception:
+            logger.exception(f"Unexpected error while loading formations state from {DATA_FILE}.")
+            return {}
+        logger.debug("Loaded formations state.")
+        return state
 
     @staticmethod
     def _save_state(state: dict[str, dict[str, Any]]) -> None:
@@ -1003,10 +1025,14 @@ class FormationManagement(commands.Cog):
             Path(Path(DATA_FILE).parent).mkdir(parents=True, exist_ok=True)
             with open(DATA_FILE, "w", encoding="utf-8") as f:
                 json.dump(state, f, ensure_ascii=False, indent=2)
-        except OSError as exc:
-            logger.exception(f"Failed to persist formations state to {DATA_FILE}", exc_info=exc)
-        except TypeError as exc:
-            logger.exception("Invalid data encountered while serializing formations state.", exc_info=exc)
+        except OSError:
+            logger.exception(f"Failed to persist formations state to {DATA_FILE}")
+        except TypeError:
+            logger.exception("Invalid data encountered while serializing formations state.")
+        except Exception:
+            logger.exception(f"Unexpected error while saving formations state to {DATA_FILE}.")
+        else:
+            logger.debug(f"Saved formations state to {DATA_FILE}.")
 
     def _get_guild_state(self, guild_id: int) -> dict[str, Any]:
         """Get state for a specific guild.
@@ -1019,6 +1045,7 @@ class FormationManagement(commands.Cog):
         """
         key = str(guild_id)
         if key not in self.state:
+            logger.debug(f"Initializing state container for guild {guild_id}.")
             self.state[key] = {}
         return self.state[key]
 
@@ -1043,6 +1070,7 @@ class FormationManagement(commands.Cog):
         """
         guild_state = self._get_guild_state(guild_id)
         if "draft" not in guild_state:
+            logger.debug(f"Initializing draft state for guild {guild_id}.")
             self._set_guild_state(guild_id, guild_state)
             guild_state["draft"] = {"intro": "", "fms": [], "end": ""}
         return guild_state["draft"]
@@ -1068,7 +1096,11 @@ class FormationManagement(commands.Cog):
             dict[str, Any] | None: The last published state of the guild, or None if not found.
         """
         guild_state = self._get_guild_state(guild_id)
-        return guild_state.get("published")
+        published = guild_state.get("published")
+        if not published:
+            logger.warning(f"No published formations data stored for guild {guild_id}.")
+            return None
+        return published
 
     def _set_last_published_in_guild(self, guild_id: int, published: dict[str, Any]) -> None:
         """Set the last published state for a specific guild.
@@ -1112,20 +1144,26 @@ class FormationManagement(commands.Cog):
             }
         )
         guild_state["reactions_log"] = log
+        logger.debug(
+            f"Logged {normalized_action} reaction for guild {guild_id} message {message_id} user {user_id} with emoji {emoji}."
+        )
         self._set_guild_state(guild_id, guild_state)
 
     def _purge_all_reaction_logs(self) -> None:
         """Apply retention to all guild reaction logs and persist changes."""
         changed = False
+        removed_total = 0
         for guild_state in self.state.values():
             log = guild_state.get("reactions_log")
             if not log:
                 continue
             filtered = self._purge_reaction_log(list(log))
             if len(filtered) != len(log):
+                removed_total += len(log) - len(filtered)
                 guild_state["reactions_log"] = filtered
                 changed = True
         if changed:
+            logger.debug(f"Purged {removed_total} reaction log entries across guilds.")
             self._save_state(self.state)
 
     @staticmethod
@@ -1147,7 +1185,7 @@ class FormationManagement(commands.Cog):
                 continue
             try:
                 ts = datetime.fromisoformat(ts_iso)
-            except (TypeError, ValueError):
+            except Exception:
                 filtered.append(entry)
                 continue
             if ts >= cutoff:
@@ -1184,6 +1222,7 @@ class FormationManagement(commands.Cog):
         guild_state = self._get_guild_state(guild_id)
         history = [event for event in guild_state.get("reactions_log", []) or [] if event.get("message_id") == message_id]
         history.sort(key=lambda ev: ev.get("ts_iso", ""))
+        logger.debug(f"Loaded {len(history)} reaction events for guild {guild_id} message {message_id}.")
         return history
 
     async def _update_published_message(self, guild_id: int) -> None:
@@ -1194,21 +1233,25 @@ class FormationManagement(commands.Cog):
         """
         pub = self._get_last_published_in_guild(guild_id)
         if not pub:
+            logger.debug(f"No published formations message recorded for guild {guild_id}; skipping update.")
             return
         guild = self.bot.get_guild(guild_id)
         channel_id = pub.get("channel_id")
         message_id = pub.get("message_id")
         if not guild or not channel_id or not message_id:
+            logger.warning(
+                f"Incomplete published formations state for guild {guild_id} (channel={channel_id}, message={message_id})."
+            )
             return
         channel = guild.get_channel(channel_id)
-        if not isinstance(channel, TextChannel):
-            return
+        assert isinstance(channel, TextChannel)
 
         try:
             msg = await channel.fetch_message(message_id)
-        except Exception as exc:
-            logger.exception(f"Failed to fetch message {message_id} in channel {channel_id}.", exc_info=exc)
+        except Exception:
+            logger.exception(f"Failed to fetch message {message_id} in channel {channel_id}.")
             return
+        logger.debug(f"Fetched published message {message_id} in channel {channel_id} for guild {guild_id}.")
 
         message_payload: dict[str, Any] = pub.get("message", {})
         intro = message_payload.get("intro")
@@ -1221,6 +1264,9 @@ class FormationManagement(commands.Cog):
         tracked_emojis = {fm.emoji for fm in fms if fm.emoji}
 
         if not intro or not end or not fms:
+            logger.warning(
+                f"Published formations payload incomplete for guild {guild_id}; intro={bool(intro)} end={bool(end)} formations={len(fms)}."
+            )
             return
 
         history = self._get_reaction_history(guild_id, message_id)
@@ -1286,13 +1332,18 @@ class FormationManagement(commands.Cog):
 
         try:
             await msg.edit(content=content, suppress=True)
-        except Exception as exc:
-            logger.exception(f"Failed to edit message {msg.id} in channel {msg.channel.id}.", exc_info=exc)
+        except Exception:
+            logger.exception(f"Failed to edit message {msg.id} in channel {msg.channel.id}.")
+        else:
+            logger.info(f"Updated published formations message {msg.id} in channel {channel_id} for guild {guild_id}.")
 
         if waitlist_notifications:
+            logger.info(f"Dispatching {len(waitlist_notifications)} waitlist notification(s) for guild {guild_id}.")
             contacts = self._format_respo_contacts(guild)
             for user_id, fm_name, waitlist_index in waitlist_notifications:
                 await self._send_waitlist_dm(guild, user_id, fm_name, waitlist_index, contacts)
+        else:
+            logger.debug(f"No new waitlist notifications for guild {guild_id}.")
 
     def _format_current_registrations(
         self,
@@ -1365,10 +1416,14 @@ class FormationManagement(commands.Cog):
 
         text = "\n".join(lines).strip()
 
+        text_length = len(text)
         file_obj: io.BytesIO | None = None
-        if len(text) > MAX_MSG_CHARS:
+        if text_length > MAX_MSG_CHARS:
             file_obj = io.BytesIO(text.encode("utf-8"))
+            logger.debug(f"Registrations export exceeded {MAX_MSG_CHARS} chars ({text_length}); switching to attachment.")
             text = "**Inscriptions actuelles par formation (extrait)**\nLe contenu complet est joint en fichier texte."
+        else:
+            logger.debug(f"Registrations export length: {text_length} characters.")
 
         return text, file_obj
 
