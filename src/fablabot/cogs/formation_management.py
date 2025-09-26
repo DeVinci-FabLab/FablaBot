@@ -674,13 +674,19 @@ class FormationManagement(commands.Cog):
         )
 
     @fm_group.command(name="export", description="Exporter la liste des membres ayant (dé)réagi aux émojis des FMs.")
-    @app_commands.describe(message_id="ID du message publié (optionnel si dernière publication)")
-    async def fm_export(self, interaction: Interaction, message_id: str | None = None) -> None:
+    @app_commands.describe(
+        message_id="ID du message publié (optionnel si dernière publication)",
+        publication_channel="Salon du message publié (optionnel si dernière publication)",
+    )
+    async def fm_export(
+        self, interaction: Interaction, message_id: str | None = None, publication_channel: TextChannel | None = None
+    ) -> None:
         """Export the list of members who reacted (added/removed) to the formation emojis.
 
         Args:
             interaction (Interaction): The interaction context.
             message_id (str | None, optional): The ID of the published message. Defaults to None.
+            publication_channel (TextChannel | None, optional): The channel of the published message. Defaults to None.
         """
         log_request(logger, "fm.export", interaction, message_id=message_id)
         if not await is_in_allowed_channel(logger, interaction):
@@ -690,13 +696,15 @@ class FormationManagement(commands.Cog):
 
         assert interaction.guild is not None
         published = self._get_last_published_in_guild(interaction.guild.id)
-        if not published and not message_id:
+        if not published and (not message_id or not publication_channel):
             logger.warning(f"Guild {interaction.guild.id} tried to export reactions without published message or ID.")
             await interaction.response.send_message("Aucun message publié enregistré et aucun ID fourni.", ephemeral=True)
             return
 
         target_message_id = int(message_id) if message_id else int(published["message_id"]) if published else None
-        target_channel_id = int(published["channel_id"]) if published else interaction.channel_id
+        target_channel_id = (
+            int(publication_channel.id) if publication_channel else int(published["channel_id"]) if published else None
+        )
         if not target_message_id or not target_channel_id:
             logger.error(f"Guild {interaction.guild.id} has inconsistent published message data: {published}")
             await interaction.response.send_message("Données de message publié incohérentes.")
@@ -709,10 +717,6 @@ class FormationManagement(commands.Cog):
         for fm in message_payload.get("fms", []):
             fm_by_emoji[fm.get("emoji")] = {"name": fm.get("name"), "seats": fm.get("seats")}
 
-        channel = interaction.guild.get_channel(target_channel_id) or await interaction.guild.fetch_channel(target_channel_id)
-        assert isinstance(channel, TextChannel)
-        msg = await channel.fetch_message(target_message_id)
-
         history = self._get_reaction_history(interaction.guild.id, target_message_id)
         history_csv = io.StringIO()
         hist_writer = csv.writer(history_csv, lineterminator="\n")
@@ -723,11 +727,26 @@ class FormationManagement(commands.Cog):
                     ev.get("ts_iso", ""),
                     ev.get("action", ""),
                     ev.get("emoji", ""),
-                    fm_by_emoji.get(ev.get("emoji", "")),
+                    fm_by_emoji.get(ev.get("emoji", ""), {}).get("name", ""),
                     ev.get("user_name", ""),
                     ev.get("user_id", ""),
                 ]
             )
+
+        if message_id or publication_channel:
+            await interaction.edit_original_response(
+                content="Export du message spécifié.",
+                attachments=[
+                    File(
+                        fp=io.BytesIO(history_csv.getvalue().encode(encoding="utf-8")), filename="formations_reactions_log.csv"
+                    ),
+                ],
+            )
+            return
+
+        channel = interaction.guild.get_channel(target_channel_id) or await interaction.guild.fetch_channel(target_channel_id)
+        assert isinstance(channel, TextChannel)
+        msg = await channel.fetch_message(target_message_id)
 
         reactions_snapshot: dict[str, dict[int, dict[str, str]]] = {}
         for reaction in msg.reactions:
@@ -1336,4 +1355,3 @@ async def setup(bot: commands.Bot) -> None:
 # FIXME: message de dm : 1ème
 # TODO: message c'est bon t'es pris
 # TODO: sécuriser les non émojis
-# FIXME: export avec anciens id : préciser channels d'envoi
