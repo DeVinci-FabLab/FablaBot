@@ -122,11 +122,11 @@ class UserManagement(commands.Cog):
         try:
             await user.add_roles(admin_role, reason=f"Add with op command by {interaction.user} for {reason}")
         except Forbidden:
-            logger.error(f"Forbidden to add role {admin_role} to {user}")
+            logger.exception(f"Forbidden to add role {admin_role} to {user}")
             await interaction.response.send_message("Impossible d'ajouter le rôle.", ephemeral=True)
             return
-        except HTTPException as e:
-            logger.error(f"Failed to add role {admin_role} to {user}: {e}")
+        except HTTPException:
+            logger.exception(f"Failed to add role {admin_role} to {user}")
             await interaction.response.send_message("Une erreur est survenue lors de l'ajout du rôle.", ephemeral=True)
             return
 
@@ -171,11 +171,11 @@ class UserManagement(commands.Cog):
         try:
             await user.remove_roles(admin_role, reason=f"Remove with op command by {interaction.user}")
         except Forbidden:
-            logger.error(f"Forbidden to remove role {admin_role} from {user}")
+            logger.exception(f"Forbidden to remove role {admin_role} from {user}")
             await interaction.response.send_message("Impossible de retirer le rôle.", ephemeral=True)
             return
-        except HTTPException as e:
-            logger.error(f"Failed to remove role {admin_role} from {user}: {e}")
+        except HTTPException:
+            logger.exception(f"Failed to remove role {admin_role} from {user}")
             await interaction.response.send_message("Une erreur est survenue lors du retrait du rôle.", ephemeral=True)
             return
 
@@ -210,11 +210,11 @@ class UserManagement(commands.Cog):
         try:
             await user.add_roles(role, reason=f"Add with add_role command by {interaction.user}")
         except Forbidden:
-            logger.error(f"Forbidden to add role {role} to {user}")
+            logger.exception(f"Forbidden to add role {role} to {user}")
             await interaction.response.send_message("Impossible d'ajouter le rôle.", ephemeral=True)
             return
-        except HTTPException as e:
-            logger.error(f"Failed to add role {role} to {user}: {e}")
+        except HTTPException:
+            logger.exception(f"Failed to add role {role} to {user}")
             await interaction.response.send_message("Une erreur est survenue lors de l'ajout du rôle.", ephemeral=True)
             return
 
@@ -247,11 +247,11 @@ class UserManagement(commands.Cog):
         try:
             await user.remove_roles(role, reason=f"Remove with remove_role command by {interaction.user}")
         except Forbidden:
-            logger.error(f"Forbidden to remove role {role} from {user}")
+            logger.exception(f"Forbidden to remove role {role} from {user}")
             await interaction.response.send_message("Impossible de retirer le rôle.", ephemeral=True)
             return
-        except HTTPException as e:
-            logger.error(f"Failed to remove role {role} from {user}: {e}")
+        except HTTPException:
+            logger.exception(f"Failed to remove role {role} from {user}")
             await interaction.response.send_message("Une erreur est survenue lors du retrait du rôle.", ephemeral=True)
             return
 
@@ -369,13 +369,13 @@ class UserManagement(commands.Cog):
                 try:
                     await user.remove_roles(admin_role, reason="Remove op after time")
                 except Forbidden:
-                    logger.error(f"Forbidden to remove admin role from {user}")
+                    logger.exception(f"Forbidden to remove admin role from {user}")
                     await interaction.followup.send(
                         f"{codir_role.mention} Je ne peux pas retirer le rôle admin de {user.mention}({user.name!r})."
                     )
                     return
-                except HTTPException as e:
-                    logger.error(f"HTTP error while removing admin role from {user}: {e}")
+                except HTTPException:
+                    logger.exception(f"HTTP error while removing admin role from {user}")
                     await interaction.followup.send(
                         f"{codir_role.mention} Erreur HTTP lors de la suppression du rôle admin de {user.mention}({user.name!r})."
                     )
@@ -385,7 +385,7 @@ class UserManagement(commands.Cog):
                 await interaction.followup.send(f"Droits admin retirés de {user.mention}({user.name!r}) après {time} minutes.")
             self.deop_tasks.pop(user.id, None)
         except asyncio.CancelledError:
-            logger.info(f"Deop timer cancelled for {user}")
+            logger.exception(f"Deop timer cancelled for {user}")
 
     @staticmethod
     def _can_assign_role(member: Member, target_role: Role) -> bool:
@@ -541,8 +541,8 @@ class BulkRoleView(ui.View):
                     modified.append(m)
                 except Forbidden:
                     failed.append(m)
-                except HTTPException as e:
-                    logger.error(f"HTTP error while adding {self.role} to {m}: {e}")
+                except HTTPException:
+                    logger.exception(f"HTTP error while adding {self.role} to {m}")
                     failed.append(m)
 
         elif self.action == "remove":
@@ -556,8 +556,8 @@ class BulkRoleView(ui.View):
                     modified.append(m)
                 except Forbidden:
                     failed.append(m)
-                except HTTPException as e:
-                    logger.error(f"HTTP error while removing {self.role} from {m}: {e}")
+                except HTTPException:
+                    logger.exception(f"HTTP error while removing {self.role} from {m}")
                     failed.append(m)
 
         logger.info(
@@ -642,7 +642,7 @@ class BulkDMView(ui.View):
             except Forbidden:
                 failed.append((member, "Forbidden"))
             except Exception as e:
-                logger.error(f"Failed to DM {member}: {e}")
+                logger.exception(f"Failed to DM {member}")
                 failed.append((member, f"Exception: {e}"))
 
         logger.info(f"Bulk DM by {self.sender} delivered to {delivered} with failures {failed}")

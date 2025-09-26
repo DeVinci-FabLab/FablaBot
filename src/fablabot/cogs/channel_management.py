@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import re
 from warnings import deprecated
@@ -14,6 +13,7 @@ from discord import (
     DMChannel,
     ForumChannel,
     GroupChannel,
+    HTTPException,
     Interaction,
     Member,
     Message,
@@ -117,9 +117,17 @@ class ChannelManagement(commands.Cog):
             )
             return
         await interaction.response.send_message("Nettoyage en cours...", ephemeral=True)
-        deleted = await interaction.channel.purge(limit=messages, reason=f"With clear command by {interaction.user}")
+        try:
+            deleted = await interaction.channel.purge(
+                limit=messages,
+                reason=f"With clear command by {interaction.user}",
+            )
+        except HTTPException:
+            logger.exception(f"HTTP error while purging {messages} messages in {interaction.channel}")
+            await interaction.edit_original_response(content="Erreur lors du nettoyage de ce salon.")
+            return
         logger.info(f"Deleted {len(deleted)} messages in channel {interaction.channel.name}")
-        await interaction.followup.send(f"{len(deleted)} messages supprimés avec succès !", ephemeral=True)
+        await interaction.edit_original_response(content=f"{len(deleted)} messages supprimés avec succès !")
 
     @text_group.command(name="create", description="Crée un nouveau salon dans la catégorie spécifiée.")
     @app_commands.describe(
@@ -153,7 +161,15 @@ class ChannelManagement(commands.Cog):
                 ephemeral=True,
             )
             return
-        new_channel = await category.create_text_channel(channel, reason=f"With create command by {interaction.user}")
+        try:
+            new_channel = await category.create_text_channel(
+                channel,
+                reason=f"With create command by {interaction.user}",
+            )
+        except HTTPException:
+            logger.exception(f"HTTP error while creating text channel {channel} in {category}")
+            await interaction.response.send_message("Erreur lors de la création du salon textuel.", ephemeral=True)
+            return
         logger.info(f"Created text channel {new_channel!r} in category {category!r}")
         await interaction.response.send_message(
             f"Le salon textuel {new_channel.mention}({new_channel.name!r}) a été créé dans {category.mention}({category.name!r})."
@@ -182,7 +198,12 @@ class ChannelManagement(commands.Cog):
             )
             return
         old_name = channel.name
-        await channel.edit(name=new_name, reason=f"With rename command by {interaction.user}")
+        try:
+            await channel.edit(name=new_name, reason=f"With rename command by {interaction.user}")
+        except HTTPException:
+            logger.exception(f"HTTP error while renaming text channel {channel} to {new_name}")
+            await interaction.response.send_message("Erreur lors du renommage du salon textuel.", ephemeral=True)
+            return
         logger.info(f"Renamed channel {channel} from {old_name!r} to {new_name!r}")
         await interaction.response.send_message(
             f"Le salon textuel {channel.mention}, anciennement {old_name!r}, a été renommé en {new_name!r}."
@@ -209,7 +230,12 @@ class ChannelManagement(commands.Cog):
                 ephemeral=True,
             )
             return
-        await channel.delete(reason=f"With delete command by {interaction.user}")
+        try:
+            await channel.delete(reason=f"With delete command by {interaction.user}")
+        except HTTPException:
+            logger.exception(f"HTTP error while deleting text channel {channel}")
+            await interaction.response.send_message("Erreur lors de la suppression du salon textuel.", ephemeral=True)
+            return
         logger.info(f"Deleted text channel {channel.name!r}")
         await interaction.response.send_message(f"Le salon textuel {channel.name!r} a été supprimé.")
 
@@ -258,7 +284,8 @@ class ChannelManagement(commands.Cog):
             name (str): The name of the voice channel to create.
             category (CategoryChannel): The category in which to create the voice channel.
             is_temporary (bool, optional): Whether the channel is temporary. Defaults to True.
-            max_user (app_commands.Range[int, 1, 99] | None, optional): The maximum number of users allowed in the channel. Defaults to None.
+            max_user (app_commands.Range[int, 1, 99] | None, optional):
+                The maximum number of users allowed in the channel. Defaults to None.
         """
         log_request(
             logger,
@@ -289,11 +316,16 @@ class ChannelManagement(commands.Cog):
                 ephemeral=True,
             )
             return
-        new_channel = await category.create_voice_channel(
-            channel_name,
-            user_limit=max_user,
-            reason=f"With create command by {interaction.user}",
-        )
+        try:
+            new_channel = await category.create_voice_channel(
+                channel_name,
+                user_limit=max_user,
+                reason=f"With create command by {interaction.user}",
+            )
+        except HTTPException:
+            logger.exception(f"HTTP error while creating voice channel {channel_name} in {category}")
+            await interaction.response.send_message("Erreur lors de la création du salon vocal.", ephemeral=True)
+            return
         logger.info(f"Created voice channel {new_channel!r} in category {category.name!r}")
         channel_creation_message = (
             f"Le salon vocal {'temporaire' if is_temporary else 'permanent'} {new_channel.mention}({new_channel.name!r}) "
@@ -338,14 +370,22 @@ class ChannelManagement(commands.Cog):
             new_name += EPHEMERAL_SUFFIX
         if old_name.endswith(DYNAMIC_SUFFIX) and not new_name.endswith(DYNAMIC_SUFFIX):
             new_name += DYNAMIC_SUFFIX
-        await channel.edit(name=new_name, reason=f"With rename command by {interaction.user}")
+        try:
+            await channel.edit(name=new_name, reason=f"With rename command by {interaction.user}")
+        except HTTPException:
+            logger.exception(f"HTTP error while renaming voice channel {channel} to {new_name}")
+            await interaction.response.send_message("Erreur lors du renommage du salon vocal.", ephemeral=True)
+            return
         logger.info(f"Renamed voice channel {channel} from {old_name!r} to {new_name!r}")
         for vc in channel.category.voice_channels:
             if vc.name.startswith(f"{old_name}{INDEX_SEPARATOR}"):
                 suffix = vc.name[len(old_name) :]
                 new_vc_name = f"{new_name}{suffix}"
-                await vc.edit(name=new_vc_name)
-                logger.info(f"Renamed associated dynamic channel {vc} from {old_name + suffix!r} to {new_vc_name!r}")
+                try:
+                    await vc.edit(name=new_vc_name)
+                    logger.info(f"Renamed associated dynamic channel {vc} from {old_name + suffix!r} to {new_vc_name!r}")
+                except HTTPException:
+                    logger.exception(f"HTTP error while renaming associated channel {vc} to {new_vc_name}")
         await interaction.response.send_message(
             f"Le salon vocal {channel.mention}, anciennement {old_name!r}, a été renommé en {new_name!r}."
         )
@@ -375,7 +415,12 @@ class ChannelManagement(commands.Cog):
             logger.warning(f"Attempt to delete non-empty voice channel: {channel}")
             await interaction.response.send_message(f"Le salon vocal {channel.mention} n'est pas vide.", ephemeral=True)
             return
-        await channel.delete(reason=f"With delete command by {interaction.user}")
+        try:
+            await channel.delete(reason=f"With delete command by {interaction.user}")
+        except HTTPException:
+            logger.exception(f"HTTP error while deleting voice channel {channel}")
+            await interaction.response.send_message("Erreur lors de la suppression du salon vocal.", ephemeral=True)
+            return
         logger.info(f"Deleted voice channel {channel.name!r}")
         await interaction.response.send_message(f"Le salon vocal {channel.name!r} a été supprimé.")
 
@@ -400,16 +445,27 @@ class ChannelManagement(commands.Cog):
         codir_role = get(message.guild.roles, name="CoDir")
         if codir_role is None:
             logger.error("Required role CoDir not found.")
-            await message.channel.send("Rôle CoDir manquant sur le serveur.")
+            try:
+                await message.channel.send("Rôle CoDir manquant sur le serveur.")
+            except HTTPException:
+                logger.exception("HTTP error while notifying missing CoDir role")
             codir_mention = ""
         else:
             codir_mention = codir_role.mention + " "
 
-        async for entry in message.guild.audit_logs(limit=1, action=AuditLogAction.message_delete):
-            deleter = entry.user
-            assert isinstance(deleter, Member)
-            logger.warning(f"Message deleted in channel {message.channel.name!r} by {deleter.name!r} : {message.content}")
-            await message.channel.send(f"{codir_mention}Un message a été supprimé par {deleter.mention} :\n> {message.content}")
+        try:
+            async for entry in message.guild.audit_logs(limit=1, action=AuditLogAction.message_delete):
+                deleter = entry.user
+                assert isinstance(deleter, Member)
+                logger.warning(f"Message deleted in channel {message.channel.name!r} by {deleter.name!r} : {message.content}")
+                try:
+                    await message.channel.send(
+                        f"{codir_mention}Un message a été supprimé par {deleter.mention} :\n> {message.content}"
+                    )
+                except HTTPException:
+                    logger.exception("HTTP error while notifying message deletion")
+        except HTTPException:
+            logger.exception("Unable to read audit logs for message deletion")
 
     @commands.Cog.listener()
     async def on_raw_message_delete(self, payload: RawMessageDeleteEvent) -> None:
@@ -435,21 +491,30 @@ class ChannelManagement(commands.Cog):
         codir_role = get(guild.roles, name="CoDir")
         if codir_role is None:
             logger.error("Required role CoDir not found.")
-            await channel.send("Rôle CoDir manquant sur le serveur.")
+            try:
+                await channel.send("Rôle CoDir manquant sur le serveur.")
+            except HTTPException:
+                logger.exception("HTTP error while notifying missing CoDir role")
             codir_mention = ""
         else:
             codir_mention = codir_role.mention + " "
 
-        async for entry in guild.audit_logs(limit=1, action=AuditLogAction.message_delete):
-            deleter = entry.user
-            assert isinstance(deleter, Member)
-            logger.warning(
-                f"Message with ID {payload.message_id} not found in channel {channel.name}. Deleted by {deleter.name!r}."
-            )
-            await channel.send(
-                f"{codir_mention}Un message irrécupérable a été supprimé par {deleter.mention}."
-                f"\nID du message : {payload.message_id}."
-            )
+        try:
+            async for entry in guild.audit_logs(limit=1, action=AuditLogAction.message_delete):
+                deleter = entry.user
+                assert isinstance(deleter, Member)
+                logger.warning(
+                    f"Message with ID {payload.message_id} not found in channel {channel.name}. Deleted by {deleter.name!r}."
+                )
+                try:
+                    await channel.send(
+                        f"{codir_mention}Un message irrécupérable a été supprimé par {deleter.mention}."
+                        f"\nID du message : {payload.message_id}."
+                    )
+                except HTTPException:
+                    logger.exception("HTTP error while notifying message deletion")
+        except HTTPException:
+            logger.exception("Unable to inspect audit logs for raw deletion")
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: Member, before: VoiceState, after: VoiceState) -> None:
@@ -500,15 +565,18 @@ class ChannelManagement(commands.Cog):
             for idx in range(1, len(channels) + 1):
                 if f"{base_channel.name}{INDEX_SEPARATOR}{idx}" not in (c.name for c in channels):
                     new_name = f"{base_channel.name}{INDEX_SEPARATOR}{idx}"
-                    await category.create_voice_channel(
-                        new_name,
-                        bitrate=base_channel.bitrate,
-                        user_limit=base_channel.user_limit,
-                        rtc_region=base_channel.rtc_region,
-                        video_quality_mode=base_channel.video_quality_mode,
-                        overwrites=base_channel.overwrites,
-                    )
-                    logger.info(f"Created additional voice channel {new_name!r}")
+                    try:
+                        await category.create_voice_channel(
+                            new_name,
+                            bitrate=base_channel.bitrate,
+                            user_limit=base_channel.user_limit,
+                            rtc_region=base_channel.rtc_region,
+                            video_quality_mode=base_channel.video_quality_mode,
+                            overwrites=base_channel.overwrites,
+                        )
+                        logger.info(f"Created additional voice channel {new_name!r}")
+                    except HTTPException:
+                        logger.exception(f"HTTP error while auto-creating dynamic channel {new_name!r} in {category!r}")
                     break
 
     async def _delayed_delete(self, channel: VoiceChannel, timeout: int) -> None:
@@ -521,9 +589,11 @@ class ChannelManagement(commands.Cog):
         logger.debug(f"_delayed_delete: channel={channel} timeout={timeout}")
         await asyncio.sleep(timeout)
         if not channel.members:
-            with contextlib.suppress(Exception):
+            try:
                 await channel.delete()
                 logger.info(f"Deleted empty voice channel {channel.name!r} after timeout")
+            except HTTPException:
+                logger.exception(f"HTTP error while deleting voice channel {channel}")
 
     # endregion Helpers
 
