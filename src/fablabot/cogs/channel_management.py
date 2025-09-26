@@ -89,12 +89,12 @@ class ChannelManagement(commands.Cog):
 
     @text_group.command(name="clear", description="Nettoie le salon actuel de ses derniers messages.")
     @app_commands.describe(messages="Le nombre de messages à supprimer (par défaut 5)")
-    async def text_clear(self, interaction: Interaction, messages: int = 5) -> None:
+    async def text_clear(self, interaction: Interaction, messages: app_commands.Range[int, 1, 50] = 5) -> None:
         """Clears the current channel of its last messages.
 
         Args:
             interaction (Interaction): The interaction that triggered the command.
-            messages (int, optional): The number of messages to purge. Defaults to 5.
+            messages (app_commands.Range[int, 1, 50], optional): The number of messages to purge. Defaults to 5.
         """
         log_request(logger, "text.clear", interaction, messages=messages)
         assert not isinstance(
@@ -114,12 +114,6 @@ class ChannelManagement(commands.Cog):
                 f"Vous ne pouvez pas nettoyer le salon {interaction.channel.mention}."
                 f" Veuillez contacter le pôle numérique si nécessaire.",
                 ephemeral=True,
-            )
-            return
-        if messages < 1 or messages > 50:
-            logger.warning(f"Attempt to clear an invalid number of messages: {messages}")
-            await interaction.response.send_message(
-                "Vous ne pouvez pas supprimer moins de 1 message ou plus de 50 messages.", ephemeral=True
             )
             return
         await interaction.response.send_message("Nettoyage en cours...", ephemeral=True)
@@ -255,7 +249,7 @@ class ChannelManagement(commands.Cog):
         name: str,
         category: CategoryChannel,
         is_temporary: bool = True,
-        max_user: int | None = None,
+        max_user: app_commands.Range[int, 1, 99] | None = None,
     ) -> None:
         """Create a custom voice channel in the passed category.
 
@@ -264,7 +258,7 @@ class ChannelManagement(commands.Cog):
             name (str): The name of the voice channel to create.
             category (CategoryChannel): The category in which to create the voice channel.
             is_temporary (bool, optional): Whether the channel is temporary. Defaults to True.
-            max_user (int | None, optional): The maximum number of users allowed in the channel. Defaults to None.
+            max_user (app_commands.Range[int, 1, 99] | None, optional): The maximum number of users allowed in the channel. Defaults to None.
         """
         log_request(
             logger,
