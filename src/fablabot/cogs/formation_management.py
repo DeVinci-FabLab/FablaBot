@@ -35,6 +35,7 @@ ALLOWED_ROLES = {"Respo Formations", "Admin -temp-", "Administrateur"}
 DATA_FILE = "data/formations_state.json"
 MAX_MSG_CHARS = 1900
 REACTION_LOG_RETENTION = timedelta(days=30)
+FM_REQUEST_FORMS = "https://forms.office.com/e/MqVdQujzjf"
 
 
 @dataclass
@@ -67,16 +68,10 @@ class Formation:
     """Number of seats available for the formation."""
     description: str
     """Brief description of the formation."""
-    registered_users: list[dict[str, Any]] = field(default_factory=list)
+    registered_users: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
     """Registered users metadata (order preserved)."""
-    waitlisted_users: list[dict[str, Any]] = field(default_factory=list)
+    waitlisted_users: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
     """Waitlisted users metadata (order preserved)."""
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.registered_users, list):
-            self.registered_users = list(self.registered_users or [])
-        if not isinstance(self.waitlisted_users, list):
-            self.waitlisted_users = list(self.waitlisted_users or [])
 
     @property
     def start_dt(self) -> datetime:
@@ -495,29 +490,25 @@ class FormationManagement(commands.Cog):
             new_emoji = candidate
 
         new_name = original.name if name is None else name.strip()
-        if new_name == "":
+        if not new_name:
             logger.warning(f"Guild {interaction.guild.id} provided an empty name while editing a formation.")
             await interaction.response.send_message("Nom invalide.", ephemeral=True)
             return
 
         new_trainer = original.trainer_mention if trainer is None else trainer.mention
         new_duration = original.duration if duration is None else duration.strip()
-        if new_duration == "":
+        if not new_duration:
             logger.warning(f"Guild {interaction.guild.id} provided an empty duration while editing a formation.")
             await interaction.response.send_message("Durée invalide.", ephemeral=True)
             return
 
         new_description = original.description if description is None else description.strip()
-        if new_description == "":
+        if not new_description:
             logger.warning(f"Guild {interaction.guild.id} provided an empty description while editing a formation.")
             await interaction.response.send_message("Description invalide.", ephemeral=True)
             return
 
-        new_seats = original.seats if seats is None else int(seats)
-        if new_seats <= 0:
-            logger.warning(f"Guild {interaction.guild.id} provided non-positive seats while editing a formation.")
-            await interaction.response.send_message("Nombre de places invalide.", ephemeral=True)
-            return
+        new_seats = original.seats if seats is None else seats
 
         new_start_iso = original.start_iso
         if date is not None or hour is not None:
@@ -911,7 +902,7 @@ class FormationManagement(commands.Cog):
             ":arrow_right: Pour s'inscrire, réagis avec les émojis des formations correspondantes.",
             ":warning: Si tu ne peux plus venir, n'oublie pas de retirer ta réaction pour libérer la place.",
             "",
-            "Tu veux apprendre autre chose ? [**Propose une formation ici**](https://forms.office.com/e/MqVdQujzjf)",
+            f"Tu veux apprendre autre chose ? [**Propose une formation ici**]({FM_REQUEST_FORMS})",
         ]
         lines.append("\n".join(end_lines))
         lines.append("")
@@ -946,6 +937,88 @@ class FormationManagement(commands.Cog):
         logger.debug(f"Resolved {len(mentions)} formation manager contacts for guild {guild.id}.")
         return " ou ".join(mentions)
 
+    async def _send_registration_dm(
+        self,
+        guild: Guild,
+        user_id: int,
+        formation: Formation,
+        contacts: str,
+    ) -> None:
+        """Notify a user that they got a seat in a formation.
+
+        Args:
+            guild (Guild): The guild where the user is located.
+            user_id (int): The ID of the user to notify.
+            formation (Formation): The formation.
+            contacts (str): The contact string for formation managers.
+        """
+        logger.debug(f"Preparing registration DM for guild {guild.id} user {user_id} formation {formation.name}.")
+        try:
+            member = guild.get_member(user_id) or await guild.fetch_member(user_id)
+        except Exception:
+            logger.exception(f"Unexpected error while fetching member {user_id} in guild {guild.id}.")
+            return
+        if member.bot:
+            return
+
+        logger.debug(f"Resolved member {member.id} ({member.display_name}) for registration DM in guild {guild.id}.")
+
+        datetime_text = self._humanize_dt(datetime.fromisoformat(formation.start_iso)).lower()[2:-2]
+
+        message = (
+            f"Salut {member.display_name} !\n"
+            f"Bonne nouvelle ! Ta réaction a bien été prise en compte. Tu es inscrit·e pour la formation **{formation.name}** le {datetime_text}.\n"
+            "Si tu ne peux finalement pas participer, retire ta réaction pour libérer la place.\n\n"
+            f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
+        )
+        try:
+            await member.send(message)
+        except Exception:
+            logger.exception(f"Failed to send registration DM to user {user_id} in guild {guild.id}.")
+        else:
+            logger.info(f"Sent registration DM to user {user_id} in guild {guild.id} for formation {formation.name}.")
+
+    async def _send_promotion_dm(
+        self,
+        guild: Guild,
+        user_id: int,
+        formation: Formation,
+        contacts: str,
+    ) -> None:
+        """Notify a user that they were promoted from the waitlist.
+
+        Args:
+            guild (Guild): The guild where the user is located.
+            user_id (int): The ID of the user to notify.
+            formation (Formation): The formation.
+            contacts (str): The contact string for formation managers.
+        """
+        logger.debug(f"Preparing waitlist promotion DM for guild {guild.id} user {user_id} formation {formation.name}.")
+        try:
+            member = guild.get_member(user_id) or await guild.fetch_member(user_id)
+        except Exception:
+            logger.exception(f"Unexpected error while fetching member {user_id} in guild {guild.id}.")
+            return
+        if member.bot:
+            return
+
+        logger.debug(f"Resolved member {member.id} ({member.display_name}) for waitlist promotion DM in guild {guild.id}.")
+
+        datetime_text = self._humanize_dt(datetime.fromisoformat(formation.start_iso)).lower()[2:-2]
+
+        message = (
+            f"Salut {member.display_name} !\n"
+            f"Bonne nouvelle ! Ta patience a payé, tu quittes la liste d'attente et tu as une place pour la formation **{formation.name}** le {datetime_text}.\n"
+            "Si tu ne peux finalement pas venir, retire ta réaction pour permettre à quelqu'un d'autre de s'inscrire.\n\n"
+            f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
+        )
+        try:
+            await member.send(message)
+        except Exception:
+            logger.exception(f"Failed to send waitlist promotion DM to user {user_id} in guild {guild.id}.")
+        else:
+            logger.info(f"Sent waitlist promotion DM to user {user_id} in guild {guild.id} for formation {formation.name}.")
+
     async def _send_waitlist_dm(
         self,
         guild: Guild,
@@ -976,11 +1049,11 @@ class FormationManagement(commands.Cog):
 
         logger.debug(f"Resolved member {member.id} ({member.display_name}) for waitlist DM in guild {guild.id}.")
 
-        position_text = f"{waitlist_position}ème"
+        position_text = f"en {waitlist_position}{'ème' if waitlist_position > 1 else 'ère'} position"
         message = (
             f"Salut {member.display_name} !\n"
             f"On sait que tu es intéressé·e par **{formation_name}**, mais il n'y a plus de places disponibles.\n"
-            f"Tu es {position_text} dans la liste d'attente.\n\n"
+            f"Tu es {position_text} dans la liste d'attente. On te tiendra informé·e si suffisamment de places se libèrent.\n\n"
             f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
         )
         try:
@@ -1298,6 +1371,8 @@ class FormationManagement(commands.Cog):
                 reactions_snapshot.setdefault(emoji_str, {})[user.id] = user.name
 
         waitlist_notifications: list[tuple[int, str, int]] = []
+        promotion_notifications: list[tuple[int, Formation]] = []
+        registration_notifications: list[tuple[int, Formation]] = []
 
         for fm in fms:
             prev_registered_ids = {entry.get("user_id") for entry in fm.registered_users if entry.get("user_id") is not None}
@@ -1313,9 +1388,13 @@ class FormationManagement(commands.Cog):
                 entry = {"user_id": uid, "username": username}
                 if position < max(fm.seats, 0):
                     registered.append(entry)
+                    if uid in prev_waitlisted_ids:
+                        promotion_notifications.append((uid, fm))
+                    elif uid not in prev_registered_ids:
+                        registration_notifications.append((uid, fm))
                 else:
                     waitlisted.append(entry)
-                    if uid not in prev_waitlisted_ids and uid not in prev_registered_ids:
+                    if uid not in prev_waitlisted_ids:
                         waitlist_notifications.append((uid, fm.name, len(waitlisted)))
             fm.registered_users = registered
             fm.waitlisted_users = waitlisted
@@ -1337,9 +1416,24 @@ class FormationManagement(commands.Cog):
         else:
             logger.info(f"Updated published formations message {msg.id} in channel {channel_id} for guild {guild_id}.")
 
+        contacts: str = self._format_respo_contacts(guild)
+
+        if promotion_notifications:
+            logger.info(f"Dispatching {len(promotion_notifications)} waitlist promotion notification(s) for guild {guild_id}.")
+            for user_id, fm in promotion_notifications:
+                await self._send_promotion_dm(guild, user_id, fm, contacts)
+        else:
+            logger.debug(f"No waitlist promotion notifications for guild {guild_id}.")
+
+        if registration_notifications:
+            logger.info(f"Dispatching {len(registration_notifications)} new registration notification(s) for guild {guild_id}.")
+            for user_id, fm in registration_notifications:
+                await self._send_registration_dm(guild, user_id, fm, contacts)
+        else:
+            logger.debug(f"No new registration notifications for guild {guild_id}.")
+
         if waitlist_notifications:
             logger.info(f"Dispatching {len(waitlist_notifications)} waitlist notification(s) for guild {guild_id}.")
-            contacts = self._format_respo_contacts(guild)
             for user_id, fm_name, waitlist_index in waitlist_notifications:
                 await self._send_waitlist_dm(guild, user_id, fm_name, waitlist_index, contacts)
         else:
@@ -1441,8 +1535,5 @@ async def setup(bot: commands.Bot) -> None:
 
 
 # TODO: dm les gens la veille de leurs formations à x heures / cmd
-# TODO: sécuriser des actions avec des try
-# FIXME: message de dm : 1ème
-# TODO: message c'est bon t'es pris
 # TODO: role id au départ à choisir (en fonction du serveur cf projets)
 # TODO: add avec une date avec un format plus simple
