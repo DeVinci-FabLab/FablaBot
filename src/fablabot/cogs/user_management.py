@@ -66,9 +66,9 @@ class UserManagement(commands.Cog):
         """Display help for user management commands.
 
         Args:
-            interaction (Interaction): The interaction object.
+            interaction (Interaction): The Discord interaction context.
         """
-        help_text = (
+        help_message = (
             "**Commandes de gestion des utilisateurs :**\n"
             "- `/user op <user>` : Donne des droits admin temporaires à un utilisateur.\n"
             "- `/user deop <user>` : Retire les droits admin temporaires d'un utilisateur.\n"
@@ -81,7 +81,7 @@ class UserManagement(commands.Cog):
             "\n"
             "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
         )
-        await interaction.response.send_message(help_text, ephemeral=True)
+        await interaction.response.send_message(help_message, ephemeral=True)
 
     @user_group.command(name="op", description="Donne des droits admin temporaires à un utilisateur.")
     @app_commands.describe(
@@ -95,7 +95,7 @@ class UserManagement(commands.Cog):
         """Grant temporary admin privileges to a user.
 
         Args:
-            interaction (Interaction): The interaction object.
+            interaction (Interaction): The Discord interaction context.
             user (Member): The user to give privileges to.
             reason (str): The reason for granting privileges.
             time (app_commands.Range[int, 1, 90], optional): The duration in minutes for which privileges are granted. Defaults to 5.
@@ -146,7 +146,7 @@ class UserManagement(commands.Cog):
         """Revoke temporary admin privileges from a user.
 
         Args:
-            interaction (Interaction): The interaction object.
+            interaction (Interaction): The Discord interaction context.
             user (Member): The user to remove privileges from.
 
         """
@@ -193,7 +193,7 @@ class UserManagement(commands.Cog):
         """Add a role to a single user.
 
         Args:
-            interaction (Interaction): The interaction object.
+            interaction (Interaction): The Discord interaction context.
             user (Member): The user to add the role to.
             role (Role): The role to add to the user.
         """
@@ -230,7 +230,7 @@ class UserManagement(commands.Cog):
         """Remove a role from a single user.
 
         Args:
-            interaction (Interaction): The interaction object.
+            interaction (Interaction): The Discord interaction context.
             user (Member): The user to remove the role from.
             role (Role): The role to remove from the user.
         """
@@ -270,7 +270,7 @@ class UserManagement(commands.Cog):
         """Open a multi-user selector to add a role in bulk.
 
         Args:
-            interaction (Interaction): The interaction object.
+            interaction (Interaction): The Discord interaction context.
             role (Role): The role to add to the users.
         """
         log_request(logger, "user.add_roles", interaction, role=role)
@@ -294,7 +294,7 @@ class UserManagement(commands.Cog):
         """Open a multi-user selector to remove a role in bulk.
 
         Args:
-            interaction (Interaction): The interaction object.
+            interaction (Interaction): The Discord interaction context.
             role (Role): The role to remove from the users.
         """
         log_request(logger, "user.remove_roles", interaction, role=role)
@@ -321,7 +321,7 @@ class UserManagement(commands.Cog):
         """Send a direct message to multiple users.
 
         Args:
-            interaction (Interaction): The interaction object.
+            interaction (Interaction): The Discord interaction context.
             message (str): The message content to send.
         """
         log_request(logger, "user.dm", interaction, message=message)
@@ -515,7 +515,7 @@ class BulkRoleView(ui.View):
         """Confirm the bulk role assignment/removal.
 
         Args:
-            interaction (Interaction): The interaction triggered by the confirm button.
+            interaction (Interaction): The Discord interaction triggered by the confirm button.
         """
         members: list[Member] = [m for m in self.select.values if isinstance(m, Member)]
         if not members:
@@ -625,7 +625,7 @@ class BulkDMView(ui.View):
         """Confirm the direct message sending.
 
         Args:
-            interaction (Interaction): The interaction triggered by the confirm button.
+            interaction (Interaction): The Discord interaction triggered by the confirm button.
         """
         members: list[Member] = [m for m in self.select.values if isinstance(m, Member)]
         if not members:

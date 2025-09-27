@@ -95,7 +95,8 @@ class Formation:
 class FormationManagement(commands.Cog):
     """Hebdo formations management cog (Draft -> Publish -> Export).
 
-    - /fm start intro:<str> end:<str> [role]
+    - /fm help
+    - /fm start intro:<str> end:<str> role:<@Role>
     - /fm edit_text [intro] [end]
     - /fm add emoji:<str> name:<str> trainer:<@Member> date:<DD/MM/YYYY> hour:<HH:MM> duration:<str> seats:<int> description:<str>
     - /fm remove index:<int>
@@ -103,7 +104,7 @@ class FormationManagement(commands.Cog):
     - /fm clear
     - /fm preview
     - /fm publish channel:<#salon>
-    - /fm export [message_id]
+    - /fm export [message_id] [publication_channel]
 
     Log reactions (add/remove) on messages published by this cog.
     """
@@ -146,6 +147,29 @@ class FormationManagement(commands.Cog):
     # region ====== Fm Slash Group ======
     fm_group = app_commands.Group(name="fm", description="Gère les annonces de Formations et les inscriptions.")
 
+    @fm_group.command(name="help", description="Afficher l'aide pour les commandes de gestion des formations.")
+    async def fm_help(self, interaction: Interaction) -> None:
+        """Display help information for the formation management commands.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+        """
+        help_message = (
+            "**Commandes de gestion des formations :**\n"
+            "- `/fm start <intro> <end> <role>` : Démarrer un nouveau brouillon de formation.\n"
+            "- `/fm edit_text [intro] [end]` : Modifier le texte d'introduction et/ou de conclusion du brouillon.\n"
+            "- `/fm add <emoji> <name> <trainer> <date> <hour> <duration> <seats> <description>` : Ajouter une nouvelle formation au brouillon.\n"
+            "- `/fm remove <index>` : Supprimer une formation du brouillon.\n"
+            "- `/fm edit <index> [emoji] [name] [trainer] [date] [hour] [duration] [seats] [description]` : Modifier une formation existante dans le brouillon.\n"
+            "- `/fm clear` : Effacer le brouillon actuel.\n"
+            "- `/fm preview` : Prévisualiser le brouillon actuel.\n"
+            "- `/fm publish` <channel> : Publier le brouillon dans un salon spécifique.\n"
+            "- `/fm export` [message_id] [publication_channel] : Exporter le brouillon sous forme de message.\n"
+            "\n"
+            "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
+        )
+        await interaction.response.send_message(help_message, ephemeral=True)
+
     @fm_group.command(name="start", description="Démarrer/écraser un brouillon avec une introduction.")
     @app_commands.describe(
         intro="Texte d'introduction affiché en tête du message",
@@ -156,7 +180,7 @@ class FormationManagement(commands.Cog):
         """Start a new draft with an introduction.
 
         Args:
-            interaction (Interaction): The interaction context.
+            interaction (Interaction): The Discord interaction context.
             intro (str): The introduction text.
             end (str): The ending text.
             role (Role): The role to mention.
@@ -202,7 +226,7 @@ class FormationManagement(commands.Cog):
         """Edit the draft introduction and/or ending.
 
         Args:
-            interaction (Interaction): The interaction context.
+            interaction (Interaction): The Discord interaction context.
             intro (str | None): The new introduction text.
             end (str | None): The new ending text.
         """
@@ -282,7 +306,7 @@ class FormationManagement(commands.Cog):
         """Add a formation to the draft (automatically sorted by date/time).
 
         Args:
-            interaction (Interaction): The interaction context.
+            interaction (Interaction): The Discord interaction context.
             emoji (str): The emoji for the formation.
             name (str): The name of the formation.
             description (str): The description of the formation.
@@ -371,7 +395,7 @@ class FormationManagement(commands.Cog):
         """Remove a formation from the draft by its index (1..n).
 
         Args:
-            interaction (Interaction): The interaction context.
+            interaction (Interaction): The Discord interaction context.
             index (app_commands.Range[int, 1, 1000]): The index of the formation to remove (1-based).
         """
         log_request(logger, "fm.remove", interaction, index=index)
@@ -434,7 +458,7 @@ class FormationManagement(commands.Cog):
         """Edit a formation in the draft while keeping other entries untouched.
 
         Args:
-            interaction (Interaction): The interaction context.
+            interaction (Interaction): The Discord interaction context.
             index (app_commands.Range[int, 1, 1000]): The index of the formation to edit (1-based).
             emoji (str | None, optional): New emoji for the formation. Defaults to None.
             name (str | None, optional): New name for the formation. Defaults to None.
@@ -567,7 +591,7 @@ class FormationManagement(commands.Cog):
         """Clear the current draft (introduction and ending are preserved).
 
         Args:
-            interaction (Interaction): The interaction context.
+            interaction (Interaction): The Discord interaction context.
         """
         log_request(logger, "fm.clear", interaction)
         if not await is_in_allowed_channel(logger, interaction):
@@ -600,7 +624,7 @@ class FormationManagement(commands.Cog):
         """Show the draft preview in the current channel.
 
         Args:
-            interaction (Interaction): _description_
+            interaction (Interaction): The Discord interaction context.
         """
         log_request(logger, "fm.preview", interaction)
         if not await is_in_allowed_channel(logger, interaction):
@@ -627,7 +651,7 @@ class FormationManagement(commands.Cog):
         """Publish the message in an announcement channel (auto-added reactions).
 
         Args:
-            interaction (Interaction): The interaction context.
+            interaction (Interaction): The Discord interaction context.
             channel (TextChannel): The target announcement channel.
         """
         log_request(logger, "fm.publish", interaction, channel=channel)
@@ -689,7 +713,7 @@ class FormationManagement(commands.Cog):
         """Export the list of members who reacted (added/removed) to the formation emojis.
 
         Args:
-            interaction (Interaction): The interaction context.
+            interaction (Interaction): The Discord interaction context.
             message_id (str | None, optional): The ID of the published message. Defaults to None.
             publication_channel (TextChannel | None, optional): The channel of the published message. Defaults to None.
         """

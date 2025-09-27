@@ -17,7 +17,7 @@ def log_request(logger: Logger, command_name: str, interaction: Interaction, **k
     Args:
         logger (Logger): The logger of the cog.
         command_name (str): The name of the command.
-        interaction (Interaction): The interaction object representing the command invocation.
+        interaction (Interaction): The Discord interaction context of the command invocation.
         **kwargs (Any): Additional details to log.
     """
     details = " ".join(f"{k}={v}" for k, v in kwargs.items())
@@ -29,7 +29,7 @@ async def is_in_allowed_channel(logger: Logger, interaction: Interaction) -> boo
 
     Args:
         logger (Logger): The logger of the cog.
-        interaction (Interaction): The interaction object representing the command invocation.
+        interaction (Interaction): The Discord interaction context of the command invocation.
 
     Returns:
         bool: ``True`` if the interaction was made in the allowed commands channel,
@@ -70,7 +70,7 @@ async def check_has_role(logger: Logger, interaction: Interaction, roles: set[st
 
     Args:
         logger (Logger): The logger of the cog.
-        interaction (Interaction): The interaction context.
+        interaction (Interaction): The Discord interaction context of the command invocation.
         roles (set[str]): The set of role names to check.
 
     Returns:
