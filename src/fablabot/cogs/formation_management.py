@@ -257,7 +257,7 @@ class FormationManagement(commands.Cog):
         emoji="Émoji unique pour cette FM (ex: 🔧)",
         name="Nom de la formation",
         trainer="Formateur·ice",
-        date="Date au format YYYY-MM-DD",
+        date="Date au format DD/MM/YYYY",
         hour="Heure au format HH:MM (24h)",
         duration="Durée en texte, ce sera affiché comme tel",
         seats="Nombre de places",
@@ -327,9 +327,9 @@ class FormationManagement(commands.Cog):
         try:
             start_dt = self._parse_date_time(date, hour)
         except Exception:
-            logger.exception(f"Guild {interaction.guild.id} tried to add formation with invalid date/hour: {date} {hour}.")
+            logger.warning(f"Guild {interaction.guild.id} tried to add formation with invalid date/hour: {date} {hour}.")
             await interaction.response.send_message(
-                "Date/heure invalides. Exemples: date `2025-09-15`, heure `18:08`.", ephemeral=True
+                "Date/heure invalides. Exemples: date `15/09/2025`, heure `18:08`.", ephemeral=True
             )
             return
 
@@ -408,7 +408,7 @@ class FormationManagement(commands.Cog):
         emoji="Nouvel émoji pour cette formation",
         name="Nouveau nom de la formation",
         trainer="Nouveau formateur ou nouvelle formatrice",
-        date="Nouvelle date au format YYYY-MM-DD",
+        date="Nouvelle date au format DD/MM/YYYY",
         hour="Nouvelle heure au format HH:MM (24h)",
         duration="Nouvelle durée affichée",
         seats="Nouveau nombre de places",
@@ -517,11 +517,11 @@ class FormationManagement(commands.Cog):
             try:
                 new_start_iso = self._parse_date_time(date_part, hour_part).isoformat()
             except Exception:
-                logger.exception(
+                logger.warning(
                     f"Guild {interaction.guild.id} provided invalid date/hour while editing formation: {date_part} {hour_part}.",
                 )
                 await interaction.response.send_message(
-                    "Date/heure invalides. Exemples: date `2025-09-15`, heure `18:08`.",
+                    "Date/heure invalides. Exemples: date `15/09/2025`, heure `18:08`.",
                     ephemeral=True,
                 )
                 return
@@ -843,13 +843,13 @@ class FormationManagement(commands.Cog):
         """Parse date and time strings into a timezone-aware datetime object.
 
         Args:
-            date_str (str): Date string in 'YYYY-MM-DD' format.
+            date_str (str): Date string in 'DD/MM/YYYY' format.
             hour_str (str): Hour string in 'HH:MM' format.
 
         Returns:
             datetime: A timezone-aware datetime object.
         """
-        y, m, d = map(int, date_str.split("-"))
+        d, m, y = map(int, date_str.split("/"))
         hh, mm = map(int, hour_str.split(":"))
         dt = datetime(y, m, d, hh, mm)
         logger.debug(f"Parsed formation schedule {date_str} {hour_str} -> {dt.isoformat()}")
@@ -1536,4 +1536,3 @@ async def setup(bot: commands.Bot) -> None:
 
 # TODO: dm les gens la veille de leurs formations à x heures / cmd
 # TODO: role id au départ à choisir (en fonction du serveur cf projets)
-# TODO: add avec une date avec un format plus simple
