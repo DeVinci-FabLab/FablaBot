@@ -6,8 +6,7 @@ from typing import override
 from discord import TextChannel
 from discord.ext import commands
 
-LOG_CHANNEL_ID = 1401670379013148702
-# TODO: Make this configurable via command
+DEFAULT_LOG_CHANNEL_ID = 1401670379013148702
 
 
 class DiscordLogHandler(logging.Handler):
@@ -21,6 +20,7 @@ class DiscordLogHandler(logging.Handler):
         """
         super().__init__()
         self.bot = bot
+        self.log_channel_id: int = DEFAULT_LOG_CHANNEL_ID
         self.setFormatter(
             logging.Formatter(
                 "[2;31m[0m[0;2m[0;31m[%(levelname)s][0m [4;2m[0m[0;34m[4;34m%(module)s.%(funcName)s[0m[0;34m[0m[0;34m:[0m %(message)s[0m"
@@ -37,14 +37,24 @@ class DiscordLogHandler(logging.Handler):
         msg = self.format(record)
         self.bot.loop.create_task(self._send(msg))
 
+    def set_log_channel(self, channel: TextChannel | int) -> None:
+        """Update the log channel destination.
+
+        Args:
+            channel (TextChannel | int): Channel instance or channel id receiving logs.
+        """
+        if isinstance(channel, TextChannel):
+            self.log_channel_id = channel.id
+        else:
+            self.log_channel_id = channel
+
     async def _send(self, message: str) -> None:
         """Sends a log message to the Discord channel.
 
         Args:
             message (str): The message to send.
         """
-        channel = self.bot.get_channel(LOG_CHANNEL_ID)
-        if channel is None:
+        channel = self.bot.get_channel(self.log_channel_id)
+        if not isinstance(channel, TextChannel):
             return
-        if isinstance(channel, TextChannel):
-            await channel.send(f"```ansi\n{message}\n```")
+        await channel.send(f"```ansi\n{message}\n```")
