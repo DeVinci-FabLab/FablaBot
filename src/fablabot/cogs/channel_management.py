@@ -73,7 +73,7 @@ class ChannelManagement(commands.Cog):
         """Display help for text channel management commands.
 
         Args:
-            interaction (Interaction): The interaction that triggered the command.
+            interaction (Interaction): The Discord interaction context.
         """
         help_message = (
             "**Commandes de gestion des salons textuels :**\n"
@@ -93,7 +93,7 @@ class ChannelManagement(commands.Cog):
         """Clears the current channel of its last messages.
 
         Args:
-            interaction (Interaction): The interaction that triggered the command.
+            interaction (Interaction): The Discord interaction context.
             messages (app_commands.Range[int, 1, 50], optional): The number of messages to purge. Defaults to 5.
         """
         log_request(logger, "text.clear", interaction, messages=messages)
@@ -138,7 +138,7 @@ class ChannelManagement(commands.Cog):
         """Create a text channel in the passed category.
 
         Args:
-            interaction (Interaction): The interaction object.
+            interaction (Interaction): The Discord interaction context.
             channel (str): The name of the channel to create.
             category (CategoryChannel): The category to create the channel in.
         """
@@ -181,7 +181,7 @@ class ChannelManagement(commands.Cog):
         """Rename a text channel.
 
         Args:
-            interaction (Interaction): The interaction object.
+            interaction (Interaction): The Discord interaction context.
             channel (TextChannel): The channel to rename.
             new_name (str): The new name of the channel.
         """
@@ -215,7 +215,7 @@ class ChannelManagement(commands.Cog):
         """Delete a text channel.
 
         Args:
-            interaction (Interaction): The interaction object.
+            interaction (Interaction): The Discord interaction context.
             channel (TextChannel): The channel to delete.
         """
         log_request(logger, "text.delete", interaction, channel=channel.name)
@@ -249,7 +249,7 @@ class ChannelManagement(commands.Cog):
         """Display help for vocal channel management commands.
 
         Args:
-            interaction (Interaction): The interaction that triggered the command.
+            interaction (Interaction): The Discord interaction context.
         """
         help_message = (
             "**Commandes de gestion des salons vocaux :**\n"
@@ -280,7 +280,7 @@ class ChannelManagement(commands.Cog):
         """Create a custom voice channel in the passed category.
 
         Args:
-            interaction (Interaction): The Discord interaction.
+            interaction (Interaction): The Discord interaction context.
             name (str): The name of the voice channel to create.
             category (CategoryChannel): The category in which to create the voice channel.
             is_temporary (bool, optional): Whether the channel is temporary. Defaults to True.
@@ -341,7 +341,7 @@ class ChannelManagement(commands.Cog):
         """Rename a voice channel.
 
         Args:
-            interaction (Interaction): The Discord interaction.
+            interaction (Interaction): The Discord interaction context.
             channel (VoiceChannel): The voice channel to rename.
             new_name (str): The new name of the voice channel.
         """
@@ -396,7 +396,7 @@ class ChannelManagement(commands.Cog):
         """Delete a voice channel.
 
         Args:
-            interaction (Interaction): The Discord interaction.
+            interaction (Interaction): The Discord interaction context.
             channel (VoiceChannel): The voice channel to delete.
         """
         log_request(logger, "vocal.delete", interaction, channel=channel.name)
