@@ -6,7 +6,11 @@ from typing import override
 from discord import TextChannel
 from discord.ext import commands
 
-DEFAULT_LOG_CHANNEL_ID = 1401670379013148702
+DEFAULT_LOG_CHANNEL_ID = 1090192458840801282
+CLEAR = "\u001b[0m"
+RED = "\u001b[31m"
+UNDERLINE = "\u001b[4m"
+CYAN = "\u001b[34m"
 
 
 class DiscordLogHandler(logging.Handler):
@@ -21,11 +25,11 @@ class DiscordLogHandler(logging.Handler):
         super().__init__()
         self.bot = bot
         self.log_channel_id: int = DEFAULT_LOG_CHANNEL_ID
-        self.setFormatter(
-            logging.Formatter(
-                "[2;31m[0m[0;2m[0;31m[%(levelname)s][0m [4;2m[0m[0;34m[4;34m%(module)s.%(funcName)s[0m[0;34m[0m[0;34m:[0m %(message)s[0m"
-            )
+        # ANSI escape code formatter for colored log output in Discord
+        ansi_log_format = (
+            f"{RED}[%(levelname)s]{CLEAR} {CYAN}{UNDERLINE}%(module)s.%(funcName)s{CLEAR}{CYAN}:{CLEAR} %(message)s"
         )
+        self.setFormatter(logging.Formatter(ansi_log_format))
 
     @override
     def emit(self, record: logging.LogRecord) -> None:
