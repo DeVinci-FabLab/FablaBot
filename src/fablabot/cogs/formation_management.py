@@ -19,6 +19,7 @@ from discord import (
     Interaction,
     Member,
     RawReactionActionEvent,
+    Role,
     TextChannel,
     app_commands,
 )
@@ -94,9 +95,9 @@ class Formation:
 class FormationManagement(commands.Cog):
     """Hebdo formations management cog (Draft -> Publish -> Export).
 
-    - /fm start intro:<str> end:<str>
+    - /fm start intro:<str> end:<str> [role]
     - /fm edit_text [intro] [end]
-    - /fm add emoji:<str> name:<str> trainer:<@Member> date:<YYYY-MM-DD> hour:<HH:MM> duration:<str> seats:<int> description:<str>
+    - /fm add emoji:<str> name:<str> trainer:<@Member> date:<DD/MM/YYYY> hour:<HH:MM> duration:<str> seats:<int> description:<str>
     - /fm remove index:<int>
     - /fm edit index:<int> [emoji] [name] [trainer] [date] [hour] [duration] [seats] [description]
     - /fm clear
@@ -147,15 +148,18 @@ class FormationManagement(commands.Cog):
 
     @fm_group.command(name="start", description="Démarrer/écraser un brouillon avec une introduction.")
     @app_commands.describe(
-        intro="Texte d'introduction affiché en tête du message", end="Texte de fin affiché en bas du message"
+        intro="Texte d'introduction affiché en tête du message",
+        end="Texte de fin affiché en bas du message",
+        role="Rôle à mentionner",
     )
-    async def fm_start(self, interaction: Interaction, intro: str, end: str) -> None:
+    async def fm_start(self, interaction: Interaction, intro: str, end: str, role: Role) -> None:
         """Start a new draft with an introduction.
 
         Args:
             interaction (Interaction): The interaction context.
             intro (str): The introduction text.
             end (str): The ending text.
+            role (Role): The role to mention.
         """
         log_request(logger, "fm.start", interaction, intro=intro)
         if not await is_in_allowed_channel(logger, interaction):
@@ -166,9 +170,9 @@ class FormationManagement(commands.Cog):
         assert interaction.guild is not None
         assert isinstance(interaction.channel, TextChannel)
 
-        membre_paris_role = get(interaction.guild.roles, name="Membre Paris")
-        assert membre_paris_role is not None
-        start = f"# [FORMATIONS] :dvfl:\nHey {membre_paris_role.mention} !\n"
+        emoji = {emoji for emoji in interaction.guild.emojis if emoji.name == "dvfl"}.pop()
+
+        start = f"# [FORMATIONS] {emoji}\nHey {role.mention} !\n"
         draft: dict[str, Any] = {"intro": start + intro, "fms": [], "end": end}
         self._set_guild_draft(interaction.guild.id, draft)
 
@@ -1535,4 +1539,3 @@ async def setup(bot: commands.Bot) -> None:
 
 
 # TODO: dm les gens la veille de leurs formations à x heures / cmd
-# TODO: role id au départ à choisir (en fonction du serveur cf projets)
