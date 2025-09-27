@@ -26,7 +26,9 @@ from discord import (
 from discord.ext import commands
 from discord.utils import get
 
-from .utils import is_in_allowed_channel, log_request
+from fablabot.discord_log_handler import DiscordLogHandler
+
+from .utils import check_has_role, is_in_allowed_channel, log_request
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,7 @@ logger = logging.getLogger(__name__)
 DYNAMIC_SUFFIX = "-vocal"
 INDEX_SEPARATOR = "/"
 EPHEMERAL_SUFFIX = "-temp"
+ADMIN_ROLES = {"Admin -temp-", "Administrateur"}
 
 
 class ChannelManagement(commands.Cog):
@@ -49,6 +52,7 @@ class ChannelManagement(commands.Cog):
     - /vocal create: Create a new voice channel in the specified category.
     - /vocal rename: Rename an existing voice channel.
     - /vocal delete: Delete a voice channel.
+    - /log set: Configure the text channel receiving bot logs on errors.
 
     Listeners:
     - on_message_delete: Notify when a message is deleted in a bot channel, log the deleter and resend the content.
@@ -65,7 +69,7 @@ class ChannelManagement(commands.Cog):
         self.bot = bot
         self.remove_tasks: dict[int, asyncio.Task[None]] = {}
 
-    # region ====== Text Slash Group ======
+    # region ====== Text Slash Commands Group ======
     text_group = app_commands.Group(name="text", description="Gestion des salons textuels")
 
     @text_group.command(name="help", description="Affiche l'aide pour les commandes de gestion des salons textuels.")
@@ -239,9 +243,9 @@ class ChannelManagement(commands.Cog):
         logger.info(f"Deleted text channel {channel.name!r}")
         await interaction.response.send_message(f"Le salon textuel {channel.name!r} a été supprimé.")
 
-    # endregion Text Slash Group
+    # endregion Text Slash Commands Group
 
-    # region ====== Vocal Slash Group ======
+    # region ====== Vocal Slash Commands Group ======
     vocal_group = app_commands.Group(name="vocal", description="Gestion des salons vocaux dynamiques")
 
     @vocal_group.command(name="help", description="Affiche l'aide pour les commandes de gestion des salons vocaux.")
@@ -424,9 +428,64 @@ class ChannelManagement(commands.Cog):
         logger.info(f"Deleted voice channel {channel.name!r}")
         await interaction.response.send_message(f"Le salon vocal {channel.name!r} a été supprimé.")
 
-    # endregion Vocal Slash Group
+    # endregion Vocal Slash Commands Group
 
-    # region ====== Listeners ======
+    # region ====== Log Slash Commands Group ======
+    log_group = app_commands.Group(name="log", description="Configuration des logs du bot")
+
+    @log_group.command(name="set", description="Configure le salon recevant les logs du bot en cas d'erreur.")
+    @app_commands.describe(channel="Salon textuel qui recevra les logs du bot.")
+    async def log_set(self, interaction: Interaction, channel: TextChannel) -> None:
+        """Configure the log channel destination for Discord logging.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            channel (TextChannel): The text channel receiving bot logs.
+        """
+        log_request(logger, "log.set", interaction, channel=channel.name, channel_id=channel.id)
+        if not await is_in_allowed_channel(logger, interaction):
+            return
+
+        assert interaction.guild is not None
+        assert isinstance(interaction.user, Member)
+        if not await check_has_role(logger, interaction, ADMIN_ROLES):
+            return
+
+        handler = getattr(self.bot, "log_handler", None)
+        if not isinstance(handler, DiscordLogHandler):
+            logger.error("DiscordLogHandler is not initialized on the bot.")
+            await interaction.response.send_message(
+                "Le gestionnaire de logs n'est pas initialisé sur ce bot.",
+                ephemeral=True,
+            )
+            return
+
+        previous_id = handler.log_channel_id
+        if previous_id == channel.id:
+            await interaction.response.send_message(
+                f"{channel.mention} est déjà configuré comme salon de logs.",
+                ephemeral=True,
+            )
+            return
+
+        previous_channel: TextChannel | None = None
+        if previous_id is not None:
+            maybe_previous = self.bot.get_channel(previous_id)
+            if isinstance(maybe_previous, TextChannel):
+                previous_channel = maybe_previous
+
+        handler.set_log_channel(channel)
+        logger.info(msg=f"Log channel set to {channel} (id={channel.id}) by {interaction.user} (id={interaction.user.id})")
+
+        confirmation = f"Les logs seront désormais envoyés dans {channel.mention}."
+        if previous_channel is not None:
+            confirmation += f" Ancien salon : {previous_channel.mention}."
+        await interaction.response.send_message(confirmation)
+
+    # endregion Log Slash Commands Group
+
+    # region ====== Event Listeners ======
+
     @commands.Cog.listener()
     async def on_message_delete(self, message: Message) -> None:
         """Handle message deletion events.
@@ -543,9 +602,11 @@ class ChannelManagement(commands.Cog):
                 ):
                     self.remove_tasks[voice_channel.id] = asyncio.create_task(self._delayed_delete(voice_channel, 60))
 
-    # endregion Listeners
+    # endregion Event Listeners
 
     # region ====== Helpers ======
+    # -- Voice Channel Helpers --
+
     async def _manage_voice_channels(self, category: CategoryChannel, base_channel: VoiceChannel) -> None:
         """Manage voice channels in a category.
 

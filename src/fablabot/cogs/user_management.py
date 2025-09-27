@@ -58,7 +58,9 @@ class UserManagement(commands.Cog):
         self.deop_tasks: dict[int, asyncio.Task[None]] = {}
         logger.info("UserManagement initialized")
 
-    # region ====== User Slash Group ======
+    # region ====== User Slash Commands Group ======
+    # -- Help & Admin Access --
+
     user_group = app_commands.Group(name="user", description="Gestion des utilisateurs")
 
     @user_group.command(name="help", description="Affiche l'aide pour les commandes de gestion des utilisateurs.")
@@ -187,6 +189,8 @@ class UserManagement(commands.Cog):
         await interaction.response.send_message("Retrait des droits admin en cours...")
         await interaction.edit_original_response(content=f"Droits admin retirés de {user.mention}({user.name!r})")
 
+    # -- Role Management --
+
     @user_group.command(name="add_role", description="Donne un rôle à un utilisateur.")
     @app_commands.describe(user="L'utilisateur cible", role="Le rôle à attribuer")
     async def user_add_role(self, interaction: Interaction, user: Member, role: Role) -> None:
@@ -312,6 +316,8 @@ class UserManagement(commands.Cog):
             f"Sélectionnez les membres à qui retirer {role.name!r} puis cliquez sur **Confirmer**.", view=view
         )
 
+    # -- Communications --
+
     @user_group.command(
         name="dm",
         description="Envoie un message privé à plusieurs utilisateurs via un sélecteur.",
@@ -347,9 +353,11 @@ class UserManagement(commands.Cog):
             view=view,
         )
 
-    # endregion User Slash Group
+    # endregion User Slash Commands Group
 
     # region ====== Helpers ======
+    # -- Scheduling --
+
     async def _schedule_deop(
         self, interaction: Interaction, user: Member, time: int, admin_role: Role, codir_role: Role
     ) -> None:
@@ -386,6 +394,8 @@ class UserManagement(commands.Cog):
             self.deop_tasks.pop(user.id, None)
         except asyncio.CancelledError:
             logger.exception(f"Deop timer cancelled for {user}")
+
+    # -- Permission Checks --
 
     @staticmethod
     def _can_assign_role(member: Member, target_role: Role) -> bool:
@@ -467,7 +477,7 @@ async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(UserManagement(bot))
 
 
-# region ====== Bulk View ======
+# region ====== UI Views ======
 
 
 class BulkRoleView(ui.View):
@@ -663,4 +673,4 @@ class BulkDMView(ui.View):
         await interaction.edit_original_response(content="\n".join(lines), view=None)
 
 
-# endregion Bulk View
+# endregion UI Views

@@ -99,8 +99,8 @@ class FormationManagement(commands.Cog):
     - /fm start intro:<str> end:<str> role:<@Role>
     - /fm edit_text [intro] [end]
     - /fm add emoji:<str> name:<str> trainer:<@Member> date:<DD/MM/YYYY> hour:<HH:MM> duration:<str> seats:<int> description:<str>
-    - /fm remove index:<int>
     - /fm edit index:<int> [emoji] [name] [trainer] [date] [hour] [duration] [seats] [description]
+    - /fm remove index:<int>
     - /fm clear
     - /fm preview
     - /fm publish channel:<#salon>
@@ -144,7 +144,7 @@ class FormationManagement(commands.Cog):
         self._purge_all_reaction_logs()
         logger.info("FormationManagement initialized")
 
-    # region ====== Fm Slash Group ======
+    # region ====== Fm Slash Commands Group ======
     fm_group = app_commands.Group(name="fm", description="Gère les annonces de Formations et les inscriptions.")
 
     @fm_group.command(name="help", description="Afficher l'aide pour les commandes de gestion des formations.")
@@ -159,8 +159,8 @@ class FormationManagement(commands.Cog):
             "- `/fm start <intro> <end> <role>` : Démarrer un nouveau brouillon de formation.\n"
             "- `/fm edit_text [intro] [end]` : Modifier le texte d'introduction et/ou de conclusion du brouillon.\n"
             "- `/fm add <emoji> <name> <trainer> <date> <hour> <duration> <seats> <description>` : Ajouter une nouvelle formation au brouillon.\n"
-            "- `/fm remove <index>` : Supprimer une formation du brouillon.\n"
             "- `/fm edit <index> [emoji] [name] [trainer] [date] [hour] [duration] [seats] [description]` : Modifier une formation existante dans le brouillon.\n"
+            "- `/fm remove <index>` : Supprimer une formation du brouillon.\n"
             "- `/fm clear` : Effacer le brouillon actuel.\n"
             "- `/fm preview` : Prévisualiser le brouillon actuel.\n"
             "- `/fm publish` <channel> : Publier le brouillon dans un salon spécifique.\n"
@@ -389,47 +389,6 @@ class FormationManagement(commands.Cog):
             ephemeral=True,
         )
 
-    @fm_group.command(name="remove", description="Retirer une formation du brouillon par son index (1..n).")
-    @app_commands.describe(index="Position de la FM dans l'aperçu trié (1..n)")
-    async def fm_remove(self, interaction: Interaction, index: app_commands.Range[int, 1, 1000]) -> None:
-        """Remove a formation from the draft by its index (1..n).
-
-        Args:
-            interaction (Interaction): The Discord interaction context.
-            index (app_commands.Range[int, 1, 1000]): The index of the formation to remove (1-based).
-        """
-        log_request(logger, "fm.remove", interaction, index=index)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
-            return
-
-        assert interaction.guild is not None
-        draft: dict[str, Any] = self._get_guild_draft(interaction.guild.id)
-        fms: list[Formation] = [Formation(**x) for x in draft["fms"]]
-        fms.sort(key=lambda x: x.start_dt)
-
-        if index > len(fms):
-            logger.warning(f"Guild {interaction.guild.id} tried to remove out-of-bounds formation index {index}.")
-            await interaction.response.send_message(f"Index hors limites (il y a {len(fms)} FM).", ephemeral=True)
-            return
-
-        removed = fms.pop(index - 1)
-        draft["fms"] = [x.to_dict() for x in fms]
-        self._set_guild_draft(interaction.guild.id, draft)
-
-        fms = [Formation(**x) for x in draft["fms"]]
-        preview = self._render_message(draft["intro"], fms, draft["end"])
-        logger.info(f"Guild {interaction.guild.id} removed formation {removed.name!r} ({removed.start_iso}) from draft.")
-        await interaction.response.send_message(
-            f"Supprimé: {removed.emoji} {removed.name}",
-            embed=Embed(
-                title=f"Aperçu brouillon — {len(fms)} formation(s)",
-                description=f"{preview or '_(vide)_'}",
-            ),
-            ephemeral=True,
-        )
-
     @fm_group.command(name="edit", description="Modifier une formation existante (champs optionnels).")
     @app_commands.describe(
         index="Position de la FM dans l'aperçu trié (1..n)",
@@ -579,6 +538,47 @@ class FormationManagement(commands.Cog):
 
         await interaction.response.send_message(
             f"Mise à jour: {updated.emoji} {updated.name} (position {new_position}).",
+            embed=Embed(
+                title=f"Aperçu brouillon — {len(fms)} formation(s)",
+                description=f"{preview or '_(vide)_'}",
+            ),
+            ephemeral=True,
+        )
+
+    @fm_group.command(name="remove", description="Retirer une formation du brouillon par son index (1..n).")
+    @app_commands.describe(index="Position de la FM dans l'aperçu trié (1..n)")
+    async def fm_remove(self, interaction: Interaction, index: app_commands.Range[int, 1, 1000]) -> None:
+        """Remove a formation from the draft by its index (1..n).
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            index (app_commands.Range[int, 1, 1000]): The index of the formation to remove (1-based).
+        """
+        log_request(logger, "fm.remove", interaction, index=index)
+        if not await is_in_allowed_channel(logger, interaction):
+            return
+        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+            return
+
+        assert interaction.guild is not None
+        draft: dict[str, Any] = self._get_guild_draft(interaction.guild.id)
+        fms: list[Formation] = [Formation(**x) for x in draft["fms"]]
+        fms.sort(key=lambda x: x.start_dt)
+
+        if index > len(fms):
+            logger.warning(f"Guild {interaction.guild.id} tried to remove out-of-bounds formation index {index}.")
+            await interaction.response.send_message(f"Index hors limites (il y a {len(fms)} FM).", ephemeral=True)
+            return
+
+        removed = fms.pop(index - 1)
+        draft["fms"] = [x.to_dict() for x in fms]
+        self._set_guild_draft(interaction.guild.id, draft)
+
+        fms = [Formation(**x) for x in draft["fms"]]
+        preview = self._render_message(draft["intro"], fms, draft["end"])
+        logger.info(f"Guild {interaction.guild.id} removed formation {removed.name!r} ({removed.start_iso}) from draft.")
+        await interaction.response.send_message(
+            f"Supprimé: {removed.emoji} {removed.name}",
             embed=Embed(
                 title=f"Aperçu brouillon — {len(fms)} formation(s)",
                 description=f"{preview or '_(vide)_'}",
@@ -824,9 +824,10 @@ class FormationManagement(commands.Cog):
             ],
         )
 
-    # endregion Fm Slash Group
+    # endregion Fm Slash Commands Group
 
-    # region ====== Listeners ======
+    # region ====== Event Listeners ======
+
     @commands.Cog.listener(name="on_raw_reaction_add")
     @commands.Cog.listener(name="on_raw_reaction_remove")
     async def on_raw_reaction_event(self, payload: RawReactionActionEvent) -> None:
@@ -863,9 +864,11 @@ class FormationManagement(commands.Cog):
 
         await self._update_published_message(payload.guild_id)
 
-    # endregion Listeners
+    # endregion Event Listeners
 
     # region ====== Helpers ======
+    # -- Parsing & Rendering --
+
     @staticmethod
     def _parse_date_time(date_str: str, hour_str: str) -> datetime:
         """Parse date and time strings into a timezone-aware datetime object.
@@ -964,6 +967,8 @@ class FormationManagement(commands.Cog):
         mentions = [member.mention for member in members]
         logger.debug(f"Resolved {len(mentions)} formation manager contacts for guild {guild.id}.")
         return " ou ".join(mentions)
+
+    # -- Notifications --
 
     async def _send_registration_dm(
         self,
@@ -1093,6 +1098,8 @@ class FormationManagement(commands.Cog):
                 f"Sent waitlist DM to user {user_id} in guild {guild.id} for formation {formation_name} (position {waitlist_position})."
             )
 
+    # -- State --
+
     @staticmethod
     def _load_state() -> dict[str, dict[str, Any]]:
         """Load the state from the JSON file.
@@ -1213,6 +1220,8 @@ class FormationManagement(commands.Cog):
         guild_state = self._get_guild_state(guild_id)
         guild_state["published"] = published
         self._set_guild_state(guild_id, guild_state)
+
+    # -- Reaction Logs & Updates --
 
     def _log_reaction(
         self, guild_id: int, message_id: int, user_id: int, emoji: str, action: str, user_name: str | None = None
@@ -1549,7 +1558,7 @@ class FormationManagement(commands.Cog):
 
         return text, file_obj
 
-    # endregion
+    # endregion Helpers
 
 
 @deprecated("Load the cog using `bot.add_cog()` instead.")
@@ -1560,6 +1569,3 @@ async def setup(bot: commands.Bot) -> None:
         bot (commands.Bot): The bot instance.
     """
     await bot.add_cog(FormationManagement(bot))
-
-
-# TODO: dm les gens la veille de leurs formations à x heures / cmd

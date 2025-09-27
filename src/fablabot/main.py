@@ -31,6 +31,7 @@ class Fablabot(commands.Bot):
                 guilds=True, members=True, expressions=True, voice_states=True, guild_messages=True, reactions=True
             ),
         )
+        self.log_handler: DiscordLogHandler | None = None
         logger.info("Bot initialized")
 
     async def setup_hook(self) -> None:
@@ -39,6 +40,7 @@ class Fablabot(commands.Bot):
         handler.setLevel(logging.ERROR)
         logging.getLogger().addHandler(handler)
         logging.getLogger().setLevel(logging.INFO)
+        self.log_handler = handler
 
         self.tree.clear_commands(guild=None)
         for cog in (ChannelManagement(self), FormationManagement(self), UserManagement(self)):
