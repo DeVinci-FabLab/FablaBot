@@ -19,7 +19,7 @@ from discord import (
     ui,
 )
 from discord.ext import commands
-from discord.utils import get
+from discord.utils import escape_markdown, get
 
 from .utils import is_in_allowed_channel, log_request
 
@@ -38,14 +38,17 @@ class UserManagement(commands.Cog):
     """Cog to register user management commands.
 
     Commands:
-    - /user help: Display help for user management commands.
-    - /user op: Grant temporary admin privileges to a user.
-    - /user deop: Revoke temporary admin privileges from a user.
-    - /user add_role: Add a role to a single user.
-    - /user remove_role: Remove a role from a single user.
-    - /user add_roles: Add a role to multiple users via a selector.
-    - /user remove_roles: Remove a role from multiple users via a selector.
-    - /user dm: Send a direct message to multiple users.
+        - /user help: Display help for user management commands.
+        - /user op: Grant temporary admin privileges to a user.
+        - /user deop: Revoke temporary admin privileges from a user.
+        - /user add_role: Add a role to a single user.
+        - /user remove_role: Remove a role from a single user.
+        - /user add_roles: Add a role to multiple users via a selector.
+        - /user remove_roles: Remove a role from multiple users via a selector.
+        - /user dm: Send a direct message to multiple users.
+
+    Attributes:
+        user_group (app_commands.Group): Command group for user management commands.
     """
 
     def __init__(self, bot: commands.Bot) -> None:
@@ -100,7 +103,8 @@ class UserManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             user (Member): The user to give privileges to.
             reason (str): The reason for granting privileges.
-            time (app_commands.Range[int, 1, 90], optional): The duration in minutes for which privileges are granted. Defaults to 5.
+            time (app_commands.Range[int, 1, 90], optional):
+                The duration in minutes for which privileges are granted. Defaults to 5.
         """
         log_request(logger, "user.op", interaction, target=user, reason=reason, duration=time)
         if not await is_in_allowed_channel(logger, interaction):
@@ -139,7 +143,8 @@ class UserManagement(commands.Cog):
         self.deop_tasks[user.id] = task
         logger.info(f"Granted {user} temporary admin for {time} minutes for reason: {reason}")
         await interaction.response.send_message(
-            f"{codir_role.mention} Droits admin donnés à {user.mention}({user.name!r}) pour {time} minutes. Raison: {reason}"
+            f"{codir_role.mention} Droits admin donnés à {user.mention}({user.name!r}) pour {time} minutes. "
+            f"Raison: {escape_markdown(reason)}"
         )
 
     @user_group.command(name="deop", description="Retire les droits admin temporaires d'un utilisateur.")
@@ -342,7 +347,10 @@ class UserManagement(commands.Cog):
             await interaction.response.send_message("Permissions insuffisantes.", ephemeral=True)
             return
 
-        message += f"\n\n*Ce message vous a été envoyé par un membre du Bureau du Fablab. Merci de ne pas y répondre directement.*\nPour plus d'informations, contactez <@{interaction.user.id}>."
+        message += (
+            f"\n\n*Ce message vous a été envoyé par un membre du Bureau du Fablab. Merci de ne pas y répondre directement.*"
+            f"\nPour plus d'informations, contactez <@{interaction.user.id}>."
+        )
 
         view = BulkDMView(interaction.user, message)
         await interaction.response.send_message(
@@ -385,7 +393,8 @@ class UserManagement(commands.Cog):
                 except HTTPException:
                     logger.exception(f"HTTP error while removing admin role from {user}")
                     await interaction.followup.send(
-                        f"{codir_role.mention} Erreur HTTP lors de la suppression du rôle admin de {user.mention}({user.name!r})."
+                        f"{codir_role.mention} Erreur HTTP lors de la "
+                        f"suppression du rôle admin de {user.mention}({user.name!r})."
                     )
                     return
 
@@ -571,7 +580,8 @@ class BulkRoleView(ui.View):
                     failed.append(m)
 
         logger.info(
-            f"Members to {self.action} role {self.role}: {members},\nSuccess:{modified},\nAlready: {already},\nFailed: {failed}",
+            f"Members to {self.action} role {self.role}: {members},"
+            f"\nSuccess:{modified},\nAlready: {already},\nFailed: {failed}",
         )
 
         action_str = {"add": "Ajouté", "remove": "Retiré"}

@@ -95,18 +95,23 @@ class Formation:
 class FormationManagement(commands.Cog):
     """Hebdo formations management cog (Draft -> Publish -> Export).
 
-    - /fm help
-    - /fm start intro:<str> end:<str> role:<@Role>
-    - /fm edit_text [intro] [end]
-    - /fm add emoji:<str> name:<str> trainer:<@Member> date:<DD/MM/YYYY> hour:<HH:MM> duration:<str> seats:<int> description:<str>
-    - /fm edit index:<int> [emoji] [name] [trainer] [date] [hour] [duration] [seats] [description]
-    - /fm remove index:<int>
-    - /fm clear
-    - /fm preview
-    - /fm publish channel:<#salon>
-    - /fm export [message_id] [publication_channel]
+    Commands:
+        - /fm help
+        - /fm start intro:<str> end:<str> role:<@Role>
+        - /fm edit_text [intro] [end]
+        - /fm add emoji:<str> name:<str> trainer:<@Member> date:<DD/MM/YYYY> hour:<HH:MM> duration:<str> seats:<int> description:<str>
+        - /fm edit index:<int> [emoji] [name] [trainer] [date] [hour] [duration] [seats] [description]
+        - /fm remove index:<int>
+        - /fm clear
+        - /fm preview
+        - /fm publish channel:<#salon>
+        - /fm export [message_id] [publication_channel]
 
-    Log reactions (add/remove) on messages published by this cog.
+    Listeners:
+        - on_raw_reaction_event: Log reactions (add/remove) on messages published by this cog.
+
+    Attributes:
+        fm_group (app_commands.Group): Command group for formation management commands.
     """
 
     def __init__(self, bot: commands.Bot) -> None:
@@ -158,8 +163,10 @@ class FormationManagement(commands.Cog):
             "**Commandes de gestion des formations :**\n"
             "- `/fm start <intro> <end> <role>` : Démarrer un nouveau brouillon de formation.\n"
             "- `/fm edit_text [intro] [end]` : Modifier le texte d'introduction et/ou de conclusion du brouillon.\n"
-            "- `/fm add <emoji> <name> <trainer> <date> <hour> <duration> <seats> <description>` : Ajouter une nouvelle formation au brouillon.\n"
-            "- `/fm edit <index> [emoji] [name] [trainer] [date] [hour] [duration] [seats] [description]` : Modifier une formation existante dans le brouillon.\n"
+            "- `/fm add <emoji> <name> <trainer> <date> <hour> <duration> <seats> <description>` :"
+            " Ajouter une nouvelle formation au brouillon.\n"
+            "- `/fm edit <index> [emoji] [name] [trainer] [date] [hour] [duration] [seats] [description]` :"
+            " Modifier une formation existante dans le brouillon.\n"
             "- `/fm remove <index>` : Supprimer une formation du brouillon.\n"
             "- `/fm clear` : Effacer le brouillon actuel.\n"
             "- `/fm preview` : Prévisualiser le brouillon actuel.\n"
@@ -194,7 +201,8 @@ class FormationManagement(commands.Cog):
         assert interaction.guild is not None
         assert isinstance(interaction.channel, TextChannel)
 
-        emoji = {emoji for emoji in interaction.guild.emojis if emoji.name == "dvfl"}.pop()
+        emoji_set = {emoji for emoji in interaction.guild.emojis if emoji.name == "dvfl"}
+        emoji = emoji_set.pop() if emoji_set else ":loudspeaker:"
 
         start = f"# [FORMATIONS] {emoji}\nHey {role.mention} !\n"
         draft: dict[str, Any] = {"intro": start + intro, "fms": [], "end": end}
@@ -499,13 +507,14 @@ class FormationManagement(commands.Cog):
 
         new_start_iso = original.start_iso
         if date is not None or hour is not None:
-            date_part = date.strip() if date is not None else original.start_dt.strftime("%Y-%m-%d")
+            date_part = date.strip() if date is not None else original.start_dt.strftime("%d/%m/%Y")
             hour_part = hour.strip() if hour is not None else original.start_dt.strftime("%H:%M")
             try:
                 new_start_iso = self._parse_date_time(date_part, hour_part).isoformat()
             except Exception:
                 logger.warning(
-                    f"Guild {interaction.guild.id} provided invalid date/hour while editing formation: {date_part} {hour_part}.",
+                    f"Guild {interaction.guild.id} provided invalid date/hour while"
+                    f" editing formation: {date_part} {hour_part}.",
                 )
                 await interaction.response.send_message(
                     "Date/heure invalides. Exemples: date `15/09/2025`, heure `18:08`.",
@@ -533,7 +542,8 @@ class FormationManagement(commands.Cog):
         new_position = fms.index(updated) + 1
 
         logger.info(
-            f"Guild {interaction.guild.id} edited formation {original.name!r} -> {updated.name!r} (index {index} → {new_position}).",
+            f"Guild {interaction.guild.id} edited formation {original.name!r} -> "
+            f"{updated.name!r} (index {index} → {new_position}).",
         )
 
         await interaction.response.send_message(
@@ -678,14 +688,17 @@ class FormationManagement(commands.Cog):
             "fms": [],
         }
 
+        success_reactions = 0
         for fm in fms:
             fm_dict = fm.to_dict()
             published_message["fms"].append(fm_dict)
             try:
                 await msg.add_reaction(fm.emoji)
+                success_reactions += 1
             except Exception:
                 logger.exception(
-                    f"Guild {interaction.guild.id} failed to add reaction {fm.emoji!r} for formation {fm.name!r} in published message."
+                    f"Guild {interaction.guild.id} failed to add reaction {fm.emoji!r} "
+                    f"for formation {fm.name!r} in published message."
                 )
 
         self._set_last_published_in_guild(
@@ -699,7 +712,8 @@ class FormationManagement(commands.Cog):
 
         logger.info(f"Guild {interaction.guild.id} published the formations draft in {channel}.")
         await interaction.response.send_message(
-            f"Message publié dans {channel.mention} (ID: `{msg.id}`) avec {len(msg.reactions)} réaction(s) ajoutée(s)."
+            f"Message publié dans {channel.mention} (ID: `{msg.id}`) avec "
+            f"{success_reactions}/{len(fms)} réaction(s) ajoutée(s)."
         )
 
     @fm_group.command(name="export", description="Exporter la liste des membres ayant (dé)réagi aux émojis des FMs.")
@@ -831,7 +845,11 @@ class FormationManagement(commands.Cog):
     @commands.Cog.listener(name="on_raw_reaction_add")
     @commands.Cog.listener(name="on_raw_reaction_remove")
     async def on_raw_reaction_event(self, payload: RawReactionActionEvent) -> None:
-        """Log reaction updates on the last published formations message."""
+        """Log reaction updates on the last published formations message.
+
+        Args:
+            payload (RawReactionActionEvent): The raw reaction event payload.
+        """
         if payload.guild_id is None:
             return
         pub = self._get_last_published_in_guild(payload.guild_id)
@@ -923,7 +941,8 @@ class FormationManagement(commands.Cog):
             line_block = [
                 f"{fm.emoji} **{fm.name}** avec {fm.trainer_mention}",
                 f":date: {self._humanize_dt(fm.start_dt)}  — "
-                f":hourglass_flowing_sand: {fm.duration}  — :busts_in_silhouette: {len(fm.registered_users)}/{fm.seats} place(s)",
+                f":hourglass_flowing_sand: {fm.duration}  — "
+                f":busts_in_silhouette: {len(fm.registered_users)}/{fm.seats} place(s)",
                 f"{fm.description}",
             ]
             lines.append("\n".join(line_block))
@@ -1000,8 +1019,8 @@ class FormationManagement(commands.Cog):
 
         message = (
             f"Salut {member.display_name} !\n"
-            f"Bonne nouvelle ! Ta réaction a bien été prise en compte. Tu es inscrit·e pour la formation **{formation.name}** le {datetime_text}.\n"
-            "Si tu ne peux finalement pas participer, retire ta réaction pour libérer la place.\n\n"
+            f"Ton inscription à la formation **{formation.name}** le {datetime_text} a bien été enregistrée.\n"
+            "Si tu ne peux finalement pas y participer, pense à retirer ta réaction pour libérer la place.\n\n"
             f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
         )
         try:
@@ -1041,8 +1060,9 @@ class FormationManagement(commands.Cog):
 
         message = (
             f"Salut {member.display_name} !\n"
-            f"Bonne nouvelle ! Ta patience a payé, tu quittes la liste d'attente et tu as une place pour la formation **{formation.name}** le {datetime_text}.\n"
-            "Si tu ne peux finalement pas venir, retire ta réaction pour permettre à quelqu'un d'autre de s'inscrire.\n\n"
+            "Bonne nouvelle : une place s'est libérée ! "
+            f"Tu es désormais inscrit·e à la formation **{formation.name}** le {datetime_text}.\n"
+            "Si tu ne peux finalement pas y participer, pense à retirer ta réaction pour libérer la place.\n\n"
             f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
         )
         try:
@@ -1070,7 +1090,8 @@ class FormationManagement(commands.Cog):
             contacts (str): The contact string for formation managers.
         """
         logger.debug(
-            f"Preparing waitlist DM for guild {guild.id} user {user_id} formation {formation_name} position {waitlist_position}."
+            f"Preparing waitlist DM for guild {guild.id} user {user_id} formation "
+            f"{formation_name} position {waitlist_position}."
         )
         try:
             member = guild.get_member(user_id) or await guild.fetch_member(user_id)
@@ -1082,11 +1103,11 @@ class FormationManagement(commands.Cog):
 
         logger.debug(f"Resolved member {member.id} ({member.display_name}) for waitlist DM in guild {guild.id}.")
 
-        position_text = f"en {waitlist_position}{'ème' if waitlist_position > 1 else 'ère'} position"
+        position_text = f"en **{waitlist_position}{'ème' if waitlist_position > 1 else 'ère'} position**"
         message = (
             f"Salut {member.display_name} !\n"
-            f"On sait que tu es intéressé·e par **{formation_name}**, mais il n'y a plus de places disponibles.\n"
-            f"Tu es {position_text} dans la liste d'attente. On te tiendra informé·e si suffisamment de places se libèrent.\n\n"
+            f"On sait que tu es intéressé·e par la formation **{formation_name}**, mais toutes les places sont déjà prises.\n"
+            f"Tu es {position_text} sur la liste d'attente. Nous te préviendrons si une place se libère.\n\n"
             f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
         )
         try:
@@ -1095,7 +1116,8 @@ class FormationManagement(commands.Cog):
             logger.exception(f"Failed to send waitlist DM to user {user_id} in guild {guild.id}.")
         else:
             logger.info(
-                f"Sent waitlist DM to user {user_id} in guild {guild.id} for formation {formation_name} (position {waitlist_position})."
+                f"Sent waitlist DM to user {user_id} in guild {guild.id} for "
+                f"formation {formation_name} (position {waitlist_position})."
             )
 
     # -- State --
@@ -1331,7 +1353,7 @@ class FormationManagement(commands.Cog):
         """
         guild_state = self._get_guild_state(guild_id)
         history = [event for event in guild_state.get("reactions_log", []) or [] if event.get("message_id") == message_id]
-        history.sort(key=lambda ev: ev.get("ts_iso", ""))
+        history.sort(key=lambda ev: ev.get("ts_iso", ""))  # pyright: ignore
         logger.debug(f"Loaded {len(history)} reaction events for guild {guild_id} message {message_id}.")
         return history
 
@@ -1375,7 +1397,8 @@ class FormationManagement(commands.Cog):
 
         if not intro or not end or not fms:
             logger.warning(
-                f"Published formations payload incomplete for guild {guild_id}; intro={bool(intro)} end={bool(end)} formations={len(fms)}."
+                f"Published formations payload incomplete for guild {guild_id}; "
+                f"intro={bool(intro)} end={bool(end)} formations={len(fms)}."
             )
             return
 

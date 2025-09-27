@@ -43,21 +43,26 @@ class ChannelManagement(commands.Cog):
     """Cog to register text and voice channel management commands and listeners.
 
     Commands:
-    - /text help: Display help for text channel management commands.
-    - /text clear: Clear the current text channel of its last messages.
-    - /text create: Create a new text channel in the specified category.
-    - /text rename: Rename an existing text channel.
-    - /text delete: Delete a text channel.
-    - /vocal help: Display help for voice channel management commands.
-    - /vocal create: Create a new voice channel in the specified category.
-    - /vocal rename: Rename an existing voice channel.
-    - /vocal delete: Delete a voice channel.
-    - /log set: Configure the text channel receiving bot logs on errors.
+        - /text help: Display help for text channel management commands.
+        - /text clear: Clear the current text channel of its last messages.
+        - /text create: Create a new text channel in the specified category.
+        - /text rename: Rename an existing text channel.
+        - /text delete: Delete a text channel.
+        - /vocal help: Display help for voice channel management commands.
+        - /vocal create: Create a new voice channel in the specified category.
+        - /vocal rename: Rename an existing voice channel.
+        - /vocal delete: Delete a voice channel.
+        - /log set: Configure the text channel receiving bot logs on errors.
 
     Listeners:
-    - on_message_delete: Notify when a message is deleted in a bot channel, log the deleter and resend the content.
-    - on_raw_message_delete: Notify when a message is deleted in a bot channel (for uncached messages).
-    - on_voice_state_update: Create and remove dynamic voice channels in categories with a base channel named *-vocal.
+        - on_message_delete: Notify when a message is deleted in a bot channel, log the deleter and resend the content.
+        - on_raw_message_delete: Notify when a message is deleted in a bot channel (for uncached messages).
+        - on_voice_state_update: Create and remove dynamic voice channels in categories with a base channel named *-vocal.
+
+    Attributes:
+        text_group (app_commands.Group): Command group for text channel management commands.
+        vocal_group (app_commands.Group): Command group for voice channel management commands.
+        log_group (app_commands.Group): Command group for bot log configuration commands.
     """
 
     def __init__(self, bot: commands.Bot) -> None:
@@ -81,7 +86,8 @@ class ChannelManagement(commands.Cog):
         """
         help_message = (
             "**Commandes de gestion des salons textuels :**\n"
-            "- `/text clear [messages]`: Nettoie le salon actuel de ses derniers messages. Par défaut, 5 messages sont supprimés.\n"
+            "- `/text clear [messages]`: Nettoie le salon actuel de ses derniers messages. "
+            "Par défaut, 5 messages sont supprimés.\n"
             "- `/text create <channel> <category>`: Crée un nouveau salon textuel dans la catégorie spécifiée.\n"
             "- `/text rename <channel> <new_name>`: Renomme un salon textuel existant.\n"
             "- `/text delete <channel>`: Supprime un salon textuel existant.\n"
@@ -176,7 +182,8 @@ class ChannelManagement(commands.Cog):
             return
         logger.info(f"Created text channel {new_channel!r} in category {category!r}")
         await interaction.response.send_message(
-            f"Le salon textuel {new_channel.mention}({new_channel.name!r}) a été créé dans {category.mention}({category.name!r})."
+            f"Le salon textuel {new_channel.mention}({new_channel.name!r}) a "
+            f"été créé dans {category.mention}({category.name!r})."
         )
 
     @text_group.command(name="rename", description="Renomme un salon textuel.")
@@ -257,7 +264,8 @@ class ChannelManagement(commands.Cog):
         """
         help_message = (
             "**Commandes de gestion des salons vocaux :**\n"
-            "- `/vocal create <name> <category> [is_temporary] [max_user]`: Crée un nouveau salon vocal dans la catégorie spécifiée. Par défaut, le salon est temporaire et illimité.\n"
+            "- `/vocal create <name> <category> [is_temporary] [max_user]`: "
+            "Crée un nouveau salon vocal dans la catégorie spécifiée. Par défaut, le salon est temporaire et illimité.\n"
             "- `/vocal rename <channel> <new_name>`: Renomme un salon vocal existant.\n"
             "- `/vocal delete <channel>`: Supprime un salon vocal existant.\n"
             "- `/vocal help`: Affiche cette aide pour les commandes de gestion des salons vocaux.\n"
@@ -469,10 +477,9 @@ class ChannelManagement(commands.Cog):
             return
 
         previous_channel: TextChannel | None = None
-        if previous_id is not None:
-            maybe_previous = self.bot.get_channel(previous_id)
-            if isinstance(maybe_previous, TextChannel):
-                previous_channel = maybe_previous
+        maybe_previous = self.bot.get_channel(previous_id)
+        if isinstance(maybe_previous, TextChannel):
+            previous_channel = maybe_previous
 
         handler.set_log_channel(channel)
         logger.info(msg=f"Log channel set to {channel} (id={channel.id}) by {interaction.user} (id={interaction.user.id})")
