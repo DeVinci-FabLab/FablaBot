@@ -67,7 +67,7 @@ class Formation:
     """Duration of the formation in text format."""
     seats: int
     """Number of seats available for the formation."""
-    description: str
+    description: str = ""
     """Brief description of the formation."""
     registered_users: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
     """Registered users metadata (order preserved)."""
@@ -304,12 +304,12 @@ class FormationManagement(commands.Cog):
         interaction: Interaction,
         emoji: str,
         name: str,
-        description: str,
         trainer: Member,
         date: str,
         hour: str,
         duration: str,
         seats: app_commands.Range[int, 1, 500],
+        description: str = "",
     ) -> None:
         """Add a formation to the draft (automatically sorted by date/time).
 
@@ -317,12 +317,12 @@ class FormationManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             emoji (str): The emoji for the formation.
             name (str): The name of the formation.
-            description (str): The description of the formation.
             trainer (Member): The trainer.
             date (str): The date of the formation.
             hour (str): The hour of the formation.
             duration (str): The duration of the formation in text format.
             seats (app_commands.Range[int, 1, 500]): The number of seats for the formation.
+            description (str, optional): The description of the formation. Defaults to "".
         """
         log_request(
             logger,
@@ -943,8 +943,8 @@ class FormationManagement(commands.Cog):
                 f":date: {self._humanize_dt(fm.start_dt)}  — "
                 f":hourglass_flowing_sand: {fm.duration}  — "
                 f":busts_in_silhouette: {len(fm.registered_users)}/{fm.seats} place(s)",
-                f"{fm.description}",
             ]
+            line_block += [fm.description] if fm.description else []
             lines.append("\n".join(line_block))
             lines.append("")
 
@@ -1103,10 +1103,10 @@ class FormationManagement(commands.Cog):
 
         logger.debug(f"Resolved member {member.id} ({member.display_name}) for waitlist DM in guild {guild.id}.")
 
-        position_text = f"en **{waitlist_position}{'ème' if waitlist_position > 1 else 'ère'} position**"
+        position_text = f"en **{waitlist_position}{'e' if waitlist_position > 1 else 're'} position**"
         message = (
             f"Salut {member.display_name} !\n"
-            f"On sait que tu es intéressé·e par la formation **{formation_name}**, mais toutes les places sont déjà prises.\n"
+            f"On sait que la formation **{formation_name}** t'intéresse, mais toutes les places sont déjà prises.\n"
             f"Tu es {position_text} sur la liste d'attente. Nous te préviendrons si une place se libère.\n\n"
             f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
         )
