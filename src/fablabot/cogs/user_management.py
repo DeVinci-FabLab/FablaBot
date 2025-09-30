@@ -19,7 +19,7 @@ from discord import (
     ui,
 )
 from discord.ext import commands
-from discord.utils import get
+from discord.utils import escape_markdown, get
 
 from .utils import is_in_allowed_channel, log_request
 
@@ -38,14 +38,17 @@ class UserManagement(commands.Cog):
     """Cog to register user management commands.
 
     Commands:
-    - /user help: Display help for user management commands.
-    - /user op: Grant temporary admin privileges to a user.
-    - /user deop: Revoke temporary admin privileges from a user.
-    - /user add_role: Add a role to a single user.
-    - /user remove_role: Remove a role from a single user.
-    - /user add_roles: Add a role to multiple users via a selector.
-    - /user remove_roles: Remove a role from multiple users via a selector.
-    - /user dm: Send a direct message to multiple users.
+        - /user help: Display help for user management commands.
+        - /user op: Grant temporary admin privileges to a user.
+        - /user deop: Revoke temporary admin privileges from a user.
+        - /user add_role: Add a role to a single user.
+        - /user remove_role: Remove a role from a single user.
+        - /user add_roles: Add a role to multiple users via a selector.
+        - /user remove_roles: Remove a role from multiple users via a selector.
+        - /user dm: Send a direct message to multiple users.
+
+    Attributes:
+        user_group (app_commands.Group): Command group for user management commands.
     """
 
     def __init__(self, bot: commands.Bot) -> None:
@@ -58,7 +61,9 @@ class UserManagement(commands.Cog):
         self.deop_tasks: dict[int, asyncio.Task[None]] = {}
         logger.info("UserManagement initialized")
 
-    # region ====== User Slash Group ======
+    # region ====== User Slash Commands Group ======
+    # -- Help & Admin Access --
+
     user_group = app_commands.Group(name="user", description="Gestion des utilisateurs")
 
     @user_group.command(name="help", description="Affiche l'aide pour les commandes de gestion des utilisateurs.")
@@ -66,9 +71,9 @@ class UserManagement(commands.Cog):
         """Display help for user management commands.
 
         Args:
-            interaction (Interaction): The interaction object.
+            interaction (Interaction): The Discord interaction context.
         """
-        help_text = (
+        help_message = (
             "**Commandes de gestion des utilisateurs :**\n"
             "- `/user op <user>` : Donne des droits admin temporaires à un utilisateur.\n"
             "- `/user deop <user>` : Retire les droits admin temporaires d'un utilisateur.\n"
@@ -81,7 +86,7 @@ class UserManagement(commands.Cog):
             "\n"
             "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
         )
-        await interaction.response.send_message(help_text, ephemeral=True)
+        await interaction.response.send_message(help_message, ephemeral=True)
 
     @user_group.command(name="op", description="Donne des droits admin temporaires à un utilisateur.")
     @app_commands.describe(
@@ -89,14 +94,17 @@ class UserManagement(commands.Cog):
         reason="Raison de l'attribution",
         time="Durée en minutes (par défaut 5)",
     )
-    async def user_op(self, interaction: Interaction, user: Member, reason: str, time: int = 5) -> None:
+    async def user_op(
+        self, interaction: Interaction, user: Member, reason: str, time: app_commands.Range[int, 1, 90] = 5
+    ) -> None:
         """Grant temporary admin privileges to a user.
 
         Args:
-            interaction (Interaction): The interaction object.
+            interaction (Interaction): The Discord interaction context.
             user (Member): The user to give privileges to.
             reason (str): The reason for granting privileges.
-            time (int, optional): The duration in minutes for which privileges are granted. Defaults to 5.
+            time (app_commands.Range[int, 1, 90], optional):
+                The duration in minutes for which privileges are granted. Defaults to 5.
         """
         log_request(logger, "user.op", interaction, target=user, reason=reason, duration=time)
         if not await is_in_allowed_channel(logger, interaction):
@@ -120,11 +128,11 @@ class UserManagement(commands.Cog):
         try:
             await user.add_roles(admin_role, reason=f"Add with op command by {interaction.user} for {reason}")
         except Forbidden:
-            logger.error(f"Forbidden to add role {admin_role} to {user}")
+            logger.exception(f"Forbidden to add role {admin_role} to {user}")
             await interaction.response.send_message("Impossible d'ajouter le rôle.", ephemeral=True)
             return
-        except HTTPException as e:
-            logger.error(f"Failed to add role {admin_role} to {user}: {e}")
+        except HTTPException:
+            logger.exception(f"Failed to add role {admin_role} to {user}")
             await interaction.response.send_message("Une erreur est survenue lors de l'ajout du rôle.", ephemeral=True)
             return
 
@@ -135,7 +143,8 @@ class UserManagement(commands.Cog):
         self.deop_tasks[user.id] = task
         logger.info(f"Granted {user} temporary admin for {time} minutes for reason: {reason}")
         await interaction.response.send_message(
-            f"{codir_role.mention} Droits admin donnés à {user.mention}({user.name!r}) pour {time} minutes. Raison: {reason}"
+            f"{codir_role.mention} Droits admin donnés à {user.mention}({user.name!r}) pour {time} minutes. "
+            f"Raison: {escape_markdown(reason)}"
         )
 
     @user_group.command(name="deop", description="Retire les droits admin temporaires d'un utilisateur.")
@@ -144,7 +153,7 @@ class UserManagement(commands.Cog):
         """Revoke temporary admin privileges from a user.
 
         Args:
-            interaction (Interaction): The interaction object.
+            interaction (Interaction): The Discord interaction context.
             user (Member): The user to remove privileges from.
 
         """
@@ -169,11 +178,11 @@ class UserManagement(commands.Cog):
         try:
             await user.remove_roles(admin_role, reason=f"Remove with op command by {interaction.user}")
         except Forbidden:
-            logger.error(f"Forbidden to remove role {admin_role} from {user}")
+            logger.exception(f"Forbidden to remove role {admin_role} from {user}")
             await interaction.response.send_message("Impossible de retirer le rôle.", ephemeral=True)
             return
-        except HTTPException as e:
-            logger.error(f"Failed to remove role {admin_role} from {user}: {e}")
+        except HTTPException:
+            logger.exception(f"Failed to remove role {admin_role} from {user}")
             await interaction.response.send_message("Une erreur est survenue lors du retrait du rôle.", ephemeral=True)
             return
 
@@ -183,7 +192,9 @@ class UserManagement(commands.Cog):
 
         logger.info(f"Revoked temporary admin from {user}")
         await interaction.response.send_message("Retrait des droits admin en cours...")
-        await interaction.edit_original_response(content=f"Droits admin retirés de {user.mention}({user.name!r}) !")
+        await interaction.edit_original_response(content=f"Droits admin retirés de {user.mention}({user.name!r})")
+
+    # -- Role Management --
 
     @user_group.command(name="add_role", description="Donne un rôle à un utilisateur.")
     @app_commands.describe(user="L'utilisateur cible", role="Le rôle à attribuer")
@@ -191,7 +202,7 @@ class UserManagement(commands.Cog):
         """Add a role to a single user.
 
         Args:
-            interaction (Interaction): The interaction object.
+            interaction (Interaction): The Discord interaction context.
             user (Member): The user to add the role to.
             role (Role): The role to add to the user.
         """
@@ -208,11 +219,11 @@ class UserManagement(commands.Cog):
         try:
             await user.add_roles(role, reason=f"Add with add_role command by {interaction.user}")
         except Forbidden:
-            logger.error(f"Forbidden to add role {role} to {user}")
+            logger.exception(f"Forbidden to add role {role} to {user}")
             await interaction.response.send_message("Impossible d'ajouter le rôle.", ephemeral=True)
             return
-        except HTTPException as e:
-            logger.error(f"Failed to add role {role} to {user}: {e}")
+        except HTTPException:
+            logger.exception(f"Failed to add role {role} to {user}")
             await interaction.response.send_message("Une erreur est survenue lors de l'ajout du rôle.", ephemeral=True)
             return
 
@@ -228,7 +239,7 @@ class UserManagement(commands.Cog):
         """Remove a role from a single user.
 
         Args:
-            interaction (Interaction): The interaction object.
+            interaction (Interaction): The Discord interaction context.
             user (Member): The user to remove the role from.
             role (Role): The role to remove from the user.
         """
@@ -245,11 +256,11 @@ class UserManagement(commands.Cog):
         try:
             await user.remove_roles(role, reason=f"Remove with remove_role command by {interaction.user}")
         except Forbidden:
-            logger.error(f"Forbidden to remove role {role} from {user}")
+            logger.exception(f"Forbidden to remove role {role} from {user}")
             await interaction.response.send_message("Impossible de retirer le rôle.", ephemeral=True)
             return
-        except HTTPException as e:
-            logger.error(f"Failed to remove role {role} from {user}: {e}")
+        except HTTPException:
+            logger.exception(f"Failed to remove role {role} from {user}")
             await interaction.response.send_message("Une erreur est survenue lors du retrait du rôle.", ephemeral=True)
             return
 
@@ -268,7 +279,7 @@ class UserManagement(commands.Cog):
         """Open a multi-user selector to add a role in bulk.
 
         Args:
-            interaction (Interaction): The interaction object.
+            interaction (Interaction): The Discord interaction context.
             role (Role): The role to add to the users.
         """
         log_request(logger, "user.add_roles", interaction, role=role)
@@ -292,7 +303,7 @@ class UserManagement(commands.Cog):
         """Open a multi-user selector to remove a role in bulk.
 
         Args:
-            interaction (Interaction): The interaction object.
+            interaction (Interaction): The Discord interaction context.
             role (Role): The role to remove from the users.
         """
         log_request(logger, "user.remove_roles", interaction, role=role)
@@ -310,6 +321,8 @@ class UserManagement(commands.Cog):
             f"Sélectionnez les membres à qui retirer {role.name!r} puis cliquez sur **Confirmer**.", view=view
         )
 
+    # -- Communications --
+
     @user_group.command(
         name="dm",
         description="Envoie un message privé à plusieurs utilisateurs via un sélecteur.",
@@ -319,7 +332,7 @@ class UserManagement(commands.Cog):
         """Send a direct message to multiple users.
 
         Args:
-            interaction (Interaction): The interaction object.
+            interaction (Interaction): The Discord interaction context.
             message (str): The message content to send.
         """
         log_request(logger, "user.dm", interaction, message=message)
@@ -334,7 +347,10 @@ class UserManagement(commands.Cog):
             await interaction.response.send_message("Permissions insuffisantes.", ephemeral=True)
             return
 
-        message += f"\n\n*Ce message vous a été envoyé par un membre du Bureau du Fablab. Merci de ne pas y répondre directement.*\nPour plus d'informations, contactez <@{interaction.user.id}>."
+        message += (
+            f"\n\n*Ce message vous a été envoyé par un membre du Bureau du Fablab. Merci de ne pas y répondre directement.*"
+            f"\nPour plus d'informations, contactez <@{interaction.user.id}>."
+        )
 
         view = BulkDMView(interaction.user, message)
         await interaction.response.send_message(
@@ -345,9 +361,11 @@ class UserManagement(commands.Cog):
             view=view,
         )
 
-    # endregion User Slash Group
+    # endregion User Slash Commands Group
 
     # region ====== Helpers ======
+    # -- Scheduling --
+
     async def _schedule_deop(
         self, interaction: Interaction, user: Member, time: int, admin_role: Role, codir_role: Role
     ) -> None:
@@ -367,15 +385,16 @@ class UserManagement(commands.Cog):
                 try:
                     await user.remove_roles(admin_role, reason="Remove op after time")
                 except Forbidden:
-                    logger.error(f"Forbidden to remove admin role from {user}")
+                    logger.exception(f"Forbidden to remove admin role from {user}")
                     await interaction.followup.send(
                         f"{codir_role.mention} Je ne peux pas retirer le rôle admin de {user.mention}({user.name!r})."
                     )
                     return
-                except HTTPException as e:
-                    logger.error(f"HTTP error while removing admin role from {user}: {e}")
+                except HTTPException:
+                    logger.exception(f"HTTP error while removing admin role from {user}")
                     await interaction.followup.send(
-                        f"{codir_role.mention} Erreur HTTP lors de la suppression du rôle admin de {user.mention}({user.name!r})."
+                        f"{codir_role.mention} Erreur HTTP lors de la "
+                        f"suppression du rôle admin de {user.mention}({user.name!r})."
                     )
                     return
 
@@ -383,7 +402,9 @@ class UserManagement(commands.Cog):
                 await interaction.followup.send(f"Droits admin retirés de {user.mention}({user.name!r}) après {time} minutes.")
             self.deop_tasks.pop(user.id, None)
         except asyncio.CancelledError:
-            logger.info(f"Deop timer cancelled for {user}")
+            logger.exception(f"Deop timer cancelled for {user}")
+
+    # -- Permission Checks --
 
     @staticmethod
     def _can_assign_role(member: Member, target_role: Role) -> bool:
@@ -465,6 +486,9 @@ async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(UserManagement(bot))
 
 
+# region ====== UI Views ======
+
+
 class BulkRoleView(ui.View):
     """View for bulk role assignment/removal."""
 
@@ -510,7 +534,7 @@ class BulkRoleView(ui.View):
         """Confirm the bulk role assignment/removal.
 
         Args:
-            interaction (Interaction): The interaction triggered by the confirm button.
+            interaction (Interaction): The Discord interaction triggered by the confirm button.
         """
         members: list[Member] = [m for m in self.select.values if isinstance(m, Member)]
         if not members:
@@ -536,8 +560,8 @@ class BulkRoleView(ui.View):
                     modified.append(m)
                 except Forbidden:
                     failed.append(m)
-                except HTTPException as e:
-                    logger.error(f"HTTP error while adding {self.role} to {m}: {e}")
+                except HTTPException:
+                    logger.exception(f"HTTP error while adding {self.role} to {m}")
                     failed.append(m)
 
         elif self.action == "remove":
@@ -551,12 +575,13 @@ class BulkRoleView(ui.View):
                     modified.append(m)
                 except Forbidden:
                     failed.append(m)
-                except HTTPException as e:
-                    logger.error(f"HTTP error while removing {self.role} from {m}: {e}")
+                except HTTPException:
+                    logger.exception(f"HTTP error while removing {self.role} from {m}")
                     failed.append(m)
 
         logger.info(
-            f"Members to {self.action} role {self.role}: {members},\nSuccess:{modified},\nAlready: {already},\nFailed: {failed}",
+            f"Members to {self.action} role {self.role}: {members},"
+            f"\nSuccess:{modified},\nAlready: {already},\nFailed: {failed}",
         )
 
         action_str = {"add": "Ajouté", "remove": "Retiré"}
@@ -620,7 +645,7 @@ class BulkDMView(ui.View):
         """Confirm the direct message sending.
 
         Args:
-            interaction (Interaction): The interaction triggered by the confirm button.
+            interaction (Interaction): The Discord interaction triggered by the confirm button.
         """
         members: list[Member] = [m for m in self.select.values if isinstance(m, Member)]
         if not members:
@@ -637,7 +662,7 @@ class BulkDMView(ui.View):
             except Forbidden:
                 failed.append((member, "Forbidden"))
             except Exception as e:
-                logger.error(f"Failed to DM {member}: {e}")
+                logger.exception(f"Failed to DM {member}")
                 failed.append((member, f"Exception: {e}"))
 
         logger.info(f"Bulk DM by {self.sender} delivered to {delivered} with failures {failed}")
@@ -656,3 +681,6 @@ class BulkDMView(ui.View):
         await interaction.response.edit_message(view=self)
 
         await interaction.edit_original_response(content="\n".join(lines), view=None)
+
+
+# endregion UI Views

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import re
 from warnings import deprecated
@@ -14,6 +13,7 @@ from discord import (
     DMChannel,
     ForumChannel,
     GroupChannel,
+    HTTPException,
     Interaction,
     Member,
     Message,
@@ -26,7 +26,9 @@ from discord import (
 from discord.ext import commands
 from discord.utils import get
 
-from .utils import is_in_allowed_channel, log_request
+from fablabot.discord_log_handler import DiscordLogHandler
+
+from .utils import check_has_role, is_in_allowed_channel, log_request
 
 logger = logging.getLogger(__name__)
 
@@ -34,26 +36,33 @@ logger = logging.getLogger(__name__)
 DYNAMIC_SUFFIX = "-vocal"
 INDEX_SEPARATOR = "/"
 EPHEMERAL_SUFFIX = "-temp"
+ADMIN_ROLES = {"Admin -temp-", "Administrateur"}
 
 
 class ChannelManagement(commands.Cog):
     """Cog to register text and voice channel management commands and listeners.
 
     Commands:
-    - /text help: Display help for text channel management commands.
-    - /text clear: Clear the current text channel of its last messages.
-    - /text create: Create a new text channel in the specified category.
-    - /text rename: Rename an existing text channel.
-    - /text delete: Delete a text channel.
-    - /vocal help: Display help for voice channel management commands.
-    - /vocal create: Create a new voice channel in the specified category.
-    - /vocal rename: Rename an existing voice channel.
-    - /vocal delete: Delete a voice channel.
+        - /text help: Display help for text channel management commands.
+        - /text clear: Clear the current text channel of its last messages.
+        - /text create: Create a new text channel in the specified category.
+        - /text rename: Rename an existing text channel.
+        - /text delete: Delete a text channel.
+        - /vocal help: Display help for voice channel management commands.
+        - /vocal create: Create a new voice channel in the specified category.
+        - /vocal rename: Rename an existing voice channel.
+        - /vocal delete: Delete a voice channel.
+        - /log set: Configure the text channel receiving bot logs on errors.
 
     Listeners:
-    - on_message_delete: Notify when a message is deleted in a bot channel, log the deleter and resend the content.
-    - on_raw_message_delete: Notify when a message is deleted in a bot channel (for uncached messages).
-    - on_voice_state_update: Create and remove dynamic voice channels in categories with a base channel named *-vocal.
+        - on_message_delete: Notify when a message is deleted in a bot channel, log the deleter and resend the content.
+        - on_raw_message_delete: Notify when a message is deleted in a bot channel (for uncached messages).
+        - on_voice_state_update: Create and remove dynamic voice channels in categories with a base channel named *-vocal.
+
+    Attributes:
+        text_group (app_commands.Group): Command group for text channel management commands.
+        vocal_group (app_commands.Group): Command group for voice channel management commands.
+        log_group (app_commands.Group): Command group for bot log configuration commands.
     """
 
     def __init__(self, bot: commands.Bot) -> None:
@@ -65,7 +74,7 @@ class ChannelManagement(commands.Cog):
         self.bot = bot
         self.remove_tasks: dict[int, asyncio.Task[None]] = {}
 
-    # region ====== Text Slash Group ======
+    # region ====== Text Slash Commands Group ======
     text_group = app_commands.Group(name="text", description="Gestion des salons textuels")
 
     @text_group.command(name="help", description="Affiche l'aide pour les commandes de gestion des salons textuels.")
@@ -73,11 +82,12 @@ class ChannelManagement(commands.Cog):
         """Display help for text channel management commands.
 
         Args:
-            interaction (Interaction): The interaction that triggered the command.
+            interaction (Interaction): The Discord interaction context.
         """
         help_message = (
             "**Commandes de gestion des salons textuels :**\n"
-            "- `/text clear [messages]`: Nettoie le salon actuel de ses derniers messages. Par défaut, 5 messages sont supprimés.\n"
+            "- `/text clear [messages]`: Nettoie le salon actuel de ses derniers messages. "
+            "Par défaut, 5 messages sont supprimés.\n"
             "- `/text create <channel> <category>`: Crée un nouveau salon textuel dans la catégorie spécifiée.\n"
             "- `/text rename <channel> <new_name>`: Renomme un salon textuel existant.\n"
             "- `/text delete <channel>`: Supprime un salon textuel existant.\n"
@@ -89,12 +99,12 @@ class ChannelManagement(commands.Cog):
 
     @text_group.command(name="clear", description="Nettoie le salon actuel de ses derniers messages.")
     @app_commands.describe(messages="Le nombre de messages à supprimer (par défaut 5)")
-    async def text_clear(self, interaction: Interaction, messages: int = 5) -> None:
+    async def text_clear(self, interaction: Interaction, messages: app_commands.Range[int, 1, 50] = 5) -> None:
         """Clears the current channel of its last messages.
 
         Args:
-            interaction (Interaction): The interaction that triggered the command.
-            messages (int, optional): The number of messages to purge. Defaults to 5.
+            interaction (Interaction): The Discord interaction context.
+            messages (app_commands.Range[int, 1, 50], optional): The number of messages to purge. Defaults to 5.
         """
         log_request(logger, "text.clear", interaction, messages=messages)
         assert not isinstance(
@@ -116,16 +126,18 @@ class ChannelManagement(commands.Cog):
                 ephemeral=True,
             )
             return
-        if messages < 1 or messages > 50:
-            logger.warning(f"Attempt to clear an invalid number of messages: {messages}")
-            await interaction.response.send_message(
-                "Vous ne pouvez pas supprimer moins de 1 message ou plus de 50 messages.", ephemeral=True
-            )
-            return
         await interaction.response.send_message("Nettoyage en cours...", ephemeral=True)
-        deleted = await interaction.channel.purge(limit=messages, reason=f"With clear command by {interaction.user}")
+        try:
+            deleted = await interaction.channel.purge(
+                limit=messages,
+                reason=f"With clear command by {interaction.user}",
+            )
+        except HTTPException:
+            logger.exception(f"HTTP error while purging {messages} messages in {interaction.channel}")
+            await interaction.edit_original_response(content="Erreur lors du nettoyage de ce salon.")
+            return
         logger.info(f"Deleted {len(deleted)} messages in channel {interaction.channel.name}")
-        await interaction.followup.send(f"{len(deleted)} messages supprimés avec succès !", ephemeral=True)
+        await interaction.edit_original_response(content=f"{len(deleted)} messages supprimés avec succès !")
 
     @text_group.command(name="create", description="Crée un nouveau salon dans la catégorie spécifiée.")
     @app_commands.describe(
@@ -136,7 +148,7 @@ class ChannelManagement(commands.Cog):
         """Create a text channel in the passed category.
 
         Args:
-            interaction (Interaction): The interaction object.
+            interaction (Interaction): The Discord interaction context.
             channel (str): The name of the channel to create.
             category (CategoryChannel): The category to create the channel in.
         """
@@ -159,10 +171,19 @@ class ChannelManagement(commands.Cog):
                 ephemeral=True,
             )
             return
-        new_channel = await category.create_text_channel(channel, reason=f"With create command by {interaction.user}")
+        try:
+            new_channel = await category.create_text_channel(
+                channel,
+                reason=f"With create command by {interaction.user}",
+            )
+        except HTTPException:
+            logger.exception(f"HTTP error while creating text channel {channel} in {category}")
+            await interaction.response.send_message("Erreur lors de la création du salon textuel.", ephemeral=True)
+            return
         logger.info(f"Created text channel {new_channel!r} in category {category!r}")
         await interaction.response.send_message(
-            f"Le salon textuel {new_channel.mention}({new_channel.name!r}) a été créé dans {category.mention}({category.name!r})."
+            f"Le salon textuel {new_channel.mention}({new_channel.name!r}) a "
+            f"été créé dans {category.mention}({category.name!r})."
         )
 
     @text_group.command(name="rename", description="Renomme un salon textuel.")
@@ -171,7 +192,7 @@ class ChannelManagement(commands.Cog):
         """Rename a text channel.
 
         Args:
-            interaction (Interaction): The interaction object.
+            interaction (Interaction): The Discord interaction context.
             channel (TextChannel): The channel to rename.
             new_name (str): The new name of the channel.
         """
@@ -188,7 +209,12 @@ class ChannelManagement(commands.Cog):
             )
             return
         old_name = channel.name
-        await channel.edit(name=new_name, reason=f"With rename command by {interaction.user}")
+        try:
+            await channel.edit(name=new_name, reason=f"With rename command by {interaction.user}")
+        except HTTPException:
+            logger.exception(f"HTTP error while renaming text channel {channel} to {new_name}")
+            await interaction.response.send_message("Erreur lors du renommage du salon textuel.", ephemeral=True)
+            return
         logger.info(f"Renamed channel {channel} from {old_name!r} to {new_name!r}")
         await interaction.response.send_message(
             f"Le salon textuel {channel.mention}, anciennement {old_name!r}, a été renommé en {new_name!r}."
@@ -200,7 +226,7 @@ class ChannelManagement(commands.Cog):
         """Delete a text channel.
 
         Args:
-            interaction (Interaction): The interaction object.
+            interaction (Interaction): The Discord interaction context.
             channel (TextChannel): The channel to delete.
         """
         log_request(logger, "text.delete", interaction, channel=channel.name)
@@ -215,13 +241,18 @@ class ChannelManagement(commands.Cog):
                 ephemeral=True,
             )
             return
-        await channel.delete(reason=f"With delete command by {interaction.user}")
+        try:
+            await channel.delete(reason=f"With delete command by {interaction.user}")
+        except HTTPException:
+            logger.exception(f"HTTP error while deleting text channel {channel}")
+            await interaction.response.send_message("Erreur lors de la suppression du salon textuel.", ephemeral=True)
+            return
         logger.info(f"Deleted text channel {channel.name!r}")
         await interaction.response.send_message(f"Le salon textuel {channel.name!r} a été supprimé.")
 
-    # endregion Text Slash Group
+    # endregion Text Slash Commands Group
 
-    # region ====== Vocal Slash Group ======
+    # region ====== Vocal Slash Commands Group ======
     vocal_group = app_commands.Group(name="vocal", description="Gestion des salons vocaux dynamiques")
 
     @vocal_group.command(name="help", description="Affiche l'aide pour les commandes de gestion des salons vocaux.")
@@ -229,11 +260,12 @@ class ChannelManagement(commands.Cog):
         """Display help for vocal channel management commands.
 
         Args:
-            interaction (Interaction): The interaction that triggered the command.
+            interaction (Interaction): The Discord interaction context.
         """
         help_message = (
             "**Commandes de gestion des salons vocaux :**\n"
-            "- `/vocal create <name> <category> [is_temporary] [max_user]`: Crée un nouveau salon vocal dans la catégorie spécifiée. Par défaut, le salon est temporaire et illimité.\n"
+            "- `/vocal create <name> <category> [is_temporary] [max_user]`: "
+            "Crée un nouveau salon vocal dans la catégorie spécifiée. Par défaut, le salon est temporaire et illimité.\n"
             "- `/vocal rename <channel> <new_name>`: Renomme un salon vocal existant.\n"
             "- `/vocal delete <channel>`: Supprime un salon vocal existant.\n"
             "- `/vocal help`: Affiche cette aide pour les commandes de gestion des salons vocaux.\n"
@@ -255,16 +287,17 @@ class ChannelManagement(commands.Cog):
         name: str,
         category: CategoryChannel,
         is_temporary: bool = True,
-        max_user: int | None = None,
+        max_user: app_commands.Range[int, 1, 99] | None = None,
     ) -> None:
         """Create a custom voice channel in the passed category.
 
         Args:
-            interaction (Interaction): The Discord interaction.
+            interaction (Interaction): The Discord interaction context.
             name (str): The name of the voice channel to create.
             category (CategoryChannel): The category in which to create the voice channel.
             is_temporary (bool, optional): Whether the channel is temporary. Defaults to True.
-            max_user (int | None, optional): The maximum number of users allowed in the channel. Defaults to None.
+            max_user (app_commands.Range[int, 1, 99] | None, optional):
+                The maximum number of users allowed in the channel. Defaults to None.
         """
         log_request(
             logger,
@@ -295,11 +328,16 @@ class ChannelManagement(commands.Cog):
                 ephemeral=True,
             )
             return
-        new_channel = await category.create_voice_channel(
-            channel_name,
-            user_limit=max_user,
-            reason=f"With create command by {interaction.user}",
-        )
+        try:
+            new_channel = await category.create_voice_channel(
+                channel_name,
+                user_limit=max_user,
+                reason=f"With create command by {interaction.user}",
+            )
+        except HTTPException:
+            logger.exception(f"HTTP error while creating voice channel {channel_name} in {category}")
+            await interaction.response.send_message("Erreur lors de la création du salon vocal.", ephemeral=True)
+            return
         logger.info(f"Created voice channel {new_channel!r} in category {category.name!r}")
         channel_creation_message = (
             f"Le salon vocal {'temporaire' if is_temporary else 'permanent'} {new_channel.mention}({new_channel.name!r}) "
@@ -315,7 +353,7 @@ class ChannelManagement(commands.Cog):
         """Rename a voice channel.
 
         Args:
-            interaction (Interaction): The Discord interaction.
+            interaction (Interaction): The Discord interaction context.
             channel (VoiceChannel): The voice channel to rename.
             new_name (str): The new name of the voice channel.
         """
@@ -344,14 +382,22 @@ class ChannelManagement(commands.Cog):
             new_name += EPHEMERAL_SUFFIX
         if old_name.endswith(DYNAMIC_SUFFIX) and not new_name.endswith(DYNAMIC_SUFFIX):
             new_name += DYNAMIC_SUFFIX
-        await channel.edit(name=new_name, reason=f"With rename command by {interaction.user}")
+        try:
+            await channel.edit(name=new_name, reason=f"With rename command by {interaction.user}")
+        except HTTPException:
+            logger.exception(f"HTTP error while renaming voice channel {channel} to {new_name}")
+            await interaction.response.send_message("Erreur lors du renommage du salon vocal.", ephemeral=True)
+            return
         logger.info(f"Renamed voice channel {channel} from {old_name!r} to {new_name!r}")
         for vc in channel.category.voice_channels:
             if vc.name.startswith(f"{old_name}{INDEX_SEPARATOR}"):
                 suffix = vc.name[len(old_name) :]
                 new_vc_name = f"{new_name}{suffix}"
-                await vc.edit(name=new_vc_name)
-                logger.info(f"Renamed associated dynamic channel {vc} from {old_name + suffix!r} to {new_vc_name!r}")
+                try:
+                    await vc.edit(name=new_vc_name)
+                    logger.info(f"Renamed associated dynamic channel {vc} from {old_name + suffix!r} to {new_vc_name!r}")
+                except HTTPException:
+                    logger.exception(f"HTTP error while renaming associated channel {vc} to {new_vc_name}")
         await interaction.response.send_message(
             f"Le salon vocal {channel.mention}, anciennement {old_name!r}, a été renommé en {new_name!r}."
         )
@@ -362,7 +408,7 @@ class ChannelManagement(commands.Cog):
         """Delete a voice channel.
 
         Args:
-            interaction (Interaction): The Discord interaction.
+            interaction (Interaction): The Discord interaction context.
             channel (VoiceChannel): The voice channel to delete.
         """
         log_request(logger, "vocal.delete", interaction, channel=channel.name)
@@ -381,13 +427,72 @@ class ChannelManagement(commands.Cog):
             logger.warning(f"Attempt to delete non-empty voice channel: {channel}")
             await interaction.response.send_message(f"Le salon vocal {channel.mention} n'est pas vide.", ephemeral=True)
             return
-        await channel.delete(reason=f"With delete command by {interaction.user}")
+        try:
+            await channel.delete(reason=f"With delete command by {interaction.user}")
+        except HTTPException:
+            logger.exception(f"HTTP error while deleting voice channel {channel}")
+            await interaction.response.send_message("Erreur lors de la suppression du salon vocal.", ephemeral=True)
+            return
         logger.info(f"Deleted voice channel {channel.name!r}")
         await interaction.response.send_message(f"Le salon vocal {channel.name!r} a été supprimé.")
 
-    # endregion Vocal Slash Group
+    # endregion Vocal Slash Commands Group
 
-    # region ====== Listeners ======
+    # region ====== Log Slash Commands Group ======
+    log_group = app_commands.Group(name="log", description="Configuration des logs du bot")
+
+    @log_group.command(name="set", description="Configure le salon recevant les logs du bot en cas d'erreur.")
+    @app_commands.describe(channel="Salon textuel qui recevra les logs du bot.")
+    async def log_set(self, interaction: Interaction, channel: TextChannel) -> None:
+        """Configure the log channel destination for Discord logging.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            channel (TextChannel): The text channel receiving bot logs.
+        """
+        log_request(logger, "log.set", interaction, channel=channel.name, channel_id=channel.id)
+        if not await is_in_allowed_channel(logger, interaction):
+            return
+
+        assert interaction.guild is not None
+        assert isinstance(interaction.user, Member)
+        if not await check_has_role(logger, interaction, ADMIN_ROLES):
+            return
+
+        handler = getattr(self.bot, "log_handler", None)
+        if not isinstance(handler, DiscordLogHandler):
+            logger.error("DiscordLogHandler is not initialized on the bot.")
+            await interaction.response.send_message(
+                "Le gestionnaire de logs n'est pas initialisé sur ce bot.",
+                ephemeral=True,
+            )
+            return
+
+        previous_id = handler.log_channel_id
+        if previous_id == channel.id:
+            await interaction.response.send_message(
+                f"{channel.mention} est déjà configuré comme salon de logs.",
+                ephemeral=True,
+            )
+            return
+
+        previous_channel: TextChannel | None = None
+        maybe_previous = self.bot.get_channel(previous_id)
+        if isinstance(maybe_previous, TextChannel):
+            previous_channel = maybe_previous
+
+        handler.set_log_channel(channel)
+        logger.info(msg=f"Log channel set to {channel} (id={channel.id}) by {interaction.user} (id={interaction.user.id})")
+
+        confirmation = f"Les logs seront désormais envoyés dans {channel.mention}."
+        if previous_channel is not None:
+            confirmation += f" Ancien salon : {previous_channel.mention}."
+        await interaction.response.send_message(confirmation)
+
+    # endregion Log Slash Commands Group
+
+    # region ====== Event Listeners ======
+
     @commands.Cog.listener()
     async def on_message_delete(self, message: Message) -> None:
         """Handle message deletion events.
@@ -406,16 +511,27 @@ class ChannelManagement(commands.Cog):
         codir_role = get(message.guild.roles, name="CoDir")
         if codir_role is None:
             logger.error("Required role CoDir not found.")
-            await message.channel.send("Rôle CoDir manquant sur le serveur.")
+            try:
+                await message.channel.send("Rôle CoDir manquant sur le serveur.")
+            except HTTPException:
+                logger.exception("HTTP error while notifying missing CoDir role")
             codir_mention = ""
         else:
             codir_mention = codir_role.mention + " "
 
-        async for entry in message.guild.audit_logs(limit=1, action=AuditLogAction.message_delete):
-            deleter = entry.user
-            assert isinstance(deleter, Member)
-            logger.warning(f"Message deleted in channel {message.channel.name!r} by {deleter.name!r} : {message.content}")
-            await message.channel.send(f"{codir_mention}Un message a été supprimé par {deleter.mention} :\n> {message.content}")
+        try:
+            async for entry in message.guild.audit_logs(limit=1, action=AuditLogAction.message_delete):
+                deleter = entry.user
+                assert isinstance(deleter, Member)
+                logger.warning(f"Message deleted in channel {message.channel.name!r} by {deleter.name!r} : {message.content}")
+                try:
+                    await message.channel.send(
+                        f"{codir_mention}Un message a été supprimé par {deleter.mention} :\n> {message.content}"
+                    )
+                except HTTPException:
+                    logger.exception("HTTP error while notifying message deletion")
+        except HTTPException:
+            logger.exception("Unable to read audit logs for message deletion")
 
     @commands.Cog.listener()
     async def on_raw_message_delete(self, payload: RawMessageDeleteEvent) -> None:
@@ -441,21 +557,30 @@ class ChannelManagement(commands.Cog):
         codir_role = get(guild.roles, name="CoDir")
         if codir_role is None:
             logger.error("Required role CoDir not found.")
-            await channel.send("Rôle CoDir manquant sur le serveur.")
+            try:
+                await channel.send("Rôle CoDir manquant sur le serveur.")
+            except HTTPException:
+                logger.exception("HTTP error while notifying missing CoDir role")
             codir_mention = ""
         else:
             codir_mention = codir_role.mention + " "
 
-        async for entry in guild.audit_logs(limit=1, action=AuditLogAction.message_delete):
-            deleter = entry.user
-            assert isinstance(deleter, Member)
-            logger.warning(
-                f"Message with ID {payload.message_id} not found in channel {channel.name}. Deleted by {deleter.name!r}."
-            )
-            await channel.send(
-                f"{codir_mention}Un message irrécupérable a été supprimé par {deleter.mention}."
-                f"\nID du message : {payload.message_id}."
-            )
+        try:
+            async for entry in guild.audit_logs(limit=1, action=AuditLogAction.message_delete):
+                deleter = entry.user
+                assert isinstance(deleter, Member)
+                logger.warning(
+                    f"Message with ID {payload.message_id} not found in channel {channel.name}. Deleted by {deleter.name!r}."
+                )
+                try:
+                    await channel.send(
+                        f"{codir_mention}Un message irrécupérable a été supprimé par {deleter.mention}."
+                        f"\nID du message : {payload.message_id}."
+                    )
+                except HTTPException:
+                    logger.exception("HTTP error while notifying message deletion")
+        except HTTPException:
+            logger.exception("Unable to inspect audit logs for raw deletion")
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member: Member, before: VoiceState, after: VoiceState) -> None:
@@ -484,9 +609,11 @@ class ChannelManagement(commands.Cog):
                 ):
                     self.remove_tasks[voice_channel.id] = asyncio.create_task(self._delayed_delete(voice_channel, 60))
 
-    # endregion Listeners
+    # endregion Event Listeners
 
     # region ====== Helpers ======
+    # -- Voice Channel Helpers --
+
     async def _manage_voice_channels(self, category: CategoryChannel, base_channel: VoiceChannel) -> None:
         """Manage voice channels in a category.
 
@@ -506,15 +633,18 @@ class ChannelManagement(commands.Cog):
             for idx in range(1, len(channels) + 1):
                 if f"{base_channel.name}{INDEX_SEPARATOR}{idx}" not in (c.name for c in channels):
                     new_name = f"{base_channel.name}{INDEX_SEPARATOR}{idx}"
-                    await category.create_voice_channel(
-                        new_name,
-                        bitrate=base_channel.bitrate,
-                        user_limit=base_channel.user_limit,
-                        rtc_region=base_channel.rtc_region,
-                        video_quality_mode=base_channel.video_quality_mode,
-                        overwrites=base_channel.overwrites,
-                    )
-                    logger.info(f"Created additional voice channel {new_name!r}")
+                    try:
+                        await category.create_voice_channel(
+                            new_name,
+                            bitrate=base_channel.bitrate,
+                            user_limit=base_channel.user_limit,
+                            rtc_region=base_channel.rtc_region,
+                            video_quality_mode=base_channel.video_quality_mode,
+                            overwrites=base_channel.overwrites,
+                        )
+                        logger.info(f"Created additional voice channel {new_name!r}")
+                    except HTTPException:
+                        logger.exception(f"HTTP error while auto-creating dynamic channel {new_name!r} in {category!r}")
                     break
 
     async def _delayed_delete(self, channel: VoiceChannel, timeout: int) -> None:
@@ -527,9 +657,11 @@ class ChannelManagement(commands.Cog):
         logger.debug(f"_delayed_delete: channel={channel} timeout={timeout}")
         await asyncio.sleep(timeout)
         if not channel.members:
-            with contextlib.suppress(Exception):
+            try:
                 await channel.delete()
                 logger.info(f"Deleted empty voice channel {channel.name!r} after timeout")
+            except HTTPException:
+                logger.exception(f"HTTP error while deleting voice channel {channel}")
 
     # endregion Helpers
 
