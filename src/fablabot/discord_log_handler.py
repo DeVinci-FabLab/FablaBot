@@ -6,7 +6,8 @@ from typing import override
 from discord import TextChannel
 from discord.ext import commands
 
-DEFAULT_LOG_CHANNEL_ID = 1090192458840801282
+from fablabot.guild_config import get_log_channel_id
+
 CLEAR = "\u001b[0m"
 RED = "\u001b[31m"
 UNDERLINE = "\u001b[4m"
@@ -24,7 +25,7 @@ class DiscordLogHandler(logging.Handler):
         """
         super().__init__()
         self.bot = bot
-        self.log_channel_id: int = DEFAULT_LOG_CHANNEL_ID
+        self.log_channel_id = get_log_channel_id() or 0
         # ANSI escape code formatter for colored log output in Discord
         ansi_log_format = (
             f"{RED}[%(levelname)s]{CLEAR} {CYAN}{UNDERLINE}%(module)s.%(funcName)s{CLEAR}{CYAN}:{CLEAR} %(message)s"

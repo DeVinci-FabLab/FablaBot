@@ -5,8 +5,10 @@ from __future__ import annotations
 from logging import Logger
 from typing import Any
 
-from discord import Interaction, Member, TextChannel
+from discord import Forbidden, HTTPException, Interaction, Member, TextChannel
 from discord.utils import get
+
+from fablabot.guild_config import get_commands_channel_id, set_commands_channel_id
 
 COMMANDS_CHANNEL_NAME = "commandes_bot"
 
@@ -44,11 +46,28 @@ async def is_in_allowed_channel(logger: Logger, interaction: Interaction) -> boo
         )
         return False
 
-    commands_channel = get(interaction.guild.channels, name=COMMANDS_CHANNEL_NAME)
-    if not isinstance(commands_channel, TextChannel):
-        logger.warning(f"Commands channel {COMMANDS_CHANNEL_NAME} not found in guild {interaction.guild.id}")
+    stored_channel_id = get_commands_channel_id(interaction.guild.id)
+    commands_channel: TextChannel | None = None
+    if stored_channel_id is not None:
+        maybe_channel = interaction.guild.get_channel(stored_channel_id)
+        if isinstance(maybe_channel, TextChannel):
+            commands_channel = maybe_channel
+        else:
+            logger.warning(
+                f"Stored commands channel id {stored_channel_id} is invalid for guild {interaction.guild.id}",
+            )
+            set_commands_channel_id(interaction.guild.id, None)
+
+    if commands_channel is None:
+        maybe_channel = get(interaction.guild.channels, name=COMMANDS_CHANNEL_NAME)
+        if isinstance(maybe_channel, TextChannel):
+            commands_channel = maybe_channel
+            set_commands_channel_id(interaction.guild.id, maybe_channel.id)
+
+    if commands_channel is None:
+        logger.warning(f"Commands channel not configured for guild {interaction.guild.id}")
         await interaction.response.send_message(
-            f"Le salon {COMMANDS_CHANNEL_NAME} n'est pas configuré sur ce serveur.",
+            "Le salon de commandes du bot n'est pas configuré sur ce serveur.",
             ephemeral=True,
         )
         return False
@@ -84,7 +103,6 @@ async def check_has_role(logger: Logger, interaction: Interaction, roles: set[st
         logger.warning(f"Missing roles {missing_roles} for guild {interaction.guild}")
         await interaction.channel.send(
             f"Les rôles suivants ne sont pas configurés sur ce serveur : {', '.join(missing_roles)}.",
-            delete_after=60,
         )
 
     assert isinstance(interaction.user, Member)
@@ -97,4 +115,22 @@ async def check_has_role(logger: Logger, interaction: Interaction, roles: set[st
             ephemeral=True,
         )
         return False
+    return True
+
+
+async def can_dm_user(user: Member) -> bool:
+    """Check if the bot can send a DM to the user.
+
+    Args:
+        user (Member): The user to check.
+
+    Returns:
+        bool: True if the bot can send a DM to the user, False otherwise.
+    """
+    try:
+        await user.send()
+    except Forbidden:
+        return False
+    except HTTPException:
+        return True
     return True

@@ -27,6 +27,7 @@ from discord.ext import commands
 from discord.utils import get
 
 from fablabot.discord_log_handler import DiscordLogHandler
+from fablabot.guild_config import set_log_channel_id
 
 from .utils import check_has_role, is_in_allowed_channel, log_request
 
@@ -482,6 +483,7 @@ class ChannelManagement(commands.Cog):
             previous_channel = maybe_previous
 
         handler.set_log_channel(channel)
+        set_log_channel_id(channel.id)
         logger.info(msg=f"Log channel set to {channel} (id={channel.id}) by {interaction.user} (id={interaction.user.id})")
 
         confirmation = f"Les logs seront désormais envoyés dans {channel.mention}."
