@@ -27,7 +27,7 @@ from discord.ext import commands
 from discord.utils import get
 from emoji import emojize, is_emoji
 
-from .utils import check_has_role, is_in_allowed_channel, log_request
+from .utils import can_dm_user, check_has_role, is_in_allowed_channel, log_request
 
 logger = logging.getLogger(__name__)
 
@@ -1012,6 +1012,9 @@ class FormationManagement(commands.Cog):
             return
         if member.bot:
             return
+        if not await can_dm_user(member):
+            logger.error(f"Cannot DM user {user_id} in guild {guild.id}; skipping registration DM.")
+            return
 
         logger.debug(f"Resolved member {member.id} ({member.display_name}) for registration DM in guild {guild.id}.")
 
@@ -1052,6 +1055,9 @@ class FormationManagement(commands.Cog):
             logger.exception(f"Unexpected error while fetching member {user_id} in guild {guild.id}.")
             return
         if member.bot:
+            return
+        if not await can_dm_user(member):
+            logger.error(f"Cannot DM user {user_id} in guild {guild.id}; skipping promotion DM.")
             return
 
         logger.debug(f"Resolved member {member.id} ({member.display_name}) for waitlist promotion DM in guild {guild.id}.")
@@ -1099,6 +1105,9 @@ class FormationManagement(commands.Cog):
             logger.exception(f"Unexpected error while fetching member {user_id} in guild {guild.id}.")
             return
         if member.bot:
+            return
+        if not await can_dm_user(member):
+            logger.error(f"Cannot DM user {user_id} in guild {guild.id}; skipping waitlist DM.")
             return
 
         logger.debug(f"Resolved member {member.id} ({member.display_name}) for waitlist DM in guild {guild.id}.")
