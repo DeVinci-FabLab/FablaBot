@@ -498,10 +498,6 @@ class FormationManagement(commands.Cog):
             return
 
         new_description = original.description if description is None else description.strip()
-        if not new_description:
-            logger.warning(f"Guild {interaction.guild.id} provided an empty description while editing a formation.")
-            await interaction.response.send_message("Description invalide.", ephemeral=True)
-            return
 
         new_seats = original.seats if seats is None else seats
 
