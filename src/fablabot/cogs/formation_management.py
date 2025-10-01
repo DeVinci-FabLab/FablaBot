@@ -9,6 +9,7 @@ import io
 import json
 import logging
 from pathlib import Path
+import re
 from typing import Any
 from warnings import deprecated
 
@@ -25,7 +26,7 @@ from discord import (
 )
 from discord.ext import commands
 from discord.utils import get
-from emoji import emojize, is_emoji
+from emoji import EMOJI_DATA
 
 from .utils import can_dm_user, check_has_role, is_in_allowed_channel, log_request
 
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 ALLOWED_ROLES = {"Respo Formations", "Admin -temp-", "Administrateur"}
 DATA_FILE = "data/formations_state.json"
+DISCORD_EMOJI_RE = re.compile(r"^<a?:\w+:\d+>$")
 MAX_MSG_CHARS = 1900
 REACTION_LOG_RETENTION = timedelta(days=30)
 FM_REQUEST_FORMS = "https://forms.office.com/e/MqVdQujzjf"
@@ -353,7 +355,11 @@ class FormationManagement(commands.Cog):
 
         emoji_clean = emoji.strip()
 
-        if not emoji_clean or not is_emoji(emojize(emoji_clean)):
+        if not emoji_clean or (
+            emoji_clean not in EMOJI_DATA
+            and not 0x1F1E6 <= ord(emoji_clean) <= 0x1F1FF
+            and not DISCORD_EMOJI_RE.match(emoji_clean)
+        ):
             logger.warning(f"Guild {interaction.guild.id} tried to add formation with invalid emoji: {emoji_clean!r}.")
             await interaction.response.send_message("Émoji invalide.", ephemeral=True)
             return
@@ -487,6 +493,14 @@ class FormationManagement(commands.Cog):
             if any(i != index - 1 and fm.emoji == candidate for i, fm in enumerate(fms)):
                 logger.warning(f"Guild {interaction.guild.id} tried to reuse emoji {candidate} while editing formation.")
                 await interaction.response.send_message("Cet émoji est déjà utilisé par une autre formation.", ephemeral=True)
+                return
+            if not candidate or (
+                candidate not in EMOJI_DATA
+                and not 0x1F1E6 <= ord(candidate) <= 0x1F1FF
+                and not DISCORD_EMOJI_RE.match(candidate)
+            ):
+                logger.warning(f"Guild {interaction.guild.id} tried to edit formation with invalid emoji: {candidate!r}.")
+                await interaction.response.send_message("Émoji invalide.", ephemeral=True)
                 return
             new_emoji = candidate
 
