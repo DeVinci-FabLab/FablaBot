@@ -179,8 +179,8 @@ class FormationManagement(commands.Cog):
 
     @fm_group.command(name="start", description="Démarrer/écraser un brouillon avec une introduction.")
     @app_commands.describe(
-        intro="Texte d'introduction affiché en tête du message",
-        end="Texte de fin affiché en bas du message",
+        intro="Texte d'introduction affiché en tête du message (utilisez \n pour un saut de ligne)",
+        end="Texte de fin affiché en bas du message (utilisez \n pour un saut de ligne)",
         role="Rôle à mentionner",
     )
     async def fm_start(self, interaction: Interaction, intro: str, end: str, role: Role) -> None:
@@ -203,8 +203,11 @@ class FormationManagement(commands.Cog):
 
         emoji_set = {emoji for emoji in interaction.guild.emojis if emoji.name == "dvfl"}
         emoji = emoji_set.pop() if emoji_set else ":loudspeaker:"
-
         start = f"# [FORMATIONS] {emoji}\nHey {role.mention} !\n"
+
+        intro = intro.replace("\\n", "\n").strip()
+        end = end.replace("\\n", "\n").strip()
+
         draft: dict[str, Any] = {"intro": start + intro, "fms": [], "end": end}
         self._set_guild_draft(interaction.guild.id, draft)
 
@@ -259,6 +262,9 @@ class FormationManagement(commands.Cog):
 
         updated_intro = current_intro if intro is None else intro.strip()
         updated_end = current_end if end is None else end.strip()
+
+        updated_intro = updated_intro.replace("\\n", "\n")
+        updated_end = updated_end.replace("\\n", "\n")
 
         if updated_intro == current_intro and updated_end == current_end:
             await interaction.response.send_message(
