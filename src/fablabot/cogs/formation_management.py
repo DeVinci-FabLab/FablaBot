@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 ALLOWED_ROLES = {"Respo Formations", "Admin -temp-", "Administrateur"}
 DATA_FILE = "data/formations_state.json"
 DISCORD_EMOJI_RE = re.compile(r"^<a?:\w+:\d+>$")
+ROLE_MENTION_RE = re.compile(r"<@&(\d+)>")  # TODO remove
 MAX_MSG_CHARS = 1900
 REACTION_LOG_RETENTION = timedelta(days=30)
 FM_REQUEST_FORMS = "https://forms.office.com/e/MqVdQujzjf"
@@ -205,16 +206,28 @@ class FormationManagement(commands.Cog):
 
         emoji_set = {emoji for emoji in interaction.guild.emojis if emoji.name == "dvfl"}
         emoji = emoji_set.pop() if emoji_set else ":loudspeaker:"
-        start = f"# [FORMATIONS] {emoji}\nHey {role.mention} !\n"
+        header = f"# [FORMATIONS] {emoji}"
 
-        intro = intro.replace("\\n", "\n").strip()
-        end = end.replace("\\n", "\n").strip()
+        intro_body = intro.replace("\\n", "\n").strip()
+        end_body = end.replace("\\n", "\n").strip()
 
-        draft: dict[str, Any] = {"intro": start + intro, "fms": [], "end": end}
+        draft: dict[str, Any] = {
+            "header": header,
+            "role_id": role.id,
+            "intro": intro_body,
+            "fms": [],
+            "end": end_body,
+        }
         self._set_guild_draft(interaction.guild.id, draft)
 
         fms = [Formation(**x) for x in draft["fms"]]
-        content = self._render_message(draft["intro"], fms, draft["end"])
+        content = self._render_message(
+            draft["header"],
+            draft["role_id"],
+            draft["intro"],
+            fms,
+            draft["end"],
+        )
         logger.info(f"Guild {interaction.guild.id} started a new formations draft.")
         await interaction.response.send_message(
             "Brouillon initialisé.\nUtilise **/fm add** pour ajouter des formations. **/fm preview** pour voir le rendu.",
@@ -229,29 +242,32 @@ class FormationManagement(commands.Cog):
     @app_commands.describe(
         intro="Nouveau texte d'introduction (laisser vide pour conserver)",
         end="Nouveau texte de conclusion (laisser vide pour conserver)",
+        role="Nouveau rôle à mentionner (laisser vide pour conserver)",
     )
     async def fm_edit_text(
         self,
         interaction: Interaction,
         intro: str | None = None,
         end: str | None = None,
+        role: Role | None = None,
     ) -> None:
         """Edit the draft introduction and/or ending.
 
         Args:
             interaction (Interaction): The Discord interaction context.
-            intro (str | None): The new introduction text.
-            end (str | None): The new ending text.
+            intro (str | None, optional): The new introduction text.
+            end (str | None, optional): The new ending text.
+            role (Role | None, optional): The new role to mention.
         """
-        log_request(logger, "fm.edit_text", interaction, intro=intro, end=end)
+        log_request(logger, "fm.edit_text", interaction, intro=intro, end=end, role=role)
         if not await is_in_allowed_channel(logger, interaction):
             return
         if not await check_has_role(logger, interaction, ALLOWED_ROLES):
             return
 
-        if intro is None and end is None:
+        if intro is None and end is None and role is None:
             await interaction.response.send_message(
-                "Aucun champ à modifier. Fournis au moins `intro` ou `end`.",
+                "Aucun champ à modifier. Fournis au moins `intro`, `end` ou `role`.",
                 ephemeral=True,
             )
             return
@@ -259,8 +275,9 @@ class FormationManagement(commands.Cog):
         assert interaction.guild is not None
         draft = self._get_guild_draft(interaction.guild.id)
 
-        current_intro = draft["intro"]
-        current_end = draft["end"]
+        current_intro = draft.get("intro", "")
+        current_end = draft.get("end", "")
+        current_role_id = draft.get("role_id", 0)
 
         updated_intro = current_intro if intro is None else intro.strip()
         updated_end = current_end if end is None else end.strip()
@@ -268,7 +285,13 @@ class FormationManagement(commands.Cog):
         updated_intro = updated_intro.replace("\\n", "\n")
         updated_end = updated_end.replace("\\n", "\n")
 
-        if updated_intro == current_intro and updated_end == current_end:
+        role_changed = False
+        if role is not None:
+            new_role_id = role.id
+            role_changed = current_role_id != new_role_id
+            draft["role_id"] = new_role_id
+
+        if updated_intro == current_intro and updated_end == current_end and not role_changed:
             await interaction.response.send_message(
                 "Aucune modification détectée.",
                 ephemeral=True,
@@ -280,11 +303,19 @@ class FormationManagement(commands.Cog):
         self._set_guild_draft(interaction.guild.id, draft)
 
         fms = [Formation(**x) for x in draft["fms"]]
-        content = self._render_message(draft["intro"], fms, draft["end"])
+        content = self._render_message(
+            draft["header"],
+            draft["role_id"],
+            draft["intro"],
+            fms,
+            draft["end"],
+        )
 
+        intro_changed = updated_intro != current_intro
+        end_changed = updated_end != current_end
         logger.info(
-            f"Guild {interaction.guild} updated draft intro/end "
-            f"(intro_changed={intro is not None}, end_changed={end is not None})."
+            f"Guild {interaction.guild.id} updated draft intro/end "
+            f"(intro_changed={intro_changed}, end_changed={end_changed}, role_changed={role_changed})."
         )
 
         await interaction.response.send_message(
@@ -397,7 +428,13 @@ class FormationManagement(commands.Cog):
         draft["fms"] = [x.to_dict() for x in fms]
         self._set_guild_draft(interaction.guild.id, draft)
 
-        preview = self._render_message(draft["intro"], fms, draft["end"])
+        preview = self._render_message(
+            draft["header"],
+            draft["role_id"],
+            draft["intro"],
+            fms,
+            draft["end"],
+        )
         logger.info(f"Guild {interaction.guild.id} added formation {fm.name!r} ({fm.start_iso}) to draft.")
         await interaction.response.send_message(
             "Formation ajoutée & brouillon mis à jour (trié). "
@@ -554,7 +591,13 @@ class FormationManagement(commands.Cog):
         draft["fms"] = [fm.to_dict() for fm in fms]
         self._set_guild_draft(interaction.guild.id, draft)
 
-        preview = self._render_message(draft["intro"], fms, draft["end"])
+        preview = self._render_message(
+            draft["header"],
+            draft["role_id"],
+            draft["intro"],
+            fms,
+            draft["end"],
+        )
         new_position = fms.index(updated) + 1
 
         logger.info(
@@ -601,7 +644,13 @@ class FormationManagement(commands.Cog):
         self._set_guild_draft(interaction.guild.id, draft)
 
         fms = [Formation(**x) for x in draft["fms"]]
-        preview = self._render_message(draft["intro"], fms, draft["end"])
+        preview = self._render_message(
+            draft["header"],
+            draft["role_id"],
+            draft["intro"],
+            fms,
+            draft["end"],
+        )
         logger.info(f"Guild {interaction.guild.id} removed formation {removed.name!r} ({removed.start_iso}) from draft.")
         await interaction.response.send_message(
             f"Supprimé: {removed.emoji} {removed.name}",
@@ -627,13 +676,21 @@ class FormationManagement(commands.Cog):
 
         assert interaction.guild is not None
         draft: dict[str, Any] = self._get_guild_draft(interaction.guild.id)
+        header = draft["header"]
+        role_id = draft["role_id"]
         intro = draft["intro"]
         end = draft["end"]
-        draft = {"intro": intro, "fms": [], "end": end}
+        draft = {"header": header, "role_id": role_id, "intro": intro, "fms": [], "end": end}
         self._set_guild_draft(interaction.guild.id, draft)
 
         fms = [Formation(**x) for x in draft["fms"]]
-        content = self._render_message(draft["intro"], fms, draft["end"])
+        content = self._render_message(
+            header,
+            role_id,
+            intro,
+            fms,
+            end,
+        )
         logger.info(f"Guild {interaction.guild.id} cleared the formations draft.")
         await interaction.response.send_message(
             "Brouillon vidé (intro et fin conservées). "
@@ -664,7 +721,13 @@ class FormationManagement(commands.Cog):
         fms = [Formation(**x) for x in draft["fms"]]
         fms.sort(key=lambda x: x.start_dt)
 
-        content = self._render_message(draft["intro"], fms, draft["end"])
+        content = self._render_message(
+            draft["header"],
+            draft["role_id"],
+            draft["intro"],
+            fms,
+            draft["end"],
+        )
         logger.info(f"Guild {interaction.guild.id} previewed the formations draft.")
         await interaction.edit_original_response(
             content=f"{content or '_(vide)_'}",
@@ -694,11 +757,19 @@ class FormationManagement(commands.Cog):
             await interaction.response.send_message("Le brouillon ne contient aucune formation.", ephemeral=True)
             return
         fms.sort(key=lambda x: x.start_dt)
-        content = self._render_message(draft["intro"], fms, draft["end"])
+        content = self._render_message(
+            draft["header"],
+            draft["role_id"],
+            draft["intro"],
+            fms,
+            draft["end"],
+        )
 
         msg = await channel.send(content, suppress_embeds=True)
 
         published_message = {
+            "header": draft["header"],
+            "role_id": draft["role_id"],
             "intro": draft["intro"],
             "end": draft["end"],
             "fms": [],
@@ -936,10 +1007,19 @@ class FormationManagement(commands.Cog):
         time_part = dt.strftime("%Hh%M")
         return f"**{day_name} {date_part} à {time_part}**"
 
-    def _render_message(self, intro: str, fms: list[Formation], end: str) -> str:
+    def _render_message(
+        self,
+        header: str,
+        role_id: int,
+        intro: str,
+        fms: list[Formation],
+        end: str,
+    ) -> str:
         """Render the message for the formations.
 
         Args:
+            header (str): The header line (e.g. title).
+            role_id (int): The role mention to prepend.
             intro (str): The introduction text.
             fms (list[Formation]): The list of formations to include in the message.
             end (str): The ending text.
@@ -949,9 +1029,13 @@ class FormationManagement(commands.Cog):
         """
         logger.debug("Rendering formations message.")
         lines: list[str] = []
-        if intro.strip():
-            lines.append(intro.strip())
-            lines.append("")
+        header_text = header.strip()
+        intro_block = intro.strip()
+        lines.append(header_text)
+        lines.append(f"Hey <@&{role_id}> !")
+        if intro_block:
+            lines.append(intro_block)
+        lines.append("")
 
         for fm in fms:
             line_block = [
@@ -980,6 +1064,76 @@ class FormationManagement(commands.Cog):
         if lines and not lines[-1]:
             lines.pop()
         return "\n".join(lines)
+
+    # TODO: remove
+    def _normalize_message_payload(self, payload: dict[str, Any]) -> bool:
+        """Ensure message payloads follow the expected schema.
+
+        Args:
+            payload (dict[str, Any]): Draft or published message payload.
+
+        Returns:
+            bool: True if the payload was modified.
+        """
+        changed = False
+
+        intro_text = payload.get("intro")
+        if intro_text is None:
+            payload["intro"] = ""
+            intro_text = ""
+            changed = True
+        intro_lines = intro_text.splitlines()
+
+        def pop_leading_blank() -> None:
+            nonlocal intro_lines, changed
+            while intro_lines and not intro_lines[0].strip():
+                intro_lines.pop(0)
+                changed = True
+
+        pop_leading_blank()
+
+        header_line: str | None = None
+        if intro_lines:
+            first_line = intro_lines[0].strip()
+            if first_line.startswith("# [FORMATIONS]"):
+                header_line = first_line
+                intro_lines.pop(0)
+                changed = True
+
+        if header_line is not None:
+            if payload.get("header") != header_line:
+                payload["header"] = header_line
+                changed = True
+        elif "header" not in payload:
+            payload["header"] = ""
+            changed = True
+
+        pop_leading_blank()
+
+        role_id_value = payload.get("role_id")
+        if intro_lines:
+            role_match = ROLE_MENTION_RE.search(intro_lines[0])
+            if role_match:
+                extracted_role_id = int(role_match.group(1))
+                if role_id_value != extracted_role_id:
+                    payload["role_id"] = extracted_role_id
+                    role_id_value = extracted_role_id
+                    changed = True
+                intro_lines.pop(0)
+                changed = True
+
+        if "role_id" not in payload:
+            payload["role_id"] = role_id_value
+            changed = True
+
+        pop_leading_blank()
+
+        normalized_intro = "\n".join(intro_lines).strip()
+        if payload.get("intro") != normalized_intro:
+            payload["intro"] = normalized_intro
+            changed = True
+
+        return changed
 
     def _format_respo_contacts(self, guild: Guild) -> str:
         """Build the contact string for formation managers.
@@ -1227,8 +1381,14 @@ class FormationManagement(commands.Cog):
         if "draft" not in guild_state:
             logger.debug(f"Initializing draft state for guild {guild_id}.")
             self._set_guild_state(guild_id, guild_state)
-            guild_state["draft"] = {"intro": "", "fms": [], "end": ""}
-        return guild_state["draft"]
+            guild_state["draft"] = {"header": None, "role_id": None, "intro": "", "fms": [], "end": ""}
+        # return guild_state["draft"]   # TODO: uncomment and remove after
+
+        draft = guild_state["draft"]
+        if self._normalize_message_payload(draft):
+            logger.debug(f"Upgraded draft schema for guild {guild_id}.")
+            self._set_guild_draft(guild_id, draft)
+        return draft
 
     def _set_guild_draft(self, guild_id: int, draft: dict[str, Any]) -> None:
         """Set the draft for a specific guild.
@@ -1237,6 +1397,7 @@ class FormationManagement(commands.Cog):
             guild_id (int): The ID of the guild.
             draft (dict[str, Any]): The draft of the guild.
         """
+        self._normalize_message_payload(draft)  # TODO: remove
         guild_state = self._get_guild_state(guild_id)
         guild_state["draft"] = draft
         self._set_guild_state(guild_id, guild_state)
@@ -1255,6 +1416,12 @@ class FormationManagement(commands.Cog):
         if not published:
             logger.warning(f"No published formations data stored for guild {guild_id}.")
             return None
+        # TODO: remove
+        message_payload = published.get("message")
+        if isinstance(message_payload, dict) and self._normalize_message_payload(message_payload):
+            logger.debug(f"Upgraded published message schema for guild {guild_id}.")
+            self._set_last_published_in_guild(guild_id, published)
+        # until here
         return published
 
     def _set_last_published_in_guild(self, guild_id: int, published: dict[str, Any]) -> None:
@@ -1264,6 +1431,11 @@ class FormationManagement(commands.Cog):
             guild_id (int): The ID of the guild.
             published (dict[str, Any]): The published state of the guild.
         """
+        # TODO: remove
+        message_payload = published.get("message")
+        if isinstance(message_payload, dict):
+            self._normalize_message_payload(message_payload)
+        # until here
         guild_state = self._get_guild_state(guild_id)
         guild_state["published"] = published
         self._set_guild_state(guild_id, guild_state)
@@ -1411,6 +1583,8 @@ class FormationManagement(commands.Cog):
         logger.debug(f"Fetched published message {message_id} in channel {channel_id} for guild {guild_id}.")
 
         message_payload: dict[str, Any] = pub.get("message", {})
+        header = message_payload.get("header")
+        role_id = message_payload.get("role_id")
         intro = message_payload.get("intro")
         end = message_payload.get("end")
 
@@ -1420,10 +1594,10 @@ class FormationManagement(commands.Cog):
             fms.append(Formation(**entry))
         tracked_emojis = {fm.emoji for fm in fms if fm.emoji}
 
-        if not intro or not end or not fms:
+        if not header or not role_id or not intro or not end or not fms:
             logger.warning(
                 f"Published formations payload incomplete for guild {guild_id}; "
-                f"intro={bool(intro)} end={bool(end)} formations={len(fms)}."
+                f"header={bool(header)} role_id={bool(role_id)} intro={bool(intro)} end={bool(end)} formations={len(fms)}."
             )
             return
 
@@ -1486,13 +1660,15 @@ class FormationManagement(commands.Cog):
 
         updated_fms = [fm.to_dict() for fm in fms]
         pub["message"] = {
+            "header": header,
+            "role_id": role_id,
             "intro": intro,
             "end": end,
             "fms": updated_fms,
         }
         self._set_last_published_in_guild(guild_id, pub)
 
-        content = self._render_message(intro, fms, end)
+        content = self._render_message(header, role_id, intro, fms, end)
 
         try:
             await msg.edit(content=content, suppress=True)
