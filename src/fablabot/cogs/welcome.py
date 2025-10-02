@@ -3,38 +3,24 @@
 from __future__ import annotations
 
 import logging
-from warnings import deprecated
+from typing import Literal
 
-from discord import (
-    HTTPException,
-    Interaction,
-    Member,
-    PermissionOverwrite,
-    app_commands,
-)
+from discord import HTTPException, Interaction, Member, PermissionOverwrite, TextChannel, app_commands
 from discord.ext import commands
 from discord.utils import get
 
 from fablabot.guild_config import is_welcome_verify_enabled, set_welcome_verify_enabled
 
-from .utils import check_has_role, is_in_allowed_channel, log_request
+from .utils import ADMIN_ROLES, check_has_role, is_in_allowed_channel, log_request
 
 logger = logging.getLogger(__name__)
-
-ADMIN_ROLES = {
-    "Admin -temp-",
-    "Administrateur",
-    "Président.e",
-    "Vice-Président.e",
-    "Secrétaire Général",
-}
 
 
 class Welcome(commands.Cog):
     """Manages welcome messages and related features.
 
     Commands:
-        - /welcome auto: Toggle automatic welcome channel creation + role assignment for new members.
+        - /welcome verify: Toggle automatic welcome channel creation + role assignment for new members.
         - /welcome approve: Approve the new member.
 
     Listeners:
@@ -68,7 +54,7 @@ class Welcome(commands.Cog):
         """
         help_message = (
             "**Commandes de gestion des channels de bienvenue :**\n"
-            "- `/welcome auto <enable>`: Activer/désactiver la création automatique de salons de bienvenue et l'attribution de rôles pour les nouveaux membres.\n"
+            "- `/welcome verify <enable>`: Activer/désactiver la création automatique de salons de bienvenue et l'attribution de rôles pour les nouveaux membres.\n"
             "- `/welcome approve <city>`: Valider le nouveau membre. Ajoute les rôles appropriés en fonction de la ville.\n"
             "- `/welcome help`: Affiche cette aide pour les commandes de bienvenue.\n"
             "\n"
@@ -77,11 +63,11 @@ class Welcome(commands.Cog):
         await interaction.response.send_message(help_message, ephemeral=True)
 
     @welcome_group.command(
-        name="auto",
+        name="verify",
         description="Active ou désactive la création automatique de salons de bienvenue et l'attribution de rôles pour les nouveaux membres.",
     )
     @app_commands.describe(enable="Activer ou désactiver la fonctionnalité")
-    async def welcome_auto(self, interaction: Interaction, enable: bool) -> None:
+    async def welcome_verify(self, interaction: Interaction, enable: bool) -> None:
         """Toggle automatic welcome channel creation and role assignment for new members.
 
         Args:
@@ -109,6 +95,69 @@ class Welcome(commands.Cog):
         set_welcome_verify_enabled(interaction.guild.id, enable)
 
         await interaction.response.send_message(f"Fonctionnalité de bienvenue automatique : {status}.")
+
+    @welcome_group.command(
+        name="approve",
+        description="Valide un nouveau membre en lui attribuant les rôles appropriés.",
+    )
+    @app_commands.describe(city="La ville de l'utilisateur (Paris, Nantes, Montpellier)")
+    async def welcome_approve(self, interaction: Interaction, city: Literal["Paris", "Nantes", "Montpellier"]) -> None:
+        """Approve a new member by assigning appropriate roles.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            city (Literal[&quot;Paris&quot;, &quot;Nantes&quot;, &quot;Montpellier&quot;]): The user's city.
+        """
+        log_request(logger, "welcome.approve", interaction, city=city)
+        if not await check_has_role(logger, interaction, ADMIN_ROLES):
+            return
+
+        channel = interaction.channel
+        assert isinstance(channel, TextChannel)
+        if not channel.name.startswith("welcome-"):
+            logger.warning("The approve command was not used in a welcome channel.")
+            await interaction.response.send_message(
+                "Cette commande doit être utilisée dans un salon de bienvenue.", ephemeral=True
+            )
+            return
+
+        assert interaction.guild is not None
+        member_name = channel.name[len("welcome-") :]
+        member = get(interaction.guild.members, name=member_name)
+        if member is None:
+            logger.warning(f"Member not found: {member_name}")
+            await interaction.response.send_message(
+                f"Impossible de trouver le membre avec le nom {member_name}.", ephemeral=True
+            )
+            return
+
+        city_role = get(interaction.guild.roles, name=f"Membre {city}")
+        if city_role is None:
+            await interaction.response.send_message(f"Le rôle pour la ville {city} n'existe pas.", ephemeral=True)
+            return
+
+        member_role = get(interaction.guild.roles, name="Membre ✓")
+        if member_role is None:
+            await interaction.response.send_message("Le rôle Membre ✓ n'existe pas.", ephemeral=True)
+            return
+
+        try:
+            await member.add_roles(city_role, member_role, reason="Validation du nouveau membre")
+        except HTTPException:
+            logger.exception(f"Failed to assign roles for {member.name}")
+            await interaction.response.send_message("Une erreur est survenue lors de l'attribution des rôles.", ephemeral=True)
+            return
+
+        await interaction.response.send_message(
+            f"Le membre {member.mention} a été validé avec succès et les rôles ont été attribués.", ephemeral=True
+        )
+
+        try:
+            await channel.delete(reason="Salon de bienvenue supprimé après validation du membre")
+        except HTTPException:
+            logger.exception(f"Failed to delete channel for {member.name}")
+            await interaction.response.send_message("Une erreur est survenue lors de la suppression du salon.", ephemeral=True)
+            return
 
     # endregion Welcome Slash Commands Group
 
@@ -150,15 +199,21 @@ class Welcome(commands.Cog):
                 reason=f"Welcome channel for new member {member.name}",
             )
         except HTTPException:
-            logger.exception("Failed to create welcome channel")
+            logger.exception(f"Failed to create welcome channel for {member.name}")
             return
 
-        message = await channel.send("TODO")
-        await message.add_reaction("🇵")  # Paris
-        await message.add_reaction("🇳")  # Nantes
-        # - auto select de paris ou nantes par la personne via émoji + envoi de son email et/ou infos nécessaires pour vous dans le chat
-        # - ajout du role membre à la mano par vous
-        # - dès que la personne à le role membre et un role entre paris et nantes le channel éphémère est supprimé
+        try:
+            await channel.send(
+                """Comment accéder au serveur discord :
+                    - Utilisez `/nick` pour ajouter votre prénom à votre username
+                    - Envoyez un message contenant votre adresse mail `~@edu.devinci.fr` et votre ville (Paris, Nantes, Montepellier) pour recevoir la validation
+                    Assurez vous d 'avoir envoyé votre RI signé sur le formulaire !
+
+                    Vous êtes un ancien ? Envoyez simplement un message précisant que vous en êtes un 🙂"""
+            )
+        except HTTPException:
+            logger.exception(f"Failed to send welcome message for {member.name}")
+            return
 
     # endregion Event Listeners
 
