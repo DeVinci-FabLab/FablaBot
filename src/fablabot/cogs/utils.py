@@ -11,6 +11,13 @@ from discord.utils import get
 from fablabot.guild_config import get_commands_channel_id, set_commands_channel_id
 
 COMMANDS_CHANNEL_NAME = "commandes_bot"
+ADMIN_ROLES = {
+    "Admin -temp-",
+    "Administrateur",
+    "Président.e",
+    "Vice-Président.e",
+    "Secrétaire Général",
+}
 
 
 def log_request(logger: Logger, command_name: str, interaction: Interaction, **kwargs: Any) -> None:

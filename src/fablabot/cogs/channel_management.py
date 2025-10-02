@@ -29,7 +29,7 @@ from discord.utils import get
 from fablabot.discord_log_handler import DiscordLogHandler
 from fablabot.guild_config import set_log_channel_id
 
-from .utils import check_has_role, is_in_allowed_channel, log_request
+from .utils import ADMIN_ROLES, check_has_role, is_in_allowed_channel, log_request
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,6 @@ logger = logging.getLogger(__name__)
 DYNAMIC_SUFFIX = "-vocal"
 INDEX_SEPARATOR = "/"
 EPHEMERAL_SUFFIX = "-temp"
-ADMIN_ROLES = {"Admin -temp-", "Administrateur"}
 
 
 class ChannelManagement(commands.Cog):
