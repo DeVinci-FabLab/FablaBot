@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from typing import Literal
+from warnings import deprecated
 
 from discord import HTTPException, Interaction, Member, PermissionOverwrite, TextChannel, app_commands
 from discord.ext import commands
@@ -54,7 +55,7 @@ class Welcome(commands.Cog):
         """
         help_message = (
             "**Commandes de gestion des channels de bienvenue :**\n"
-            "- `/welcome verify <enable>`: Activer/désactiver la création automatique de salons de bienvenue et l'attribution de rôles pour les nouveaux membres.\n"
+            "- `/welcome verify <enable>`: Activer/désactiver la création automatique de salons de bienvenue.\n"
             "- `/welcome approve <city>`: Valider le nouveau membre. Ajoute les rôles appropriés en fonction de la ville.\n"
             "- `/welcome help`: Affiche cette aide pour les commandes de bienvenue.\n"
             "\n"
@@ -64,7 +65,7 @@ class Welcome(commands.Cog):
 
     @welcome_group.command(
         name="verify",
-        description="Active ou désactive la création automatique de salons de bienvenue et l'attribution de rôles pour les nouveaux membres.",
+        description="Active ou désactive la création automatique de salons de bienvenue.",
     )
     @app_commands.describe(enable="Activer ou désactiver la fonctionnalité")
     async def welcome_verify(self, interaction: Interaction, enable: bool) -> None:
@@ -163,6 +164,7 @@ class Welcome(commands.Cog):
 
     # region ====== Event Listeners ======
 
+    @commands.Cog.listener()
     async def on_member_join(self, member: Member) -> None:
         """Event listener for when a member joins the guild.
 
@@ -204,12 +206,12 @@ class Welcome(commands.Cog):
 
         try:
             await channel.send(
-                """Comment accéder au serveur discord :
-                    - Utilisez `/nick` pour ajouter votre prénom à votre username
-                    - Envoyez un message contenant votre adresse mail `~@edu.devinci.fr` et votre ville (Paris, Nantes, Montepellier) pour recevoir la validation
-                    Assurez vous d 'avoir envoyé votre RI signé sur le formulaire !
-
-                    Vous êtes un ancien ? Envoyez simplement un message précisant que vous en êtes un 🙂"""
+                "Comment accéder au serveur discord :\n"
+                " - Utilisez `/nick` pour ajouter votre prénom à votre username\n"
+                " - Envoyez un message contenant votre adresse mail `~@edu.devinci.fr` et votre ville (Paris, Nantes, Montepellier) pour recevoir la validation\n"
+                "   Assurez vous d 'avoir envoyé votre RI signé sur le formulaire !\n"
+                "\n"
+                "Vous êtes un ancien ? Envoyez simplement un message précisant que vous en êtes un 🙂"
             )
         except HTTPException:
             logger.exception(f"Failed to send welcome message for {member.name}")
