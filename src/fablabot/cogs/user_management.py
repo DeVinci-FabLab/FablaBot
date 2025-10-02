@@ -21,17 +21,9 @@ from discord import (
 from discord.ext import commands
 from discord.utils import escape_markdown, get
 
-from .utils import is_in_allowed_channel, log_request
+from .utils import ADMIN_ROLES, is_in_allowed_channel, log_request
 
 logger = logging.getLogger(__name__)
-
-ADMIN_ROLES = {
-    "Admin -temp-",
-    "Administrateur",
-    "Président.e",
-    "Vice-Président.e",
-    "Secrétaire Général",
-}
 
 
 class UserManagement(commands.Cog):
