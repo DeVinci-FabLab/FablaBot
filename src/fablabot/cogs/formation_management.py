@@ -182,8 +182,8 @@ class FormationManagement(commands.Cog):
 
     @fm_group.command(name="start", description="Démarrer/écraser un brouillon avec une introduction.")
     @app_commands.describe(
-        intro="Texte d'introduction affiché en tête du message (utilisez \n pour un saut de ligne)",
-        end="Texte de fin affiché en bas du message (utilisez \n pour un saut de ligne)",
+        intro="Texte d'introduction affiché en tête du message (utilisez \\n pour un saut de ligne)",
+        end="Texte de fin affiché en bas du message (utilisez \\n pour un saut de ligne)",
         role="Rôle à mentionner",
     )
     async def fm_start(self, interaction: Interaction, intro: str, end: str, role: Role) -> None:
