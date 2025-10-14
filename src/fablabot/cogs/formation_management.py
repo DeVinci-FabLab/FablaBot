@@ -764,6 +764,9 @@ class FormationManagement(commands.Cog):
             logger.warning(f"Guild {interaction.guild.id} tried to publish empty formations draft.")
             await interaction.response.send_message("Le brouillon ne contient aucune formation.", ephemeral=True)
             return
+
+        await interaction.response.defer(thinking=True)
+
         fms.sort(key=lambda x: x.start_dt)
         content = self._render_message(
             draft["header"],
@@ -773,7 +776,15 @@ class FormationManagement(commands.Cog):
             draft["end"],
         )
 
-        msg = await channel.send(content, suppress_embeds=True)
+        try:
+            msg = await channel.send(content, suppress_embeds=True)
+        except Exception:
+            logger.exception(f"Guild {interaction.guild.id} failed to publish the formations draft in {channel!r}.")
+            await interaction.followup.send(
+                "Erreur pendant la publication du message.",
+                ephemeral=True,
+            )
+            return
 
         published_message = {
             "header": draft["header"],
@@ -806,7 +817,7 @@ class FormationManagement(commands.Cog):
         )
 
         logger.info(f"Guild {interaction.guild.id} published the formations draft in {channel}.")
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Message publié dans {channel.mention} (ID: `{msg.id}`) avec "
             f"{success_reactions}/{len(fms)} réaction(s) ajoutée(s)."
         )
@@ -934,6 +945,10 @@ class FormationManagement(commands.Cog):
         if not pub or payload.message_id != pub.get("message_id"):
             return
 
+        member = payload.member
+        if member and member.bot:
+            return
+
         emoji_str = str(payload.emoji)
         message_payload = pub.get("message", {})
         fm_emojis: set[str] = set()
@@ -944,10 +959,7 @@ class FormationManagement(commands.Cog):
         if fm_emojis and emoji_str not in fm_emojis:
             return
 
-        member_name: str | None = None
-        if payload.event_type == "REACTION_ADD" and payload.member is not None:
-            member = payload.member
-            member_name = member.name
+        member_name = member.name if member else None
 
         self._log_reaction(
             payload.guild_id,

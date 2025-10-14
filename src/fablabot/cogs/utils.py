@@ -55,8 +55,11 @@ async def is_in_allowed_channel(logger: Logger, interaction: Interaction) -> boo
 
     stored_channel_id = get_commands_channel_id(interaction.guild.id)
     commands_channel: TextChannel | None = None
+
     if stored_channel_id is not None:
-        maybe_channel = interaction.guild.get_channel(stored_channel_id)
+        maybe_channel: Any = interaction.guild.get_channel(stored_channel_id) or await interaction.guild.fetch_channel(
+            stored_channel_id
+        )
         if isinstance(maybe_channel, TextChannel):
             commands_channel = maybe_channel
         else:
