@@ -82,23 +82,23 @@ class UserManagement(commands.Cog):
 
     @user_group.command(name="op", description="Donne des droits admin temporaires à un utilisateur.")
     @app_commands.describe(
-        user="L'utilisateur cible",
+        member="L'utilisateur cible",
         reason="Raison de l'attribution",
         time="Durée en minutes (par défaut 5)",
     )
     async def user_op(
-        self, interaction: Interaction, user: Member, reason: str, time: app_commands.Range[int, 1, 90] = 5
+        self, interaction: Interaction, member: Member, reason: str, time: app_commands.Range[int, 1, 90] = 5
     ) -> None:
         """Grant temporary admin privileges to a user.
 
         Args:
             interaction (Interaction): The Discord interaction context.
-            user (Member): The user to give privileges to.
+            member (Member): The user to give privileges to.
             reason (str): The reason for granting privileges.
             time (app_commands.Range[int, 1, 90], optional):
                 The duration in minutes for which privileges are granted. Defaults to 5.
         """
-        log_request(logger, "user.op", interaction, target=user, reason=reason, duration=time)
+        log_request(logger, "user.op", interaction, target=member, reason=reason, duration=time)
         if not await is_in_allowed_channel(logger, interaction):
             return
 
@@ -118,38 +118,38 @@ class UserManagement(commands.Cog):
             return
 
         try:
-            await user.add_roles(admin_role, reason=f"Add with op command by {interaction.user} for {reason}")
+            await member.add_roles(admin_role, reason=f"Add with op command by {interaction.user} for {reason}")
         except Forbidden:
-            logger.exception(f"Forbidden to add role {admin_role} to {user}")
+            logger.exception(f"Forbidden to add role {admin_role} to {member}")
             await interaction.response.send_message("Impossible d'ajouter le rôle.", ephemeral=True)
             return
         except HTTPException:
-            logger.exception(f"Failed to add role {admin_role} to {user}")
+            logger.exception(f"Failed to add role {admin_role} to {member}")
             await interaction.response.send_message("Une erreur est survenue lors de l'ajout du rôle.", ephemeral=True)
             return
 
-        old_task = self.deop_tasks.pop(user.id, None)
+        old_task = self.deop_tasks.pop(member.id, None)
         if old_task:
             old_task.cancel()
-        task = asyncio.create_task(self._schedule_deop(interaction, user, time, admin_role, codir_role))
-        self.deop_tasks[user.id] = task
-        logger.info(f"Granted {user} temporary admin for {time} minutes for reason: {reason}")
+        task = asyncio.create_task(self._schedule_deop(interaction, member, time, admin_role, codir_role))
+        self.deop_tasks[member.id] = task
+        logger.info(f"Granted {member} temporary admin for {time} minutes for reason: {reason}")
         await interaction.response.send_message(
-            f"{codir_role.mention} Droits admin donnés à {user.mention}({user.name!r}) pour {time} minutes. "
+            f"{codir_role.mention} Droits admin donnés à {member.mention}({escape_markdown(member.name)!r}) pour {time} minutes. "
             f"Raison: {escape_markdown(reason)}"
         )
 
     @user_group.command(name="deop", description="Retire les droits admin temporaires d'un utilisateur.")
-    @app_commands.describe(user="L'utilisateur cible")
-    async def user_deop(self, interaction: Interaction, user: Member) -> None:
+    @app_commands.describe(member="L'utilisateur cible")
+    async def user_deop(self, interaction: Interaction, member: Member) -> None:
         """Revoke temporary admin privileges from a user.
 
         Args:
             interaction (Interaction): The Discord interaction context.
-            user (Member): The user to remove privileges from.
+            member (Member): The user to remove privileges from.
 
         """
-        log_request(logger, "user.deop", interaction, target=user)
+        log_request(logger, "user.deop", interaction, target=member)
         if not await is_in_allowed_channel(logger, interaction):
             return
 
@@ -168,37 +168,37 @@ class UserManagement(commands.Cog):
             return
 
         try:
-            await user.remove_roles(admin_role, reason=f"Remove with op command by {interaction.user}")
+            await member.remove_roles(admin_role, reason=f"Remove with op command by {interaction.user}")
         except Forbidden:
-            logger.exception(f"Forbidden to remove role {admin_role} from {user}")
+            logger.exception(f"Forbidden to remove role {admin_role} from {member}")
             await interaction.response.send_message("Impossible de retirer le rôle.", ephemeral=True)
             return
         except HTTPException:
-            logger.exception(f"Failed to remove role {admin_role} from {user}")
+            logger.exception(f"Failed to remove role {admin_role} from {member}")
             await interaction.response.send_message("Une erreur est survenue lors du retrait du rôle.", ephemeral=True)
             return
 
-        task = self.deop_tasks.pop(user.id, None)
+        task = self.deop_tasks.pop(member.id, None)
         if task:
             task.cancel()
 
-        logger.info(f"Revoked temporary admin from {user}")
+        logger.info(f"Revoked temporary admin from {member}")
         await interaction.response.send_message("Retrait des droits admin en cours...")
-        await interaction.edit_original_response(content=f"Droits admin retirés de {user.mention}({user.name!r})")
+        await interaction.edit_original_response(content=f"Droits admin retirés de {member.mention}({member.name!r})")
 
     # -- Role Management --
 
     @user_group.command(name="add_role", description="Donne un rôle à un utilisateur.")
-    @app_commands.describe(user="L'utilisateur cible", role="Le rôle à attribuer")
-    async def user_add_role(self, interaction: Interaction, user: Member, role: Role) -> None:
+    @app_commands.describe(member="L'utilisateur cible", role="Le rôle à attribuer")
+    async def user_add_role(self, interaction: Interaction, member: Member, role: Role) -> None:
         """Add a role to a single user.
 
         Args:
             interaction (Interaction): The Discord interaction context.
-            user (Member): The user to add the role to.
+            member (Member): The user to add the role to.
             role (Role): The role to add to the user.
         """
-        log_request(logger, "user.add_role", interaction, target=user, role=role)
+        log_request(logger, "user.add_role", interaction, target=member, role=role)
         if not await is_in_allowed_channel(logger, interaction):
             return
 
@@ -209,33 +209,33 @@ class UserManagement(commands.Cog):
             return
 
         try:
-            await user.add_roles(role, reason=f"Add with add_role command by {interaction.user}")
+            await member.add_roles(role, reason=f"Add with add_role command by {interaction.user}")
         except Forbidden:
-            logger.exception(f"Forbidden to add role {role} to {user}")
+            logger.exception(f"Forbidden to add role {role} to {member}")
             await interaction.response.send_message("Impossible d'ajouter le rôle.", ephemeral=True)
             return
         except HTTPException:
-            logger.exception(f"Failed to add role {role} to {user}")
+            logger.exception(f"Failed to add role {role} to {member}")
             await interaction.response.send_message("Une erreur est survenue lors de l'ajout du rôle.", ephemeral=True)
             return
 
-        logger.info(f"Added role {role} to {user}")
+        logger.info(f"Added role {role} to {member}")
         await interaction.response.send_message("Le rôle est en cours d'ajout...")
         await interaction.edit_original_response(
-            content=f"Le rôle {role.mention}({role.name!r}) a été ajouté à {user.mention}({user.name!r})."
+            content=f"Le rôle {role.mention}({role.name!r}) a été ajouté à {member.mention}({member.name!r})."
         )
 
     @user_group.command(name="remove_role", description="Retire un rôle à un utilisateur.")
-    @app_commands.describe(user="L'utilisateur cible", role="Le rôle à retirer")
-    async def user_remove_role(self, interaction: Interaction, user: Member, role: Role) -> None:
+    @app_commands.describe(member="L'utilisateur cible", role="Le rôle à retirer")
+    async def user_remove_role(self, interaction: Interaction, member: Member, role: Role) -> None:
         """Remove a role from a single user.
 
         Args:
             interaction (Interaction): The Discord interaction context.
-            user (Member): The user to remove the role from.
+            member (Member): The user to remove the role from.
             role (Role): The role to remove from the user.
         """
-        log_request(logger, "user.remove_role", interaction, target=user, role=role)
+        log_request(logger, "user.remove_role", interaction, target=member, role=role)
         if not await is_in_allowed_channel(logger, interaction):
             return
 
@@ -246,20 +246,20 @@ class UserManagement(commands.Cog):
             return
 
         try:
-            await user.remove_roles(role, reason=f"Remove with remove_role command by {interaction.user}")
+            await member.remove_roles(role, reason=f"Remove with remove_role command by {interaction.user}")
         except Forbidden:
-            logger.exception(f"Forbidden to remove role {role} from {user}")
+            logger.exception(f"Forbidden to remove role {role} from {member}")
             await interaction.response.send_message("Impossible de retirer le rôle.", ephemeral=True)
             return
         except HTTPException:
-            logger.exception(f"Failed to remove role {role} from {user}")
+            logger.exception(f"Failed to remove role {role} from {member}")
             await interaction.response.send_message("Une erreur est survenue lors du retrait du rôle.", ephemeral=True)
             return
 
-        logger.info(f"Removed role {role} from {user}")
+        logger.info(f"Removed role {role} from {member}")
         await interaction.response.send_message("Le rôle est en cours de retrait...")
         await interaction.edit_original_response(
-            content=f"Le rôle {role.mention}({role.name!r}) a été retiré à {user.mention}({user.name!r})."
+            content=f"Le rôle {role.mention}({role.name!r}) a été retiré à {member.mention}({member.name!r})."
         )
 
     @user_group.command(
@@ -286,7 +286,7 @@ class UserManagement(commands.Cog):
 
         view = BulkRoleView(role, interaction.user, action="add")
         await interaction.response.send_message(
-            f"Sélectionnez les membres à qui ajouter {role.name!r} puis cliquez sur **Confirmer**.", view=view
+            f"Sélectionnez les membres à qui ajouter {escape_markdown(role.name)!r} puis cliquez sur **Confirmer**.", view=view
         )
 
     @user_group.command(name="remove_roles", description="Retire un rôle à plusieurs utilisateurs via un sélecteur.")
@@ -310,7 +310,7 @@ class UserManagement(commands.Cog):
 
         view = BulkRoleView(role, interaction.user, action="remove")
         await interaction.response.send_message(
-            f"Sélectionnez les membres à qui retirer {role.name!r} puis cliquez sur **Confirmer**.", view=view
+            f"Sélectionnez les membres à qui retirer {escape_markdown(role.name)!r} puis cliquez sur **Confirmer**.", view=view
         )
 
     # -- Communications --
@@ -359,42 +359,44 @@ class UserManagement(commands.Cog):
     # -- Scheduling --
 
     async def _schedule_deop(
-        self, interaction: Interaction, user: Member, time: int, admin_role: Role, codir_role: Role
+        self, interaction: Interaction, member: Member, time: int, admin_role: Role, codir_role: Role
     ) -> None:
         """Schedule removal of temporary admin role after timeout.
 
         Args:
             interaction (Interaction): The interaction that triggered the deop.
-            user (Member): The user to remove the role from.
+            member (Member): The user to remove the role from.
             time (int): The time in minutes to wait before removing the role.
             admin_role (Role): The admin role to remove.
             codir_role (Role): The CoDir role to prevent if there is an error.
         """
-        logger.debug(f"Scheduling deop for {user} after {time} minutes")
+        logger.debug(f"Scheduling deop for {member} after {time} minutes")
         try:
             await asyncio.sleep(time * 60)
-            if user.id in self.deop_tasks:
+            if member.id in self.deop_tasks:
                 try:
-                    await user.remove_roles(admin_role, reason="Remove op after time")
+                    await member.remove_roles(admin_role, reason="Remove op after time")
                 except Forbidden:
-                    logger.exception(f"Forbidden to remove admin role from {user}")
+                    logger.exception(f"Forbidden to remove admin role from {member}")
                     await interaction.followup.send(
-                        f"{codir_role.mention} Je ne peux pas retirer le rôle admin de {user.mention}({user.name!r})."
+                        f"{codir_role.mention} Je ne peux pas retirer le rôle admin de {member.mention}({member.name!r})."
                     )
                     return
                 except HTTPException:
-                    logger.exception(f"HTTP error while removing admin role from {user}")
+                    logger.exception(f"HTTP error while removing admin role from {member}")
                     await interaction.followup.send(
                         f"{codir_role.mention} Erreur HTTP lors de la "
-                        f"suppression du rôle admin de {user.mention}({user.name!r})."
+                        f"suppression du rôle admin de {member.mention}({member.name!r})."
                     )
                     return
 
-                logger.info(f"Revoked temporary admin from {user} after {time} minutes")
-                await interaction.followup.send(f"Droits admin retirés de {user.mention}({user.name!r}) après {time} minutes.")
-            self.deop_tasks.pop(user.id, None)
+                logger.info(f"Revoked temporary admin from {member} after {time} minutes")
+                await interaction.followup.send(
+                    f"Droits admin retirés de {member.mention}({member.name!r}) après {time} minutes."
+                )
+            self.deop_tasks.pop(member.id, None)
         except asyncio.CancelledError:
-            logger.exception(f"Deop timer cancelled for {user}")
+            logger.exception(f"Deop timer cancelled for {member}")
 
     # -- Permission Checks --
 
@@ -581,11 +583,15 @@ class BulkRoleView(ui.View):
 
         lines: list[str] = [f"Rôle {self.role.name!r} :"]
         if modified:
-            lines.append(f"{action_str[self.action]} avec succès : {', '.join(f'{m.mention}({m.name!r})' for m in modified)}")
+            lines.append(
+                f"{action_str[self.action]} avec succès : {', '.join(f'{m.mention} ({escape_markdown(m.name)!r})' for m in modified)}"
+            )
         if already:
-            lines.append(f"Déjà {already_str[self.action]} chez : {', '.join(f'{m.mention}({m.name!r})' for m in already)}")
+            lines.append(
+                f"Déjà {already_str[self.action]} chez : {', '.join(f'{m.mention} ({escape_markdown(m.name)!r})' for m in already)}"
+            )
         if failed:
-            lines.append(f"Échec : {', '.join(f'{m.mention}({m.name!r})' for m in failed)}")
+            lines.append(f"Échec : {', '.join(f'{m.mention} ({escape_markdown(m.name)!r})' for m in failed)}")
 
         for child in self.children:
             if isinstance(child, ui.Button | ui.UserSelect):
@@ -658,9 +664,9 @@ class BulkDMView(ui.View):
 
         lines: list[str] = ["Envoi des messages terminé."]
         if delivered:
-            lines.append("Succès : " + ", ".join(f"{member.mention}({member.name!r})" for member in delivered))
+            lines.append("Succès : " + ", ".join(f"{member.mention}({escape_markdown(member.name)!r})" for member in delivered))
         if failed:
-            lines.append("Échecs : " + ", ".join(f"{member.mention}({member.name!r})" for member in failed))
+            lines.append("Échecs : " + ", ".join(f"{member.mention}({escape_markdown(member.name)!r})" for member in failed))
         lines.append("Contenu envoyé :")
         lines.append(f">>> {self.message}")
 

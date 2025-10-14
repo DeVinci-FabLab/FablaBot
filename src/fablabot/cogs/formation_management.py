@@ -26,7 +26,7 @@ from discord import (
     app_commands,
 )
 from discord.ext import commands, tasks
-from discord.utils import get
+from discord.utils import escape_markdown, get
 from emoji import EMOJI_DATA
 
 from .utils import check_has_role, is_in_allowed_channel, log_request, send_dm_to_member
@@ -725,7 +725,7 @@ class FormationManagement(commands.Cog):
         if not await check_has_role(logger, interaction, ALLOWED_ROLES):
             return
 
-        await interaction.response.send_message("Génération du message en cours...")
+        await interaction.response.send_message("Génération du message en cours...")  # TODO: defer
         assert interaction.guild is not None
         draft = self._get_guild_draft(interaction.guild.id)
         fms = [Formation(**x) for x in draft["fms"]]
@@ -858,7 +858,7 @@ class FormationManagement(commands.Cog):
         )
         if not target_message_id or not target_channel_id:
             logger.error(f"Guild {interaction.guild.id} has inconsistent published message data: {published}")
-            await interaction.response.send_message("Données de message publié incohérentes.")
+            await interaction.response.send_message("Données de message publié incohérentes.", ephemeral=True)
             return
 
         message_payload = published["message"] if published else {}
@@ -900,7 +900,7 @@ class FormationManagement(commands.Cog):
             await interaction.response.send_message("Aucun message publié enregistré.", ephemeral=True)
             return
 
-        await interaction.response.send_message("Export en cours...")
+        await interaction.response.send_message("Export en cours...")  # TODO: defer
 
         message_payload = published.get("message", {})
         raw_fms = message_payload.get("fms", [])
@@ -1183,7 +1183,7 @@ class FormationManagement(commands.Cog):
                 ts = user_entry.get("ts_iso", datetime.min.isoformat(timespec="seconds"))
                 dt = datetime.fromisoformat(ts)
                 when = self._humanize_dt(dt).lower()[2:-2] if dt != datetime.min else "n/a"
-                lines.append(f"{idx}. <@{user_id}> ({username}) · inscrit·e le {when}")
+                lines.append(f"{idx}. <@{user_id}> ({escape_markdown(username)}) · inscrit·e le {when}")
         else:
             lines.append("_(Aucune inscription)_")
 
@@ -1194,7 +1194,7 @@ class FormationManagement(commands.Cog):
                 ts = user_entry.get("ts_iso", datetime.min)
                 dt = datetime.fromisoformat(ts)
                 when = self._humanize_dt(dt).lower()[2:-2] if dt != datetime.min else "n/a"
-                lines.append(f"{idx}. <@{user_id}> ({username}) · inscrit·e le {when} (en attente)")
+                lines.append(f"{idx}. <@{user_id}> ({escape_markdown(username)}) · inscrit·e le {when} (en attente)")
 
         return "\n".join(lines)
 
@@ -1699,13 +1699,7 @@ class FormationManagement(commands.Cog):
             fm.waitlisted_users = waitlisted
 
         updated_fms = [fm.to_dict() for fm in fms]
-        pub["message"] = {
-            "header": header,
-            "role_id": role_id,
-            "intro": intro,
-            "end": end,
-            "fms": updated_fms,
-        }
+        pub["message"]["fms"] = updated_fms
         self._set_last_published_in_guild(guild_id, pub)
 
         content = self._render_message(header, role_id, intro, fms, end)

@@ -24,7 +24,7 @@ from discord import (
     app_commands,
 )
 from discord.ext import commands
-from discord.utils import get
+from discord.utils import escape_markdown, get
 
 from fablabot.discord_log_handler import DiscordLogHandler
 from fablabot.guild_config import set_log_channel_id
@@ -167,7 +167,7 @@ class ChannelManagement(commands.Cog):
         if channel in (c.name for c in category.channels):
             logger.info(f"Text channel {channel!r} already exists in {category!r}")
             await interaction.response.send_message(
-                f"Un salon {channel!r} existe déjà dans {category.mention}.",
+                f"Un salon {escape_markdown(channel)!r} existe déjà dans {escape_markdown(category.name)!r}.",
                 ephemeral=True,
             )
             return
@@ -182,8 +182,8 @@ class ChannelManagement(commands.Cog):
             return
         logger.info(f"Created text channel {new_channel!r} in category {category!r}")
         await interaction.response.send_message(
-            f"Le salon textuel {new_channel.mention}({new_channel.name!r}) a "
-            f"été créé dans {category.mention}({category.name!r})."
+            f"Le salon textuel {new_channel.mention}({escape_markdown(new_channel.name)!r}) a "
+            f"été créé dans {category.mention}({escape_markdown(category.name)!r})."
         )
 
     @text_group.command(name="rename", description="Renomme un salon textuel.")
@@ -217,7 +217,7 @@ class ChannelManagement(commands.Cog):
             return
         logger.info(f"Renamed channel {channel} from {old_name!r} to {new_name!r}")
         await interaction.response.send_message(
-            f"Le salon textuel {channel.mention}, anciennement {old_name!r}, a été renommé en {new_name!r}."
+            f"Le salon textuel {channel.mention}, anciennement {escape_markdown(old_name)!r}, a été renommé en {escape_markdown(new_name)!r}."
         )
 
     @text_group.command(name="delete", description="Supprime un salon textuel.")
@@ -248,7 +248,7 @@ class ChannelManagement(commands.Cog):
             await interaction.response.send_message("Erreur lors de la suppression du salon textuel.", ephemeral=True)
             return
         logger.info(f"Deleted text channel {channel.name!r}")
-        await interaction.response.send_message(f"Le salon textuel {channel.name!r} a été supprimé.")
+        await interaction.response.send_message(f"Le salon textuel {escape_markdown(channel.name)!r} a été supprimé.")
 
     # endregion Text Slash Commands Group
 
@@ -324,7 +324,7 @@ class ChannelManagement(commands.Cog):
         if channel_name in existing:
             logger.info(f"Voice channel {channel_name!r} already exists in {category!r}")
             await interaction.response.send_message(
-                f"Un salon vocal {name!r} existe déjà dans {category.mention}.",
+                f"Un salon vocal {escape_markdown(channel_name)!r} existe déjà dans {escape_markdown(category.name)!r}.",
                 ephemeral=True,
             )
             return
@@ -340,8 +340,8 @@ class ChannelManagement(commands.Cog):
             return
         logger.info(f"Created voice channel {new_channel!r} in category {category.name!r}")
         channel_creation_message = (
-            f"Le salon vocal {'temporaire' if is_temporary else 'permanent'} {new_channel.mention}({new_channel.name!r}) "
-            f"a été créé dans {category.mention}({category.name!r})."
+            f"Le salon vocal {'temporaire' if is_temporary else 'permanent'} {new_channel.mention} ({escape_markdown(new_channel.name)!r}) "
+            f"a été créé dans la catégorie {escape_markdown(category.name)!r}."
         )
         if max_user:
             channel_creation_message += f" (max {max_user} utilisateurs)"
@@ -399,7 +399,7 @@ class ChannelManagement(commands.Cog):
                 except HTTPException:
                     logger.exception(f"HTTP error while renaming associated channel {vc} to {new_vc_name}")
         await interaction.response.send_message(
-            f"Le salon vocal {channel.mention}, anciennement {old_name!r}, a été renommé en {new_name!r}."
+            f"Le salon vocal {channel.mention}, anciennement {escape_markdown(old_name)!r}, a été renommé en {escape_markdown(new_name)!r}."
         )
 
     @vocal_group.command(name="delete", description="Supprime un salon vocal.")
@@ -434,7 +434,7 @@ class ChannelManagement(commands.Cog):
             await interaction.response.send_message("Erreur lors de la suppression du salon vocal.", ephemeral=True)
             return
         logger.info(f"Deleted voice channel {channel.name!r}")
-        await interaction.response.send_message(f"Le salon vocal {channel.name!r} a été supprimé.")
+        await interaction.response.send_message(f"Le salon vocal {escape_markdown(channel.name)!r} a été supprimé.")
 
     # endregion Vocal Slash Commands Group
 
@@ -485,9 +485,9 @@ class ChannelManagement(commands.Cog):
         set_log_channel_id(channel.id)
         logger.info(msg=f"Log channel set to {channel} (id={channel.id}) by {interaction.user} (id={interaction.user.id})")
 
-        confirmation = f"Les logs seront désormais envoyés dans {channel.mention}."
+        confirmation = f"Les logs seront désormais envoyés dans {channel.mention} ({escape_markdown(channel.name)!r})."
         if previous_channel is not None:
-            confirmation += f" Ancien salon : {previous_channel.mention}."
+            confirmation += f" Ancien salon : {previous_channel.mention} ({escape_markdown(previous_channel.name)!r})."
         await interaction.response.send_message(confirmation)
 
     # endregion Log Slash Commands Group

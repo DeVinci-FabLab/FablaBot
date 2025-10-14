@@ -8,7 +8,7 @@ from warnings import deprecated
 
 from discord import HTTPException, Interaction, Member, PermissionOverwrite, TextChannel, app_commands
 from discord.ext import commands
-from discord.utils import get
+from discord.utils import escape_markdown, get
 
 from fablabot.guild_config import is_welcome_verify_enabled, set_welcome_verify_enabled
 
@@ -128,7 +128,7 @@ class Welcome(commands.Cog):
         if member is None:
             logger.warning(f"Member not found: {member_name}")
             await interaction.response.send_message(
-                f"Impossible de trouver le membre avec le nom {member_name}.", ephemeral=True
+                f"Impossible de trouver le membre avec le nom {escape_markdown(member_name)!r}.", ephemeral=True
             )
             return
 
