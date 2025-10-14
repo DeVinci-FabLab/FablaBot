@@ -37,7 +37,6 @@ logger = logging.getLogger(__name__)
 ALLOWED_ROLES = {"Respo Formations", "Admin -temp-", "Administrateur"}
 DATA_FILE = "data/formations_state.json"
 DISCORD_EMOJI_RE = re.compile(r"^<a?:\w+:\d+>$")
-ROLE_MENTION_RE = re.compile(r"<@&(\d+)>")  # TODO remove
 MAX_MSG_CHARS = 1900
 REACTION_LOG_RETENTION = timedelta(days=30)
 FM_REQUEST_FORMS = "https://forms.office.com/e/MqVdQujzjf"
@@ -1071,76 +1070,6 @@ class FormationManagement(commands.Cog):
             lines.pop()
         return "\n".join(lines)
 
-    # TODO: remove
-    def _normalize_message_payload(self, payload: dict[str, Any]) -> bool:
-        """Ensure message payloads follow the expected schema.
-
-        Args:
-            payload (dict[str, Any]): Draft or published message payload.
-
-        Returns:
-            bool: True if the payload was modified.
-        """
-        changed = False
-
-        intro_text = payload.get("intro")
-        if intro_text is None:
-            payload["intro"] = ""
-            intro_text = ""
-            changed = True
-        intro_lines = intro_text.splitlines()
-
-        def pop_leading_blank() -> None:
-            nonlocal intro_lines, changed
-            while intro_lines and not intro_lines[0].strip():
-                intro_lines.pop(0)
-                changed = True
-
-        pop_leading_blank()
-
-        header_line: str | None = None
-        if intro_lines:
-            first_line = intro_lines[0].strip()
-            if first_line.startswith("# [FORMATIONS]"):
-                header_line = first_line
-                intro_lines.pop(0)
-                changed = True
-
-        if header_line is not None:
-            if payload.get("header") != header_line:
-                payload["header"] = header_line
-                changed = True
-        elif "header" not in payload:
-            payload["header"] = ""
-            changed = True
-
-        pop_leading_blank()
-
-        role_id_value = payload.get("role_id")
-        if intro_lines:
-            role_match = ROLE_MENTION_RE.search(intro_lines[0])
-            if role_match:
-                extracted_role_id = int(role_match.group(1))
-                if role_id_value != extracted_role_id:
-                    payload["role_id"] = extracted_role_id
-                    role_id_value = extracted_role_id
-                    changed = True
-                intro_lines.pop(0)
-                changed = True
-
-        if "role_id" not in payload:
-            payload["role_id"] = role_id_value
-            changed = True
-
-        pop_leading_blank()
-
-        normalized_intro = "\n".join(intro_lines).strip()
-        if payload.get("intro") != normalized_intro:
-            payload["intro"] = normalized_intro
-            changed = True
-
-        return changed
-
     def _format_respo_contacts(self, guild: Guild) -> str:
         """Build the contact string for formation managers.
 
@@ -1420,13 +1349,7 @@ class FormationManagement(commands.Cog):
             logger.debug(f"Initializing draft state for guild {guild_id}.")
             self._set_guild_state(guild_id, guild_state)
             guild_state["draft"] = {"header": None, "role_id": None, "intro": "", "fms": [], "end": ""}
-        # return guild_state["draft"]   # TODO: uncomment and remove after
-
-        draft = guild_state["draft"]
-        if self._normalize_message_payload(draft):
-            logger.debug(f"Upgraded draft schema for guild {guild_id}.")
-            self._set_guild_draft(guild_id, draft)
-        return draft
+        return guild_state["draft"]
 
     def _set_guild_draft(self, guild_id: int, draft: dict[str, Any]) -> None:
         """Set the draft for a specific guild.
@@ -1435,7 +1358,6 @@ class FormationManagement(commands.Cog):
             guild_id (int): The ID of the guild.
             draft (dict[str, Any]): The draft of the guild.
         """
-        self._normalize_message_payload(draft)  # TODO: remove
         guild_state = self._get_guild_state(guild_id)
         guild_state["draft"] = draft
         self._set_guild_state(guild_id, guild_state)
@@ -1454,12 +1376,6 @@ class FormationManagement(commands.Cog):
         if not published:
             logger.warning(f"No published formations data stored for guild {guild_id}.")
             return None
-        # TODO: remove
-        message_payload = published.get("message")
-        if isinstance(message_payload, dict) and self._normalize_message_payload(message_payload):
-            logger.debug(f"Upgraded published message schema for guild {guild_id}.")
-            self._set_last_published_in_guild(guild_id, published)
-        # until here
         return published
 
     def _set_last_published_in_guild(self, guild_id: int, published: dict[str, Any]) -> None:
@@ -1469,11 +1385,6 @@ class FormationManagement(commands.Cog):
             guild_id (int): The ID of the guild.
             published (dict[str, Any]): The published state of the guild.
         """
-        # TODO: remove
-        message_payload = published.get("message")
-        if isinstance(message_payload, dict):
-            self._normalize_message_payload(message_payload)
-        # until here
         guild_state = self._get_guild_state(guild_id)
         guild_state["published"] = published
         self._set_guild_state(guild_id, guild_state)
