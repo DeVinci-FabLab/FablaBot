@@ -943,15 +943,15 @@ class FormationManagement(commands.Cog):
         """
         if payload.guild_id is None:
             return
-        pub = self._get_last_published_in_guild(payload.guild_id)
-        if not pub or payload.message_id != pub.get("message_id"):
-            return
 
         member = payload.member
         if member and member.bot:
             return
 
         async with self._reaction_lock:
+            pub = self._get_last_published_in_guild(payload.guild_id)
+            if not pub or payload.message_id != pub.get("message_id"):
+                return
             emoji_str = str(payload.emoji)
             message_payload = pub.get("message", {})
             fm_emojis: set[str] = set()
@@ -1679,11 +1679,11 @@ class FormationManagement(commands.Cog):
             )
             registered: list[dict[str, Any]] = []
             waitlisted: list[dict[str, Any]] = []
-            for position, (uid, _, username) in enumerate(ordered_users):
+            for position, (uid, ts, username) in enumerate(ordered_users):
                 entry = {
                     "user_id": uid,
                     "username": username,
-                    "ts_iso": last_add.get((fm.emoji, uid), datetime.min).isoformat(timespec="seconds"),
+                    "ts_iso": ts.isoformat(timespec="seconds"),
                 }
                 if position < max(fm.seats, 0):
                     registered.append(entry)
