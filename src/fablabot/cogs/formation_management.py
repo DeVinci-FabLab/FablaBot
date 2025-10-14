@@ -10,7 +10,7 @@ import json
 import logging
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, override
 from warnings import deprecated
 
 from discord import (
@@ -24,7 +24,7 @@ from discord import (
     TextChannel,
     app_commands,
 )
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord.utils import get
 from emoji import EMOJI_DATA
 
@@ -40,6 +40,7 @@ ROLE_MENTION_RE = re.compile(r"<@&(\d+)>")  # TODO remove
 MAX_MSG_CHARS = 1900
 REACTION_LOG_RETENTION = timedelta(days=30)
 FM_REQUEST_FORMS = "https://forms.office.com/e/MqVdQujzjf"
+TRAINER_NOTIFICATION_ADVANCE = timedelta(hours=1)
 
 
 @dataclass
@@ -150,7 +151,14 @@ class FormationManagement(commands.Cog):
         ```
         """
         self._purge_all_reaction_logs()
+        self._check_upcoming_formations.start()
         logger.info("FormationManagement initialized")
+
+    @override
+    async def cog_unload(self) -> None:
+        """Clean up when the cog is unloaded."""
+        self._check_upcoming_formations.cancel()
+        logger.info("FormationManagement unloaded")
 
     # region ====== Fm Slash Commands Group ======
     fm_group = app_commands.Group(name="fm", description="Gère les annonces de Formations et les inscriptions.")
@@ -1183,7 +1191,7 @@ class FormationManagement(commands.Cog):
         if member.bot:
             return
         if not await can_dm_user(member):
-            logger.error(f"Cannot DM user {user_id} in guild {guild.id}; skipping registration DM.")
+            logger.error(f"Cannot DM user {member.name} ({member.display_name}) in guild {guild.id}; skipping registration DM.")
             return
 
         logger.debug(f"Resolved member {member.id} ({member.display_name}) for registration DM in guild {guild.id}.")
@@ -1202,51 +1210,6 @@ class FormationManagement(commands.Cog):
             logger.exception(f"Failed to send registration DM to user {user_id} in guild {guild.id}.")
         else:
             logger.info(f"Sent registration DM to user {user_id} in guild {guild.id} for formation {formation.name}.")
-
-    async def _send_promotion_dm(
-        self,
-        guild: Guild,
-        user_id: int,
-        formation: Formation,
-        contacts: str,
-    ) -> None:
-        """Notify a user that they were promoted from the waitlist.
-
-        Args:
-            guild (Guild): The guild where the user is located.
-            user_id (int): The ID of the user to notify.
-            formation (Formation): The formation.
-            contacts (str): The contact string for formation managers.
-        """
-        logger.debug(f"Preparing waitlist promotion DM for guild {guild.id} user {user_id} formation {formation.name}.")
-        try:
-            member = guild.get_member(user_id) or await guild.fetch_member(user_id)
-        except Exception:
-            logger.exception(f"Unexpected error while fetching member {user_id} in guild {guild.id}.")
-            return
-        if member.bot:
-            return
-        if not await can_dm_user(member):
-            logger.error(f"Cannot DM user {user_id} in guild {guild.id}; skipping promotion DM.")
-            return
-
-        logger.debug(f"Resolved member {member.id} ({member.display_name}) for waitlist promotion DM in guild {guild.id}.")
-
-        datetime_text = self._humanize_dt(datetime.fromisoformat(formation.start_iso)).lower()[2:-2]
-
-        message = (
-            f"Salut {member.display_name} !\n"
-            "Bonne nouvelle : une place s'est libérée ! "
-            f"Tu es désormais inscrit·e à la formation **{formation.name}** le {datetime_text}.\n"
-            "Si tu ne peux finalement pas y participer, pense à retirer ta réaction pour libérer la place.\n\n"
-            f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
-        )
-        try:
-            await member.send(message)
-        except Exception:
-            logger.exception(f"Failed to send waitlist promotion DM to user {user_id} in guild {guild.id}.")
-        else:
-            logger.info(f"Sent waitlist promotion DM to user {user_id} in guild {guild.id} for formation {formation.name}.")
 
     async def _send_waitlist_dm(
         self,
@@ -1277,7 +1240,7 @@ class FormationManagement(commands.Cog):
         if member.bot:
             return
         if not await can_dm_user(member):
-            logger.error(f"Cannot DM user {user_id} in guild {guild.id}; skipping waitlist DM.")
+            logger.error(f"Cannot DM user {member.name} ({member.display_name}) in guild {guild.id}; skipping waitlist DM.")
             return
 
         logger.debug(f"Resolved member {member.id} ({member.display_name}) for waitlist DM in guild {guild.id}.")
@@ -1297,6 +1260,139 @@ class FormationManagement(commands.Cog):
             logger.info(
                 f"Sent waitlist DM to user {user_id} in guild {guild.id} for "
                 f"formation {formation_name} (position {waitlist_position})."
+            )
+
+    async def _send_promotion_dm(
+        self,
+        guild: Guild,
+        user_id: int,
+        formation: Formation,
+        contacts: str,
+    ) -> None:
+        """Notify a user that they were promoted from the waitlist.
+
+        Args:
+            guild (Guild): The guild where the user is located.
+            user_id (int): The ID of the user to notify.
+            formation (Formation): The formation.
+            contacts (str): The contact string for formation managers.
+        """
+        logger.debug(f"Preparing waitlist promotion DM for guild {guild.id} user {user_id} formation {formation.name}.")
+        try:
+            member = guild.get_member(user_id) or await guild.fetch_member(user_id)
+        except Exception:
+            logger.exception(f"Unexpected error while fetching member {user_id} in guild {guild.id}.")
+            return
+        if member.bot:
+            return
+        if not await can_dm_user(member):
+            logger.error(f"Cannot DM user {member.name} ({member.display_name}) in guild {guild.id}; skipping promotion DM.")
+            return
+
+        logger.debug(f"Resolved member {member.id} ({member.display_name}) for waitlist promotion DM in guild {guild.id}.")
+
+        datetime_text = self._humanize_dt(datetime.fromisoformat(formation.start_iso)).lower()[2:-2]
+
+        message = (
+            f"Salut {member.display_name} !\n"
+            "Bonne nouvelle : une place s'est libérée ! "
+            f"Tu es désormais inscrit·e à la formation **{formation.name}** le {datetime_text}.\n"
+            "Si tu ne peux finalement pas y participer, pense à retirer ta réaction pour libérer la place.\n\n"
+            f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
+        )
+        try:
+            await member.send(message)
+        except Exception:
+            logger.exception(f"Failed to send waitlist promotion DM to user {user_id} in guild {guild.id}.")
+        else:
+            logger.info(f"Sent waitlist promotion DM to user {user_id} in guild {guild.id} for formation {formation.name}.")
+
+    async def _notify_trainer_before_formation(
+        self, guild: Guild, formation: Formation, published_data: dict[str, Any], contacts: str
+    ) -> None:
+        """Send a DM to the trainer with the list of registered attendees.
+
+        Args:
+            guild (Guild): The guild where the formation is taking place.
+            formation (Formation): The formation starting soon.
+            published_data (dict[str, Any]): The published message data.
+            contacts (str): The contact string for formation managers.
+        """
+        logger.info(
+            f"Notifying trainer for formation {formation.name!r} starting at {formation.start_iso} in guild {guild.id}."
+        )
+
+        trainer_mention = formation.trainer_mention
+        trainer_id_match = re.search(r"<@!?(\d+)>", trainer_mention)
+        if not trainer_id_match:
+            logger.warning(f"Could not extract trainer ID from mention {trainer_mention!r} for formation {formation.name!r}.")
+            return
+        trainer_id = int(trainer_id_match.group(1))
+
+        try:
+            trainer = guild.get_member(trainer_id) or await guild.fetch_member(trainer_id)
+        except Exception:
+            logger.exception(f"Failed to fetch trainer {trainer_id} for formation {formation.name!r}.")
+            return
+
+        if trainer.bot:
+            logger.warning(f"Trainer {trainer_id} is a bot for formation {formation.name!r}.")
+            return
+
+        if not await can_dm_user(trainer):
+            logger.error(f"Cannot DM trainer {trainer.name} ({trainer.display_name}) for formation {formation.name!r}.")
+            return
+
+        message_id = published_data.get("message_id")
+        channel_id = published_data.get("channel_id")
+
+        if not message_id or not channel_id:
+            logger.error(f"Missing message_id or channel_id in published data for formation {formation.name!r}.")
+            return
+
+        registered_list: list[str] = []
+        waitlisted_list: list[str] = []
+
+        for idx, user_entry in enumerate(formation.registered_users, start=1):
+            user_id = user_entry.get("user_id")
+            username = user_entry.get("username", "Utilisateur inconnu")
+            registered_list.append(f"{idx}. {username} (<@{user_id}>)")
+
+        for idx, user_entry in enumerate(formation.waitlisted_users, start=len(formation.registered_users) + 1):
+            user_id = user_entry.get("user_id")
+            username = user_entry.get("username", "Utilisateur inconnu")
+            waitlisted_list.append(f"{idx}. {username} (<@{user_id}>) [en attente]")
+
+        datetime_text = self._humanize_dt(formation.start_dt).lower()[2:-2]
+
+        message_parts: list[str] = []
+        message_parts.append(f"Salut {trainer.display_name} !")
+        message_parts.append(f"\nTa formation **{formation.name}** commence bientôt (le {datetime_text}).\n")
+        message_parts.append(f"**Inscrit·e·s ({len(formation.registered_users)}/{formation.seats}) :**")
+
+        if registered_list:
+            message_parts.append("\n".join(registered_list))
+        else:
+            message_parts.append("_(Aucune inscription pour le moment)_")
+
+        if waitlisted_list:
+            message_parts.append(f"\n**Liste d'attente ({len(formation.waitlisted_users)}) :**")
+            message_parts.append("\n".join(waitlisted_list))
+
+        message_parts.append(
+            f"\n\n*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
+        )
+
+        message = "\n".join(message_parts)
+
+        try:
+            await trainer.send(message)
+        except Exception:
+            logger.exception(f"Failed to send notification DM to trainer {trainer_id} for formation {formation.name!r}.")
+        else:
+            logger.info(
+                f"Sent formation notification to trainer {trainer.name} (ID: {trainer_id}) "
+                f"for formation {formation.name!r} in guild {guild.id}."
             )
 
     # -- State --
@@ -1781,6 +1877,66 @@ class FormationManagement(commands.Cog):
             logger.debug(f"Registrations export length: {text_length} characters.")
 
         return text, file_obj
+
+    # -- Background Tasks --
+
+    @tasks.loop(minutes=10)
+    async def _check_upcoming_formations(self) -> None:
+        """Check for formations starting in ~1 hour and notify trainers with registration export."""
+        logger.debug("Checking for upcoming formations to notify trainers.")
+        now = datetime.now()
+        notification_window_start = now + TRAINER_NOTIFICATION_ADVANCE - timedelta(minutes=10)
+        notification_window_end = now + TRAINER_NOTIFICATION_ADVANCE + timedelta(minutes=10)
+
+        for guild_id_str, guild_state in self.state.items():
+            guild_id = int(guild_id_str)
+            guild = self.bot.get_guild(guild_id)
+            if not guild:
+                continue
+
+            published = self._get_last_published_in_guild(guild_id)
+            if not published:
+                continue
+
+            message_payload = published.get("message", {})
+            raw_fms = message_payload.get("fms", [])
+            if not raw_fms:
+                continue
+
+            notified_formations = guild_state.get("notified_formations", [])
+            notified_keys = {(nf.get("formation_emoji"), nf.get("start_iso")) for nf in notified_formations}
+
+            for fm_dict in raw_fms:
+                fm = Formation(**fm_dict)
+                formation_key = (fm.emoji, fm.start_iso)
+
+                if formation_key in notified_keys:
+                    continue
+
+                if notification_window_start <= fm.start_dt <= notification_window_end:
+                    await self._notify_trainer_before_formation(
+                        guild,
+                        fm,
+                        published,
+                        self._format_respo_contacts(guild),
+                    )
+
+                    notified_formations.append(
+                        {
+                            "formation_emoji": fm.emoji,
+                            "formation_name": fm.name,
+                            "start_iso": fm.start_iso,
+                            "notified_at": now.isoformat(),
+                        }
+                    )
+                    guild_state["notified_formations"] = notified_formations
+                    self._set_guild_state(guild_id, guild_state)
+
+    @_check_upcoming_formations.before_loop
+    async def _before_check_upcoming_formations(self) -> None:
+        """Wait for the bot to be ready before starting the background task."""
+        await self.bot.wait_until_ready()
+        logger.info("Formation notification task started")
 
     # endregion Helpers
 

@@ -107,7 +107,7 @@ async def check_has_role(logger: Logger, interaction: Interaction, roles: set[st
     missing_roles = [role for role in roles if role not in guild_roles]
     if missing_roles:
         assert isinstance(interaction.channel, TextChannel)
-        logger.warning(f"Missing roles {missing_roles} for guild {interaction.guild}")
+        logger.warning(f"Missing roles {', '.join(missing_roles)} for guild {interaction.guild}")
         await interaction.channel.send(
             f"Les rôles suivants ne sont pas configurés sur ce serveur : {', '.join(missing_roles)}.",
         )
@@ -115,7 +115,9 @@ async def check_has_role(logger: Logger, interaction: Interaction, roles: set[st
     assert isinstance(interaction.user, Member)
     member_role_names = {role.name for role in interaction.user.roles}
     if not bool(member_role_names & roles):
-        logger.warning(f"User {interaction.user} doesn't have any of the roles {roles} in the guild {interaction.guild.id}")
+        logger.warning(
+            f"User {interaction.user} doesn't have any of the roles {','.join(roles)} in the guild {interaction.guild.id}"
+        )
         msg = f"Il est requis d'avoir au moins l'un des rôles suivants pour utiliser cette commande : {', '.join(roles)}."
         await interaction.response.send_message(
             msg,
