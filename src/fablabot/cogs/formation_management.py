@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
@@ -150,6 +151,7 @@ class FormationManagement(commands.Cog):
         }
         ```
         """
+        self._reaction_lock = asyncio.Lock()
         self._purge_all_reaction_logs()
         self._check_upcoming_formations.start()
         logger.info("FormationManagement initialized")
@@ -949,28 +951,29 @@ class FormationManagement(commands.Cog):
         if member and member.bot:
             return
 
-        emoji_str = str(payload.emoji)
-        message_payload = pub.get("message", {})
-        fm_emojis: set[str] = set()
-        for fm in message_payload.get("fms", []):
-            emoji = fm.get("emoji")
-            if emoji:
-                fm_emojis.add(str(emoji))
-        if fm_emojis and emoji_str not in fm_emojis:
-            return
+        async with self._reaction_lock:
+            emoji_str = str(payload.emoji)
+            message_payload = pub.get("message", {})
+            fm_emojis: set[str] = set()
+            for fm in message_payload.get("fms", []):
+                emoji = fm.get("emoji")
+                if emoji:
+                    fm_emojis.add(str(emoji))
+            if fm_emojis and emoji_str not in fm_emojis:
+                return
 
-        member_name = member.name if member else None
+            member_name = member.name if member else None
 
-        self._log_reaction(
-            payload.guild_id,
-            payload.message_id,
-            payload.user_id,
-            emoji_str,
-            payload.event_type,
-            member_name,
-        )
+            self._log_reaction(
+                payload.guild_id,
+                payload.message_id,
+                payload.user_id,
+                emoji_str,
+                payload.event_type,
+                member_name,
+            )
 
-        await self._update_published_message(payload.guild_id)
+            await self._update_published_message(payload.guild_id)
 
     # endregion Event Listeners
 
