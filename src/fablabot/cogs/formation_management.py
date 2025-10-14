@@ -1171,23 +1171,27 @@ class FormationManagement(commands.Cog):
         """
         lines: list[str] = []
 
-        lines.append(f"{formation.emoji} **{formation.name}**")
-        lines.append(f"**Inscrit·e·s ({len(formation.registered_users)}/{formation.seats}) :**")
+        lines.append(f"{formation.emoji} **{formation.name}** ({formation.seats} place{'s' if formation.seats != 1 else ''})")
 
         if formation.registered_users:
             for idx, user_entry in enumerate(formation.registered_users, start=1):
                 user_id = user_entry.get("user_id")
                 username = user_entry.get("username", "Utilisateur inconnu")
-                lines.append(f"{idx}. {username} (<@{user_id}>)")
+                ts = user_entry.get("ts_iso", datetime.min.isoformat(timespec="seconds"))
+                dt = datetime.fromisoformat(ts)
+                when = self._humanize_dt(dt).lower()[2:-2] if dt != datetime.min else "n/a"
+                lines.append(f"{idx}. <@{user_id}> ({username}) · inscrit·e le {when}")
         else:
-            lines.append("_(Aucune inscription pour le moment)_")
+            lines.append("_(Aucune inscription)_")
 
         if formation.waitlisted_users:
-            lines.append(f"\n**Liste d'attente ({len(formation.waitlisted_users)}) :**")
             for idx, user_entry in enumerate(formation.waitlisted_users, start=len(formation.registered_users) + 1):
                 user_id = user_entry.get("user_id")
                 username = user_entry.get("username", "Utilisateur inconnu")
-                lines.append(f"{idx}. {username} (<@{user_id}>) [en attente]")
+                ts = user_entry.get("ts_iso", datetime.min)
+                dt = datetime.fromisoformat(ts)
+                when = self._humanize_dt(dt).lower()[2:-2] if dt != datetime.min else "n/a"
+                lines.append(f"{idx}. <@{user_id}> ({username}) · inscrit·e le {when} (en attente)")
 
         return "\n".join(lines)
 
@@ -1736,7 +1740,11 @@ class FormationManagement(commands.Cog):
             registered: list[dict[str, Any]] = []
             waitlisted: list[dict[str, Any]] = []
             for position, (uid, _, username) in enumerate(ordered_users):
-                entry = {"user_id": uid, "username": username}
+                entry = {
+                    "user_id": uid,
+                    "username": username,
+                    "ts_iso": last_add.get((fm.emoji, uid), datetime.min).isoformat(timespec="seconds"),
+                }
                 if position < max(fm.seats, 0):
                     registered.append(entry)
                     if uid in prev_waitlisted_ids:
