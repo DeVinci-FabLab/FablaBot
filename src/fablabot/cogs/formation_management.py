@@ -26,10 +26,10 @@ from discord import (
     app_commands,
 )
 from discord.ext import commands, tasks
-from discord.utils import escape_markdown, get
+from discord.utils import get
 from emoji import EMOJI_DATA
 
-from .utils import check_has_role, is_in_allowed_channel, log_request, send_dm_to_member
+from .utils import check_has_role, escape_md, is_in_allowed_channel, log_request, send_dm_to_member
 
 logger = logging.getLogger(__name__)
 
@@ -725,7 +725,7 @@ class FormationManagement(commands.Cog):
         if not await check_has_role(logger, interaction, ALLOWED_ROLES):
             return
 
-        await interaction.response.send_message("Génération du message en cours...")  # TODO: defer
+        await interaction.response.defer(thinking=True)
         assert interaction.guild is not None
         draft = self._get_guild_draft(interaction.guild.id)
         fms = [Formation(**x) for x in draft["fms"]]
@@ -739,7 +739,7 @@ class FormationManagement(commands.Cog):
             draft["end"],
         )
         logger.info(f"Guild {interaction.guild.id} previewed the formations draft.")
-        await interaction.edit_original_response(
+        await interaction.followup.send(
             content=f"{content or '_(vide)_'}",
             embed=Embed(description="Utilise **/fm publish** pour le publier."),
         )
@@ -900,7 +900,7 @@ class FormationManagement(commands.Cog):
             await interaction.response.send_message("Aucun message publié enregistré.", ephemeral=True)
             return
 
-        await interaction.response.send_message("Export en cours...")  # TODO: defer
+        await interaction.response.defer(thinking=True)
 
         message_payload = published.get("message", {})
         raw_fms = message_payload.get("fms", [])
@@ -908,9 +908,9 @@ class FormationManagement(commands.Cog):
 
         reg_text, reg_file = self._format_current_registrations(fms)
         if reg_file:
-            await interaction.edit_original_response(
-                content=reg_text,
-                attachments=[
+            await interaction.followup.send(
+                reg_text,
+                files=[
                     File(reg_file, filename="inscriptions_ordre_inscription.txt"),
                     File(
                         fp=io.BytesIO(history_csv.getvalue().encode(encoding="utf-8")), filename="formations_reactions_log.csv"
@@ -919,9 +919,9 @@ class FormationManagement(commands.Cog):
             )
             return
 
-        await interaction.edit_original_response(
-            content=reg_text,
-            attachments=[
+        await interaction.followup.send(
+            reg_text,
+            files=[
                 File(
                     fp=io.BytesIO(history_csv.getvalue().encode(encoding="utf-8")),
                     filename="formations_reactions_log.csv",
@@ -1183,7 +1183,7 @@ class FormationManagement(commands.Cog):
                 ts = user_entry.get("ts_iso", datetime.min.isoformat(timespec="seconds"))
                 dt = datetime.fromisoformat(ts)
                 when = self._humanize_dt(dt).lower()[2:-2] if dt != datetime.min else "n/a"
-                lines.append(f"{idx}. <@{user_id}> ({escape_markdown(username)}) · inscrit·e le {when}")
+                lines.append(f"{idx}. <@{user_id}> ({escape_md(username)}) · inscrit·e le {when}")
         else:
             lines.append("_(Aucune inscription)_")
 
@@ -1194,7 +1194,7 @@ class FormationManagement(commands.Cog):
                 ts = user_entry.get("ts_iso", datetime.min)
                 dt = datetime.fromisoformat(ts)
                 when = self._humanize_dt(dt).lower()[2:-2] if dt != datetime.min else "n/a"
-                lines.append(f"{idx}. <@{user_id}> ({escape_markdown(username)}) · inscrit·e le {when} (en attente)")
+                lines.append(f"{idx}. <@{user_id}> ({escape_md(username)}) · inscrit·e le {when} (en attente)")
 
         return "\n".join(lines)
 

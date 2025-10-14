@@ -130,6 +130,18 @@ async def check_has_role(logger: Logger, interaction: Interaction, roles: set[st
     return True
 
 
+def escape_md(text: str) -> str:
+    """Escape markdown characters in a string.
+
+    Args:
+        text (str): The text to escape.
+
+    Returns:
+        str: The escaped text.
+    """
+    return f"`{text}`"
+
+
 async def _can_dm_user(user: Member) -> bool:
     """Check if the bot can send a DM to the user.
 
