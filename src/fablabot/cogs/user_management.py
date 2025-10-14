@@ -21,7 +21,7 @@ from discord import (
 from discord.ext import commands
 from discord.utils import escape_markdown, get
 
-from .utils import ADMIN_ROLES, is_in_allowed_channel, log_request
+from .utils import ADMIN_ROLES, is_in_allowed_channel, log_request, send_dm_to_member
 
 logger = logging.getLogger(__name__)
 
@@ -639,23 +639,20 @@ class BulkDMView(ui.View):
         Args:
             interaction (Interaction): The Discord interaction triggered by the confirm button.
         """
+        assert interaction.guild is not None
         members: list[Member] = [m for m in self.select.values if isinstance(m, Member)]
         if not members:
             await interaction.response.send_message("Aucun membre sélectionné.", ephemeral=True)
             return
 
         delivered: list[Member] = []
-        failed: list[tuple[Member, str]] = []
+        failed: list[Member] = []
 
         for member in members:
-            try:
-                await member.send(self.message)
+            if await send_dm_to_member(logger, interaction.guild, member, self.message, "Bulk DM"):
                 delivered.append(member)
-            except Forbidden:
-                failed.append((member, "Forbidden"))
-            except Exception as e:
-                logger.exception(f"Failed to DM {member}")
-                failed.append((member, f"Exception: {e}"))
+            else:
+                failed.append(member)
 
         logger.info(f"Bulk DM by {self.sender} delivered to {delivered} with failures {failed}")
 
@@ -663,7 +660,7 @@ class BulkDMView(ui.View):
         if delivered:
             lines.append("Succès : " + ", ".join(f"{member.mention}({member.name!r})" for member in delivered))
         if failed:
-            lines.append("Échecs : " + ", ".join(f"{member.mention}({member.name!r})" for member, _ in failed))
+            lines.append("Échecs : " + ", ".join(f"{member.mention}({member.name!r})" for member in failed))
         lines.append("Contenu envoyé :")
         lines.append(f">>> {self.message}")
 

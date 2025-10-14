@@ -5,7 +5,7 @@ from __future__ import annotations
 from logging import Logger
 from typing import Any
 
-from discord import Forbidden, HTTPException, Interaction, Member, TextChannel
+from discord import Forbidden, Guild, HTTPException, Interaction, Member, TextChannel
 from discord.utils import get
 
 from fablabot.guild_config import get_commands_channel_id, set_commands_channel_id
@@ -130,7 +130,7 @@ async def check_has_role(logger: Logger, interaction: Interaction, roles: set[st
     return True
 
 
-async def can_dm_user(user: Member) -> bool:
+async def _can_dm_user(user: Member) -> bool:
     """Check if the bot can send a DM to the user.
 
     Args:
@@ -146,3 +146,43 @@ async def can_dm_user(user: Member) -> bool:
     except HTTPException:
         return True
     return True
+
+
+async def send_dm_to_member(
+    logger: Logger,
+    guild: Guild,
+    member: Member,
+    message_content: str,
+    dm_type: str,
+) -> bool:
+    """Send a direct message to a guild member.
+
+    Args:
+        logger (Logger): The logger of the cog.
+        guild (Guild): The guild where the user is located.
+        member (Member): The member to notify.
+        message_content (str): The message content to send.
+        dm_type (str): The type of DM being sent (for logging purposes).
+
+    Returns:
+        bool: True if the message was sent successfully, False otherwise.
+    """
+    logger.debug(f"Preparing {dm_type} DM for guild {guild.id} user {member}.")
+
+    if member.bot:
+        return False
+
+    if not await _can_dm_user(member):
+        logger.error(f"Cannot DM user {member.name} ({member.display_name}) in guild {guild.id}; skipping {dm_type} DM.")
+        return False
+
+    logger.debug(f"Resolved member {member.id} ({member.display_name}) for {dm_type} DM in guild {guild.id}.")
+
+    try:
+        await member.send(message_content)
+    except Exception:
+        logger.exception(f"Failed to send {dm_type} DM to user {member} in guild {guild.id}.")
+        return False
+    else:
+        logger.info(f"Sent {dm_type} DM to user {member} in guild {guild.id}.")
+        return True
