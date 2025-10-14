@@ -881,36 +881,19 @@ class FormationManagement(commands.Cog):
             )
             return
 
-        try:
-            channel = interaction.guild.get_channel(target_channel_id) or await interaction.guild.fetch_channel(
-                target_channel_id
-            )
-            assert isinstance(channel, TextChannel)
-            msg = await channel.fetch_message(target_message_id)
-        except Exception:
-            logger.exception(
-                f"Guild {interaction.guild.id} failed to fetch message {target_message_id} in channel {target_channel_id}."
-            )
-            await interaction.response.send_message(content="Impossible de récupérer le message cible.", ephemeral=True)
+        published = self._get_last_published_in_guild(interaction.guild.id)
+        if not published:
+            logger.error(f"Guild {interaction.guild.id} has no published message but no ID/channel was given.")
+            await interaction.response.send_message("Aucun message publié enregistré.", ephemeral=True)
             return
 
         await interaction.response.send_message("Export en cours...")
 
-        reactions_snapshot: dict[str, dict[int, dict[str, str]]] = {}
-        for reaction in msg.reactions:
-            emoji_str = str(reaction.emoji)
-            if fm_by_emoji and emoji_str not in fm_by_emoji:
-                continue
+        message_payload = published.get("message", {})
+        raw_fms = message_payload.get("fms", [])
+        fms: list[Formation] = [Formation(**fm_dict) for fm_dict in raw_fms]
 
-            reactions_snapshot.setdefault(emoji_str, {})
-            async for user in reaction.users():
-                if user.bot:
-                    continue
-                reactions_snapshot[emoji_str][user.id] = {
-                    "username": user.name,
-                }
-
-        reg_text, reg_file = self._format_current_registrations(history, reactions_snapshot, fm_by_emoji)
+        reg_text, reg_file = self._format_current_registrations(fms)
         if reg_file:
             await interaction.edit_original_response(
                 content=reg_text,
@@ -1165,6 +1148,37 @@ class FormationManagement(commands.Cog):
         logger.debug(f"Resolved {len(mentions)} formation manager contacts for guild {guild.id}.")
         return " ou ".join(mentions)
 
+    def _format_formation_export(self, formation: Formation) -> str:
+        """Format the export of a single formation with registered and waitlisted users.
+
+        Args:
+            formation (Formation): The formation to export.
+
+        Returns:
+            str: The formatted export string.
+        """
+        lines: list[str] = []
+
+        lines.append(f"{formation.emoji} **{formation.name}**")
+        lines.append(f"**Inscrit·e·s ({len(formation.registered_users)}/{formation.seats}) :**")
+
+        if formation.registered_users:
+            for idx, user_entry in enumerate(formation.registered_users, start=1):
+                user_id = user_entry.get("user_id")
+                username = user_entry.get("username", "Utilisateur inconnu")
+                lines.append(f"{idx}. {username} (<@{user_id}>)")
+        else:
+            lines.append("_(Aucune inscription pour le moment)_")
+
+        if formation.waitlisted_users:
+            lines.append(f"\n**Liste d'attente ({len(formation.waitlisted_users)}) :**")
+            for idx, user_entry in enumerate(formation.waitlisted_users, start=len(formation.registered_users) + 1):
+                user_id = user_entry.get("user_id")
+                username = user_entry.get("username", "Utilisateur inconnu")
+                lines.append(f"{idx}. {username} (<@{user_id}>) [en attente]")
+
+        return "\n".join(lines)
+
     # -- Notifications --
 
     async def _send_registration_dm(
@@ -1343,42 +1357,14 @@ class FormationManagement(commands.Cog):
             logger.error(f"Cannot DM trainer {trainer.name} ({trainer.display_name}) for formation {formation.name!r}.")
             return
 
-        message_id = published_data.get("message_id")
-        channel_id = published_data.get("channel_id")
-
-        if not message_id or not channel_id:
-            logger.error(f"Missing message_id or channel_id in published data for formation {formation.name!r}.")
-            return
-
-        registered_list: list[str] = []
-        waitlisted_list: list[str] = []
-
-        for idx, user_entry in enumerate(formation.registered_users, start=1):
-            user_id = user_entry.get("user_id")
-            username = user_entry.get("username", "Utilisateur inconnu")
-            registered_list.append(f"{idx}. {username} (<@{user_id}>)")
-
-        for idx, user_entry in enumerate(formation.waitlisted_users, start=len(formation.registered_users) + 1):
-            user_id = user_entry.get("user_id")
-            username = user_entry.get("username", "Utilisateur inconnu")
-            waitlisted_list.append(f"{idx}. {username} (<@{user_id}>) [en attente]")
-
         datetime_text = self._humanize_dt(formation.start_dt).lower()[2:-2]
+
+        formation_export = self._format_formation_export(formation)
 
         message_parts: list[str] = []
         message_parts.append(f"Salut {trainer.display_name} !")
         message_parts.append(f"\nTa formation **{formation.name}** commence bientôt (le {datetime_text}).\n")
-        message_parts.append(f"**Inscrit·e·s ({len(formation.registered_users)}/{formation.seats}) :**")
-
-        if registered_list:
-            message_parts.append("\n".join(registered_list))
-        else:
-            message_parts.append("_(Aucune inscription pour le moment)_")
-
-        if waitlisted_list:
-            message_parts.append(f"\n**Liste d'attente ({len(formation.waitlisted_users)}) :**")
-            message_parts.append("\n".join(waitlisted_list))
-
+        message_parts.append(formation_export)
         message_parts.append(
             f"\n\n*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
         )
@@ -1685,9 +1671,7 @@ class FormationManagement(commands.Cog):
         end = message_payload.get("end")
 
         raw_fms = message_payload.get("fms", [])
-        fms: list[Formation] = []
-        for entry in raw_fms:
-            fms.append(Formation(**entry))
+        fms: list[Formation] = [Formation(**fm_dict) for fm_dict in raw_fms]
         tracked_emojis = {fm.emoji for fm in fms if fm.emoji}
 
         if not header or not role_id or not intro or not end or not fms:
@@ -1796,73 +1780,22 @@ class FormationManagement(commands.Cog):
         else:
             logger.debug(f"No new waitlist notifications for guild {guild_id}.")
 
-    def _format_current_registrations(
-        self,
-        history: list[dict[str, Any]],
-        reactions_snapshot: dict[str, dict[int, dict[str, str]]],
-        fm_meta: dict[str, dict[str, Any]],
-    ) -> tuple[str, io.BytesIO | None]:
-        """Format the current registrations for each formation.
+    def _format_current_registrations(self, formations: list[Formation]) -> tuple[str, io.BytesIO | None]:
+        """Format the current registrations for each formation using data from guild state.
 
         Args:
-            history (list[dict[str, Any]]): The history of reactions.
-            reactions_snapshot (dict[str, dict[int, dict[str, str]]]): The current reactions snapshot.
-            fm_meta (dict[str, dict[str, Any]]): The mapping of emojis to formation metadata.
+            formations (list[Formation]): The list of formations with up-to-date registration data.
 
         Returns:
             tuple[str, io.BytesIO | None]: The formatted message and an optional file object.
         """
-        last_add: dict[tuple[str, int], datetime] = {}
-        for ev in history:
-            if ev.get("action") != "add":
-                continue
-            emoji = str(ev.get("emoji", ""))
-            user_id = ev.get("user_id")
-            if user_id is None:
-                continue
-            key = (emoji, int(user_id))
-            try:
-                ts = datetime.fromisoformat(ev.get("ts_iso", ""))
-            except (TypeError, ValueError):
-                ts = datetime.min
-            if key not in last_add or ts > last_add[key]:
-                last_add[key] = ts
-
         lines: list[str] = []
         lines.append("**Inscriptions actuelles par formation (ordre d'inscription)**")
         lines.append("")
 
-        emojis = set(reactions_snapshot.keys()) | set(fm_meta.keys())
-        for emoji in emojis:
-            name = fm_meta.get(emoji, {}).get("name", "")
-            seats = fm_meta.get(emoji, {}).get("seats", 0)
-            header = f"{emoji} **{name}**" if name else f"{emoji}"
-            header += f" ({seats} place{'s' if seats != 1 else ''})"
-            lines.append(header)
-
-            current_users = reactions_snapshot.get(emoji, {})
-            ordering: list[tuple[int, datetime]] = []
-            for uid, _meta in current_users.items():
-                ts = last_add.get((emoji, uid), datetime.min)
-                ordering.append((uid, ts))
-            ordering.sort(key=lambda item: (item[1], item[0]))
-
-            split_index = len(ordering) if seats is None else min(seats, len(ordering))
-            registered_entries = ordering[:split_index]
-            waitlisted_entries = ordering[split_index:]
-
-            if registered_entries:
-                for pos, (uid, ts) in enumerate(registered_entries, start=1):
-                    when = self._humanize_dt(ts).lower()[2:-2] if ts != datetime.min else "n/a"
-                    lines.append(f"{pos}. <@{uid}> · inscrit·e le {when}")
-            else:
-                lines.append("_(aucune inscription)_")
-
-            if waitlisted_entries:
-                for pos, (uid, ts) in enumerate(waitlisted_entries, start=len(registered_entries) + 1):
-                    when = self._humanize_dt(ts).lower()[2:-2] if ts != datetime.min else "n/a"
-                    lines.append(f"{pos}. <@{uid}> · inscrit·e le {when} (en attente)")
-
+        for formation in formations:
+            formation_export = self._format_formation_export(formation)
+            lines.append(formation_export)
             lines.append("")
 
         text = "\n".join(lines).strip()
