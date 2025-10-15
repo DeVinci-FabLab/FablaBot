@@ -656,7 +656,7 @@ class BulkDMView(ui.View):
         failed: list[Member] = []
 
         for member in members:
-            if await send_dm_to_member(logger, interaction.guild, member, self.message, "Bulk DM"):
+            if await send_dm_to_member(logger, interaction.guild, member, self.message, "Bulk"):
                 delivered.append(member)
             else:
                 failed.append(member)

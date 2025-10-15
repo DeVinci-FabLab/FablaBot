@@ -13,6 +13,7 @@ from discord import (
     DMChannel,
     ForumChannel,
     GroupChannel,
+    Guild,
     HTTPException,
     Interaction,
     Member,
@@ -509,17 +510,7 @@ class ChannelManagement(commands.Cog):
             return
 
         assert message.guild is not None
-        codir_role = get(message.guild.roles, name="CoDir")
-        if codir_role is None:
-            logger.error("Required role CoDir not found.")
-            try:
-                await message.channel.send("Rôle CoDir manquant sur le serveur.")
-            except HTTPException:
-                logger.exception("HTTP error while notifying missing CoDir role")
-            codir_mention = ""
-        else:
-            codir_mention = codir_role.mention + " "
-
+        codir_mention = await self._get_codir_mention(message.guild, message.channel)
         try:
             async for entry in message.guild.audit_logs(limit=1, action=AuditLogAction.message_delete):
                 deleter = entry.user
@@ -555,17 +546,7 @@ class ChannelManagement(commands.Cog):
         if not channel.name.endswith("_bot"):
             return
 
-        codir_role = get(guild.roles, name="CoDir")
-        if codir_role is None:
-            logger.error("Required role CoDir not found.")
-            try:
-                await channel.send("Rôle CoDir manquant sur le serveur.")
-            except HTTPException:
-                logger.exception("HTTP error while notifying missing CoDir role")
-            codir_mention = ""
-        else:
-            codir_mention = codir_role.mention + " "
-
+        codir_mention = await self._get_codir_mention(guild, channel)
         try:
             async for entry in guild.audit_logs(limit=1, action=AuditLogAction.message_delete):
                 deleter = entry.user
@@ -625,15 +606,18 @@ class ChannelManagement(commands.Cog):
         logger.debug(f"_manage_voice_channels: category={category.name} base={base_channel.name}")
         channels = [vc for vc in category.voice_channels if vc.name.startswith(base_channel.name)]
         empty = [vc for vc in channels if not vc.members]
-        empty.sort(key=lambda c: c.name)
-        while len(empty) > 1:
-            vc = empty.pop()
-            if vc.id not in self.remove_tasks:
-                self.remove_tasks[vc.id] = asyncio.create_task(self._delayed_delete(vc, 10))
+
+        if len(empty) > 1:
+            empty.sort(key=lambda c: c.name)
+            for vc in empty[1:]:
+                if vc.id not in self.remove_tasks:
+                    self.remove_tasks[vc.id] = asyncio.create_task(self._delayed_delete(vc, 10))
+
         if not empty:
-            for idx in range(1, len(channels) + 1):
-                if f"{base_channel.name}{INDEX_SEPARATOR}{idx}" not in (c.name for c in channels):
-                    new_name = f"{base_channel.name}{INDEX_SEPARATOR}{idx}"
+            channel_names = {c.name for c in channels}
+            for idx in range(1, len(channels) + 2):
+                new_name = f"{base_channel.name}{INDEX_SEPARATOR}{idx}"
+                if new_name not in channel_names:
                     try:
                         await category.create_voice_channel(
                             new_name,
@@ -663,6 +647,27 @@ class ChannelManagement(commands.Cog):
                 logger.info(f"Deleted empty voice channel {channel.name!r} after timeout")
             except HTTPException:
                 logger.exception(f"HTTP error while deleting voice channel {channel}")
+
+    @staticmethod
+    async def _get_codir_mention(guild: Guild, channel: TextChannel) -> str:
+        """Get CoDir role mention or return empty string if not found.
+
+        Args:
+            guild (Guild): The guild to search for the role.
+            channel (TextChannel): The channel to send error message to if role not found.
+
+        Returns:
+            str: The role mention with trailing space, or empty string if not found.
+        """
+        codir_role = get(guild.roles, name="CoDir")
+        if codir_role is None:
+            logger.error("Required role CoDir not found.")
+            try:
+                await channel.send("Rôle CoDir manquant sur le serveur.")
+            except HTTPException:
+                logger.exception("HTTP error while notifying missing CoDir role")
+            return ""
+        return f"{codir_role.mention} "
 
     # endregion Helpers
 

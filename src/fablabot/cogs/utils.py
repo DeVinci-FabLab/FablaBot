@@ -57,14 +57,20 @@ async def is_in_allowed_channel(logger: Logger, interaction: Interaction) -> boo
     commands_channel: TextChannel | None = None
 
     if stored_channel_id is not None:
-        maybe_channel: Any = interaction.guild.get_channel(stored_channel_id) or await interaction.guild.fetch_channel(
-            stored_channel_id
-        )
+        try:
+            maybe_channel = interaction.guild.get_channel(stored_channel_id) or await interaction.guild.fetch_channel(
+                stored_channel_id
+            )
+        except Exception:
+            logger.warning(
+                f"Stored commands channel id {stored_channel_id} could not be fetched for guild {interaction.guild.id}",
+            )
+            set_commands_channel_id(interaction.guild.id, None)
         if isinstance(maybe_channel, TextChannel):
             commands_channel = maybe_channel
-        else:
+        elif maybe_channel is not None:
             logger.warning(
-                f"Stored commands channel id {stored_channel_id} is invalid for guild {interaction.guild.id}",
+                f"Stored commands channel id {stored_channel_id} is not a TextChannel for guild {interaction.guild.id}",
             )
             set_commands_channel_id(interaction.guild.id, None)
 
@@ -106,8 +112,8 @@ async def check_has_role(logger: Logger, interaction: Interaction, roles: set[st
         bool: True if the user has any of the roles, False otherwise.
     """
     assert interaction.guild is not None
-    guild_roles = {role.name: role for role in interaction.guild.roles}
-    missing_roles = [role for role in roles if role not in guild_roles]
+    guild_role_names = {role.name for role in interaction.guild.roles}
+    missing_roles = roles - guild_role_names
     if missing_roles:
         assert isinstance(interaction.channel, TextChannel)
         logger.warning(f"Missing roles {', '.join(missing_roles)} for guild {interaction.guild}")
@@ -117,9 +123,9 @@ async def check_has_role(logger: Logger, interaction: Interaction, roles: set[st
 
     assert isinstance(interaction.user, Member)
     member_role_names = {role.name for role in interaction.user.roles}
-    if not bool(member_role_names & roles):
+    if not (member_role_names & roles):
         logger.warning(
-            f"User {interaction.user} doesn't have any of the roles {','.join(roles)} in the guild {interaction.guild.id}"
+            f"User {interaction.user} doesn't have any of the roles {', '.join(roles)} in the guild {interaction.guild.id}"
         )
         msg = f"Il est requis d'avoir au moins l'un des rôles suivants pour utiliser cette commande : {', '.join(roles)}."
         await interaction.response.send_message(
@@ -153,11 +159,11 @@ async def _can_dm_user(user: Member) -> bool:
     """
     try:
         await user.send()
+        return True
     except Forbidden:
         return False
     except HTTPException:
         return True
-    return True
 
 
 async def send_dm_to_member(
