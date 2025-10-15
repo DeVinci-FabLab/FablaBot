@@ -6,20 +6,21 @@ from logging import Logger
 from typing import Any
 
 from discord import (
+    CategoryChannel,
     Forbidden,
     Guild,
     HTTPException,
     Interaction,
     Member,
+    PermissionOverwrite,
     Role,
     TextChannel,
     VoiceChannel,
 )
 from discord.utils import get
 
+from fablabot.cogs.constants import ErrorMessages, RoleNames
 from fablabot.guild_config import get_commands_channel_id, set_commands_channel_id
-
-from .constants import ErrorMessages, RoleNames
 
 COMMANDS_CHANNEL_NAME = "commandes_bot"
 ADMIN_ROLES = {
@@ -338,6 +339,74 @@ async def safe_remove_roles(
         return False, ErrorMessages.HTTP_ERROR.format(
             operation=f"le retrait des rôles {', '.join(role.name for role in roles)} à {format_member_mention(member)}"
         )
+
+
+async def safe_create_text_channel(
+    logger: Logger,
+    category: CategoryChannel,
+    name: str,
+    overwrites: dict[Any, PermissionOverwrite] | None = None,
+    reason: str | None = None,
+    **options: Any,
+) -> tuple[TextChannel | None, str | None]:
+    """Safely create a text channel with error handling.
+
+    Args:
+        logger (Logger): The logger to use for error messages.
+        category (CategoryChannel): The category to create the channel in.
+        name (str): The name of the channel.
+        overwrites (dict[Any, PermissionOverwrite] | None, optional): Permission overwrites. Defaults to None.
+        reason (str | None, optional): The reason for creation. Defaults to None.
+        **options (Any): Additional channel options.
+
+    Returns:
+        tuple[TextChannel | None, str | None]: (Created channel or None, Error message if failed).
+    """
+    try:
+        channel = await category.create_text_channel(
+            name=name,
+            overwrites=overwrites or {},
+            reason=reason,
+            **options,
+        )
+        return channel, None
+    except HTTPException:
+        logger.exception(f"HTTP error while creating text channel {name!r} in category {category}")
+        return None, ErrorMessages.CHANNEL_CREATE_FAILED.format(channel_type=f"salon textuel {name!r}")
+
+
+async def safe_create_voice_channel(
+    logger: Logger,
+    category: CategoryChannel,
+    name: str,
+    overwrites: dict[Any, PermissionOverwrite] | None = None,
+    reason: str | None = None,
+    **options: Any,
+) -> tuple[VoiceChannel | None, str | None]:
+    """Safely create a voice channel with error handling.
+
+    Args:
+        logger (Logger): The logger to use for error messages.
+        category (CategoryChannel): The category to create the channel in.
+        name (str): The name of the channel.
+        overwrites (dict[Any, PermissionOverwrite] | None, optional): Permission overwrites. Defaults to None.
+        reason (str | None, optional): The reason for creation. Defaults to None.
+        **options (Any): Additional channel options.
+
+    Returns:
+        tuple[VoiceChannel | None, str | None]: (Created channel or None, Error message if failed).
+    """
+    try:
+        channel = await category.create_voice_channel(
+            name=name,
+            overwrites=overwrites or {},
+            reason=reason,
+            **options,
+        )
+        return channel, None
+    except HTTPException:
+        logger.exception(f"HTTP error while creating voice channel {name!r} in category {category}")
+        return None, ErrorMessages.CHANNEL_CREATE_FAILED.format(channel_type=f"salon vocal {name!r}")
 
 
 async def safe_delete_channel(

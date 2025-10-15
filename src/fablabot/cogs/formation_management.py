@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import csv
-from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 import io
 import json
@@ -13,12 +12,10 @@ from pathlib import Path
 import re
 from typing import Any, override
 from warnings import deprecated
-from zoneinfo import ZoneInfo
 
 from discord import (
     Embed,
     File,
-    Guild,
     Interaction,
     Member,
     RawReactionActionEvent,
@@ -27,18 +24,23 @@ from discord import (
     app_commands,
 )
 from discord.ext import commands, tasks
-from discord.utils import get
 from emoji import EMOJI_DATA
 
-from .constants import Emojis, ErrorMessages, RoleNames
-from .utils import (
-    check_has_role,
-    escape_md,
-    get_or_fetch_member,
-    is_in_allowed_channel,
-    log_request,
-    send_dm_to_member,
+from fablabot.cogs.constants import Emojis, ErrorMessages, RoleNames
+from fablabot.cogs.helpers import (
+    PARIS_TZ,
+    Formation,
+    format_current_registrations,
+    format_respo_contacts,
+    notify_responsible_before_formation,
+    notify_trainer_before_formation,
+    parse_date_time,
+    render_message,
+    send_promotion_dm,
+    send_registration_dm,
+    send_waitlist_dm,
 )
+from fablabot.cogs.utils import check_has_role, is_in_allowed_channel, log_request
 
 logger = logging.getLogger(__name__)
 
@@ -46,66 +48,9 @@ logger = logging.getLogger(__name__)
 ALLOWED_ROLES = {RoleNames.RESPO_FORMATIONS, RoleNames.ADMIN_TEMP, RoleNames.ADMIN}
 DATA_FILE = "data/formations_state.json"
 DISCORD_EMOJI_RE = re.compile(r"^<a?:\w+:\d+>$")
-MAX_MSG_CHARS = 1900
-REACTION_LOG_RETENTION = timedelta(days=30)
 FM_REQUEST_FORMS = "https://forms.office.com/e/MqVdQujzjf"
 TRAINER_NOTIFICATION_ADVANCE = timedelta(hours=1)
-PARIS_TZ = ZoneInfo("Europe/Paris")
-
-
-@dataclass
-class Formation:
-    """Single Formation entry in a draft.
-
-    Attributes:
-        emoji (str): Single emoji representing the formation.
-        name (str): Name of the formation.
-        trainer_mention (str): Mention of the trainer.
-        start_iso (str): Start date/time in ISO format (timezone-aware if possible).
-        duration (str): Duration of the formation in text format.
-        seats (int): Number of seats available for the formation.
-        description (str): Brief description of the formation.
-        registered_users (list[dict[str, Any]]): Ordered list of registered users metadata.
-        waitlisted_users (list[dict[str, Any]]): Ordered list of waitlisted users metadata.
-    """
-
-    emoji: str
-    """Single emoji representing the formation."""
-    name: str
-    """Name of the formation."""
-    trainer_mention: str
-    """Mention of the trainer."""
-    start_iso: str
-    """Start date/time in ISO format."""
-    duration: str
-    """Duration of the formation in text format."""
-    seats: int
-    """Number of seats available for the formation."""
-    description: str = ""
-    """Brief description of the formation."""
-    registered_users: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
-    """Registered users metadata (order preserved)."""
-    waitlisted_users: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
-    """Waitlisted users metadata (order preserved)."""
-    notified: bool = False
-    """Whether the trainer has been notified for this formation."""
-
-    @property
-    def start_dt(self) -> datetime:
-        """Get the start date/time as a datetime object.
-
-        Returns:
-            datetime: The start date/time as a datetime object.
-        """
-        return datetime.fromisoformat(self.start_iso).astimezone(PARIS_TZ)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert the Formation instance to a dictionary.
-
-        Returns:
-            dict[str, Any]: The dictionary representation of the Formation.
-        """
-        return asdict(self)
+REACTION_LOG_RETENTION = timedelta(days=30)
 
 
 class FormationManagement(commands.Cog):
@@ -242,7 +187,7 @@ class FormationManagement(commands.Cog):
         self._set_guild_draft(interaction.guild.id, draft)
 
         fms = [Formation(**x) for x in draft["fms"]]
-        content = self._render_message(
+        content = render_message(
             draft["header"],
             draft["role_id"],
             draft["intro"],
@@ -324,7 +269,7 @@ class FormationManagement(commands.Cog):
         self._set_guild_draft(interaction.guild.id, draft)
 
         fms = [Formation(**x) for x in draft["fms"]]
-        content = self._render_message(
+        content = render_message(
             draft["header"],
             draft["role_id"],
             draft["intro"],
@@ -423,7 +368,7 @@ class FormationManagement(commands.Cog):
             return
 
         try:
-            start_dt = self._parse_date_time(date, hour)
+            start_dt = parse_date_time(date, hour, PARIS_TZ)
         except Exception:
             logger.warning(f"Guild {interaction.guild.id} tried to add formation with invalid date/hour: {date} {hour}.")
             await interaction.response.send_message(
@@ -447,7 +392,7 @@ class FormationManagement(commands.Cog):
         draft["fms"] = [x.to_dict() for x in fms]
         self._set_guild_draft(interaction.guild.id, draft)
 
-        preview = self._render_message(
+        preview = render_message(
             draft["header"],
             draft["role_id"],
             draft["intro"],
@@ -582,7 +527,7 @@ class FormationManagement(commands.Cog):
             date_part = date.strip() if date is not None else original.start_dt.strftime("%d/%m/%Y")
             hour_part = hour.strip() if hour is not None else original.start_dt.strftime("%H:%M")
             try:
-                new_start_iso = self._parse_date_time(date_part, hour_part).isoformat()
+                new_start_iso = parse_date_time(date_part, hour_part, PARIS_TZ).isoformat()
             except Exception:
                 logger.warning(
                     f"Guild {interaction.guild.id} provided invalid date/hour while"
@@ -610,7 +555,7 @@ class FormationManagement(commands.Cog):
         draft["fms"] = [fm.to_dict() for fm in fms]
         self._set_guild_draft(interaction.guild.id, draft)
 
-        preview = self._render_message(
+        preview = render_message(
             draft["header"],
             draft["role_id"],
             draft["intro"],
@@ -663,7 +608,7 @@ class FormationManagement(commands.Cog):
         self._set_guild_draft(interaction.guild.id, draft)
 
         fms = [Formation(**x) for x in draft["fms"]]
-        preview = self._render_message(
+        preview = render_message(
             draft["header"],
             draft["role_id"],
             draft["intro"],
@@ -703,7 +648,7 @@ class FormationManagement(commands.Cog):
         self._set_guild_draft(interaction.guild.id, draft)
 
         fms = [Formation(**x) for x in draft["fms"]]
-        content = self._render_message(
+        content = render_message(
             header,
             role_id,
             intro,
@@ -740,7 +685,7 @@ class FormationManagement(commands.Cog):
         fms = [Formation(**x) for x in draft["fms"]]
         fms.sort(key=lambda x: x.start_dt)
 
-        content = self._render_message(
+        content = render_message(
             draft["header"],
             draft["role_id"],
             draft["intro"],
@@ -779,7 +724,7 @@ class FormationManagement(commands.Cog):
         await interaction.response.defer(thinking=True)
 
         fms.sort(key=lambda x: x.start_dt)
-        content = self._render_message(
+        content = render_message(
             draft["header"],
             draft["role_id"],
             draft["intro"],
@@ -908,7 +853,7 @@ class FormationManagement(commands.Cog):
         raw_fms = message_payload.get("fms", [])
         fms: list[Formation] = [Formation(**fm_dict) for fm_dict in raw_fms]
 
-        reg_text, reg_file = self._format_current_registrations(fms)
+        reg_text, reg_file = format_current_registrations(fms)
         if reg_file:
             await interaction.followup.send(
                 reg_text,
@@ -980,320 +925,6 @@ class FormationManagement(commands.Cog):
     # endregion Event Listeners
 
     # region ====== Helpers ======
-    # -- Parsing & Rendering --
-
-    @staticmethod
-    def _parse_date_time(date_str: str, hour_str: str) -> datetime:
-        """Parse date and time strings into a timezone-aware datetime object in Paris timezone.
-
-        Args:
-            date_str (str): Date string in 'DD/MM/YYYY' format.
-            hour_str (str): Hour string in 'HH:MM' format.
-
-        Returns:
-            datetime: A timezone-aware datetime object in Europe/Paris timezone.
-        """
-        d, m, y = map(int, date_str.split("/"))
-        hh, mm = map(int, hour_str.split(":"))
-        dt = datetime(y, m, d, hh, mm, tzinfo=PARIS_TZ)
-        logger.debug(f"Parsed formation schedule {date_str} {hour_str} -> {dt.isoformat()} (Paris time)")
-        return dt
-
-    @staticmethod
-    def _humanize_dt(dt: datetime) -> str:
-        """Humanize a datetime object.
-
-        Args:
-            dt (datetime): The datetime object to humanize.
-
-        Returns:
-            str: The humanized date/time string.
-        """
-        days = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
-        day_name = days[dt.weekday()]
-        date_part = dt.strftime("%d/%m")
-        time_part = dt.strftime("%Hh%M")
-        return f"**{day_name} {date_part} à {time_part}**"
-
-    def _render_message(
-        self,
-        header: str,
-        role_id: int,
-        intro: str,
-        fms: list[Formation],
-        end: str,
-    ) -> str:
-        """Render the message for the formations.
-
-        Args:
-            header (str): The header line (e.g. title).
-            role_id (int): The role mention to prepend.
-            intro (str): The introduction text.
-            fms (list[Formation]): The list of formations to include in the message.
-            end (str): The ending text.
-
-        Returns:
-            str: The rendered message.
-        """
-        logger.debug("Rendering formations message.")
-        lines: list[str] = []
-        header_text = header.strip()
-        intro_block = intro.strip()
-        lines.append(header_text)
-        lines.append(f"Hey <@&{role_id}> !")
-        if intro_block:
-            lines.append(intro_block)
-        lines.append("")
-
-        for fm in fms:
-            line_block = [
-                f"{fm.emoji} **{fm.name}** avec {fm.trainer_mention}",
-                f"{Emojis.DATE} {self._humanize_dt(fm.start_dt)}  — "
-                f"{Emojis.HOURGLASS} {fm.duration}  — "
-                f"{Emojis.PEOPLE} {len(fm.registered_users)}/{fm.seats} place(s)",
-            ]
-            line_block += [fm.description] if fm.description else []
-            lines.append("\n".join(line_block))
-            lines.append("")
-
-        end_lines = [
-            f"{Emojis.ARROW_RIGHT} Pour s'inscrire, réagis avec les émojis des formations correspondantes.",
-            f"{Emojis.WARNING} Si tu ne peux plus venir, n'oublie pas de retirer ta réaction pour libérer la place.",
-            "",
-            f"Tu veux apprendre autre chose ? [**Propose une formation ici**]({FM_REQUEST_FORMS})",
-        ]
-        lines.append("\n".join(end_lines))
-        lines.append("")
-
-        if end.strip():
-            lines.append(end.strip())
-            lines.append("")
-
-        if lines and not lines[-1]:
-            lines.pop()
-        return "\n".join(lines)
-
-    def _format_respo_contacts(self, guild: Guild) -> str:
-        """Build the contact string for formation managers.
-
-        Args:
-            guild (Guild): The guild to get the role from.
-
-        Returns:
-            str: The contact string.
-        """
-        logger.debug(f"Resolving formation contacts for guild {guild.id}.")
-        role = get(guild.roles, name=RoleNames.RESPO_FORMATIONS)
-        if role is None:
-            logger.debug(f"Role '{RoleNames.RESPO_FORMATIONS}' missing in guild {guild.id}; using fallback contacts.")
-            return "un·e membre du Pôle Formations"
-        members = [member for member in role.members if not member.bot]
-        if not members:
-            logger.debug(
-                f"Role '{RoleNames.RESPO_FORMATIONS}' has no human members in guild {guild.id}; using fallback contacts."
-            )
-            return "un·e membre du Pôle Formations"
-        mentions = [member.mention for member in members]
-        logger.debug(f"Resolved {len(mentions)} formation manager contacts for guild {guild.id}.")
-        return " ou ".join(mentions)
-
-    def _format_formation_export(self, formation: Formation) -> str:
-        """Format the export of a single formation with registered and waitlisted users.
-
-        Args:
-            formation (Formation): The formation to export.
-
-        Returns:
-            str: The formatted export string.
-        """
-        lines: list[str] = []
-
-        lines.append(f"{formation.emoji} **{formation.name}** ({formation.seats} place{'s' if formation.seats != 1 else ''})")
-
-        if formation.registered_users:
-            for idx, user_entry in enumerate(formation.registered_users, start=1):
-                user_id = user_entry.get("user_id")
-                username = user_entry.get("username", "Utilisateur inconnu")
-                ts = user_entry.get("ts_iso", datetime.min.isoformat(timespec="seconds"))
-                dt = datetime.fromisoformat(ts)
-                when = self._humanize_dt(dt).lower()[2:-2] if dt != datetime.min else "n/a"
-                lines.append(f"{idx}. <@{user_id}> ({escape_md(username)}) · inscrit·e le {when}")
-        else:
-            lines.append("_(Aucune inscription)_")
-
-        if formation.waitlisted_users:
-            for idx, user_entry in enumerate(formation.waitlisted_users, start=len(formation.registered_users) + 1):
-                user_id = user_entry.get("user_id")
-                username = user_entry.get("username", "Utilisateur inconnu")
-                ts = user_entry.get("ts_iso", datetime.min)
-                dt = datetime.fromisoformat(ts)
-                when = self._humanize_dt(dt).lower()[2:-2] if dt != datetime.min else "n/a"
-                lines.append(f"{idx}. <@{user_id}> ({escape_md(username)}) · inscrit·e le {when} (en attente)")
-
-        return "\n".join(lines)
-
-    # -- Notifications --
-
-    async def _send_registration_dm(
-        self,
-        guild: Guild,
-        user_id: int,
-        formation: Formation,
-        contacts: str,
-    ) -> None:
-        """Notify a user that they got a seat in a formation.
-
-        Args:
-            guild (Guild): The guild where the user is located.
-            user_id (int): The ID of the user to notify.
-            formation (Formation): The formation.
-            contacts (str): The contact string for formation managers.
-        """
-        member = await get_or_fetch_member(guild, user_id)
-        if member is None:
-            logger.error(f"Failed to fetch member {user_id} for registration DM in guild {guild.id}.")
-            return
-        logger.debug(f"Resolved member {member.id} ({member.display_name}) for registration DM in guild {guild.id}.")
-
-        datetime_text = self._humanize_dt(datetime.fromisoformat(formation.start_iso)).lower()[2:-2]
-
-        message = (
-            f"Salut {member.display_name} !\n"
-            f"Ton inscription à la formation **{formation.name}** le {datetime_text} a bien été enregistrée.\n"
-            "Si tu ne peux finalement pas y participer, pense à retirer ta réaction pour libérer la place.\n\n"
-            f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
-        )
-
-        await send_dm_to_member(logger, guild, member, message, f"registration for formation {formation.name}")
-
-    async def _send_waitlist_dm(
-        self,
-        guild: Guild,
-        user_id: int,
-        formation_name: str,
-        waitlist_position: int,
-        contacts: str,
-    ) -> None:
-        """Notify a user that they joined the waitlist for a formation.
-
-        Args:
-            guild (Guild): The guild where the user is located.
-            user_id (int): The ID of the user to notify.
-            formation_name (str): The name of the formation.
-            waitlist_position (int): The user's position on the waitlist.
-            contacts (str): The contact string for formation managers.
-        """
-        member = await get_or_fetch_member(guild, user_id)
-        if member is None:
-            logger.error(f"Failed to fetch member {user_id} for waitlist DM in guild {guild.id}.")
-            return
-        logger.debug(f"Resolved member {member.id} ({member.display_name}) for waitlist DM in guild {guild.id}.")
-
-        position_text = f"en **{waitlist_position}{'e' if waitlist_position > 1 else 're'} position**"
-        message = (
-            f"Salut {member.display_name} !\n"
-            f"On sait que la formation **{formation_name}** t'intéresse, mais toutes les places sont déjà prises.\n"
-            f"Tu es {position_text} sur la liste d'attente. Nous te préviendrons si une place se libère.\n\n"
-            f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
-        )
-
-        await send_dm_to_member(logger, guild, member, message, f"waitlist for formation {formation_name}")
-
-    async def _send_promotion_dm(
-        self,
-        guild: Guild,
-        user_id: int,
-        formation: Formation,
-        contacts: str,
-    ) -> None:
-        """Notify a user that they were promoted from the waitlist.
-
-        Args:
-            guild (Guild): The guild where the user is located.
-            user_id (int): The ID of the user to notify.
-            formation (Formation): The formation.
-            contacts (str): The contact string for formation managers.
-        """
-        member = await get_or_fetch_member(guild, user_id)
-        if member is None:
-            logger.error(f"Failed to fetch member {user_id} for promotion DM in guild {guild.id}.")
-            return
-        logger.debug(f"Resolved member {member.id} ({member.display_name}) for waitlist promotion DM in guild {guild.id}.")
-
-        datetime_text = self._humanize_dt(datetime.fromisoformat(formation.start_iso)).lower()[2:-2]
-
-        message = (
-            f"Salut {member.display_name} !\n"
-            "Bonne nouvelle : une place s'est libérée ! "
-            f"Tu es désormais inscrit·e à la formation **{formation.name}** le {datetime_text}.\n"
-            "Si tu ne peux finalement pas y participer, pense à retirer ta réaction pour libérer la place.\n\n"
-            f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
-        )
-
-        await send_dm_to_member(logger, guild, member, message, f"promotion for formation {formation.name}")
-
-    async def _notify_trainer_before_formation(self, guild: Guild, formation: Formation, contacts: str) -> None:
-        """Send a DM to the trainer with the list of registered attendees.
-
-        Args:
-            guild (Guild): The guild where the formation is taking place.
-            formation (Formation): The formation starting soon.
-            contacts (str): The contact string for formation managers.
-        """
-        trainer_mention = formation.trainer_mention
-        trainer_id_match = re.search(r"<@!?(\d+)>", trainer_mention)
-        if not trainer_id_match:
-            logger.warning(f"Could not extract trainer ID from mention {trainer_mention!r} for formation {formation.name!r}.")
-            return
-        trainer_id = int(trainer_id_match.group(1))
-
-        trainer = await get_or_fetch_member(guild, trainer_id)
-        if trainer is None:
-            logger.error(f"Failed to fetch trainer {trainer_id} for formation {formation.name!r}.")
-            return
-
-        datetime_text = self._humanize_dt(formation.start_dt).lower()[2:-2]
-        formation_export = self._format_formation_export(formation)
-
-        message = (
-            f"Salut {trainer.display_name} !\n"
-            f"Ta formation **{formation.name}** commence bientôt (le {datetime_text}).\n\n"
-            f"{formation_export}\n\n"
-            f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
-        )
-
-        await send_dm_to_member(logger, guild, trainer, message, f"reminder for formation {formation.name}")
-
-    async def _notify_responsible_before_formation(self, guild: Guild, formation: Formation, contacts: str) -> None:
-        """Send a DM to the training responsible with the list of registered attendees.
-
-        Args:
-            guild (Guild): The guild where the formation is taking place.
-            formation (Formation): The formation starting soon.
-            contacts (str): The contact string for formation managers.
-        """
-        responsibles_ids: list[int] = [int(id) for id in re.findall(r"<@!?(\d+)>", contacts)]
-        if not responsibles_ids:
-            logger.warning(f"Could not extract responsible IDs from mention {contacts!r} for formation {formation.name!r}.")
-            return
-
-        for responsible_id in responsibles_ids:
-            responsible = await get_or_fetch_member(guild, responsible_id)
-            if responsible is None:
-                logger.error(f"Failed to fetch responsible {responsible_id} for formation {formation.name!r}.")
-                continue
-
-            datetime_text = self._humanize_dt(formation.start_dt).lower()[2:-2]
-            formation_export = self._format_formation_export(formation)
-
-            message = (
-                f"Salut {responsible.display_name} !\n"
-                f"La formation **{formation.name}** commence bientôt (le {datetime_text}).\n\n"
-                f"{formation_export}\n\n"
-            )
-
-            await send_dm_to_member(logger, guild, responsible, message, f"export for formation {formation.name}")
-
     # -- State --
 
     @staticmethod
@@ -1647,7 +1278,7 @@ class FormationManagement(commands.Cog):
         pub["message"]["fms"] = updated_fms
         self._set_last_published_in_guild(guild_id, pub)
 
-        content = self._render_message(header, role_id, intro, fms, end)
+        content = render_message(header, role_id, intro, fms, end)
 
         try:
             await msg.edit(content=content, suppress=True)
@@ -1656,59 +1287,28 @@ class FormationManagement(commands.Cog):
         else:
             logger.info(f"Updated published formations message {msg.id} in channel {channel_id} for guild {guild_id}.")
 
-        contacts: str = self._format_respo_contacts(guild)
+        contacts: str = format_respo_contacts(guild)
 
         if promotion_notifications:
             logger.info(f"Dispatching {len(promotion_notifications)} waitlist promotion notification(s) for guild {guild_id}.")
             for user_id, fm in promotion_notifications:
-                await self._send_promotion_dm(guild, user_id, fm, contacts)
+                await send_promotion_dm(guild, user_id, fm, contacts)
         else:
             logger.debug(f"No waitlist promotion notifications for guild {guild_id}.")
 
         if registration_notifications:
             logger.info(f"Dispatching {len(registration_notifications)} new registration notification(s) for guild {guild_id}.")
             for user_id, fm in registration_notifications:
-                await self._send_registration_dm(guild, user_id, fm, contacts)
+                await send_registration_dm(guild, user_id, fm, contacts)
         else:
             logger.debug(f"No new registration notifications for guild {guild_id}.")
 
         if waitlist_notifications:
             logger.info(f"Dispatching {len(waitlist_notifications)} waitlist notification(s) for guild {guild_id}.")
             for user_id, fm_name, waitlist_index in waitlist_notifications:
-                await self._send_waitlist_dm(guild, user_id, fm_name, waitlist_index, contacts)
+                await send_waitlist_dm(guild, user_id, fm_name, waitlist_index, contacts)
         else:
             logger.debug(f"No new waitlist notifications for guild {guild_id}.")
-
-    def _format_current_registrations(self, formations: list[Formation]) -> tuple[str, io.BytesIO | None]:
-        """Format the current registrations for each formation using data from guild state.
-
-        Args:
-            formations (list[Formation]): The list of formations with up-to-date registration data.
-
-        Returns:
-            tuple[str, io.BytesIO | None]: The formatted message and an optional file object.
-        """
-        lines: list[str] = []
-        lines.append("**Inscriptions actuelles par formation (ordre d'inscription)**")
-        lines.append("")
-
-        for formation in formations:
-            formation_export = self._format_formation_export(formation)
-            lines.append(formation_export)
-            lines.append("")
-
-        text = "\n".join(lines).strip()
-
-        text_length = len(text)
-        file_obj: io.BytesIO | None = None
-        if text_length > MAX_MSG_CHARS:
-            file_obj = io.BytesIO(text.encode("utf-8"))
-            logger.debug(f"Registrations export exceeded {MAX_MSG_CHARS} chars ({text_length}); switching to attachment.")
-            text = "**Inscriptions actuelles par formation (extrait)**\nLe contenu complet est joint en fichier texte."
-        else:
-            logger.debug(f"Registrations export length: {text_length} characters.")
-
-        return text, file_obj
 
     # -- Background Tasks --
 
@@ -1741,15 +1341,15 @@ class FormationManagement(commands.Cog):
                     continue
 
                 if notification_window_start <= fm.start_dt <= notification_window_end:
-                    await self._notify_trainer_before_formation(
+                    await notify_trainer_before_formation(
                         guild,
                         fm,
-                        self._format_respo_contacts(guild),
+                        format_respo_contacts(guild),
                     )
-                    await self._notify_responsible_before_formation(
+                    await notify_responsible_before_formation(
                         guild,
                         fm,
-                        self._format_respo_contacts(guild),
+                        format_respo_contacts(guild),
                     )
 
                     fm.notified = True

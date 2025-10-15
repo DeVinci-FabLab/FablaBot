@@ -10,18 +10,18 @@ from discord import HTTPException, Interaction, Member, PermissionOverwrite, Tex
 from discord.ext import commands
 from discord.utils import get
 
-from fablabot.guild_config import is_welcome_verify_enabled, set_welcome_verify_enabled
-
-from .constants import ErrorMessages, RoleNames
-from .utils import (
+from fablabot.cogs.constants import ErrorMessages, RoleNames
+from fablabot.cogs.utils import (
     ADMIN_ROLES,
     check_has_role,
     escape_md,
     is_in_allowed_channel,
     log_request,
     safe_add_roles,
+    safe_create_text_channel,
     safe_delete_channel,
 )
+from fablabot.guild_config import is_welcome_verify_enabled, set_welcome_verify_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +132,7 @@ class Welcome(commands.Cog):
             return
 
         assert interaction.guild is not None
-        member_name = channel.name[len("welcome-") :]
+        member_name = channel.name.removeprefix("welcome-")
         member = get(interaction.guild.members, name=member_name)
         if member is None:
             logger.warning(f"Member not found: {member_name}")
@@ -141,9 +141,12 @@ class Welcome(commands.Cog):
             )
             return
 
-        city_role = get(interaction.guild.roles, name=f"Membre {city}")
+        city_role_name = f"Membre {city}"
+        city_role = get(interaction.guild.roles, name=city_role_name)
         if city_role is None:
-            await interaction.response.send_message(ErrorMessages.ROLE_NOT_FOUND.format(role_name=city_role), ephemeral=True)
+            await interaction.response.send_message(
+                ErrorMessages.ROLE_NOT_FOUND.format(role_name=city_role_name), ephemeral=True
+            )
             return
 
         member_role = get(interaction.guild.roles, name=RoleNames.MEMBER_VERIFIED)
@@ -167,7 +170,6 @@ class Welcome(commands.Cog):
         )
         if not success:
             await interaction.response.send_message(error, ephemeral=True)
-            return
 
     # endregion Welcome Slash Commands Group
 
@@ -202,13 +204,14 @@ class Welcome(commands.Cog):
             codir_role: PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
             member: PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
         }
-        try:
-            channel = await validation_category.create_text_channel(  # TODO: encapsulate
-                name=f"welcome-{member.name}",
-                overwrites=overwrites,
-                reason=f"Welcome channel for new member {member.name}",
-            )
-        except HTTPException:
+        channel, error = await safe_create_text_channel(
+            logger,
+            validation_category,
+            f"welcome-{member.name}",
+            overwrites=overwrites,
+            reason=f"Welcome channel for new member {member.name}",
+        )
+        if not channel or error:
             logger.exception(ErrorMessages.CHANNEL_CREATE_FAILED.format(channel_type=f"salon de bienvenue pour {member.name}"))
             return
 

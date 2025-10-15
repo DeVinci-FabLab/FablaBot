@@ -27,20 +27,21 @@ from discord import (
 from discord.ext import commands
 from discord.utils import get
 
-from fablabot.discord_log_handler import DiscordLogHandler
-from fablabot.guild_config import set_log_channel_id
-
-from .constants import ErrorMessages, RoleNames
-from .utils import (
+from fablabot.cogs.constants import ErrorMessages, RoleNames
+from fablabot.cogs.utils import (
     ADMIN_ROLES,
     check_has_role,
     escape_md,
     format_channel_mention,
     is_in_allowed_channel,
     log_request,
+    safe_create_text_channel,
+    safe_create_voice_channel,
     safe_delete_channel,
     safe_edit_channel,
 )
+from fablabot.discord_log_handler import DiscordLogHandler
+from fablabot.guild_config import set_log_channel_id
 
 logger = logging.getLogger(__name__)
 
@@ -176,16 +177,14 @@ class ChannelManagement(commands.Cog):
                 ephemeral=True,
             )
             return
-        try:
-            new_channel = await category.create_text_channel(  # TODO: encapsulate
-                channel,
-                reason=f"With create command by {interaction.user}",
-            )
-        except HTTPException:
-            logger.exception(f"HTTP error while creating text channel {channel} in {category}")
-            await interaction.response.send_message(
-                ErrorMessages.CHANNEL_CREATE_FAILED.format(channel_type="salon textuel"), ephemeral=True
-            )
+        new_channel, error = await safe_create_text_channel(
+            logger,
+            category,
+            channel,
+            reason=f"With create command by {interaction.user}",
+        )
+        if not new_channel or error:
+            await interaction.response.send_message(error, ephemeral=True)
             return
         logger.info(f"Created text channel {new_channel!r} in category {category!r}")
         await interaction.response.send_message(
@@ -328,17 +327,15 @@ class ChannelManagement(commands.Cog):
                 ephemeral=True,
             )
             return
-        try:
-            new_channel = await category.create_voice_channel(  # TODO: encapsulate
-                channel_name,
-                user_limit=max_user,
-                reason=f"With create command by {interaction.user}",
-            )
-        except HTTPException:
-            logger.exception(f"HTTP error while creating voice channel {channel_name} in {category}")
-            await interaction.response.send_message(
-                ErrorMessages.CHANNEL_CREATE_FAILED.format(channel_type="salon vocal"), ephemeral=True
-            )
+        new_channel, error = await safe_create_voice_channel(
+            logger,
+            category,
+            channel_name,
+            user_limit=max_user,
+            reason=f"With create command by {interaction.user}",
+        )
+        if not new_channel or error:
+            await interaction.response.send_message(error, ephemeral=True)
             return
         logger.info(f"Created voice channel {new_channel!r} in category {category.name!r}")
         channel_creation_message = (
@@ -618,18 +615,21 @@ class ChannelManagement(commands.Cog):
             for idx in range(1, len(channels) + 2):
                 new_name = f"{base_channel.name}{INDEX_SEPARATOR}{idx}"
                 if new_name not in channel_names:
-                    try:
-                        await category.create_voice_channel(  # TODO: encapsulate
-                            new_name,
-                            bitrate=base_channel.bitrate,
-                            user_limit=base_channel.user_limit,
-                            rtc_region=base_channel.rtc_region,
-                            video_quality_mode=base_channel.video_quality_mode,
-                            overwrites=base_channel.overwrites,
-                        )
-                        logger.info(f"Created additional voice channel {new_name!r}")
-                    except HTTPException:
-                        logger.exception(f"HTTP error while auto-creating dynamic channel {new_name!r} in {category!r}")
+                    new_channel, error = await safe_create_voice_channel(
+                        logger,
+                        category,
+                        new_name,
+                        bitrate=base_channel.bitrate,
+                        user_limit=base_channel.user_limit,
+                        rtc_region=base_channel.rtc_region,
+                        video_quality_mode=base_channel.video_quality_mode,
+                        overwrites=base_channel.overwrites,
+                        reason="Creating additional dynamic voice channel",
+                    )
+                    if not new_channel or error:
+                        logger.exception(error)
+                    else:
+                        logger.info(f"Created additional dynamic voice channel {new_channel} in category {category.name!r}")
                     break
 
     async def _delayed_delete(self, channel: VoiceChannel, timeout: int) -> None:
