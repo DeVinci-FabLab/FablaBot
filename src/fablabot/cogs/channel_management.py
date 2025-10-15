@@ -166,10 +166,9 @@ class ChannelManagement(commands.Cog):
             return
 
         assert isinstance(interaction.user, Member)
-        if not category.permissions_for(interaction.user).manage_channels:
-            logger.warning(f"Insufficient permissions for manage_channels: {interaction.user}")
-            await interaction.response.send_message(ErrorMessages.NO_PERMISSION_CREATE_CHANNEL, ephemeral=True)
+        if not await check_has_role(logger, interaction, ADMIN_ROLES):
             return
+
         if channel in (c.name for c in category.channels):
             logger.info(f"Text channel {channel!r} already exists in {category!r}")
             await interaction.response.send_message(
@@ -206,12 +205,9 @@ class ChannelManagement(commands.Cog):
             return
 
         assert isinstance(interaction.user, Member)
-        if not channel.permissions_for(interaction.user).manage_channels:
-            logger.warning(f"Insufficient permissions for rename: {interaction.user}")
-            await interaction.response.send_message(
-                ErrorMessages.NO_PERMISSION_RENAME_CHANNEL.format(channel_mention=channel.mention), ephemeral=True
-            )
+        if not await check_has_role(logger, interaction, ADMIN_ROLES):
             return
+
         old_name = channel.name
         success, error = await safe_edit_channel(
             logger, channel, reason=f"With rename command by {interaction.user}", name=new_name
@@ -238,12 +234,9 @@ class ChannelManagement(commands.Cog):
             return
 
         assert isinstance(interaction.user, Member)
-        if not channel.permissions_for(interaction.user).manage_channels:
-            logger.warning(f"Insufficient permissions for delete: {interaction.user}")
-            await interaction.response.send_message(
-                ErrorMessages.NO_PERMISSION_DELETE_CHANNEL.format(channel_mention=channel.mention), ephemeral=True
-            )
+        if not await check_has_role(logger, interaction, ADMIN_ROLES):
             return
+
         channel_name = channel.name
         success, error = await safe_delete_channel(logger, channel, reason=f"With delete command by {interaction.user}")
         if not success:
@@ -314,10 +307,9 @@ class ChannelManagement(commands.Cog):
             return
 
         assert isinstance(interaction.user, Member)
-        if not category.permissions_for(interaction.user).manage_channels:
-            logger.warning(f"Insufficient permissions for create voice channel: {interaction.user}")
-            await interaction.response.send_message(ErrorMessages.NO_PERMISSION_CREATE_CHANNEL, ephemeral=True)
+        if not await check_has_role(logger, interaction, ADMIN_ROLES):
             return
+
         existing = {vc.name for vc in category.voice_channels}
         channel_name = f"{name}{EPHEMERAL_SUFFIX}" if is_temporary else name
         if channel_name in existing:
@@ -362,12 +354,9 @@ class ChannelManagement(commands.Cog):
 
         assert isinstance(interaction.user, Member)
         assert channel.category is not None
-        if not channel.permissions_for(interaction.user).manage_channels:
-            logger.warning(f"Insufficient permissions for rename voice channel: {interaction.user}")
-            await interaction.response.send_message(
-                ErrorMessages.NO_PERMISSION_RENAME_CHANNEL.format(channel_mention=channel.mention), ephemeral=True
-            )
+        if not await check_has_role(logger, interaction, ADMIN_ROLES):
             return
+
         if re.search(rf"{DYNAMIC_SUFFIX}{INDEX_SEPARATOR}\d+$", channel.name):
             logger.warning(f"Attempt to rename a dynamic voice channel: {channel.name}")
             await interaction.response.send_message(
@@ -416,12 +405,9 @@ class ChannelManagement(commands.Cog):
             return
 
         assert isinstance(interaction.user, Member)
-        if not channel.permissions_for(interaction.user).manage_channels:
-            logger.warning(f"Insufficient permissions for delete voice channel: {interaction.user}")
-            await interaction.response.send_message(
-                ErrorMessages.NO_PERMISSION_DELETE_CHANNEL.format(channel_mention=channel.mention), ephemeral=True
-            )
+        if not await check_has_role(logger, interaction, ADMIN_ROLES):
             return
+
         if len(channel.members) > 0:
             logger.warning(f"Attempt to delete non-empty voice channel: {channel}")
             await interaction.response.send_message(f"Le salon vocal {channel.mention} n'est pas vide.", ephemeral=True)

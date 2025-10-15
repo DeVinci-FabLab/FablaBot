@@ -50,15 +50,6 @@ class ErrorMessages:
     NO_PERMISSION_MANAGE_MESSAGES = "Vous n'avez pas la permission de gérer les messages dans ce salon."
     """User lacks permission to manage messages in channel."""
 
-    NO_PERMISSION_CREATE_CHANNEL = "Vous n'avez pas la permission de créer des salons dans cette catégorie."
-    """User lacks permission to create channels in category."""
-
-    NO_PERMISSION_RENAME_CHANNEL = "Vous n'avez pas la permission de renommer le salon {channel_mention}."
-    """User lacks permission to rename channel."""
-
-    NO_PERMISSION_DELETE_CHANNEL = "Vous n'avez pas la permission de supprimer le salon {channel_mention}."
-    """User lacks permission to delete channel."""
-
     NO_PERMISSION_ADD_ROLE = "Vous n'avez pas la permission d'ajouter ce rôle."
     """User lacks permission to add role."""
 
