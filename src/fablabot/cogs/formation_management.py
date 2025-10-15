@@ -1234,15 +1234,12 @@ class FormationManagement(commands.Cog):
 
         await send_dm_to_member(logger, guild, member, message, f"promotion for formation {formation.name}")
 
-    async def _notify_trainer_before_formation(
-        self, guild: Guild, formation: Formation, published_data: dict[str, Any], contacts: str
-    ) -> None:
+    async def _notify_trainer_before_formation(self, guild: Guild, formation: Formation, contacts: str) -> None:
         """Send a DM to the trainer with the list of registered attendees.
 
         Args:
             guild (Guild): The guild where the formation is taking place.
             formation (Formation): The formation starting soon.
-            published_data (dict[str, Any]): The published message data.
             contacts (str): The contact string for formation managers.
         """
         trainer_mention = formation.trainer_mention
@@ -1269,6 +1266,37 @@ class FormationManagement(commands.Cog):
         )
 
         await send_dm_to_member(logger, guild, trainer, message, f"reminder for formation {formation.name}")
+
+    async def _notify_responsible_before_formation(self, guild: Guild, formation: Formation, contacts: str) -> None:
+        """Send a DM to the training responsible with the list of registered attendees.
+
+        Args:
+            guild (Guild): The guild where the formation is taking place.
+            formation (Formation): The formation starting soon.
+            contacts (str): The contact string for formation managers.
+        """
+        responsibles_ids: list[int] = [int(id) for id in re.findall(r"<@!?(\d+)>", contacts)]
+        if not responsibles_ids:
+            logger.warning(f"Could not extract responsible IDs from mention {contacts!r} for formation {formation.name!r}.")
+            return
+
+        for responsible_id in responsibles_ids:
+            try:
+                responsible = guild.get_member(responsible_id) or await guild.fetch_member(responsible_id)
+            except Exception:
+                logger.exception(f"Failed to fetch responsible {responsible_id} for formation {formation.name!r}.")
+                return
+
+            datetime_text = self._humanize_dt(formation.start_dt).lower()[2:-2]
+            formation_export = self._format_formation_export(formation)
+
+            message = (
+                f"Salut {responsible.display_name} !\n"
+                f"La formation **{formation.name}** commence bientôt (le {datetime_text}).\n\n"
+                f"{formation_export}\n\n"
+            )
+
+            await send_dm_to_member(logger, guild, responsible, message, f"export for formation {formation.name}")
 
     # -- State --
 
@@ -1714,7 +1742,11 @@ class FormationManagement(commands.Cog):
                     await self._notify_trainer_before_formation(
                         guild,
                         fm,
-                        pub,
+                        self._format_respo_contacts(guild),
+                    )
+                    await self._notify_responsible_before_formation(
+                        guild,
+                        fm,
                         self._format_respo_contacts(guild),
                     )
 
