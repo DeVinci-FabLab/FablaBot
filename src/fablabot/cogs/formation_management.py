@@ -79,6 +79,8 @@ class Formation:
     """Registered users metadata (order preserved)."""
     waitlisted_users: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
     """Waitlisted users metadata (order preserved)."""
+    notified: bool = False
+    """Whether the trainer has been notified for this formation."""
 
     @property
     def start_dt(self) -> datetime:
@@ -87,7 +89,7 @@ class Formation:
         Returns:
             datetime: The start date/time as a datetime object.
         """
-        return datetime.fromisoformat(self.start_iso)
+        return datetime.fromisoformat(self.start_iso).astimezone(PARIS_TZ)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the Formation instance to a dictionary.
@@ -1464,7 +1466,7 @@ class FormationManagement(commands.Cog):
                 filtered.append(entry)
                 continue
             try:
-                ts = datetime.fromisoformat(ts_iso)
+                ts = datetime.fromisoformat(ts_iso).astimezone(PARIS_TZ)
             except Exception:
                 filtered.append(entry)
                 continue
@@ -1688,49 +1690,39 @@ class FormationManagement(commands.Cog):
         notification_window_start = now + TRAINER_NOTIFICATION_ADVANCE - timedelta(minutes=10)
         notification_window_end = now + TRAINER_NOTIFICATION_ADVANCE + timedelta(minutes=10)
 
-        for guild_id_str, guild_state in self.state.items():
+        for guild_id_str in self.state:
             guild_id = int(guild_id_str)
             guild = self.bot.get_guild(guild_id)
             if not guild:
                 continue
 
-            published = self._get_last_published_in_guild(guild_id)
-            if not published:
+            pub = self._get_last_published_in_guild(guild_id)
+            if not pub:
                 continue
 
-            message_payload = published.get("message", {})
+            message_payload = pub.get("message", {})
             raw_fms = message_payload.get("fms", [])
             if not raw_fms:
                 continue
+            fms: list[Formation] = [Formation(**fm_dict) for fm_dict in raw_fms]
 
-            notified_formations = guild_state.get("notified_formations", [])
-            notified_keys = {(nf.get("formation_emoji"), nf.get("start_iso")) for nf in notified_formations}
-
-            for fm_dict in raw_fms:
-                fm = Formation(**fm_dict)
-                formation_key = (fm.emoji, fm.start_iso)
-
-                if formation_key in notified_keys:
+            for fm in fms:
+                if fm.notified:
                     continue
 
                 if notification_window_start <= fm.start_dt <= notification_window_end:
                     await self._notify_trainer_before_formation(
                         guild,
                         fm,
-                        published,
+                        pub,
                         self._format_respo_contacts(guild),
                     )
 
-                    notified_formations.append(
-                        {
-                            "formation_emoji": fm.emoji,
-                            "formation_name": fm.name,
-                            "start_iso": fm.start_iso,
-                            "notified_at": now.isoformat(),
-                        }
-                    )
-                    guild_state["notified_formations"] = notified_formations
-                    self._set_guild_state(guild_id, guild_state)
+                    fm.notified = True
+
+            updated_fms = [fm.to_dict() for fm in fms]
+            pub["message"]["fms"] = updated_fms
+            self._set_last_published_in_guild(guild_id, pub)
 
     @_check_upcoming_formations.before_loop
     async def _before_check_upcoming_formations(self) -> None:
