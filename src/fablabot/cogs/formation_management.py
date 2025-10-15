@@ -1615,11 +1615,17 @@ class FormationManagement(commands.Cog):
         for fm in fms:
             prev_registered_ids = {entry.get("user_id") for entry in fm.registered_users if entry.get("user_id") is not None}
             prev_waitlisted_ids = {entry.get("user_id") for entry in fm.waitlisted_users if entry.get("user_id") is not None}
+
             current_users = reactions_snapshot.get(fm.emoji, {})
+            current_logged_user = {uid: username for uid, username in current_users.items() if (fm.emoji, uid) in last_add}
             ordered_users = sorted(
-                ((uid, last_add.get((fm.emoji, uid), datetime.min), username) for uid, username in current_users.items()),
+                (
+                    (uid, last_add.get((fm.emoji, uid), datetime.min.replace(tzinfo=PARIS_TZ)), username)
+                    for uid, username in current_logged_user.items()
+                ),
                 key=lambda item: (item[1], item[0]),
             )
+
             registered: list[dict[str, Any]] = []
             waitlisted: list[dict[str, Any]] = []
             for position, (uid, ts, username) in enumerate(ordered_users):
