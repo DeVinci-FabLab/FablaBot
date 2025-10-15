@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 from typing import Any, override
 from warnings import deprecated
+from zoneinfo import ZoneInfo
 
 from discord import (
     Embed,
@@ -41,6 +42,7 @@ MAX_MSG_CHARS = 1900
 REACTION_LOG_RETENTION = timedelta(days=30)
 FM_REQUEST_FORMS = "https://forms.office.com/e/MqVdQujzjf"
 TRAINER_NOTIFICATION_ADVANCE = timedelta(hours=1)
+PARIS_TZ = ZoneInfo("Europe/Paris")
 
 
 @dataclass
@@ -981,19 +983,19 @@ class FormationManagement(commands.Cog):
 
     @staticmethod
     def _parse_date_time(date_str: str, hour_str: str) -> datetime:
-        """Parse date and time strings into a timezone-aware datetime object.
+        """Parse date and time strings into a timezone-aware datetime object in Paris timezone.
 
         Args:
             date_str (str): Date string in 'DD/MM/YYYY' format.
             hour_str (str): Hour string in 'HH:MM' format.
 
         Returns:
-            datetime: A timezone-aware datetime object.
+            datetime: A timezone-aware datetime object in Europe/Paris timezone.
         """
         d, m, y = map(int, date_str.split("/"))
         hh, mm = map(int, hour_str.split(":"))
-        dt = datetime(y, m, d, hh, mm)
-        logger.debug(f"Parsed formation schedule {date_str} {hour_str} -> {dt.isoformat()}")
+        dt = datetime(y, m, d, hh, mm, tzinfo=PARIS_TZ)
+        logger.debug(f"Parsed formation schedule {date_str} {hour_str} -> {dt.isoformat()} (Paris time)")
         return dt
 
     @staticmethod
@@ -1394,7 +1396,7 @@ class FormationManagement(commands.Cog):
     def _log_reaction(
         self, guild_id: int, message_id: int, user_id: int, emoji: str, action: str, user_name: str | None = None
     ) -> None:
-        """Log a reaction event.
+        """Log a reaction event with Paris timezone.
 
         Args:
             guild_id (int): The ID of the guild.
@@ -1408,7 +1410,7 @@ class FormationManagement(commands.Cog):
         guild_state = self._get_guild_state(guild_id)
         log = guild_state.get("reactions_log") or []
         normalized_action = action[9:].lower()
-        ts_iso = datetime.now().isoformat(timespec="seconds")
+        ts_iso = datetime.now(PARIS_TZ).isoformat(timespec="seconds")
         if user_name is None:
             user_name = self._get_last_known_user_name(log, message_id, user_id)
         log.append(
@@ -1423,7 +1425,7 @@ class FormationManagement(commands.Cog):
         )
         guild_state["reactions_log"] = log
         logger.debug(
-            f"Logged {normalized_action} reaction for guild {guild_id} message {message_id} user {user_id} with emoji {emoji}."
+            f"Logged {normalized_action} reaction for guild {guild_id} message {message_id} user {user_id} with emoji {emoji} (Paris time: {ts_iso})."
         )
         self._set_guild_state(guild_id, guild_state)
 
@@ -1446,7 +1448,7 @@ class FormationManagement(commands.Cog):
 
     @staticmethod
     def _purge_reaction_log(log: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Remove reaction log entries older than the retention window.
+        """Remove reaction log entries older than the retention window (Paris timezone).
 
         Args:
             log (list[dict[str, Any]]): The reaction log to purge.
@@ -1454,7 +1456,7 @@ class FormationManagement(commands.Cog):
         Returns:
             list[dict[str, Any]]: The filtered reaction log.
         """
-        cutoff = datetime.now() - REACTION_LOG_RETENTION
+        cutoff = datetime.now(PARIS_TZ) - REACTION_LOG_RETENTION
         filtered: list[dict[str, Any]] = []
         for entry in log:
             ts_iso = entry.get("ts_iso")
@@ -1680,9 +1682,9 @@ class FormationManagement(commands.Cog):
 
     @tasks.loop(minutes=10)
     async def _check_upcoming_formations(self) -> None:
-        """Check for formations starting in ~1 hour and notify trainers with registration export."""
-        logger.debug("Checking for upcoming formations to notify trainers.")
-        now = datetime.now()
+        """Check for formations starting in ~1 hour and notify trainers with registration export (Paris timezone)."""
+        logger.debug("Checking for upcoming formations to notify trainers (Paris time).")
+        now = datetime.now(PARIS_TZ)
         notification_window_start = now + TRAINER_NOTIFICATION_ADVANCE - timedelta(minutes=10)
         notification_window_end = now + TRAINER_NOTIFICATION_ADVANCE + timedelta(minutes=10)
 
