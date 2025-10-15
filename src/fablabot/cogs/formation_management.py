@@ -30,12 +30,20 @@ from discord.ext import commands, tasks
 from discord.utils import get
 from emoji import EMOJI_DATA
 
-from .utils import check_has_role, escape_md, is_in_allowed_channel, log_request, send_dm_to_member
+from .constants import Emojis, ErrorMessages, RoleNames
+from .utils import (
+    check_has_role,
+    escape_md,
+    get_or_fetch_member,
+    is_in_allowed_channel,
+    log_request,
+    send_dm_to_member,
+)
 
 logger = logging.getLogger(__name__)
 
 
-ALLOWED_ROLES = {"Respo Formations", "Admin -temp-", "Administrateur"}
+ALLOWED_ROLES = {RoleNames.RESPO_FORMATIONS, RoleNames.ADMIN_TEMP, RoleNames.ADMIN}
 DATA_FILE = "data/formations_state.json"
 DISCORD_EMOJI_RE = re.compile(r"^<a?:\w+:\d+>$")
 MAX_MSG_CHARS = 1900
@@ -218,7 +226,7 @@ class FormationManagement(commands.Cog):
         assert isinstance(interaction.channel, TextChannel)
 
         emoji_set = {emoji for emoji in interaction.guild.emojis if emoji.name == "dvfl"}
-        emoji = emoji_set.pop() if emoji_set else ":loudspeaker:"
+        emoji = emoji_set.pop() if emoji_set else Emojis.LOUDSPEAKER
         header = f"# [FORMATIONS] {emoji}"
 
         intro_body = intro.replace("\\n", "\n").strip()
@@ -405,15 +413,13 @@ class FormationManagement(commands.Cog):
             and not DISCORD_EMOJI_RE.match(emoji_clean)
         ):
             logger.warning(f"Guild {interaction.guild.id} tried to add formation with invalid emoji: {emoji_clean!r}.")
-            await interaction.response.send_message("Émoji invalide.", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.INVALID_EMOJI, ephemeral=True)
             return
 
         fms: list[Formation] = [Formation(**x) for x in draft["fms"]]
         if any(existing.emoji == emoji_clean for existing in fms):
             logger.warning(f"Guild {interaction.guild.id} tried to add formation with duplicate emoji {emoji_clean!r}.")
-            await interaction.response.send_message(
-                "Cet émoji est deja utilisé pour une autre formation dans ce brouillon.", ephemeral=True
-            )
+            await interaction.response.send_message(ErrorMessages.EMOJI_ALREADY_USED, ephemeral=True)
             return
 
         try:
@@ -526,7 +532,7 @@ class FormationManagement(commands.Cog):
                 f"Guild {interaction.guild.id} tried to edit out-of-bounds formation index {index}.",
             )
             await interaction.response.send_message(
-                f"Index hors limites (il y a {len(fms)} FM).",
+                ErrorMessages.INDEX_OUT_OF_BOUNDS.format(count=len(fms)),
                 ephemeral=True,
             )
             return
@@ -538,11 +544,11 @@ class FormationManagement(commands.Cog):
             candidate = emoji.strip()
             if not candidate:
                 logger.warning(f"Guild {interaction.guild.id} provided an empty emoji while editing a formation.")
-                await interaction.response.send_message("Émoji invalide.", ephemeral=True)
+                await interaction.response.send_message(ErrorMessages.INVALID_EMOJI, ephemeral=True)
                 return
             if any(i != index - 1 and fm.emoji == candidate for i, fm in enumerate(fms)):
                 logger.warning(f"Guild {interaction.guild.id} tried to reuse emoji {candidate} while editing formation.")
-                await interaction.response.send_message("Cet émoji est déjà utilisé par une autre formation.", ephemeral=True)
+                await interaction.response.send_message(ErrorMessages.EMOJI_ALREADY_USED, ephemeral=True)
                 return
             if not candidate or (
                 candidate not in EMOJI_DATA
@@ -550,21 +556,21 @@ class FormationManagement(commands.Cog):
                 and not DISCORD_EMOJI_RE.match(candidate)
             ):
                 logger.warning(f"Guild {interaction.guild.id} tried to edit formation with invalid emoji: {candidate!r}.")
-                await interaction.response.send_message("Émoji invalide.", ephemeral=True)
+                await interaction.response.send_message(ErrorMessages.INVALID_EMOJI, ephemeral=True)
                 return
             new_emoji = candidate
 
         new_name = original.name if name is None else name.strip()
         if not new_name:
             logger.warning(f"Guild {interaction.guild.id} provided an empty name while editing a formation.")
-            await interaction.response.send_message("Nom invalide.", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.INVALID_NAME, ephemeral=True)
             return
 
         new_trainer = original.trainer_mention if trainer is None else trainer.mention
         new_duration = original.duration if duration is None else duration.strip()
         if not new_duration:
             logger.warning(f"Guild {interaction.guild.id} provided an empty duration while editing a formation.")
-            await interaction.response.send_message("Durée invalide.", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.INVALID_DURATION, ephemeral=True)
             return
 
         new_description = original.description if description is None else description.strip()
@@ -649,7 +655,7 @@ class FormationManagement(commands.Cog):
 
         if index > len(fms):
             logger.warning(f"Guild {interaction.guild.id} tried to remove out-of-bounds formation index {index}.")
-            await interaction.response.send_message(f"Index hors limites (il y a {len(fms)} FM).", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.INDEX_OUT_OF_BOUNDS.format(count=len(fms)), ephemeral=True)
             return
 
         removed = fms.pop(index - 1)
@@ -767,7 +773,7 @@ class FormationManagement(commands.Cog):
         fms = [Formation(**x) for x in draft["fms"]]
         if not fms:
             logger.warning(f"Guild {interaction.guild.id} tried to publish empty formations draft.")
-            await interaction.response.send_message("Le brouillon ne contient aucune formation.", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.DRAFT_EMPTY, ephemeral=True)
             return
 
         await interaction.response.defer(thinking=True)
@@ -852,7 +858,7 @@ class FormationManagement(commands.Cog):
         published = self._get_last_published_in_guild(interaction.guild.id)
         if not published and (not message_id or not publication_channel):
             logger.warning(f"Guild {interaction.guild.id} tried to export reactions without published message or ID.")
-            await interaction.response.send_message("Aucun message publié enregistré et aucun ID fourni.", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.NO_PUBLISHED_MESSAGE, ephemeral=True)
             return
 
         target_message_id = int(message_id) if message_id else int(published["message_id"]) if published else None
@@ -861,7 +867,7 @@ class FormationManagement(commands.Cog):
         )
         if not target_message_id or not target_channel_id:
             logger.error(f"Guild {interaction.guild.id} has inconsistent published message data: {published}")
-            await interaction.response.send_message("Données de message publié incohérentes.", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.INCONSISTENT_PUBLISHED_DATA, ephemeral=True)
             return
 
         message_payload = published["message"] if published else {}
@@ -897,15 +903,8 @@ class FormationManagement(commands.Cog):
             )
             return
 
-        published = self._get_last_published_in_guild(interaction.guild.id)
-        if not published:
-            logger.error(f"Guild {interaction.guild.id} has no published message but no ID/channel was given.")
-            await interaction.response.send_message("Aucun message publié enregistré.", ephemeral=True)
-            return
-
         await interaction.response.defer(thinking=True)
 
-        message_payload = published.get("message", {})
         raw_fms = message_payload.get("fms", [])
         fms: list[Formation] = [Formation(**fm_dict) for fm_dict in raw_fms]
 
@@ -1049,17 +1048,17 @@ class FormationManagement(commands.Cog):
         for fm in fms:
             line_block = [
                 f"{fm.emoji} **{fm.name}** avec {fm.trainer_mention}",
-                f":date: {self._humanize_dt(fm.start_dt)}  — "
-                f":hourglass_flowing_sand: {fm.duration}  — "
-                f":busts_in_silhouette: {len(fm.registered_users)}/{fm.seats} place(s)",
+                f"{Emojis.DATE} {self._humanize_dt(fm.start_dt)}  — "
+                f"{Emojis.HOURGLASS} {fm.duration}  — "
+                f"{Emojis.PEOPLE} {len(fm.registered_users)}/{fm.seats} place(s)",
             ]
             line_block += [fm.description] if fm.description else []
             lines.append("\n".join(line_block))
             lines.append("")
 
         end_lines = [
-            ":arrow_right: Pour s'inscrire, réagis avec les émojis des formations correspondantes.",
-            ":warning: Si tu ne peux plus venir, n'oublie pas de retirer ta réaction pour libérer la place.",
+            f"{Emojis.ARROW_RIGHT} Pour s'inscrire, réagis avec les émojis des formations correspondantes.",
+            f"{Emojis.WARNING} Si tu ne peux plus venir, n'oublie pas de retirer ta réaction pour libérer la place.",
             "",
             f"Tu veux apprendre autre chose ? [**Propose une formation ici**]({FM_REQUEST_FORMS})",
         ]
@@ -1084,13 +1083,15 @@ class FormationManagement(commands.Cog):
             str: The contact string.
         """
         logger.debug(f"Resolving formation contacts for guild {guild.id}.")
-        role = get(guild.roles, name="Respo Formations")
+        role = get(guild.roles, name=RoleNames.RESPO_FORMATIONS)
         if role is None:
-            logger.debug(f"Role 'Respo Formations' missing in guild {guild.id}; using fallback contacts.")
+            logger.debug(f"Role '{RoleNames.RESPO_FORMATIONS}' missing in guild {guild.id}; using fallback contacts.")
             return "un·e membre du Pôle Formations"
         members = [member for member in role.members if not member.bot]
         if not members:
-            logger.debug(f"Role 'Respo Formations' has no human members in guild {guild.id}; using fallback contacts.")
+            logger.debug(
+                f"Role '{RoleNames.RESPO_FORMATIONS}' has no human members in guild {guild.id}; using fallback contacts."
+            )
             return "un·e membre du Pôle Formations"
         mentions = [member.mention for member in members]
         logger.debug(f"Resolved {len(mentions)} formation manager contacts for guild {guild.id}.")
@@ -1148,10 +1149,9 @@ class FormationManagement(commands.Cog):
             formation (Formation): The formation.
             contacts (str): The contact string for formation managers.
         """
-        try:
-            member = guild.get_member(user_id) or await guild.fetch_member(user_id)
-        except Exception:
-            logger.exception(f"Failed to fetch member {user_id} for registration DM in guild {guild.id}.")
+        member = await get_or_fetch_member(guild, user_id)
+        if member is None:
+            logger.error(f"Failed to fetch member {user_id} for registration DM in guild {guild.id}.")
             return
         logger.debug(f"Resolved member {member.id} ({member.display_name}) for registration DM in guild {guild.id}.")
 
@@ -1183,10 +1183,9 @@ class FormationManagement(commands.Cog):
             waitlist_position (int): The user's position on the waitlist.
             contacts (str): The contact string for formation managers.
         """
-        try:
-            member = guild.get_member(user_id) or await guild.fetch_member(user_id)
-        except Exception:
-            logger.exception(f"Unexpected error while fetching member {user_id} in guild {guild.id}.")
+        member = await get_or_fetch_member(guild, user_id)
+        if member is None:
+            logger.error(f"Failed to fetch member {user_id} for waitlist DM in guild {guild.id}.")
             return
         logger.debug(f"Resolved member {member.id} ({member.display_name}) for waitlist DM in guild {guild.id}.")
 
@@ -1215,10 +1214,9 @@ class FormationManagement(commands.Cog):
             formation (Formation): The formation.
             contacts (str): The contact string for formation managers.
         """
-        try:
-            member = guild.get_member(user_id) or await guild.fetch_member(user_id)
-        except Exception:
-            logger.exception(f"Unexpected error while fetching member {user_id} in guild {guild.id}.")
+        member = await get_or_fetch_member(guild, user_id)
+        if member is None:
+            logger.error(f"Failed to fetch member {user_id} for promotion DM in guild {guild.id}.")
             return
         logger.debug(f"Resolved member {member.id} ({member.display_name}) for waitlist promotion DM in guild {guild.id}.")
 
@@ -1249,10 +1247,9 @@ class FormationManagement(commands.Cog):
             return
         trainer_id = int(trainer_id_match.group(1))
 
-        try:
-            trainer = guild.get_member(trainer_id) or await guild.fetch_member(trainer_id)
-        except Exception:
-            logger.exception(f"Failed to fetch trainer {trainer_id} for formation {formation.name!r}.")
+        trainer = await get_or_fetch_member(guild, trainer_id)
+        if trainer is None:
+            logger.error(f"Failed to fetch trainer {trainer_id} for formation {formation.name!r}.")
             return
 
         datetime_text = self._humanize_dt(formation.start_dt).lower()[2:-2]
@@ -1281,11 +1278,10 @@ class FormationManagement(commands.Cog):
             return
 
         for responsible_id in responsibles_ids:
-            try:
-                responsible = guild.get_member(responsible_id) or await guild.fetch_member(responsible_id)
-            except Exception:
-                logger.exception(f"Failed to fetch responsible {responsible_id} for formation {formation.name!r}.")
-                return
+            responsible = await get_or_fetch_member(guild, responsible_id)
+            if responsible is None:
+                logger.error(f"Failed to fetch responsible {responsible_id} for formation {formation.name!r}.")
+                continue
 
             datetime_text = self._humanize_dt(formation.start_dt).lower()[2:-2]
             formation_export = self._format_formation_export(formation)

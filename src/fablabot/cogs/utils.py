@@ -5,18 +5,29 @@ from __future__ import annotations
 from logging import Logger
 from typing import Any
 
-from discord import Forbidden, Guild, HTTPException, Interaction, Member, TextChannel
+from discord import (
+    Forbidden,
+    Guild,
+    HTTPException,
+    Interaction,
+    Member,
+    Role,
+    TextChannel,
+    VoiceChannel,
+)
 from discord.utils import get
 
 from fablabot.guild_config import get_commands_channel_id, set_commands_channel_id
 
+from .constants import ErrorMessages, RoleNames
+
 COMMANDS_CHANNEL_NAME = "commandes_bot"
 ADMIN_ROLES = {
-    "Admin -temp-",
-    "Administrateur",
-    "Président.e",
-    "Vice-Président.e",
-    "Secrétaire Général",
+    RoleNames.ADMIN_TEMP,
+    RoleNames.ADMIN,
+    RoleNames.PRESIDENT,
+    RoleNames.VICE_PRESIDENT,
+    RoleNames.SECRETARY,
 }
 
 
@@ -58,7 +69,7 @@ async def is_in_allowed_channel(logger: Logger, interaction: Interaction) -> boo
 
     if stored_channel_id is not None:
         try:
-            maybe_channel = interaction.guild.get_channel(stored_channel_id) or await interaction.guild.fetch_channel(
+            maybe_channel: Any = interaction.guild.get_channel(stored_channel_id) or await interaction.guild.fetch_channel(
                 stored_channel_id
             )
         except Exception:
@@ -117,9 +128,7 @@ async def check_has_role(logger: Logger, interaction: Interaction, roles: set[st
     if missing_roles:
         assert isinstance(interaction.channel, TextChannel)
         logger.warning(f"Missing roles {', '.join(missing_roles)} for guild {interaction.guild}")
-        await interaction.channel.send(
-            f"Les rôles suivants ne sont pas configurés sur ce serveur : {', '.join(missing_roles)}.",
-        )
+        await interaction.channel.send(ErrorMessages.ROLE_NOT_FOUND.format(role_name=", ".join(missing_roles)))
 
     assert isinstance(interaction.user, Member)
     member_role_names = {role.name for role in interaction.user.roles}
@@ -134,18 +143,6 @@ async def check_has_role(logger: Logger, interaction: Interaction, roles: set[st
         )
         return False
     return True
-
-
-def escape_md(text: str) -> str:
-    """Escape markdown characters in a string.
-
-    Args:
-        text (str): The text to escape.
-
-    Returns:
-        str: The escaped text.
-    """
-    return f"`{text}`"
 
 
 async def _can_dm_user(user: Member) -> bool:
@@ -191,7 +188,7 @@ async def send_dm_to_member(
         return False
 
     if not await _can_dm_user(member):
-        logger.error(f"Cannot DM user {member.name} ({member.display_name}) in guild {guild.id}; skipping {dm_type} DM.")
+        logger.error(f"Cannot DM user {member.id} ({member.name!r}) in guild {guild.id}; skipping {dm_type} DM.")
         return False
 
     logger.debug(f"Resolved member {member.id} ({member.display_name}) for {dm_type} DM in guild {guild.id}.")
@@ -204,3 +201,193 @@ async def send_dm_to_member(
     else:
         logger.info(f"Sent {dm_type} DM to user {member} in guild {guild.id}.")
         return True
+
+
+async def get_or_fetch_member(guild: Guild, member_id: int) -> Member | None:
+    """Get a member from cache or fetch from API if not cached.
+
+    Args:
+        guild (Guild): The guild to search in.
+        member_id (int): The ID of the member to retrieve.
+
+    Returns:
+        Member | None: The member if found, None otherwise.
+    """
+    member = guild.get_member(member_id)
+    if member is not None:
+        return member
+
+    try:
+        return await guild.fetch_member(member_id)
+    except Exception:
+        return None
+
+
+# region ====== Formatting Helpers ======
+
+
+def escape_md(text: str) -> str:
+    """Escape markdown characters in a string.
+
+    Args:
+        text (str): The text to escape.
+
+    Returns:
+        str: The escaped text.
+    """
+    return f"`{text}`"
+
+
+def format_member_mention(member: Member) -> str:
+    """Format a member mention with escaped name.
+
+    Args:
+        member (Member): The member to format.
+
+    Returns:
+        str: Formatted string like "{mention} (`name`)".
+    """
+    return f"{member.mention} ({escape_md(member.name)})"
+
+
+def format_role_mention(role: Role) -> str:
+    """Format a role mention with escaped name.
+
+    Args:
+        role (Role): The role to format.
+
+    Returns:
+        str: Formatted string like "{mention} (`name`)".
+    """
+    return f"{role.mention} ({escape_md(role.name)})"
+
+
+def format_channel_mention(channel: TextChannel | VoiceChannel) -> str:
+    """Format a channel mention with escaped name.
+
+    Args:
+        channel (TextChannel | VoiceChannel): The channel to format.
+
+    Returns:
+        str: Formatted string like "{mention} (`name`)".
+    """
+    return f"{channel.mention} ({escape_md(channel.name)})"
+
+
+# endregion Formatting Helpers
+
+
+# region ====== Safe Discord Operations (with error handling) ======
+
+
+async def safe_add_roles(
+    logger: Logger,
+    member: Member,
+    *roles: Role,
+    reason: str | None = None,
+) -> tuple[bool, str | None]:
+    """Safely add roles to a member with error handling.
+
+    Args:
+        logger (Logger): The logger to use for error messages.
+        member (Member): The member to add roles to.
+        *roles (Role): The roles to add.
+        reason (str | None, optional): The reason for adding roles. Defaults to None.
+
+    Returns:
+        tuple[bool, str | None]: (Success status, Error message if failed).
+    """
+    try:
+        await member.add_roles(*roles, reason=reason)
+        return True, None
+    except Forbidden:
+        logger.exception(f"Forbidden to add roles {roles} to {member}")
+        return False, ErrorMessages.ROLE_ADD_FAILED
+    except HTTPException:
+        logger.exception(f"HTTP error while adding roles {roles} to {member}")
+        return False, ErrorMessages.HTTP_ERROR.format(
+            operation=f"l'ajout des rôles {', '.join(role.name for role in roles)} à {format_member_mention(member)}"
+        )
+
+
+async def safe_remove_roles(
+    logger: Logger,
+    member: Member,
+    *roles: Role,
+    reason: str | None = None,
+) -> tuple[bool, str | None]:
+    """Safely remove roles from a member with error handling.
+
+    Args:
+        logger (Logger): The logger to use for error messages.
+        member (Member): The member to remove roles from.
+        *roles (Role): The roles to remove.
+        reason (str | None, optional): The reason for removing roles. Defaults to None.
+
+    Returns:
+        tuple[bool, str | None]: (Success status, Error message if failed).
+    """
+    try:
+        await member.remove_roles(*roles, reason=reason)
+        return True, None
+    except Forbidden:
+        logger.exception(f"Forbidden to remove roles {roles} from {member}")
+        return False, ErrorMessages.ROLE_REMOVE_FAILED
+    except HTTPException:
+        logger.exception(f"HTTP error while removing roles {roles} from {member}")
+        return False, ErrorMessages.HTTP_ERROR.format(
+            operation=f"le retrait des rôles {', '.join(role.name for role in roles)} à {format_member_mention(member)}"
+        )
+
+
+async def safe_delete_channel(
+    logger: Logger,
+    channel: TextChannel | VoiceChannel,
+    reason: str | None = None,
+) -> tuple[bool, str | None]:
+    """Safely delete a channel with error handling.
+
+    Args:
+        logger (Logger): The logger to use for error messages.
+        channel (TextChannel | VoiceChannel): The channel to delete.
+        reason (str | None, optional): The reason for deletion. Defaults to None.
+
+    Returns:
+        tuple[bool, str | None]: (Success status, Error message if failed).
+    """
+    channel_type = "salon textuel" if isinstance(channel, TextChannel) else "salon vocal"
+    try:
+        await channel.delete(reason=reason)
+        return True, None
+    except HTTPException:
+        logger.exception(f"HTTP error while deleting channel {channel}")
+        return False, ErrorMessages.CHANNEL_DELETE_FAILED.format(channel_type=channel_type)
+
+
+async def safe_edit_channel(
+    logger: Logger,
+    channel: TextChannel | VoiceChannel,
+    reason: str | None = None,
+    **options: Any,
+) -> tuple[bool, str | None]:
+    """Safely edit a channel with error handling.
+
+    Args:
+        logger (Logger): The logger to use for error messages.
+        channel (TextChannel | VoiceChannel): The channel to edit.
+        reason (str | None, optional): The reason for editing. Defaults to None.
+        **options (Any): The channel attributes to edit.
+
+    Returns:
+        tuple[bool, str | None]: (Success status, Error message if failed).
+    """
+    channel_type = "salon textuel" if isinstance(channel, TextChannel) else "salon vocal"
+    try:
+        await channel.edit(reason=reason, **options)
+        return True, None
+    except HTTPException:
+        logger.exception(f"HTTP error while editing channel {channel}")
+        return False, ErrorMessages.CHANNEL_EDIT_FAILED.format(channel_type=channel_type)
+
+
+# endregion Safe Discord Operations
