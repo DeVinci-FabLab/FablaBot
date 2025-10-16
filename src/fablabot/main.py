@@ -7,6 +7,7 @@ import os
 from typing import Any, override
 
 from discord import Intents
+from discord.app_commands import AppCommandContext
 from discord.ext import commands
 from dotenv import load_dotenv
 
@@ -37,6 +38,7 @@ class Fablabot(commands.Bot):
         """
         super().__init__(
             command_prefix=commands.when_mentioned,
+            allowed_contexts=AppCommandContext(guild=True, dm_channel=False),
             intents=Intents(
                 guilds=True, members=True, expressions=True, voice_states=True, guild_messages=True, reactions=True
             ),

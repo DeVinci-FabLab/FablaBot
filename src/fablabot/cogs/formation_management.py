@@ -2,21 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 import csv
-from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 import io
 import json
 import logging
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, Literal, cast, override
 from warnings import deprecated
 
 from discord import (
     Embed,
     File,
-    Guild,
     Interaction,
     Member,
     RawReactionActionEvent,
@@ -24,75 +23,38 @@ from discord import (
     TextChannel,
     app_commands,
 )
-from discord.ext import commands
-from discord.utils import get
+from discord.ext import commands, tasks
 from emoji import EMOJI_DATA
 
-from .utils import can_dm_user, check_has_role, is_in_allowed_channel, log_request
+from fablabot.cogs.helpers import (
+    PARIS_TZ,
+    Draft,
+    Emojis,
+    ErrorMessages,
+    Formation,
+    PublishedMessage,
+    ReactionEvent,
+    RoleNames,
+    format_current_registrations,
+    format_respo_contacts,
+    notify_responsible_before_formation,
+    notify_trainer_before_formation,
+    parse_date_time,
+    render_message,
+    send_promotion_dm,
+    send_registration_dm,
+    send_waitlist_dm,
+)
+from fablabot.cogs.helpers.utils import check_has_role, is_in_allowed_channel, log_request
 
 logger = logging.getLogger(__name__)
 
 
-ALLOWED_ROLES = {"Respo Formations", "Admin -temp-", "Administrateur"}
+ALLOWED_ROLES = {RoleNames.RESPO_FORMATIONS, RoleNames.ADMIN_TEMP, RoleNames.ADMIN}
 DATA_FILE = "data/formations_state.json"
 DISCORD_EMOJI_RE = re.compile(r"^<a?:\w+:\d+>$")
-ROLE_MENTION_RE = re.compile(r"<@&(\d+)>")  # TODO remove
-MAX_MSG_CHARS = 1900
+TRAINER_NOTIFICATION_ADVANCE = timedelta(hours=1)
 REACTION_LOG_RETENTION = timedelta(days=30)
-FM_REQUEST_FORMS = "https://forms.office.com/e/MqVdQujzjf"
-
-
-@dataclass
-class Formation:
-    """Single Formation entry in a draft.
-
-    Attributes:
-        emoji (str): Single emoji representing the formation.
-        name (str): Name of the formation.
-        trainer_mention (str): Mention of the trainer.
-        start_iso (str): Start date/time in ISO format (timezone-aware if possible).
-        duration (str): Duration of the formation in text format.
-        seats (int): Number of seats available for the formation.
-        description (str): Brief description of the formation.
-        registered_users (list[dict[str, Any]]): Ordered list of registered users metadata.
-        waitlisted_users (list[dict[str, Any]]): Ordered list of waitlisted users metadata.
-    """
-
-    emoji: str
-    """Single emoji representing the formation."""
-    name: str
-    """Name of the formation."""
-    trainer_mention: str
-    """Mention of the trainer."""
-    start_iso: str
-    """Start date/time in ISO format."""
-    duration: str
-    """Duration of the formation in text format."""
-    seats: int
-    """Number of seats available for the formation."""
-    description: str = ""
-    """Brief description of the formation."""
-    registered_users: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
-    """Registered users metadata (order preserved)."""
-    waitlisted_users: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
-    """Waitlisted users metadata (order preserved)."""
-
-    @property
-    def start_dt(self) -> datetime:
-        """Get the start date/time as a datetime object.
-
-        Returns:
-            datetime: The start date/time as a datetime object.
-        """
-        return datetime.fromisoformat(self.start_iso)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert the Formation instance to a dictionary.
-
-        Returns:
-            dict[str, Any]: The dictionary representation of the Formation.
-        """
-        return asdict(self)
 
 
 class FormationManagement(commands.Cog):
@@ -141,7 +103,7 @@ class FormationManagement(commands.Cog):
                   "user_id": int,
                   "user_name": str,
                   "emoji": str,
-                  "action": "add"|"remove",
+                  "action": Literal["add", "remove"],
                   "ts_iso": str
                 }
               ]
@@ -149,8 +111,16 @@ class FormationManagement(commands.Cog):
         }
         ```
         """
+        self._reaction_lock = asyncio.Lock()
         self._purge_all_reaction_logs()
+        self._check_upcoming_formations.start()
         logger.info("FormationManagement initialized")
+
+    @override
+    async def cog_unload(self) -> None:
+        """Clean up when the cog is unloaded."""
+        self._check_upcoming_formations.cancel()
+        logger.info("FormationManagement unloaded")
 
     # region ====== Fm Slash Commands Group ======
     fm_group = app_commands.Group(name="fm", description="Gère les annonces de Formations et les inscriptions.")
@@ -182,8 +152,8 @@ class FormationManagement(commands.Cog):
 
     @fm_group.command(name="start", description="Démarrer/écraser un brouillon avec une introduction.")
     @app_commands.describe(
-        intro="Texte d'introduction affiché en tête du message (utilisez \n pour un saut de ligne)",
-        end="Texte de fin affiché en bas du message (utilisez \n pour un saut de ligne)",
+        intro="Texte d'introduction affiché en tête du message (utilisez \\n pour un saut de ligne)",
+        end="Texte de fin affiché en bas du message (utilisez \\n pour un saut de ligne)",
         role="Rôle à mentionner",
     )
     async def fm_start(self, interaction: Interaction, intro: str, end: str, role: Role) -> None:
@@ -200,33 +170,30 @@ class FormationManagement(commands.Cog):
             return
         if not await check_has_role(logger, interaction, ALLOWED_ROLES):
             return
-
         assert interaction.guild is not None
-        assert isinstance(interaction.channel, TextChannel)
 
         emoji_set = {emoji for emoji in interaction.guild.emojis if emoji.name == "dvfl"}
-        emoji = emoji_set.pop() if emoji_set else ":loudspeaker:"
+        emoji = emoji_set.pop() if emoji_set else Emojis.LOUDSPEAKER
         header = f"# [FORMATIONS] {emoji}"
 
         intro_body = intro.replace("\\n", "\n").strip()
         end_body = end.replace("\\n", "\n").strip()
 
-        draft: dict[str, Any] = {
-            "header": header,
-            "role_id": role.id,
-            "intro": intro_body,
-            "fms": [],
-            "end": end_body,
-        }
+        draft = Draft(
+            header=header,
+            role_id=role.id,
+            intro=intro_body,
+            fms=[],
+            end=end_body,
+        )
         self._set_guild_draft(interaction.guild.id, draft)
 
-        fms = [Formation(**x) for x in draft["fms"]]
-        content = self._render_message(
-            draft["header"],
-            draft["role_id"],
-            draft["intro"],
-            fms,
-            draft["end"],
+        content = render_message(
+            draft.header,
+            draft.role_id,
+            draft.intro,
+            draft.fms,
+            draft.end,
         )
         logger.info(f"Guild {interaction.guild.id} started a new formations draft.")
         await interaction.response.send_message(
@@ -275,9 +242,9 @@ class FormationManagement(commands.Cog):
         assert interaction.guild is not None
         draft = self._get_guild_draft(interaction.guild.id)
 
-        current_intro = draft.get("intro", "")
-        current_end = draft.get("end", "")
-        current_role_id = draft.get("role_id", 0)
+        current_intro = draft.intro
+        current_end = draft.end
+        current_role_id = draft.role_id
 
         updated_intro = current_intro if intro is None else intro.strip()
         updated_end = current_end if end is None else end.strip()
@@ -285,11 +252,11 @@ class FormationManagement(commands.Cog):
         updated_intro = updated_intro.replace("\\n", "\n")
         updated_end = updated_end.replace("\\n", "\n")
 
+        updated_role_id = current_role_id
         role_changed = False
         if role is not None:
-            new_role_id = role.id
-            role_changed = current_role_id != new_role_id
-            draft["role_id"] = new_role_id
+            updated_role_id = role.id
+            role_changed = current_role_id != updated_role_id
 
         if updated_intro == current_intro and updated_end == current_end and not role_changed:
             await interaction.response.send_message(
@@ -298,17 +265,21 @@ class FormationManagement(commands.Cog):
             )
             return
 
-        draft["intro"] = updated_intro
-        draft["end"] = updated_end
+        draft = Draft(
+            header=draft.header,
+            role_id=updated_role_id,
+            intro=updated_intro,
+            fms=draft.fms,
+            end=updated_end,
+        )
         self._set_guild_draft(interaction.guild.id, draft)
 
-        fms = [Formation(**x) for x in draft["fms"]]
-        content = self._render_message(
-            draft["header"],
-            draft["role_id"],
-            draft["intro"],
-            fms,
-            draft["end"],
+        content = render_message(
+            draft.header,
+            draft.role_id,
+            draft.intro,
+            draft.fms,
+            draft.end,
         )
 
         intro_changed = updated_intro != current_intro
@@ -321,7 +292,7 @@ class FormationManagement(commands.Cog):
         await interaction.response.send_message(
             "Brouillon mis à jour.",
             embed=Embed(
-                title=f"Aperçu brouillon — {len(fms)} formation(s)",
+                title=f"Aperçu brouillon — {len(draft.fms)} formation(s)",
                 description=f"{content or '_(vide)_'}",
             ),
             ephemeral=True,
@@ -392,19 +363,16 @@ class FormationManagement(commands.Cog):
             and not DISCORD_EMOJI_RE.match(emoji_clean)
         ):
             logger.warning(f"Guild {interaction.guild.id} tried to add formation with invalid emoji: {emoji_clean!r}.")
-            await interaction.response.send_message("Émoji invalide.", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.INVALID_EMOJI, ephemeral=True)
             return
 
-        fms: list[Formation] = [Formation(**x) for x in draft["fms"]]
-        if any(existing.emoji == emoji_clean for existing in fms):
+        if any(existing.emoji == emoji_clean for existing in draft.fms):
             logger.warning(f"Guild {interaction.guild.id} tried to add formation with duplicate emoji {emoji_clean!r}.")
-            await interaction.response.send_message(
-                "Cet émoji est deja utilisé pour une autre formation dans ce brouillon.", ephemeral=True
-            )
+            await interaction.response.send_message(ErrorMessages.EMOJI_ALREADY_USED, ephemeral=True)
             return
 
         try:
-            start_dt = self._parse_date_time(date, hour)
+            start_dt = parse_date_time(date, hour, PARIS_TZ)
         except Exception:
             logger.warning(f"Guild {interaction.guild.id} tried to add formation with invalid date/hour: {date} {hour}.")
             await interaction.response.send_message(
@@ -422,18 +390,25 @@ class FormationManagement(commands.Cog):
             description=description.strip(),
         )
 
+        fms = list(draft.fms)
         fms.append(fm)
         fms.sort(key=lambda x: x.start_dt)
 
-        draft["fms"] = [x.to_dict() for x in fms]
+        draft = Draft(
+            header=draft.header,
+            role_id=draft.role_id,
+            intro=draft.intro,
+            fms=fms,
+            end=draft.end,
+        )
         self._set_guild_draft(interaction.guild.id, draft)
 
-        preview = self._render_message(
-            draft["header"],
-            draft["role_id"],
-            draft["intro"],
-            fms,
-            draft["end"],
+        preview = render_message(
+            draft.header,
+            draft.role_id,
+            draft.intro,
+            draft.fms,
+            draft.end,
         )
         logger.info(f"Guild {interaction.guild.id} added formation {fm.name!r} ({fm.start_iso}) to draft.")
         await interaction.response.send_message(
@@ -504,16 +479,15 @@ class FormationManagement(commands.Cog):
             return
 
         assert interaction.guild is not None
-        draft: dict[str, Any] = self._get_guild_draft(interaction.guild.id)
-        fms: list[Formation] = [Formation(**x) for x in draft["fms"]]
-        fms.sort(key=lambda x: x.start_dt)
+        draft = self._get_guild_draft(interaction.guild.id)
+        fms = sorted(draft.fms, key=lambda x: x.start_dt)
 
         if index > len(fms):
             logger.warning(
                 f"Guild {interaction.guild.id} tried to edit out-of-bounds formation index {index}.",
             )
             await interaction.response.send_message(
-                f"Index hors limites (il y a {len(fms)} FM).",
+                ErrorMessages.INDEX_OUT_OF_BOUNDS.format(count=len(fms)),
                 ephemeral=True,
             )
             return
@@ -525,11 +499,11 @@ class FormationManagement(commands.Cog):
             candidate = emoji.strip()
             if not candidate:
                 logger.warning(f"Guild {interaction.guild.id} provided an empty emoji while editing a formation.")
-                await interaction.response.send_message("Émoji invalide.", ephemeral=True)
+                await interaction.response.send_message(ErrorMessages.INVALID_EMOJI, ephemeral=True)
                 return
             if any(i != index - 1 and fm.emoji == candidate for i, fm in enumerate(fms)):
                 logger.warning(f"Guild {interaction.guild.id} tried to reuse emoji {candidate} while editing formation.")
-                await interaction.response.send_message("Cet émoji est déjà utilisé par une autre formation.", ephemeral=True)
+                await interaction.response.send_message(ErrorMessages.EMOJI_ALREADY_USED, ephemeral=True)
                 return
             if not candidate or (
                 candidate not in EMOJI_DATA
@@ -537,21 +511,21 @@ class FormationManagement(commands.Cog):
                 and not DISCORD_EMOJI_RE.match(candidate)
             ):
                 logger.warning(f"Guild {interaction.guild.id} tried to edit formation with invalid emoji: {candidate!r}.")
-                await interaction.response.send_message("Émoji invalide.", ephemeral=True)
+                await interaction.response.send_message(ErrorMessages.INVALID_EMOJI, ephemeral=True)
                 return
             new_emoji = candidate
 
         new_name = original.name if name is None else name.strip()
         if not new_name:
             logger.warning(f"Guild {interaction.guild.id} provided an empty name while editing a formation.")
-            await interaction.response.send_message("Nom invalide.", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.INVALID_NAME, ephemeral=True)
             return
 
         new_trainer = original.trainer_mention if trainer is None else trainer.mention
         new_duration = original.duration if duration is None else duration.strip()
         if not new_duration:
             logger.warning(f"Guild {interaction.guild.id} provided an empty duration while editing a formation.")
-            await interaction.response.send_message("Durée invalide.", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.INVALID_DURATION, ephemeral=True)
             return
 
         new_description = original.description if description is None else description.strip()
@@ -563,7 +537,7 @@ class FormationManagement(commands.Cog):
             date_part = date.strip() if date is not None else original.start_dt.strftime("%d/%m/%Y")
             hour_part = hour.strip() if hour is not None else original.start_dt.strftime("%H:%M")
             try:
-                new_start_iso = self._parse_date_time(date_part, hour_part).isoformat()
+                new_start_iso = parse_date_time(date_part, hour_part, PARIS_TZ).isoformat()
             except Exception:
                 logger.warning(
                     f"Guild {interaction.guild.id} provided invalid date/hour while"
@@ -588,15 +562,21 @@ class FormationManagement(commands.Cog):
         fms[index - 1] = updated
         fms.sort(key=lambda x: x.start_dt)
 
-        draft["fms"] = [fm.to_dict() for fm in fms]
+        draft = Draft(
+            header=draft.header,
+            role_id=draft.role_id,
+            intro=draft.intro,
+            fms=fms,
+            end=draft.end,
+        )
         self._set_guild_draft(interaction.guild.id, draft)
 
-        preview = self._render_message(
-            draft["header"],
-            draft["role_id"],
-            draft["intro"],
-            fms,
-            draft["end"],
+        preview = render_message(
+            draft.header,
+            draft.role_id,
+            draft.intro,
+            draft.fms,
+            draft.end,
         )
         new_position = fms.index(updated) + 1
 
@@ -630,26 +610,31 @@ class FormationManagement(commands.Cog):
             return
 
         assert interaction.guild is not None
-        draft: dict[str, Any] = self._get_guild_draft(interaction.guild.id)
-        fms: list[Formation] = [Formation(**x) for x in draft["fms"]]
-        fms.sort(key=lambda x: x.start_dt)
+        draft = self._get_guild_draft(interaction.guild.id)
+        fms = sorted(draft.fms, key=lambda x: x.start_dt)
 
         if index > len(fms):
             logger.warning(f"Guild {interaction.guild.id} tried to remove out-of-bounds formation index {index}.")
-            await interaction.response.send_message(f"Index hors limites (il y a {len(fms)} FM).", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.INDEX_OUT_OF_BOUNDS.format(count=len(fms)), ephemeral=True)
             return
 
         removed = fms.pop(index - 1)
-        draft["fms"] = [x.to_dict() for x in fms]
+
+        draft = Draft(
+            header=draft.header,
+            role_id=draft.role_id,
+            intro=draft.intro,
+            fms=fms,
+            end=draft.end,
+        )
         self._set_guild_draft(interaction.guild.id, draft)
 
-        fms = [Formation(**x) for x in draft["fms"]]
-        preview = self._render_message(
-            draft["header"],
-            draft["role_id"],
-            draft["intro"],
-            fms,
-            draft["end"],
+        preview = render_message(
+            draft.header,
+            draft.role_id,
+            draft.intro,
+            draft.fms,
+            draft.end,
         )
         logger.info(f"Guild {interaction.guild.id} removed formation {removed.name!r} ({removed.start_iso}) from draft.")
         await interaction.response.send_message(
@@ -675,21 +660,23 @@ class FormationManagement(commands.Cog):
             return
 
         assert interaction.guild is not None
-        draft: dict[str, Any] = self._get_guild_draft(interaction.guild.id)
-        header = draft["header"]
-        role_id = draft["role_id"]
-        intro = draft["intro"]
-        end = draft["end"]
-        draft = {"header": header, "role_id": role_id, "intro": intro, "fms": [], "end": end}
+        draft = self._get_guild_draft(interaction.guild.id)
+
+        draft = Draft(
+            header=draft.header,
+            role_id=draft.role_id,
+            intro=draft.intro,
+            fms=[],
+            end=draft.end,
+        )
         self._set_guild_draft(interaction.guild.id, draft)
 
-        fms = [Formation(**x) for x in draft["fms"]]
-        content = self._render_message(
-            header,
-            role_id,
-            intro,
-            fms,
-            end,
+        content = render_message(
+            draft.header,
+            draft.role_id,
+            draft.intro,
+            draft.fms,
+            draft.end,
         )
         logger.info(f"Guild {interaction.guild.id} cleared the formations draft.")
         await interaction.response.send_message(
@@ -715,21 +702,20 @@ class FormationManagement(commands.Cog):
         if not await check_has_role(logger, interaction, ALLOWED_ROLES):
             return
 
-        await interaction.response.send_message("Génération du message en cours...")
+        await interaction.response.defer(thinking=True)
         assert interaction.guild is not None
         draft = self._get_guild_draft(interaction.guild.id)
-        fms = [Formation(**x) for x in draft["fms"]]
-        fms.sort(key=lambda x: x.start_dt)
+        fms = sorted(draft.fms, key=lambda x: x.start_dt)
 
-        content = self._render_message(
-            draft["header"],
-            draft["role_id"],
-            draft["intro"],
+        content = render_message(
+            draft.header,
+            draft.role_id,
+            draft.intro,
             fms,
-            draft["end"],
+            draft.end,
         )
         logger.info(f"Guild {interaction.guild.id} previewed the formations draft.")
-        await interaction.edit_original_response(
+        await interaction.followup.send(
             content=f"{content or '_(vide)_'}",
             embed=Embed(description="Utilise **/fm publish** pour le publier."),
         )
@@ -751,34 +737,34 @@ class FormationManagement(commands.Cog):
 
         assert interaction.guild is not None
         draft = self._get_guild_draft(interaction.guild.id)
-        fms = [Formation(**x) for x in draft["fms"]]
-        if not fms:
+        if not draft.fms:
             logger.warning(f"Guild {interaction.guild.id} tried to publish empty formations draft.")
-            await interaction.response.send_message("Le brouillon ne contient aucune formation.", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.DRAFT_EMPTY, ephemeral=True)
             return
-        fms.sort(key=lambda x: x.start_dt)
-        content = self._render_message(
-            draft["header"],
-            draft["role_id"],
-            draft["intro"],
+
+        await interaction.response.defer(thinking=True)
+
+        fms = sorted(draft.fms, key=lambda x: x.start_dt)
+        content = render_message(
+            draft.header,
+            draft.role_id,
+            draft.intro,
             fms,
-            draft["end"],
+            draft.end,
         )
 
-        msg = await channel.send(content, suppress_embeds=True)
-
-        published_message = {
-            "header": draft["header"],
-            "role_id": draft["role_id"],
-            "intro": draft["intro"],
-            "end": draft["end"],
-            "fms": [],
-        }
+        try:
+            msg = await channel.send(content, suppress_embeds=True)
+        except Exception:
+            logger.exception(f"Guild {interaction.guild.id} failed to publish the formations draft in {channel!r}.")
+            await interaction.followup.send(
+                "Erreur pendant la publication du message.",
+                ephemeral=True,
+            )
+            return
 
         success_reactions = 0
         for fm in fms:
-            fm_dict = fm.to_dict()
-            published_message["fms"].append(fm_dict)
             try:
                 await msg.add_reaction(fm.emoji)
                 success_reactions += 1
@@ -788,17 +774,25 @@ class FormationManagement(commands.Cog):
                     f"for formation {fm.name!r} in published message."
                 )
 
+        published_message = Draft(
+            header=draft.header,
+            role_id=draft.role_id,
+            intro=draft.intro,
+            fms=fms,
+            end=draft.end,
+        )
+
         self._set_last_published_in_guild(
             interaction.guild.id,
-            {
-                "message_id": msg.id,
-                "channel_id": channel.id,
-                "message": published_message,
-            },
+            PublishedMessage(
+                message_id=msg.id,
+                channel_id=channel.id,
+                message=published_message,
+            ),
         )
 
         logger.info(f"Guild {interaction.guild.id} published the formations draft in {channel}.")
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Message publié dans {channel.mention} (ID: `{msg.id}`) avec "
             f"{success_reactions}/{len(fms)} réaction(s) ajoutée(s)."
         )
@@ -828,25 +822,20 @@ class FormationManagement(commands.Cog):
         published = self._get_last_published_in_guild(interaction.guild.id)
         if not published and (not message_id or not publication_channel):
             logger.warning(f"Guild {interaction.guild.id} tried to export reactions without published message or ID.")
-            await interaction.response.send_message("Aucun message publié enregistré et aucun ID fourni.", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.NO_PUBLISHED_MESSAGE, ephemeral=True)
             return
 
-        target_message_id = int(message_id) if message_id else int(published["message_id"]) if published else None
-        target_channel_id = (
-            int(publication_channel.id) if publication_channel else int(published["channel_id"]) if published else None
-        )
+        target_message_id = int(message_id) if message_id else published.message_id if published else None
+        target_channel_id = int(publication_channel.id) if publication_channel else published.channel_id if published else None
         if not target_message_id or not target_channel_id:
             logger.error(f"Guild {interaction.guild.id} has inconsistent published message data: {published}")
-            await interaction.response.send_message("Données de message publié incohérentes.")
+            await interaction.response.send_message(ErrorMessages.INCONSISTENT_PUBLISHED_DATA, ephemeral=True)
             return
 
-        message_payload = published["message"] if published else {}
         fm_by_emoji: dict[str, dict[str, Any]] = {}
-        for fm in message_payload.get("fms", []):
-            emoji = fm.get("emoji")
-            if not emoji:
-                continue
-            fm_by_emoji[emoji] = {"name": fm.get("name"), "seats": fm.get("seats")}
+        if published:
+            for fm in published.message.fms:
+                fm_by_emoji[fm.emoji] = {"name": fm.name, "seats": fm.seats}
 
         history = self._get_reaction_history(interaction.guild.id, target_message_id)
         history_csv = io.StringIO()
@@ -855,12 +844,12 @@ class FormationManagement(commands.Cog):
         for ev in history:
             hist_writer.writerow(
                 [
-                    ev.get("ts_iso", ""),
-                    ev.get("action", ""),
-                    ev.get("emoji", ""),
-                    fm_by_emoji.get(ev.get("emoji", ""), {}).get("name", ""),
-                    ev.get("user_name", ""),
-                    ev.get("user_id", ""),
+                    ev.ts_iso,
+                    ev.action,
+                    ev.emoji,
+                    fm_by_emoji.get(ev.emoji, {}).get("name", ""),
+                    ev.user_name or "",
+                    ev.user_id,
                 ]
             )
 
@@ -873,40 +862,15 @@ class FormationManagement(commands.Cog):
             )
             return
 
-        try:
-            channel = interaction.guild.get_channel(target_channel_id) or await interaction.guild.fetch_channel(
-                target_channel_id
-            )
-            assert isinstance(channel, TextChannel)
-            msg = await channel.fetch_message(target_message_id)
-        except Exception:
-            logger.exception(
-                f"Guild {interaction.guild.id} failed to fetch message {target_message_id} in channel {target_channel_id}."
-            )
-            await interaction.response.send_message(content="Impossible de récupérer le message cible.", ephemeral=True)
-            return
+        await interaction.response.defer(thinking=True)
 
-        await interaction.response.send_message("Export en cours...")
+        fms = published.message.fms if published else []
 
-        reactions_snapshot: dict[str, dict[int, dict[str, str]]] = {}
-        for reaction in msg.reactions:
-            emoji_str = str(reaction.emoji)
-            if fm_by_emoji and emoji_str not in fm_by_emoji:
-                continue
-
-            reactions_snapshot.setdefault(emoji_str, {})
-            async for user in reaction.users():
-                if user.bot:
-                    continue
-                reactions_snapshot[emoji_str][user.id] = {
-                    "username": user.name,
-                }
-
-        reg_text, reg_file = self._format_current_registrations(history, reactions_snapshot, fm_by_emoji)
+        reg_text, reg_file = format_current_registrations(fms)
         if reg_file:
-            await interaction.edit_original_response(
-                content=reg_text,
-                attachments=[
+            await interaction.followup.send(
+                reg_text,
+                files=[
                     File(reg_file, filename="inscriptions_ordre_inscription.txt"),
                     File(
                         fp=io.BytesIO(history_csv.getvalue().encode(encoding="utf-8")), filename="formations_reactions_log.csv"
@@ -915,9 +879,9 @@ class FormationManagement(commands.Cog):
             )
             return
 
-        await interaction.edit_original_response(
-            content=reg_text,
-            attachments=[
+        await interaction.followup.send(
+            reg_text,
+            files=[
                 File(
                     fp=io.BytesIO(history_csv.getvalue().encode(encoding="utf-8")),
                     filename="formations_reactions_log.csv",
@@ -939,366 +903,126 @@ class FormationManagement(commands.Cog):
         """
         if payload.guild_id is None:
             return
-        pub = self._get_last_published_in_guild(payload.guild_id)
-        if not pub or payload.message_id != pub.get("message_id"):
+
+        member = payload.member
+        if member and member.bot:
             return
 
-        emoji_str = str(payload.emoji)
-        message_payload = pub.get("message", {})
-        fm_emojis: set[str] = set()
-        for fm in message_payload.get("fms", []):
-            emoji = fm.get("emoji")
-            if emoji:
-                fm_emojis.add(str(emoji))
-        if fm_emojis and emoji_str not in fm_emojis:
-            return
+        async with self._reaction_lock:
+            pub = self._get_last_published_in_guild(payload.guild_id)
+            if not pub or payload.message_id != pub.message_id:
+                return
+            emoji_str = str(payload.emoji)
+            fm_emojis = {fm.emoji for fm in pub.message.fms}
+            if fm_emojis and emoji_str not in fm_emojis:
+                return
 
-        member_name: str | None = None
-        if payload.event_type == "REACTION_ADD" and payload.member is not None:
-            member = payload.member
-            member_name = member.name
+            member_name = member.name if member else None
+            reaction_event = ReactionEvent(
+                message_id=payload.message_id,
+                user_id=payload.user_id,
+                user_name=member_name,
+                emoji=emoji_str,
+                action=cast(Literal["add", "remove"], payload.event_type.removeprefix("REACTION_").lower()),
+                ts_iso=datetime.now(PARIS_TZ).isoformat(timespec="seconds"),
+            )
 
-        self._log_reaction(
-            payload.guild_id,
-            payload.message_id,
-            payload.user_id,
-            emoji_str,
-            payload.event_type,
-            member_name,
-        )
+            self._log_reaction(payload.guild_id, reaction_event)
 
-        await self._update_published_message(payload.guild_id)
+            await self._update_published_message(payload.guild_id)
 
     # endregion Event Listeners
 
-    # region ====== Helpers ======
-    # -- Parsing & Rendering --
+    # region ====== Background Tasks ======
 
-    @staticmethod
-    def _parse_date_time(date_str: str, hour_str: str) -> datetime:
-        """Parse date and time strings into a timezone-aware datetime object.
+    @tasks.loop(minutes=5)
+    async def _check_upcoming_formations(self) -> None:
+        """Check for formations starting soon and notify trainers/responsibles (Paris timezone)."""
+        logger.debug("Checking for upcoming formations to notify trainers and responsibles (Paris time).")
+        now = datetime.now(PARIS_TZ)
+        window_tolerance = timedelta(minutes=5)
+        notification_window_start = now + TRAINER_NOTIFICATION_ADVANCE - window_tolerance
+        notification_window_end = now + TRAINER_NOTIFICATION_ADVANCE + window_tolerance
+        start_window_start = now - window_tolerance
+        start_window_end = now + window_tolerance
 
-        Args:
-            date_str (str): Date string in 'DD/MM/YYYY' format.
-            hour_str (str): Hour string in 'HH:MM' format.
+        for guild_id_str in self.state:
+            guild_id = int(guild_id_str)
+            guild = self.bot.get_guild(guild_id)
+            if not guild:
+                continue
 
-        Returns:
-            datetime: A timezone-aware datetime object.
-        """
-        d, m, y = map(int, date_str.split("/"))
-        hh, mm = map(int, hour_str.split(":"))
-        dt = datetime(y, m, d, hh, mm)
-        logger.debug(f"Parsed formation schedule {date_str} {hour_str} -> {dt.isoformat()}")
-        return dt
+            pub = self._get_last_published_in_guild(guild_id)
+            if not pub:
+                continue
 
-    @staticmethod
-    def _humanize_dt(dt: datetime) -> str:
-        """Humanize a datetime object.
+            fms = list(pub.message.fms)
+            if not fms:
+                continue
 
-        Args:
-            dt (datetime): The datetime object to humanize.
+            for fm in fms:
+                if fm.notified_at_start:
+                    continue
 
-        Returns:
-            str: The humanized date/time string.
-        """
-        days = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
-        day_name = days[dt.weekday()]
-        date_part = dt.strftime("%d/%m")
-        time_part = dt.strftime("%Hh%M")
-        return f"**{day_name} {date_part} à {time_part}**"
+                send_contacts = format_respo_contacts(guild)
+                if not fm.notified_hour_before and notification_window_start <= fm.start_dt <= notification_window_end:
+                    await notify_trainer_before_formation(
+                        guild,
+                        fm,
+                        send_contacts,
+                        moment="hour_before",
+                    )
+                    await notify_responsible_before_formation(
+                        guild,
+                        fm,
+                        send_contacts,
+                        moment="hour_before",
+                    )
 
-    def _render_message(
-        self,
-        header: str,
-        role_id: int,
-        intro: str,
-        fms: list[Formation],
-        end: str,
-    ) -> str:
-        """Render the message for the formations.
+                    fm.notified_hour_before = True
+                    continue
 
-        Args:
-            header (str): The header line (e.g. title).
-            role_id (int): The role mention to prepend.
-            intro (str): The introduction text.
-            fms (list[Formation]): The list of formations to include in the message.
-            end (str): The ending text.
+                if start_window_start <= fm.start_dt <= start_window_end:
+                    await notify_trainer_before_formation(
+                        guild,
+                        fm,
+                        send_contacts,
+                        moment="start",
+                    )
+                    await notify_responsible_before_formation(
+                        guild,
+                        fm,
+                        send_contacts,
+                        moment="start",
+                    )
 
-        Returns:
-            str: The rendered message.
-        """
-        logger.debug("Rendering formations message.")
-        lines: list[str] = []
-        header_text = header.strip()
-        intro_block = intro.strip()
-        lines.append(header_text)
-        lines.append(f"Hey <@&{role_id}> !")
-        if intro_block:
-            lines.append(intro_block)
-        lines.append("")
+                    fm.notified_at_start = True
 
-        for fm in fms:
-            line_block = [
-                f"{fm.emoji} **{fm.name}** avec {fm.trainer_mention}",
-                f":date: {self._humanize_dt(fm.start_dt)}  — "
-                f":hourglass_flowing_sand: {fm.duration}  — "
-                f":busts_in_silhouette: {len(fm.registered_users)}/{fm.seats} place(s)",
-            ]
-            line_block += [fm.description] if fm.description else []
-            lines.append("\n".join(line_block))
-            lines.append("")
-
-        end_lines = [
-            ":arrow_right: Pour s'inscrire, réagis avec les émojis des formations correspondantes.",
-            ":warning: Si tu ne peux plus venir, n'oublie pas de retirer ta réaction pour libérer la place.",
-            "",
-            f"Tu veux apprendre autre chose ? [**Propose une formation ici**]({FM_REQUEST_FORMS})",
-        ]
-        lines.append("\n".join(end_lines))
-        lines.append("")
-
-        if end.strip():
-            lines.append(end.strip())
-            lines.append("")
-
-        if lines and not lines[-1]:
-            lines.pop()
-        return "\n".join(lines)
-
-    # TODO: remove
-    def _normalize_message_payload(self, payload: dict[str, Any]) -> bool:
-        """Ensure message payloads follow the expected schema.
-
-        Args:
-            payload (dict[str, Any]): Draft or published message payload.
-
-        Returns:
-            bool: True if the payload was modified.
-        """
-        changed = False
-
-        intro_text = payload.get("intro")
-        if intro_text is None:
-            payload["intro"] = ""
-            intro_text = ""
-            changed = True
-        intro_lines = intro_text.splitlines()
-
-        def pop_leading_blank() -> None:
-            nonlocal intro_lines, changed
-            while intro_lines and not intro_lines[0].strip():
-                intro_lines.pop(0)
-                changed = True
-
-        pop_leading_blank()
-
-        header_line: str | None = None
-        if intro_lines:
-            first_line = intro_lines[0].strip()
-            if first_line.startswith("# [FORMATIONS]"):
-                header_line = first_line
-                intro_lines.pop(0)
-                changed = True
-
-        if header_line is not None:
-            if payload.get("header") != header_line:
-                payload["header"] = header_line
-                changed = True
-        elif "header" not in payload:
-            payload["header"] = ""
-            changed = True
-
-        pop_leading_blank()
-
-        role_id_value = payload.get("role_id")
-        if intro_lines:
-            role_match = ROLE_MENTION_RE.search(intro_lines[0])
-            if role_match:
-                extracted_role_id = int(role_match.group(1))
-                if role_id_value != extracted_role_id:
-                    payload["role_id"] = extracted_role_id
-                    role_id_value = extracted_role_id
-                    changed = True
-                intro_lines.pop(0)
-                changed = True
-
-        if "role_id" not in payload:
-            payload["role_id"] = role_id_value
-            changed = True
-
-        pop_leading_blank()
-
-        normalized_intro = "\n".join(intro_lines).strip()
-        if payload.get("intro") != normalized_intro:
-            payload["intro"] = normalized_intro
-            changed = True
-
-        return changed
-
-    def _format_respo_contacts(self, guild: Guild) -> str:
-        """Build the contact string for formation managers.
-
-        Args:
-            guild (Guild): The guild to get the role from.
-
-        Returns:
-            str: The contact string.
-        """
-        logger.debug(f"Resolving formation contacts for guild {guild.id}.")
-        role = get(guild.roles, name="Respo Formations")
-        if role is None:
-            logger.debug(f"Role 'Respo Formations' missing in guild {guild.id}; using fallback contacts.")
-            return "un·e membre du Pôle Formations"
-        members = [member for member in role.members if not member.bot]
-        if not members:
-            logger.debug(f"Role 'Respo Formations' has no human members in guild {guild.id}; using fallback contacts.")
-            return "un·e membre du Pôle Formations"
-        mentions = [member.mention for member in members]
-        logger.debug(f"Resolved {len(mentions)} formation manager contacts for guild {guild.id}.")
-        return " ou ".join(mentions)
-
-    # -- Notifications --
-
-    async def _send_registration_dm(
-        self,
-        guild: Guild,
-        user_id: int,
-        formation: Formation,
-        contacts: str,
-    ) -> None:
-        """Notify a user that they got a seat in a formation.
-
-        Args:
-            guild (Guild): The guild where the user is located.
-            user_id (int): The ID of the user to notify.
-            formation (Formation): The formation.
-            contacts (str): The contact string for formation managers.
-        """
-        logger.debug(f"Preparing registration DM for guild {guild.id} user {user_id} formation {formation.name}.")
-        try:
-            member = guild.get_member(user_id) or await guild.fetch_member(user_id)
-        except Exception:
-            logger.exception(f"Unexpected error while fetching member {user_id} in guild {guild.id}.")
-            return
-        if member.bot:
-            return
-        if not await can_dm_user(member):
-            logger.error(f"Cannot DM user {user_id} in guild {guild.id}; skipping registration DM.")
-            return
-
-        logger.debug(f"Resolved member {member.id} ({member.display_name}) for registration DM in guild {guild.id}.")
-
-        datetime_text = self._humanize_dt(datetime.fromisoformat(formation.start_iso)).lower()[2:-2]
-
-        message = (
-            f"Salut {member.display_name} !\n"
-            f"Ton inscription à la formation **{formation.name}** le {datetime_text} a bien été enregistrée.\n"
-            "Si tu ne peux finalement pas y participer, pense à retirer ta réaction pour libérer la place.\n\n"
-            f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
-        )
-        try:
-            await member.send(message)
-        except Exception:
-            logger.exception(f"Failed to send registration DM to user {user_id} in guild {guild.id}.")
-        else:
-            logger.info(f"Sent registration DM to user {user_id} in guild {guild.id} for formation {formation.name}.")
-
-    async def _send_promotion_dm(
-        self,
-        guild: Guild,
-        user_id: int,
-        formation: Formation,
-        contacts: str,
-    ) -> None:
-        """Notify a user that they were promoted from the waitlist.
-
-        Args:
-            guild (Guild): The guild where the user is located.
-            user_id (int): The ID of the user to notify.
-            formation (Formation): The formation.
-            contacts (str): The contact string for formation managers.
-        """
-        logger.debug(f"Preparing waitlist promotion DM for guild {guild.id} user {user_id} formation {formation.name}.")
-        try:
-            member = guild.get_member(user_id) or await guild.fetch_member(user_id)
-        except Exception:
-            logger.exception(f"Unexpected error while fetching member {user_id} in guild {guild.id}.")
-            return
-        if member.bot:
-            return
-        if not await can_dm_user(member):
-            logger.error(f"Cannot DM user {user_id} in guild {guild.id}; skipping promotion DM.")
-            return
-
-        logger.debug(f"Resolved member {member.id} ({member.display_name}) for waitlist promotion DM in guild {guild.id}.")
-
-        datetime_text = self._humanize_dt(datetime.fromisoformat(formation.start_iso)).lower()[2:-2]
-
-        message = (
-            f"Salut {member.display_name} !\n"
-            "Bonne nouvelle : une place s'est libérée ! "
-            f"Tu es désormais inscrit·e à la formation **{formation.name}** le {datetime_text}.\n"
-            "Si tu ne peux finalement pas y participer, pense à retirer ta réaction pour libérer la place.\n\n"
-            f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
-        )
-        try:
-            await member.send(message)
-        except Exception:
-            logger.exception(f"Failed to send waitlist promotion DM to user {user_id} in guild {guild.id}.")
-        else:
-            logger.info(f"Sent waitlist promotion DM to user {user_id} in guild {guild.id} for formation {formation.name}.")
-
-    async def _send_waitlist_dm(
-        self,
-        guild: Guild,
-        user_id: int,
-        formation_name: str,
-        waitlist_position: int,
-        contacts: str,
-    ) -> None:
-        """Notify a user that they joined the waitlist for a formation.
-
-        Args:
-            guild (Guild): The guild where the user is located.
-            user_id (int): The ID of the user to notify.
-            formation_name (str): The name of the formation.
-            waitlist_position (int): The user's position on the waitlist.
-            contacts (str): The contact string for formation managers.
-        """
-        logger.debug(
-            f"Preparing waitlist DM for guild {guild.id} user {user_id} formation "
-            f"{formation_name} position {waitlist_position}."
-        )
-        try:
-            member = guild.get_member(user_id) or await guild.fetch_member(user_id)
-        except Exception:
-            logger.exception(f"Unexpected error while fetching member {user_id} in guild {guild.id}.")
-            return
-        if member.bot:
-            return
-        if not await can_dm_user(member):
-            logger.error(f"Cannot DM user {user_id} in guild {guild.id}; skipping waitlist DM.")
-            return
-
-        logger.debug(f"Resolved member {member.id} ({member.display_name}) for waitlist DM in guild {guild.id}.")
-
-        position_text = f"en **{waitlist_position}{'e' if waitlist_position > 1 else 're'} position**"
-        message = (
-            f"Salut {member.display_name} !\n"
-            f"On sait que la formation **{formation_name}** t'intéresse, mais toutes les places sont déjà prises.\n"
-            f"Tu es {position_text} sur la liste d'attente. Nous te préviendrons si une place se libère.\n\n"
-            f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
-        )
-        try:
-            await member.send(message)
-        except Exception:
-            logger.exception(f"Failed to send waitlist DM to user {user_id} in guild {guild.id}.")
-        else:
-            logger.info(
-                f"Sent waitlist DM to user {user_id} in guild {guild.id} for "
-                f"formation {formation_name} (position {waitlist_position})."
+            updated_draft = Draft(
+                header=pub.message.header,
+                role_id=pub.message.role_id,
+                intro=pub.message.intro,
+                fms=fms,
+                end=pub.message.end,
+            )
+            self._set_last_published_in_guild(
+                guild_id,
+                PublishedMessage(
+                    message_id=pub.message_id,
+                    channel_id=pub.channel_id,
+                    message=updated_draft,
+                ),
             )
 
+    @_check_upcoming_formations.before_loop
+    async def _before_check_upcoming_formations(self) -> None:
+        """Wait for the bot to be ready before starting the background task."""
+        await self.bot.wait_until_ready()
+        logger.info("Formation notification task started")
+
+    # endregion Background Tasks
+
+    # region ====== Helpers ======
     # -- State --
 
     @staticmethod
@@ -1368,113 +1092,79 @@ class FormationManagement(commands.Cog):
         self.state[str(guild_id)] = payload
         self._save_state(self.state)
 
-    def _get_guild_draft(self, guild_id: int) -> dict[str, Any]:
+    def _get_guild_draft(self, guild_id: int) -> Draft:
         """Get the draft state for a specific guild.
 
         Args:
             guild_id (int): The ID of the guild.
 
         Returns:
-            dict[str, Any]: The draft of the guild.
+            Draft: The draft of the guild.
         """
         guild_state = self._get_guild_state(guild_id)
         if "draft" not in guild_state:
             logger.debug(f"Initializing draft state for guild {guild_id}.")
             self._set_guild_state(guild_id, guild_state)
-            guild_state["draft"] = {"header": None, "role_id": None, "intro": "", "fms": [], "end": ""}
-        # return guild_state["draft"]   # TODO: uncomment and remove after
+            guild_state["draft"] = {"header": "", "role_id": 0, "intro": "", "fms": [], "end": ""}
+        draft_dict = guild_state["draft"]
+        return Draft.from_dict(draft_dict)
 
-        draft = guild_state["draft"]
-        if self._normalize_message_payload(draft):
-            logger.debug(f"Upgraded draft schema for guild {guild_id}.")
-            self._set_guild_draft(guild_id, draft)
-        return draft
-
-    def _set_guild_draft(self, guild_id: int, draft: dict[str, Any]) -> None:
+    def _set_guild_draft(self, guild_id: int, draft: Draft) -> None:
         """Set the draft for a specific guild.
 
         Args:
             guild_id (int): The ID of the guild.
-            draft (dict[str, Any]): The draft of the guild.
+            draft (Draft): The draft of the guild.
         """
-        self._normalize_message_payload(draft)  # TODO: remove
         guild_state = self._get_guild_state(guild_id)
-        guild_state["draft"] = draft
+        guild_state["draft"] = draft.to_dict()
         self._set_guild_state(guild_id, guild_state)
 
-    def _get_last_published_in_guild(self, guild_id: int) -> dict[str, Any] | None:
+    def _get_last_published_in_guild(self, guild_id: int) -> PublishedMessage | None:
         """Get the last published state for a specific guild.
 
         Args:
             guild_id (int): The ID of the guild.
 
         Returns:
-            dict[str, Any] | None: The last published state of the guild, or None if not found.
+            PublishedMessage | None: The last published state of the guild, or None if not found.
         """
         guild_state = self._get_guild_state(guild_id)
-        published = guild_state.get("published")
-        if not published:
+        published_dict = guild_state.get("published")
+        if not published_dict:
             logger.warning(f"No published formations data stored for guild {guild_id}.")
             return None
-        # TODO: remove
-        message_payload = published.get("message")
-        if isinstance(message_payload, dict) and self._normalize_message_payload(message_payload):
-            logger.debug(f"Upgraded published message schema for guild {guild_id}.")
-            self._set_last_published_in_guild(guild_id, published)
-        # until here
-        return published
+        return PublishedMessage.from_dict(published_dict)
 
-    def _set_last_published_in_guild(self, guild_id: int, published: dict[str, Any]) -> None:
+    def _set_last_published_in_guild(self, guild_id: int, published: PublishedMessage) -> None:
         """Set the last published state for a specific guild.
 
         Args:
             guild_id (int): The ID of the guild.
-            published (dict[str, Any]): The published state of the guild.
+            published (PublishedMessage): The published state of the guild.
         """
-        # TODO: remove
-        message_payload = published.get("message")
-        if isinstance(message_payload, dict):
-            self._normalize_message_payload(message_payload)
-        # until here
         guild_state = self._get_guild_state(guild_id)
-        guild_state["published"] = published
+        guild_state["published"] = published.to_dict()
         self._set_guild_state(guild_id, guild_state)
 
     # -- Reaction Logs & Updates --
 
-    def _log_reaction(
-        self, guild_id: int, message_id: int, user_id: int, emoji: str, action: str, user_name: str | None = None
-    ) -> None:
-        """Log a reaction event.
+    def _log_reaction(self, guild_id: int, reaction_event: ReactionEvent) -> None:
+        """Log a reaction event with Paris timezone.
 
         Args:
             guild_id (int): The ID of the guild.
-            message_id (int): The ID of the message.
-            user_id (int): The ID of the user.
-            emoji (str): The emoji used in the reaction.
-            action (str): The action taken (e.g., "add" or "remove").
-            user_name (str | None, optional): The name of the user. Defaults to None.
+            reaction_event (ReactionEvent): The event to log.
         """
         self._purge_all_reaction_logs()
         guild_state = self._get_guild_state(guild_id)
-        log = guild_state.get("reactions_log") or []
-        normalized_action = action[9:].lower()
-        ts_iso = datetime.now().isoformat(timespec="seconds")
-        if user_name is None:
-            user_name = self._get_last_known_user_name(log, message_id, user_id)
-        log.append(
-            {
-                "message_id": message_id,
-                "user_id": user_id,
-                "user_name": user_name,
-                "emoji": emoji,
-                "action": normalized_action,
-                "ts_iso": ts_iso,
-            }
-        )
-        guild_state["reactions_log"] = log
+        log = [ReactionEvent.from_dict(entry) for entry in guild_state.get("reactions_log") or []]
+        if reaction_event.user_name is None:
+            reaction_event.user_name = self._get_last_known_user_name(log, reaction_event.message_id, reaction_event.user_id)
+        log.append(reaction_event)
+        guild_state["reactions_log"] = [event.to_dict() for event in log]
         logger.debug(
-            f"Logged {normalized_action} reaction for guild {guild_id} message {message_id} user {user_id} with emoji {emoji}."
+            f"Logged {reaction_event.action} reaction for guild {guild_id} message {reaction_event.message_id} user {reaction_event.user_id} with emoji {reaction_event.emoji} (Paris time: {reaction_event.ts_iso})."
         )
         self._set_guild_state(guild_id, guild_state)
 
@@ -1483,37 +1173,38 @@ class FormationManagement(commands.Cog):
         changed = False
         removed_total = 0
         for guild_state in self.state.values():
-            log = guild_state.get("reactions_log")
-            if not log:
+            raw_log = guild_state.get("reactions_log")
+            if not raw_log:
                 continue
+            log = [ReactionEvent.from_dict(entry) for entry in raw_log]
             filtered = self._purge_reaction_log(list(log))
             if len(filtered) != len(log):
                 removed_total += len(log) - len(filtered)
-                guild_state["reactions_log"] = filtered
+                guild_state["reactions_log"] = [event.to_dict() for event in filtered]
                 changed = True
         if changed:
             logger.debug(f"Purged {removed_total} reaction log entries across guilds.")
             self._save_state(self.state)
 
     @staticmethod
-    def _purge_reaction_log(log: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Remove reaction log entries older than the retention window.
+    def _purge_reaction_log(log: list[ReactionEvent]) -> list[ReactionEvent]:
+        """Remove reaction log entries older than the retention window (Paris timezone).
 
         Args:
-            log (list[dict[str, Any]]): The reaction log to purge.
+            log (list[ReactionEvent]): The reaction log to purge.
 
         Returns:
-            list[dict[str, Any]]: The filtered reaction log.
+            list[ReactionEvent]: The filtered reaction log.
         """
-        cutoff = datetime.now() - REACTION_LOG_RETENTION
-        filtered: list[dict[str, Any]] = []
+        cutoff = datetime.now(PARIS_TZ) - REACTION_LOG_RETENTION
+        filtered: list[ReactionEvent] = []
         for entry in log:
-            ts_iso = entry.get("ts_iso")
+            ts_iso = entry.ts_iso
             if not ts_iso:
                 filtered.append(entry)
                 continue
             try:
-                ts = datetime.fromisoformat(ts_iso)
+                ts = datetime.fromisoformat(ts_iso).astimezone(PARIS_TZ)
             except Exception:
                 filtered.append(entry)
                 continue
@@ -1522,11 +1213,11 @@ class FormationManagement(commands.Cog):
         return filtered
 
     @staticmethod
-    def _get_last_known_user_name(log: list[dict[str, Any]], message_id: int, user_id: int) -> str | None:
+    def _get_last_known_user_name(log: list[ReactionEvent], message_id: int, user_id: int) -> str | None:
         """Get the last known user name from the log.
 
         Args:
-            log (list[dict[str, Any]]): The reaction log.
+            log (list[ReactionEvent]): The reaction log.
             message_id (int): The ID of the message.
             user_id (int): The ID of the user.
 
@@ -1534,11 +1225,11 @@ class FormationManagement(commands.Cog):
             str | None: The last known user name, or None if not found.
         """
         for entry in reversed(log):
-            if entry.get("message_id") == message_id and entry.get("user_id") == user_id and entry.get("user_name"):
-                return entry.get("user_name")
+            if entry.user_id == user_id and entry.user_name:
+                return entry.user_name
         return None
 
-    def _get_reaction_history(self, guild_id: int, message_id: int) -> list[dict[str, Any]]:
+    def _get_reaction_history(self, guild_id: int, message_id: int) -> list[ReactionEvent]:
         """Get the reaction history for a specific message in a guild.
 
         Args:
@@ -1546,11 +1237,12 @@ class FormationManagement(commands.Cog):
             message_id (int): The ID of the message.
 
         Returns:
-            list[dict[str, Any]]: The reaction history for the message.
+            list[ReactionEvent]: The reaction history for the message.
         """
         guild_state = self._get_guild_state(guild_id)
-        history = [event for event in guild_state.get("reactions_log", []) or [] if event.get("message_id") == message_id]
-        history.sort(key=lambda ev: ev.get("ts_iso", ""))  # pyright: ignore
+        raw_log = guild_state.get("reactions_log", []) or []
+        history = [ev for entry in raw_log if (ev := ReactionEvent.from_dict(entry)).message_id == message_id]
+        history.sort(key=lambda ev: ev.ts_iso or "")
         logger.debug(f"Loaded {len(history)} reaction events for guild {guild_id} message {message_id}.")
         return history
 
@@ -1565,8 +1257,8 @@ class FormationManagement(commands.Cog):
             logger.debug(f"No published formations message recorded for guild {guild_id}; skipping update.")
             return
         guild = self.bot.get_guild(guild_id)
-        channel_id = pub.get("channel_id")
-        message_id = pub.get("message_id")
+        channel_id = pub.channel_id
+        message_id = pub.message_id
         if not guild or not channel_id or not message_id:
             logger.warning(
                 f"Incomplete published formations state for guild {guild_id} (channel={channel_id}, message={message_id})."
@@ -1582,16 +1274,12 @@ class FormationManagement(commands.Cog):
             return
         logger.debug(f"Fetched published message {message_id} in channel {channel_id} for guild {guild_id}.")
 
-        message_payload: dict[str, Any] = pub.get("message", {})
-        header = message_payload.get("header")
-        role_id = message_payload.get("role_id")
-        intro = message_payload.get("intro")
-        end = message_payload.get("end")
-
-        raw_fms = message_payload.get("fms", [])
-        fms: list[Formation] = []
-        for entry in raw_fms:
-            fms.append(Formation(**entry))
+        message_payload = pub.message
+        header = message_payload.header
+        role_id = message_payload.role_id
+        intro = message_payload.intro
+        end = message_payload.end
+        fms = list(message_payload.fms)
         tracked_emojis = {fm.emoji for fm in fms if fm.emoji}
 
         if not header or not role_id or not intro or not end or not fms:
@@ -1605,16 +1293,16 @@ class FormationManagement(commands.Cog):
 
         last_add: dict[tuple[str, int], datetime] = {}
         for event in history:
-            if event.get("action") != "add":
+            if event.action != "add":
                 continue
-            emoji = str(event.get("emoji", ""))
-            user_id = event.get("user_id")
+            emoji = str(event.emoji)
+            user_id = event.user_id
             if not emoji or user_id is None or emoji not in tracked_emojis:
                 continue
             try:
-                ts = datetime.fromisoformat(event.get("ts_iso", ""))
+                ts = datetime.fromisoformat(event.ts_iso).astimezone(PARIS_TZ)
             except (TypeError, ValueError):
-                ts = datetime.min
+                ts = datetime.min.replace(tzinfo=PARIS_TZ)
             key = (emoji, int(user_id))
             if key not in last_add or ts > last_add[key]:
                 last_add[key] = ts
@@ -1636,15 +1324,25 @@ class FormationManagement(commands.Cog):
         for fm in fms:
             prev_registered_ids = {entry.get("user_id") for entry in fm.registered_users if entry.get("user_id") is not None}
             prev_waitlisted_ids = {entry.get("user_id") for entry in fm.waitlisted_users if entry.get("user_id") is not None}
+
             current_users = reactions_snapshot.get(fm.emoji, {})
+            current_logged_user = {uid: username for uid, username in current_users.items() if (fm.emoji, uid) in last_add}
             ordered_users = sorted(
-                ((uid, last_add.get((fm.emoji, uid), datetime.min), username) for uid, username in current_users.items()),
+                (
+                    (uid, last_add.get((fm.emoji, uid), datetime.min.replace(tzinfo=PARIS_TZ)), username)
+                    for uid, username in current_logged_user.items()
+                ),
                 key=lambda item: (item[1], item[0]),
             )
+
             registered: list[dict[str, Any]] = []
             waitlisted: list[dict[str, Any]] = []
-            for position, (uid, _, username) in enumerate(ordered_users):
-                entry = {"user_id": uid, "username": username}
+            for position, (uid, ts, username) in enumerate(ordered_users):
+                entry = {
+                    "user_id": uid,
+                    "username": username,
+                    "ts_iso": ts.isoformat(timespec="seconds"),
+                }
                 if position < max(fm.seats, 0):
                     registered.append(entry)
                     if uid in prev_waitlisted_ids:
@@ -1658,17 +1356,23 @@ class FormationManagement(commands.Cog):
             fm.registered_users = registered
             fm.waitlisted_users = waitlisted
 
-        updated_fms = [fm.to_dict() for fm in fms]
-        pub["message"] = {
-            "header": header,
-            "role_id": role_id,
-            "intro": intro,
-            "end": end,
-            "fms": updated_fms,
-        }
-        self._set_last_published_in_guild(guild_id, pub)
+        updated_message_payload = Draft(
+            header=header,
+            role_id=role_id,
+            intro=intro,
+            fms=fms,
+            end=end,
+        )
+        self._set_last_published_in_guild(
+            guild_id,
+            PublishedMessage(
+                message_id=pub.message_id,
+                channel_id=pub.channel_id,
+                message=updated_message_payload,
+            ),
+        )
 
-        content = self._render_message(header, role_id, intro, fms, end)
+        content = render_message(header, role_id, intro, fms, end)
 
         try:
             await msg.edit(content=content, suppress=True)
@@ -1677,110 +1381,28 @@ class FormationManagement(commands.Cog):
         else:
             logger.info(f"Updated published formations message {msg.id} in channel {channel_id} for guild {guild_id}.")
 
-        contacts: str = self._format_respo_contacts(guild)
+        contacts: str = format_respo_contacts(guild)
 
         if promotion_notifications:
             logger.info(f"Dispatching {len(promotion_notifications)} waitlist promotion notification(s) for guild {guild_id}.")
             for user_id, fm in promotion_notifications:
-                await self._send_promotion_dm(guild, user_id, fm, contacts)
+                await send_promotion_dm(guild, user_id, fm, contacts)
         else:
             logger.debug(f"No waitlist promotion notifications for guild {guild_id}.")
 
         if registration_notifications:
             logger.info(f"Dispatching {len(registration_notifications)} new registration notification(s) for guild {guild_id}.")
             for user_id, fm in registration_notifications:
-                await self._send_registration_dm(guild, user_id, fm, contacts)
+                await send_registration_dm(guild, user_id, fm, contacts)
         else:
             logger.debug(f"No new registration notifications for guild {guild_id}.")
 
         if waitlist_notifications:
             logger.info(f"Dispatching {len(waitlist_notifications)} waitlist notification(s) for guild {guild_id}.")
             for user_id, fm_name, waitlist_index in waitlist_notifications:
-                await self._send_waitlist_dm(guild, user_id, fm_name, waitlist_index, contacts)
+                await send_waitlist_dm(guild, user_id, fm_name, waitlist_index, contacts)
         else:
             logger.debug(f"No new waitlist notifications for guild {guild_id}.")
-
-    def _format_current_registrations(
-        self,
-        history: list[dict[str, Any]],
-        reactions_snapshot: dict[str, dict[int, dict[str, str]]],
-        fm_meta: dict[str, dict[str, Any]],
-    ) -> tuple[str, io.BytesIO | None]:
-        """Format the current registrations for each formation.
-
-        Args:
-            history (list[dict[str, Any]]): The history of reactions.
-            reactions_snapshot (dict[str, dict[int, dict[str, str]]]): The current reactions snapshot.
-            fm_meta (dict[str, dict[str, Any]]): The mapping of emojis to formation metadata.
-
-        Returns:
-            tuple[str, io.BytesIO | None]: The formatted message and an optional file object.
-        """
-        last_add: dict[tuple[str, int], datetime] = {}
-        for ev in history:
-            if ev.get("action") != "add":
-                continue
-            emoji = str(ev.get("emoji", ""))
-            user_id = ev.get("user_id")
-            if user_id is None:
-                continue
-            key = (emoji, int(user_id))
-            try:
-                ts = datetime.fromisoformat(ev.get("ts_iso", ""))
-            except (TypeError, ValueError):
-                ts = datetime.min
-            if key not in last_add or ts > last_add[key]:
-                last_add[key] = ts
-
-        lines: list[str] = []
-        lines.append("**Inscriptions actuelles par formation (ordre d'inscription)**")
-        lines.append("")
-
-        emojis = set(reactions_snapshot.keys()) | set(fm_meta.keys())
-        for emoji in emojis:
-            name = fm_meta.get(emoji, {}).get("name", "")
-            seats = fm_meta.get(emoji, {}).get("seats", 0)
-            header = f"{emoji} **{name}**" if name else f"{emoji}"
-            header += f" ({seats} place{'s' if seats != 1 else ''})"
-            lines.append(header)
-
-            current_users = reactions_snapshot.get(emoji, {})
-            ordering: list[tuple[int, datetime]] = []
-            for uid, _meta in current_users.items():
-                ts = last_add.get((emoji, uid), datetime.min)
-                ordering.append((uid, ts))
-            ordering.sort(key=lambda item: (item[1], item[0]))
-
-            split_index = len(ordering) if seats is None else min(seats, len(ordering))
-            registered_entries = ordering[:split_index]
-            waitlisted_entries = ordering[split_index:]
-
-            if registered_entries:
-                for pos, (uid, ts) in enumerate(registered_entries, start=1):
-                    when = self._humanize_dt(ts).lower()[2:-2] if ts != datetime.min else "n/a"
-                    lines.append(f"{pos}. <@{uid}> · inscrit·e le {when}")
-            else:
-                lines.append("_(aucune inscription)_")
-
-            if waitlisted_entries:
-                for pos, (uid, ts) in enumerate(waitlisted_entries, start=len(registered_entries) + 1):
-                    when = self._humanize_dt(ts).lower()[2:-2] if ts != datetime.min else "n/a"
-                    lines.append(f"{pos}. <@{uid}> · inscrit·e le {when} (en attente)")
-
-            lines.append("")
-
-        text = "\n".join(lines).strip()
-
-        text_length = len(text)
-        file_obj: io.BytesIO | None = None
-        if text_length > MAX_MSG_CHARS:
-            file_obj = io.BytesIO(text.encode("utf-8"))
-            logger.debug(f"Registrations export exceeded {MAX_MSG_CHARS} chars ({text_length}); switching to attachment.")
-            text = "**Inscriptions actuelles par formation (extrait)**\nLe contenu complet est joint en fichier texte."
-        else:
-            logger.debug(f"Registrations export length: {text_length} characters.")
-
-        return text, file_obj
 
     # endregion Helpers
 

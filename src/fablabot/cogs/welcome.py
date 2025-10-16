@@ -10,9 +10,19 @@ from discord import HTTPException, Interaction, Member, PermissionOverwrite, Tex
 from discord.ext import commands
 from discord.utils import get
 
+from fablabot.cogs.helpers import (
+    ADMIN_ROLES,
+    ErrorMessages,
+    RoleNames,
+    check_has_role,
+    escape_md,
+    is_in_allowed_channel,
+    log_request,
+    safe_add_roles,
+    safe_create_text_channel,
+    safe_delete_channel,
+)
 from fablabot.guild_config import is_welcome_verify_enabled, set_welcome_verify_enabled
-
-from .utils import ADMIN_ROLES, check_has_role, is_in_allowed_channel, log_request
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +89,6 @@ class Welcome(commands.Cog):
         if not await is_in_allowed_channel(logger, interaction):
             return
 
-        assert isinstance(interaction.user, Member)
         if not await check_has_role(logger, interaction, ADMIN_ROLES):
             return
 
@@ -123,42 +132,47 @@ class Welcome(commands.Cog):
             return
 
         assert interaction.guild is not None
-        member_name = channel.name[len("welcome-") :]
+        member_name = channel.name.removeprefix("welcome-")
         member = get(interaction.guild.members, name=member_name)
+        if member is None:
+            logger.warning(f"Member not found by name: {member_name}")
+            member = next((u for u in channel.overwrites if isinstance(u, Member)), None)
         if member is None:
             logger.warning(f"Member not found: {member_name}")
             await interaction.response.send_message(
-                f"Impossible de trouver le membre avec le nom {member_name}.", ephemeral=True
+                ErrorMessages.MEMBER_NOT_FOUND.format(member_name=escape_md(member_name)), ephemeral=True
             )
             return
 
-        city_role = get(interaction.guild.roles, name=f"Membre {city}")
+        city_role_name = f"Membre {city}"
+        city_role = get(interaction.guild.roles, name=city_role_name)
         if city_role is None:
-            await interaction.response.send_message(f"Le rôle pour la ville {city} n'existe pas.", ephemeral=True)
+            await interaction.response.send_message(
+                ErrorMessages.ROLE_NOT_FOUND.format(role_name=city_role_name), ephemeral=True
+            )
             return
 
-        member_role = get(interaction.guild.roles, name="Membre ✓")
+        member_role = get(interaction.guild.roles, name=RoleNames.MEMBER_VERIFIED)
         if member_role is None:
-            await interaction.response.send_message("Le rôle Membre ✓ n'existe pas.", ephemeral=True)
+            await interaction.response.send_message(
+                ErrorMessages.ROLE_NOT_FOUND.format(role_name=RoleNames.MEMBER_VERIFIED), ephemeral=True
+            )
             return
 
-        try:
-            await member.add_roles(city_role, member_role, reason="Validation du nouveau membre")
-        except HTTPException:
-            logger.exception(f"Failed to assign roles for {member.name}")
-            await interaction.response.send_message("Une erreur est survenue lors de l'attribution des rôles.", ephemeral=True)
+        success, error = await safe_add_roles(logger, member, city_role, member_role, reason="Validation du nouveau membre")
+        if not success:
+            await interaction.response.send_message(error, ephemeral=True)
             return
 
         await interaction.response.send_message(
             f"Le membre {member.mention} a été validé avec succès et les rôles ont été attribués.", ephemeral=True
         )
 
-        try:
-            await channel.delete(reason="Salon de bienvenue supprimé après validation du membre")
-        except HTTPException:
-            logger.exception(f"Failed to delete channel for {member.name}")
-            await interaction.response.send_message("Une erreur est survenue lors de la suppression du salon.", ephemeral=True)
-            return
+        success, error = await safe_delete_channel(
+            logger, channel, reason="Salon de bienvenue supprimé après validation du membre"
+        )
+        if not success:
+            await interaction.response.send_message(error, ephemeral=True)
 
     # endregion Welcome Slash Commands Group
 
@@ -183,9 +197,9 @@ class Welcome(commands.Cog):
             logger.error("Validation category not found, cannot create welcome channel.")
             return
 
-        codir_role = get(guild.roles, name="CoDir")
+        codir_role = get(guild.roles, name=RoleNames.CODIR)
         if codir_role is None:
-            logger.error("CoDir role not found, cannot create welcome channel.")
+            logger.error(f"{RoleNames.CODIR} role not found, cannot create welcome channel.")
             return
 
         overwrites = {
@@ -193,15 +207,15 @@ class Welcome(commands.Cog):
             codir_role: PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
             member: PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
         }
-        try:
-            channel = await guild.create_text_channel(
-                name=f"welcome-{member.name}",
-                category=validation_category,
-                overwrites=overwrites,
-                reason=f"Welcome channel for new member {member.name}",
-            )
-        except HTTPException:
-            logger.exception(f"Failed to create welcome channel for {member.name}")
+        channel, error = await safe_create_text_channel(
+            logger,
+            validation_category,
+            f"welcome-{member.name}",
+            overwrites=overwrites,
+            reason=f"Welcome channel for new member {member.name}",
+        )
+        if not channel or error:
+            logger.exception(ErrorMessages.CHANNEL_CREATE_FAILED.format(channel_type=f"salon de bienvenue pour {member.name}"))
             return
 
         try:

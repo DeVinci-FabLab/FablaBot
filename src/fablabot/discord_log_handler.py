@@ -1,11 +1,13 @@
 """Discord log handler for logging messages to a specific Discord channel."""
 
+import io
 import logging
 from typing import override
 
-from discord import TextChannel
+from discord import File, TextChannel
 from discord.ext import commands
 
+from fablabot.cogs.helpers.constants import MAX_MSG_CHARS
 from fablabot.guild_config import get_log_channel_id
 
 CLEAR = "\u001b[0m"
@@ -62,4 +64,13 @@ class DiscordLogHandler(logging.Handler):
         channel = self.bot.get_channel(self.log_channel_id)
         if not isinstance(channel, TextChannel):
             return
-        await channel.send(f"```ansi\n{message}\n```")
+        log_message = f"```ansi\n{message}\n```"
+        file_obj: io.BytesIO | None = None
+        if len(log_message) > MAX_MSG_CHARS:
+            file_obj = io.BytesIO(log_message.encode("utf-8"))
+            log_message = "Log message too long, see attached file."
+
+        if file_obj:
+            await channel.send(log_message, file=File(file_obj, filename="log.txt"))
+        else:
+            await channel.send(log_message)
