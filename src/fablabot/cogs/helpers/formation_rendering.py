@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from discord import Guild
 from discord.utils import get
 
-from fablabot.cogs.helpers.constants import Emojis, RoleNames
+from fablabot.cogs.helpers.constants import MAX_MSG_CHARS, Emojis, RoleNames
 from fablabot.cogs.helpers.utils import escape_md
 
 if TYPE_CHECKING:
@@ -19,7 +19,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 FM_REQUEST_FORMS = "https://forms.office.com/e/MqVdQujzjf"
-MAX_MSG_CHARS = 1900
 
 
 def parse_date_time(date_str: str, hour_str: str, timezone: Any) -> datetime:

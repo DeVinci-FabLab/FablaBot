@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+MAX_MSG_CHARS = 1900
+
 
 class RoleNames:
     """Standard role names used in the guild."""
