@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from discord import Guild
 from discord.utils import get
 
-from fablabot.cogs.constants import Emojis, RoleNames
+from fablabot.cogs.helpers.constants import Emojis, RoleNames
 from fablabot.cogs.helpers.utils import escape_md
 
 if TYPE_CHECKING:

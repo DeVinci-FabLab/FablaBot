@@ -19,7 +19,7 @@ from discord import (
 )
 from discord.utils import get
 
-from fablabot.cogs.constants import ErrorMessages, RoleNames
+from fablabot.cogs.helpers.constants import ErrorMessages, RoleNames
 from fablabot.guild_config import get_commands_channel_id, set_commands_channel_id
 
 COMMANDS_CHANNEL_NAME = "commandes_bot"

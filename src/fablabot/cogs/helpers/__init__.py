@@ -1,5 +1,6 @@
 """Helpers for formation management cog."""
 
+from fablabot.cogs.helpers.constants import Emojis, ErrorMessages, RoleNames
 from fablabot.cogs.helpers.formation_models import PARIS_TZ, Draft, Formation, PublishedMessage, ReactionEvent
 from fablabot.cogs.helpers.formation_notifications import (
     notify_responsible_before_formation,
@@ -27,6 +28,8 @@ from fablabot.cogs.helpers.utils import (
     is_in_allowed_channel,
     log_request,
     safe_add_roles,
+    safe_create_text_channel,
+    safe_create_voice_channel,
     safe_delete_channel,
     safe_edit_channel,
     safe_remove_roles,
@@ -37,9 +40,12 @@ __all__ = [
     "ADMIN_ROLES",
     "PARIS_TZ",
     "Draft",
+    "Emojis",
+    "ErrorMessages",
     "Formation",
     "PublishedMessage",
     "ReactionEvent",
+    "RoleNames",
     "check_has_role",
     "escape_md",
     "format_channel_mention",
@@ -57,6 +63,8 @@ __all__ = [
     "parse_date_time",
     "render_message",
     "safe_add_roles",
+    "safe_create_text_channel",
+    "safe_create_voice_channel",
     "safe_delete_channel",
     "safe_edit_channel",
     "safe_remove_roles",

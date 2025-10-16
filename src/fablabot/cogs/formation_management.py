@@ -26,13 +26,15 @@ from discord import (
 from discord.ext import commands, tasks
 from emoji import EMOJI_DATA
 
-from fablabot.cogs.constants import Emojis, ErrorMessages, RoleNames
 from fablabot.cogs.helpers import (
     PARIS_TZ,
     Draft,
+    Emojis,
+    ErrorMessages,
     Formation,
     PublishedMessage,
     ReactionEvent,
+    RoleNames,
     format_current_registrations,
     format_respo_contacts,
     notify_responsible_before_formation,
@@ -51,7 +53,6 @@ logger = logging.getLogger(__name__)
 ALLOWED_ROLES = {RoleNames.RESPO_FORMATIONS, RoleNames.ADMIN_TEMP, RoleNames.ADMIN}
 DATA_FILE = "data/formations_state.json"
 DISCORD_EMOJI_RE = re.compile(r"^<a?:\w+:\d+>$")
-FM_REQUEST_FORMS = "https://forms.office.com/e/MqVdQujzjf"
 TRAINER_NOTIFICATION_ADVANCE = timedelta(hours=1)
 REACTION_LOG_RETENTION = timedelta(days=30)
 
