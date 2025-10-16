@@ -10,7 +10,7 @@ import json
 import logging
 from pathlib import Path
 import re
-from typing import Any, override
+from typing import Any, Literal, cast, override
 from warnings import deprecated
 
 from discord import (
@@ -32,6 +32,7 @@ from fablabot.cogs.helpers import (
     Draft,
     Formation,
     PublishedMessage,
+    ReactionEvent,
     format_current_registrations,
     format_respo_contacts,
     notify_responsible_before_formation,
@@ -844,12 +845,12 @@ class FormationManagement(commands.Cog):
         for ev in history:
             hist_writer.writerow(
                 [
-                    ev.get("ts_iso", ""),
-                    ev.get("action", ""),
-                    ev.get("emoji", ""),
-                    fm_by_emoji.get(ev.get("emoji", ""), {}).get("name", ""),
-                    ev.get("user_name", ""),
-                    ev.get("user_id", ""),
+                    ev.ts_iso,
+                    ev.action,
+                    ev.emoji,
+                    fm_by_emoji.get(ev.emoji, {}).get("name", ""),
+                    ev.user_name or "",
+                    ev.user_id,
                 ]
             )
 
@@ -918,15 +919,16 @@ class FormationManagement(commands.Cog):
                 return
 
             member_name = member.name if member else None
-
-            self._log_reaction(
-                payload.guild_id,
-                payload.message_id,
-                payload.user_id,
-                emoji_str,
-                payload.event_type,
-                member_name,
+            reaction_event = ReactionEvent(
+                message_id=payload.message_id,
+                user_id=payload.user_id,
+                user_name=member_name,
+                emoji=emoji_str,
+                action=cast(Literal["add", "remove"], payload.event_type.removeprefix("REACTION_").lower()),
+                ts_iso=datetime.now(PARIS_TZ).isoformat(timespec="seconds"),
             )
+
+            self._log_reaction(payload.guild_id, reaction_event)
 
             await self._update_published_message(payload.guild_id)
 
@@ -1059,39 +1061,22 @@ class FormationManagement(commands.Cog):
 
     # -- Reaction Logs & Updates --
 
-    def _log_reaction(
-        self, guild_id: int, message_id: int, user_id: int, emoji: str, action: str, user_name: str | None = None
-    ) -> None:
+    def _log_reaction(self, guild_id: int, reaction_event: ReactionEvent) -> None:
         """Log a reaction event with Paris timezone.
 
         Args:
             guild_id (int): The ID of the guild.
-            message_id (int): The ID of the message.
-            user_id (int): The ID of the user.
-            emoji (str): The emoji used in the reaction.
-            action (str): The action taken (e.g., "add" or "remove").
-            user_name (str | None, optional): The name of the user. Defaults to None.
+            reaction_event (ReactionEvent): The event to log.
         """
         self._purge_all_reaction_logs()
         guild_state = self._get_guild_state(guild_id)
-        log = guild_state.get("reactions_log") or []
-        normalized_action = action[9:].lower()
-        ts_iso = datetime.now(PARIS_TZ).isoformat(timespec="seconds")
-        if user_name is None:
-            user_name = self._get_last_known_user_name(log, message_id, user_id)
-        log.append(
-            {
-                "message_id": message_id,
-                "user_id": user_id,
-                "user_name": user_name,
-                "emoji": emoji,
-                "action": normalized_action,
-                "ts_iso": ts_iso,
-            }
-        )
-        guild_state["reactions_log"] = log
+        log = [ReactionEvent.from_dict(entry) for entry in guild_state.get("reactions_log") or []]
+        if reaction_event.user_name is None:
+            reaction_event.user_name = self._get_last_known_user_name(log, reaction_event.message_id, reaction_event.user_id)
+        log.append(reaction_event)
+        guild_state["reactions_log"] = [event.to_dict() for event in log]
         logger.debug(
-            f"Logged {normalized_action} reaction for guild {guild_id} message {message_id} user {user_id} with emoji {emoji} (Paris time: {ts_iso})."
+            f"Logged {reaction_event.action} reaction for guild {guild_id} message {reaction_event.message_id} user {reaction_event.user_id} with emoji {reaction_event.emoji} (Paris time: {reaction_event.ts_iso})."
         )
         self._set_guild_state(guild_id, guild_state)
 
@@ -1100,32 +1085,33 @@ class FormationManagement(commands.Cog):
         changed = False
         removed_total = 0
         for guild_state in self.state.values():
-            log = guild_state.get("reactions_log")
-            if not log:
+            raw_log = guild_state.get("reactions_log")
+            if not raw_log:
                 continue
+            log = [ReactionEvent.from_dict(entry) for entry in raw_log]
             filtered = self._purge_reaction_log(list(log))
             if len(filtered) != len(log):
                 removed_total += len(log) - len(filtered)
-                guild_state["reactions_log"] = filtered
+                guild_state["reactions_log"] = [event.to_dict() for event in filtered]
                 changed = True
         if changed:
             logger.debug(f"Purged {removed_total} reaction log entries across guilds.")
             self._save_state(self.state)
 
     @staticmethod
-    def _purge_reaction_log(log: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _purge_reaction_log(log: list[ReactionEvent]) -> list[ReactionEvent]:
         """Remove reaction log entries older than the retention window (Paris timezone).
 
         Args:
-            log (list[dict[str, Any]]): The reaction log to purge.
+            log (list[ReactionEvent]): The reaction log to purge.
 
         Returns:
-            list[dict[str, Any]]: The filtered reaction log.
+            list[ReactionEvent]: The filtered reaction log.
         """
         cutoff = datetime.now(PARIS_TZ) - REACTION_LOG_RETENTION
-        filtered: list[dict[str, Any]] = []
+        filtered: list[ReactionEvent] = []
         for entry in log:
-            ts_iso = entry.get("ts_iso")
+            ts_iso = entry.ts_iso
             if not ts_iso:
                 filtered.append(entry)
                 continue
@@ -1139,11 +1125,11 @@ class FormationManagement(commands.Cog):
         return filtered
 
     @staticmethod
-    def _get_last_known_user_name(log: list[dict[str, Any]], message_id: int, user_id: int) -> str | None:
+    def _get_last_known_user_name(log: list[ReactionEvent], message_id: int, user_id: int) -> str | None:
         """Get the last known user name from the log.
 
         Args:
-            log (list[dict[str, Any]]): The reaction log.
+            log (list[ReactionEvent]): The reaction log.
             message_id (int): The ID of the message.
             user_id (int): The ID of the user.
 
@@ -1151,11 +1137,11 @@ class FormationManagement(commands.Cog):
             str | None: The last known user name, or None if not found.
         """
         for entry in reversed(log):
-            if entry.get("message_id") == message_id and entry.get("user_id") == user_id and entry.get("user_name"):
-                return entry.get("user_name")
+            if entry.user_id == user_id and entry.user_name:
+                return entry.user_name
         return None
 
-    def _get_reaction_history(self, guild_id: int, message_id: int) -> list[dict[str, Any]]:
+    def _get_reaction_history(self, guild_id: int, message_id: int) -> list[ReactionEvent]:
         """Get the reaction history for a specific message in a guild.
 
         Args:
@@ -1163,11 +1149,12 @@ class FormationManagement(commands.Cog):
             message_id (int): The ID of the message.
 
         Returns:
-            list[dict[str, Any]]: The reaction history for the message.
+            list[ReactionEvent]: The reaction history for the message.
         """
         guild_state = self._get_guild_state(guild_id)
-        history = [event for event in guild_state.get("reactions_log", []) or [] if event.get("message_id") == message_id]
-        history.sort(key=lambda ev: ev.get("ts_iso", ""))  # pyright: ignore
+        raw_log = guild_state.get("reactions_log", []) or []
+        history = [ev for entry in raw_log if (ev := ReactionEvent.from_dict(entry)).message_id == message_id]
+        history.sort(key=lambda ev: ev.ts_iso or "")
         logger.debug(f"Loaded {len(history)} reaction events for guild {guild_id} message {message_id}.")
         return history
 
@@ -1218,16 +1205,16 @@ class FormationManagement(commands.Cog):
 
         last_add: dict[tuple[str, int], datetime] = {}
         for event in history:
-            if event.get("action") != "add":
+            if event.action != "add":
                 continue
-            emoji = str(event.get("emoji", ""))
-            user_id = event.get("user_id")
+            emoji = str(event.emoji)
+            user_id = event.user_id
             if not emoji or user_id is None or emoji not in tracked_emojis:
                 continue
             try:
-                ts = datetime.fromisoformat(event.get("ts_iso", ""))
+                ts = datetime.fromisoformat(event.ts_iso).astimezone(PARIS_TZ)
             except (TypeError, ValueError):
-                ts = datetime.min
+                ts = datetime.min.replace(tzinfo=PARIS_TZ)
             key = (emoji, int(user_id))
             if key not in last_add or ts > last_add[key]:
                 last_add[key] = ts

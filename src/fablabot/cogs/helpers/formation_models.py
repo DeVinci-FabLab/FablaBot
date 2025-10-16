@@ -201,3 +201,22 @@ class ReactionEvent:
             dict[str, Any]: The dictionary representation of the ReactionEvent.
         """
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ReactionEvent:
+        """Create a ReactionEvent instance from a dictionary.
+
+        Args:
+            data (dict[str, Any]): Dictionary containing reaction event data.
+
+        Returns:
+            ReactionEvent: The ReactionEvent instance.
+        """
+        return cls(
+            message_id=data.get("message_id", 0),
+            user_id=data.get("user_id", 0),
+            user_name=data.get("user_name"),
+            emoji=data.get("emoji", ""),
+            action=data.get("action", "add"),
+            ts_iso=data.get("ts_iso", ""),
+        )
