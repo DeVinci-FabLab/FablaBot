@@ -136,6 +136,9 @@ class Welcome(commands.Cog):
         member_name = channel.name.removeprefix("welcome-")
         member = get(interaction.guild.members, name=member_name)
         if member is None:
+            logger.warning(f"Member not found by name: {member_name}")
+            member = next((u for u in channel.overwrites if isinstance(u, Member)), None)
+        if member is None:
             logger.warning(f"Member not found: {member_name}")
             await interaction.response.send_message(
                 ErrorMessages.MEMBER_NOT_FOUND.format(member_name=escape_md(member_name)), ephemeral=True
