@@ -170,9 +170,7 @@ class FormationManagement(commands.Cog):
             return
         if not await check_has_role(logger, interaction, ALLOWED_ROLES):
             return
-
         assert interaction.guild is not None
-        assert isinstance(interaction.channel, TextChannel)
 
         emoji_set = {emoji for emoji in interaction.guild.emojis if emoji.name == "dvfl"}
         emoji = emoji_set.pop() if emoji_set else Emojis.LOUDSPEAKER
@@ -935,6 +933,72 @@ class FormationManagement(commands.Cog):
 
     # endregion Event Listeners
 
+    # region ====== Background Tasks ======
+
+    @tasks.loop(minutes=5)
+    async def _check_upcoming_formations(self) -> None:
+        """Check for formations starting in ~1 hour and notify trainers with registration export (Paris timezone)."""
+        logger.debug("Checking for upcoming formations to notify trainers (Paris time).")
+        now = datetime.now(PARIS_TZ)
+        notification_window_start = now + TRAINER_NOTIFICATION_ADVANCE - timedelta(minutes=5)
+        notification_window_end = now + TRAINER_NOTIFICATION_ADVANCE + timedelta(minutes=5)
+
+        for guild_id_str in self.state:
+            guild_id = int(guild_id_str)
+            guild = self.bot.get_guild(guild_id)
+            if not guild:
+                continue
+
+            pub = self._get_last_published_in_guild(guild_id)
+            if not pub:
+                continue
+
+            fms = list(pub.message.fms)
+            if not fms:
+                continue
+
+            for fm in fms:
+                if fm.notified:
+                    continue
+
+                if notification_window_start <= fm.start_dt <= notification_window_end:
+                    await notify_trainer_before_formation(
+                        guild,
+                        fm,
+                        format_respo_contacts(guild),
+                    )
+                    await notify_responsible_before_formation(
+                        guild,
+                        fm,
+                        format_respo_contacts(guild),
+                    )
+
+                    fm.notified = True
+
+            updated_draft = Draft(
+                header=pub.message.header,
+                role_id=pub.message.role_id,
+                intro=pub.message.intro,
+                fms=fms,
+                end=pub.message.end,
+            )
+            self._set_last_published_in_guild(
+                guild_id,
+                PublishedMessage(
+                    message_id=pub.message_id,
+                    channel_id=pub.channel_id,
+                    message=updated_draft,
+                ),
+            )
+
+    @_check_upcoming_formations.before_loop
+    async def _before_check_upcoming_formations(self) -> None:
+        """Wait for the bot to be ready before starting the background task."""
+        await self.bot.wait_until_ready()
+        logger.info("Formation notification task started")
+
+    # endregion Background Tasks
+
     # region ====== Helpers ======
     # -- State --
 
@@ -1316,70 +1380,6 @@ class FormationManagement(commands.Cog):
                 await send_waitlist_dm(guild, user_id, fm_name, waitlist_index, contacts)
         else:
             logger.debug(f"No new waitlist notifications for guild {guild_id}.")
-
-    # -- Background Tasks --
-
-    @tasks.loop(minutes=10)
-    async def _check_upcoming_formations(self) -> None:
-        """Check for formations starting in ~1 hour and notify trainers with registration export (Paris timezone)."""
-        logger.debug("Checking for upcoming formations to notify trainers (Paris time).")
-        now = datetime.now(PARIS_TZ)
-        notification_window_start = now + TRAINER_NOTIFICATION_ADVANCE - timedelta(minutes=10)
-        notification_window_end = now + TRAINER_NOTIFICATION_ADVANCE + timedelta(minutes=10)
-
-        for guild_id_str in self.state:
-            guild_id = int(guild_id_str)
-            guild = self.bot.get_guild(guild_id)
-            if not guild:
-                continue
-
-            pub = self._get_last_published_in_guild(guild_id)
-            if not pub:
-                continue
-
-            fms = list(pub.message.fms)
-            if not fms:
-                continue
-
-            for fm in fms:
-                if fm.notified:
-                    continue
-
-                if notification_window_start <= fm.start_dt <= notification_window_end:
-                    await notify_trainer_before_formation(
-                        guild,
-                        fm,
-                        format_respo_contacts(guild),
-                    )
-                    await notify_responsible_before_formation(
-                        guild,
-                        fm,
-                        format_respo_contacts(guild),
-                    )
-
-                    fm.notified = True
-
-            updated_draft = Draft(
-                header=pub.message.header,
-                role_id=pub.message.role_id,
-                intro=pub.message.intro,
-                fms=fms,
-                end=pub.message.end,
-            )
-            self._set_last_published_in_guild(
-                guild_id,
-                PublishedMessage(
-                    message_id=pub.message_id,
-                    channel_id=pub.channel_id,
-                    message=updated_draft,
-                ),
-            )
-
-    @_check_upcoming_formations.before_loop
-    async def _before_check_upcoming_formations(self) -> None:
-        """Wait for the bot to be ready before starting the background task."""
-        await self.bot.wait_until_ready()
-        logger.info("Formation notification task started")
 
     # endregion Helpers
 

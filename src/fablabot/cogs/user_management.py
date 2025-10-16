@@ -12,7 +12,7 @@ from discord import (
     Interaction,
     Member,
     Role,
-    TextChannel,
+    User,
     app_commands,
     ui,
 )
@@ -206,7 +206,6 @@ class UserManagement(commands.Cog):
         if not await is_in_allowed_channel(logger, interaction):
             return
 
-        assert isinstance(interaction.user, Member)
         if not self._can_assign_role(interaction.user, role):
             logger.warning(f"Unauthorized add_role by {interaction.user}")
             await interaction.response.send_message(ErrorMessages.NO_PERMISSION_ADD_ROLE, ephemeral=True)
@@ -237,7 +236,6 @@ class UserManagement(commands.Cog):
         if not await is_in_allowed_channel(logger, interaction):
             return
 
-        assert isinstance(interaction.user, Member)
         if not self._can_assign_role(interaction.user, role):
             logger.warning(f"Unauthorized remove_role by {interaction.user}")
             await interaction.response.send_message(ErrorMessages.NO_PERMISSION_REMOVE_ROLE, ephemeral=True)
@@ -388,23 +386,24 @@ class UserManagement(commands.Cog):
     # -- Permission Checks --
 
     @staticmethod
-    def _can_assign_role(member: Member, target_role: Role) -> bool:
+    def _can_assign_role(user: User | Member, target_role: Role) -> bool:
         """Checks if the member can assign a specific role.
 
         Args:
-            member (Member): The member attempting to assign the role.
+            user (User | Member): The user attempting to assign the role.
             target_role (Role): The role to be assigned.
 
         Returns:
-            bool: True if the member can assign the role, False otherwise.
+            bool: True if the user can assign the role, False otherwise.
         """
         if target_role.name == RoleNames.ADMIN:
             return False
+        assert isinstance(user, Member)
 
         return (
-            UserManagement._is_user_server_admin(member)
-            or UserManagement._is_user_responsible_for_pole(member, target_role)
-            or UserManagement._is_user_responsible_for_trainers(member, target_role)
+            UserManagement._is_user_server_admin(user)
+            or UserManagement._is_user_responsible_for_pole(user, target_role)
+            or UserManagement._is_user_responsible_for_trainers(user, target_role)
         )
 
     @staticmethod
@@ -521,9 +520,6 @@ class BulkRoleView(ui.View):
         if not members:
             await interaction.response.send_message("Aucun membre sélectionné.", ephemeral=True)
             return
-
-        channel = interaction.channel
-        assert isinstance(channel, TextChannel)
 
         modified: list[Member] = []
         already: list[Member] = []

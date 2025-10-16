@@ -89,7 +89,6 @@ class Welcome(commands.Cog):
         if not await is_in_allowed_channel(logger, interaction):
             return
 
-        assert isinstance(interaction.user, Member)
         if not await check_has_role(logger, interaction, ADMIN_ROLES):
             return
 

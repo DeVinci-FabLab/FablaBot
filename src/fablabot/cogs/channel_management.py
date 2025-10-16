@@ -166,7 +166,6 @@ class ChannelManagement(commands.Cog):
         if not await is_in_allowed_channel(logger, interaction):
             return
 
-        assert isinstance(interaction.user, Member)
         if not await check_has_role(logger, interaction, ADMIN_ROLES):
             return
 
@@ -205,7 +204,6 @@ class ChannelManagement(commands.Cog):
         if not await is_in_allowed_channel(logger, interaction):
             return
 
-        assert isinstance(interaction.user, Member)
         if not await check_has_role(logger, interaction, ADMIN_ROLES):
             return
 
@@ -234,7 +232,6 @@ class ChannelManagement(commands.Cog):
         if not await is_in_allowed_channel(logger, interaction):
             return
 
-        assert isinstance(interaction.user, Member)
         if not await check_has_role(logger, interaction, ADMIN_ROLES):
             return
 
@@ -307,7 +304,6 @@ class ChannelManagement(commands.Cog):
         if not await is_in_allowed_channel(logger, interaction):
             return
 
-        assert isinstance(interaction.user, Member)
         if not await check_has_role(logger, interaction, ADMIN_ROLES):
             return
 
@@ -353,8 +349,6 @@ class ChannelManagement(commands.Cog):
         if not await is_in_allowed_channel(logger, interaction):
             return
 
-        assert isinstance(interaction.user, Member)
-        assert channel.category is not None
         if not await check_has_role(logger, interaction, ADMIN_ROLES):
             return
 
@@ -377,6 +371,7 @@ class ChannelManagement(commands.Cog):
             await interaction.response.send_message(error, ephemeral=True)
             return
         logger.info(f"Renamed voice channel {channel} from {old_name!r} to {new_name!r}")
+        assert channel.category is not None
         for vc in channel.category.voice_channels:
             if vc.name.startswith(f"{old_name}{INDEX_SEPARATOR}"):
                 suffix = vc.name[len(old_name) :]
@@ -405,7 +400,6 @@ class ChannelManagement(commands.Cog):
         if not await is_in_allowed_channel(logger, interaction):
             return
 
-        assert isinstance(interaction.user, Member)
         if not await check_has_role(logger, interaction, ADMIN_ROLES):
             return
 
@@ -439,8 +433,6 @@ class ChannelManagement(commands.Cog):
         if not await is_in_allowed_channel(logger, interaction):
             return
 
-        assert interaction.guild is not None
-        assert isinstance(interaction.user, Member)
         if not await check_has_role(logger, interaction, ADMIN_ROLES):
             return
 
