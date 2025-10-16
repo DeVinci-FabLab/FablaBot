@@ -24,7 +24,8 @@ class Formation:
         description (str): Brief description of the formation.
         registered_users (list[dict[str, Any]]): Ordered list of registered users metadata.
         waitlisted_users (list[dict[str, Any]]): Ordered list of waitlisted users metadata.
-        notified (bool): Whether the trainer has been notified for this formation.
+        notified_hour_before (bool): Whether the trainer has been notified one hour before the formation.
+        notified_at_start (bool): Whether the trainer has been notified at the start time of the formation.
     """
 
     emoji: str
@@ -45,8 +46,10 @@ class Formation:
     """Registered users metadata (order preserved)."""
     waitlisted_users: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
     """Waitlisted users metadata (order preserved)."""
-    notified: bool = False
-    """Whether the trainer has been notified for this formation."""
+    notified_hour_before: bool = False
+    """Whether the trainer has been notified one hour before the formation."""
+    notified_at_start: bool = False
+    """Whether the trainer has been notified at the formation start time."""
 
     @property
     def start_dt(self) -> datetime:

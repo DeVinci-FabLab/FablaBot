@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 import logging
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from discord import Guild
 
@@ -116,13 +116,19 @@ async def send_promotion_dm(
     await send_dm_to_member(logger, guild, member, message, f"promotion for formation {formation.name}")
 
 
-async def notify_trainer_before_formation(guild: Guild, formation: Formation, contacts: str) -> None:
+async def notify_trainer_before_formation(
+    guild: Guild,
+    formation: Formation,
+    contacts: str,
+    moment: Literal["hour_before", "start"] = "hour_before",
+) -> None:
     """Send a DM to the trainer with the list of registered attendees.
 
     Args:
         guild (Guild): The guild where the formation is taking place.
         formation (Formation): The formation starting soon.
         contacts (str): The contact string for formation managers.
+        moment (Literal["hour_before", "start"]): When the notification is sent.
     """
     trainer_mention = formation.trainer_mention
     trainer_id_match = re.search(r"<@!?(\d+)>", trainer_mention)
@@ -139,23 +145,36 @@ async def notify_trainer_before_formation(guild: Guild, formation: Formation, co
     datetime_text = humanize_dt(formation.start_dt).lower()[2:-2]
     formation_export = format_formation_export(formation)
 
+    if moment == "hour_before":
+        timing_line = f"Ta formation **{formation.name}** commence bientôt (le {datetime_text})."
+        subject = f"reminder for formation {formation.name}"
+    else:
+        timing_line = f"Ta formation **{formation.name}** commence maintenant (le {datetime_text})."
+        subject = f"start alert for formation {formation.name}"
+
     message = (
         f"Salut {trainer.display_name} !\n"
-        f"Ta formation **{formation.name}** commence bientôt (le {datetime_text}).\n\n"
+        f"{timing_line}\n\n"
         f"{formation_export}\n\n"
         f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
     )
 
-    await send_dm_to_member(logger, guild, trainer, message, f"reminder for formation {formation.name}")
+    await send_dm_to_member(logger, guild, trainer, message, subject)
 
 
-async def notify_responsible_before_formation(guild: Guild, formation: Formation, contacts: str) -> None:
+async def notify_responsible_before_formation(
+    guild: Guild,
+    formation: Formation,
+    contacts: str,
+    moment: Literal["hour_before", "start"] = "hour_before",
+) -> None:
     """Send a DM to the training responsible with the list of registered attendees.
 
     Args:
         guild (Guild): The guild where the formation is taking place.
         formation (Formation): The formation starting soon.
         contacts (str): The contact string for formation managers.
+        moment (Literal["hour_before", "start"]): When the notification is sent.
     """
     responsibles_ids: list[int] = [int(id) for id in re.findall(r"<@!?(\d+)>", contacts)]
     if not responsibles_ids:
@@ -171,10 +190,13 @@ async def notify_responsible_before_formation(guild: Guild, formation: Formation
         datetime_text = humanize_dt(formation.start_dt).lower()[2:-2]
         formation_export = format_formation_export(formation)
 
-        message = (
-            f"Salut {responsible.display_name} !\n"
-            f"La formation **{formation.name}** commence bientôt (le {datetime_text}).\n\n"
-            f"{formation_export}\n\n"
-        )
+        if moment == "hour_before":
+            timing_line = f"La formation **{formation.name}** commence bientôt (le {datetime_text})."
+            subject = f"export reminder for formation {formation.name}"
+        else:
+            timing_line = f"La formation **{formation.name}** commence maintenant (le {datetime_text})."
+            subject = f"start export for formation {formation.name}"
 
-        await send_dm_to_member(logger, guild, responsible, message, f"export for formation {formation.name}")
+        message = f"Salut {responsible.display_name} !\n{timing_line}\n\n{formation_export}\n\n"
+
+        await send_dm_to_member(logger, guild, responsible, message, subject)

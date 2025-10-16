@@ -937,11 +937,14 @@ class FormationManagement(commands.Cog):
 
     @tasks.loop(minutes=5)
     async def _check_upcoming_formations(self) -> None:
-        """Check for formations starting in ~1 hour and notify trainers with registration export (Paris timezone)."""
-        logger.debug("Checking for upcoming formations to notify trainers (Paris time).")
+        """Check for formations starting soon and notify trainers/responsibles (Paris timezone)."""
+        logger.debug("Checking for upcoming formations to notify trainers and responsibles (Paris time).")
         now = datetime.now(PARIS_TZ)
-        notification_window_start = now + TRAINER_NOTIFICATION_ADVANCE - timedelta(minutes=5)
-        notification_window_end = now + TRAINER_NOTIFICATION_ADVANCE + timedelta(minutes=5)
+        window_tolerance = timedelta(minutes=5)
+        notification_window_start = now + TRAINER_NOTIFICATION_ADVANCE - window_tolerance
+        notification_window_end = now + TRAINER_NOTIFICATION_ADVANCE + window_tolerance
+        start_window_start = now - window_tolerance
+        start_window_end = now + window_tolerance
 
         for guild_id_str in self.state:
             guild_id = int(guild_id_str)
@@ -958,22 +961,42 @@ class FormationManagement(commands.Cog):
                 continue
 
             for fm in fms:
-                if fm.notified:
+                if fm.notified_at_start:
                     continue
 
-                if notification_window_start <= fm.start_dt <= notification_window_end:
+                send_contacts = format_respo_contacts(guild)
+                if not fm.notified_hour_before and notification_window_start <= fm.start_dt <= notification_window_end:
                     await notify_trainer_before_formation(
                         guild,
                         fm,
-                        format_respo_contacts(guild),
+                        send_contacts,
+                        moment="hour_before",
                     )
                     await notify_responsible_before_formation(
                         guild,
                         fm,
-                        format_respo_contacts(guild),
+                        send_contacts,
+                        moment="hour_before",
                     )
 
-                    fm.notified = True
+                    fm.notified_hour_before = True
+                    continue
+
+                if start_window_start <= fm.start_dt <= start_window_end:
+                    await notify_trainer_before_formation(
+                        guild,
+                        fm,
+                        send_contacts,
+                        moment="start",
+                    )
+                    await notify_responsible_before_formation(
+                        guild,
+                        fm,
+                        send_contacts,
+                        moment="start",
+                    )
+
+                    fm.notified_at_start = True
 
             updated_draft = Draft(
                 header=pub.message.header,
