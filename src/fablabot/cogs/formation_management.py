@@ -29,7 +29,9 @@ from emoji import EMOJI_DATA
 from fablabot.cogs.constants import Emojis, ErrorMessages, RoleNames
 from fablabot.cogs.helpers import (
     PARIS_TZ,
+    Draft,
     Formation,
+    PublishedMessage,
     format_current_registrations,
     format_respo_contacts,
     notify_responsible_before_formation,
@@ -40,7 +42,7 @@ from fablabot.cogs.helpers import (
     send_registration_dm,
     send_waitlist_dm,
 )
-from fablabot.cogs.utils import check_has_role, is_in_allowed_channel, log_request
+from fablabot.cogs.helpers.utils import check_has_role, is_in_allowed_channel, log_request
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +101,7 @@ class FormationManagement(commands.Cog):
                   "user_id": int,
                   "user_name": str,
                   "emoji": str,
-                  "action": "add"|"remove",
+                  "action": Literal["add", "remove"],
                   "ts_iso": str
                 }
               ]
@@ -177,22 +179,21 @@ class FormationManagement(commands.Cog):
         intro_body = intro.replace("\\n", "\n").strip()
         end_body = end.replace("\\n", "\n").strip()
 
-        draft: dict[str, Any] = {
-            "header": header,
-            "role_id": role.id,
-            "intro": intro_body,
-            "fms": [],
-            "end": end_body,
-        }
+        draft = Draft(
+            header=header,
+            role_id=role.id,
+            intro=intro_body,
+            fms=[],
+            end=end_body,
+        )
         self._set_guild_draft(interaction.guild.id, draft)
 
-        fms = [Formation(**x) for x in draft["fms"]]
         content = render_message(
-            draft["header"],
-            draft["role_id"],
-            draft["intro"],
-            fms,
-            draft["end"],
+            draft.header,
+            draft.role_id,
+            draft.intro,
+            draft.fms,
+            draft.end,
         )
         logger.info(f"Guild {interaction.guild.id} started a new formations draft.")
         await interaction.response.send_message(
@@ -241,9 +242,9 @@ class FormationManagement(commands.Cog):
         assert interaction.guild is not None
         draft = self._get_guild_draft(interaction.guild.id)
 
-        current_intro = draft.get("intro", "")
-        current_end = draft.get("end", "")
-        current_role_id = draft.get("role_id", 0)
+        current_intro = draft.intro
+        current_end = draft.end
+        current_role_id = draft.role_id
 
         updated_intro = current_intro if intro is None else intro.strip()
         updated_end = current_end if end is None else end.strip()
@@ -251,11 +252,11 @@ class FormationManagement(commands.Cog):
         updated_intro = updated_intro.replace("\\n", "\n")
         updated_end = updated_end.replace("\\n", "\n")
 
+        updated_role_id = current_role_id
         role_changed = False
         if role is not None:
-            new_role_id = role.id
-            role_changed = current_role_id != new_role_id
-            draft["role_id"] = new_role_id
+            updated_role_id = role.id
+            role_changed = current_role_id != updated_role_id
 
         if updated_intro == current_intro and updated_end == current_end and not role_changed:
             await interaction.response.send_message(
@@ -264,17 +265,21 @@ class FormationManagement(commands.Cog):
             )
             return
 
-        draft["intro"] = updated_intro
-        draft["end"] = updated_end
+        draft = Draft(
+            header=draft.header,
+            role_id=updated_role_id,
+            intro=updated_intro,
+            fms=draft.fms,
+            end=updated_end,
+        )
         self._set_guild_draft(interaction.guild.id, draft)
 
-        fms = [Formation(**x) for x in draft["fms"]]
         content = render_message(
-            draft["header"],
-            draft["role_id"],
-            draft["intro"],
-            fms,
-            draft["end"],
+            draft.header,
+            draft.role_id,
+            draft.intro,
+            draft.fms,
+            draft.end,
         )
 
         intro_changed = updated_intro != current_intro
@@ -287,7 +292,7 @@ class FormationManagement(commands.Cog):
         await interaction.response.send_message(
             "Brouillon mis à jour.",
             embed=Embed(
-                title=f"Aperçu brouillon — {len(fms)} formation(s)",
+                title=f"Aperçu brouillon — {len(draft.fms)} formation(s)",
                 description=f"{content or '_(vide)_'}",
             ),
             ephemeral=True,
@@ -361,8 +366,7 @@ class FormationManagement(commands.Cog):
             await interaction.response.send_message(ErrorMessages.INVALID_EMOJI, ephemeral=True)
             return
 
-        fms: list[Formation] = [Formation(**x) for x in draft["fms"]]
-        if any(existing.emoji == emoji_clean for existing in fms):
+        if any(existing.emoji == emoji_clean for existing in draft.fms):
             logger.warning(f"Guild {interaction.guild.id} tried to add formation with duplicate emoji {emoji_clean!r}.")
             await interaction.response.send_message(ErrorMessages.EMOJI_ALREADY_USED, ephemeral=True)
             return
@@ -386,18 +390,25 @@ class FormationManagement(commands.Cog):
             description=description.strip(),
         )
 
+        fms = list(draft.fms)
         fms.append(fm)
         fms.sort(key=lambda x: x.start_dt)
 
-        draft["fms"] = [x.to_dict() for x in fms]
+        draft = Draft(
+            header=draft.header,
+            role_id=draft.role_id,
+            intro=draft.intro,
+            fms=fms,
+            end=draft.end,
+        )
         self._set_guild_draft(interaction.guild.id, draft)
 
         preview = render_message(
-            draft["header"],
-            draft["role_id"],
-            draft["intro"],
-            fms,
-            draft["end"],
+            draft.header,
+            draft.role_id,
+            draft.intro,
+            draft.fms,
+            draft.end,
         )
         logger.info(f"Guild {interaction.guild.id} added formation {fm.name!r} ({fm.start_iso}) to draft.")
         await interaction.response.send_message(
@@ -468,9 +479,8 @@ class FormationManagement(commands.Cog):
             return
 
         assert interaction.guild is not None
-        draft: dict[str, Any] = self._get_guild_draft(interaction.guild.id)
-        fms: list[Formation] = [Formation(**x) for x in draft["fms"]]
-        fms.sort(key=lambda x: x.start_dt)
+        draft = self._get_guild_draft(interaction.guild.id)
+        fms = sorted(draft.fms, key=lambda x: x.start_dt)
 
         if index > len(fms):
             logger.warning(
@@ -552,15 +562,21 @@ class FormationManagement(commands.Cog):
         fms[index - 1] = updated
         fms.sort(key=lambda x: x.start_dt)
 
-        draft["fms"] = [fm.to_dict() for fm in fms]
+        draft = Draft(
+            header=draft.header,
+            role_id=draft.role_id,
+            intro=draft.intro,
+            fms=fms,
+            end=draft.end,
+        )
         self._set_guild_draft(interaction.guild.id, draft)
 
         preview = render_message(
-            draft["header"],
-            draft["role_id"],
-            draft["intro"],
-            fms,
-            draft["end"],
+            draft.header,
+            draft.role_id,
+            draft.intro,
+            draft.fms,
+            draft.end,
         )
         new_position = fms.index(updated) + 1
 
@@ -594,9 +610,8 @@ class FormationManagement(commands.Cog):
             return
 
         assert interaction.guild is not None
-        draft: dict[str, Any] = self._get_guild_draft(interaction.guild.id)
-        fms: list[Formation] = [Formation(**x) for x in draft["fms"]]
-        fms.sort(key=lambda x: x.start_dt)
+        draft = self._get_guild_draft(interaction.guild.id)
+        fms = sorted(draft.fms, key=lambda x: x.start_dt)
 
         if index > len(fms):
             logger.warning(f"Guild {interaction.guild.id} tried to remove out-of-bounds formation index {index}.")
@@ -604,16 +619,22 @@ class FormationManagement(commands.Cog):
             return
 
         removed = fms.pop(index - 1)
-        draft["fms"] = [x.to_dict() for x in fms]
+
+        draft = Draft(
+            header=draft.header,
+            role_id=draft.role_id,
+            intro=draft.intro,
+            fms=fms,
+            end=draft.end,
+        )
         self._set_guild_draft(interaction.guild.id, draft)
 
-        fms = [Formation(**x) for x in draft["fms"]]
         preview = render_message(
-            draft["header"],
-            draft["role_id"],
-            draft["intro"],
-            fms,
-            draft["end"],
+            draft.header,
+            draft.role_id,
+            draft.intro,
+            draft.fms,
+            draft.end,
         )
         logger.info(f"Guild {interaction.guild.id} removed formation {removed.name!r} ({removed.start_iso}) from draft.")
         await interaction.response.send_message(
@@ -639,21 +660,23 @@ class FormationManagement(commands.Cog):
             return
 
         assert interaction.guild is not None
-        draft: dict[str, Any] = self._get_guild_draft(interaction.guild.id)
-        header = draft["header"]
-        role_id = draft["role_id"]
-        intro = draft["intro"]
-        end = draft["end"]
-        draft = {"header": header, "role_id": role_id, "intro": intro, "fms": [], "end": end}
+        draft = self._get_guild_draft(interaction.guild.id)
+
+        draft = Draft(
+            header=draft.header,
+            role_id=draft.role_id,
+            intro=draft.intro,
+            fms=[],
+            end=draft.end,
+        )
         self._set_guild_draft(interaction.guild.id, draft)
 
-        fms = [Formation(**x) for x in draft["fms"]]
         content = render_message(
-            header,
-            role_id,
-            intro,
-            fms,
-            end,
+            draft.header,
+            draft.role_id,
+            draft.intro,
+            draft.fms,
+            draft.end,
         )
         logger.info(f"Guild {interaction.guild.id} cleared the formations draft.")
         await interaction.response.send_message(
@@ -682,15 +705,14 @@ class FormationManagement(commands.Cog):
         await interaction.response.defer(thinking=True)
         assert interaction.guild is not None
         draft = self._get_guild_draft(interaction.guild.id)
-        fms = [Formation(**x) for x in draft["fms"]]
-        fms.sort(key=lambda x: x.start_dt)
+        fms = sorted(draft.fms, key=lambda x: x.start_dt)
 
         content = render_message(
-            draft["header"],
-            draft["role_id"],
-            draft["intro"],
+            draft.header,
+            draft.role_id,
+            draft.intro,
             fms,
-            draft["end"],
+            draft.end,
         )
         logger.info(f"Guild {interaction.guild.id} previewed the formations draft.")
         await interaction.followup.send(
@@ -715,21 +737,20 @@ class FormationManagement(commands.Cog):
 
         assert interaction.guild is not None
         draft = self._get_guild_draft(interaction.guild.id)
-        fms = [Formation(**x) for x in draft["fms"]]
-        if not fms:
+        if not draft.fms:
             logger.warning(f"Guild {interaction.guild.id} tried to publish empty formations draft.")
             await interaction.response.send_message(ErrorMessages.DRAFT_EMPTY, ephemeral=True)
             return
 
         await interaction.response.defer(thinking=True)
 
-        fms.sort(key=lambda x: x.start_dt)
+        fms = sorted(draft.fms, key=lambda x: x.start_dt)
         content = render_message(
-            draft["header"],
-            draft["role_id"],
-            draft["intro"],
+            draft.header,
+            draft.role_id,
+            draft.intro,
             fms,
-            draft["end"],
+            draft.end,
         )
 
         try:
@@ -742,18 +763,8 @@ class FormationManagement(commands.Cog):
             )
             return
 
-        published_message = {
-            "header": draft["header"],
-            "role_id": draft["role_id"],
-            "intro": draft["intro"],
-            "end": draft["end"],
-            "fms": [],
-        }
-
         success_reactions = 0
         for fm in fms:
-            fm_dict = fm.to_dict()
-            published_message["fms"].append(fm_dict)
             try:
                 await msg.add_reaction(fm.emoji)
                 success_reactions += 1
@@ -763,13 +774,21 @@ class FormationManagement(commands.Cog):
                     f"for formation {fm.name!r} in published message."
                 )
 
+        published_message = Draft(
+            header=draft.header,
+            role_id=draft.role_id,
+            intro=draft.intro,
+            fms=fms,
+            end=draft.end,
+        )
+
         self._set_last_published_in_guild(
             interaction.guild.id,
-            {
-                "message_id": msg.id,
-                "channel_id": channel.id,
-                "message": published_message,
-            },
+            PublishedMessage(
+                message_id=msg.id,
+                channel_id=channel.id,
+                message=published_message,
+            ),
         )
 
         logger.info(f"Guild {interaction.guild.id} published the formations draft in {channel}.")
@@ -806,22 +825,17 @@ class FormationManagement(commands.Cog):
             await interaction.response.send_message(ErrorMessages.NO_PUBLISHED_MESSAGE, ephemeral=True)
             return
 
-        target_message_id = int(message_id) if message_id else int(published["message_id"]) if published else None
-        target_channel_id = (
-            int(publication_channel.id) if publication_channel else int(published["channel_id"]) if published else None
-        )
+        target_message_id = int(message_id) if message_id else published.message_id if published else None
+        target_channel_id = int(publication_channel.id) if publication_channel else published.channel_id if published else None
         if not target_message_id or not target_channel_id:
             logger.error(f"Guild {interaction.guild.id} has inconsistent published message data: {published}")
             await interaction.response.send_message(ErrorMessages.INCONSISTENT_PUBLISHED_DATA, ephemeral=True)
             return
 
-        message_payload = published["message"] if published else {}
         fm_by_emoji: dict[str, dict[str, Any]] = {}
-        for fm in message_payload.get("fms", []):
-            emoji = fm.get("emoji")
-            if not emoji:
-                continue
-            fm_by_emoji[emoji] = {"name": fm.get("name"), "seats": fm.get("seats")}
+        if published:
+            for fm in published.message.fms:
+                fm_by_emoji[fm.emoji] = {"name": fm.name, "seats": fm.seats}
 
         history = self._get_reaction_history(interaction.guild.id, target_message_id)
         history_csv = io.StringIO()
@@ -850,8 +864,7 @@ class FormationManagement(commands.Cog):
 
         await interaction.response.defer(thinking=True)
 
-        raw_fms = message_payload.get("fms", [])
-        fms: list[Formation] = [Formation(**fm_dict) for fm_dict in raw_fms]
+        fms = published.message.fms if published else []
 
         reg_text, reg_file = format_current_registrations(fms)
         if reg_file:
@@ -897,15 +910,10 @@ class FormationManagement(commands.Cog):
 
         async with self._reaction_lock:
             pub = self._get_last_published_in_guild(payload.guild_id)
-            if not pub or payload.message_id != pub.get("message_id"):
+            if not pub or payload.message_id != pub.message_id:
                 return
             emoji_str = str(payload.emoji)
-            message_payload = pub.get("message", {})
-            fm_emojis: set[str] = set()
-            for fm in message_payload.get("fms", []):
-                emoji = fm.get("emoji")
-                if emoji:
-                    fm_emojis.add(str(emoji))
+            fm_emojis = {fm.emoji for fm in pub.message.fms}
             if fm_emojis and emoji_str not in fm_emojis:
                 return
 
@@ -994,58 +1002,59 @@ class FormationManagement(commands.Cog):
         self.state[str(guild_id)] = payload
         self._save_state(self.state)
 
-    def _get_guild_draft(self, guild_id: int) -> dict[str, Any]:
+    def _get_guild_draft(self, guild_id: int) -> Draft:
         """Get the draft state for a specific guild.
 
         Args:
             guild_id (int): The ID of the guild.
 
         Returns:
-            dict[str, Any]: The draft of the guild.
+            Draft: The draft of the guild.
         """
         guild_state = self._get_guild_state(guild_id)
         if "draft" not in guild_state:
             logger.debug(f"Initializing draft state for guild {guild_id}.")
             self._set_guild_state(guild_id, guild_state)
-            guild_state["draft"] = {"header": None, "role_id": None, "intro": "", "fms": [], "end": ""}
-        return guild_state["draft"]
+            guild_state["draft"] = {"header": "", "role_id": 0, "intro": "", "fms": [], "end": ""}
+        draft_dict = guild_state["draft"]
+        return Draft.from_dict(draft_dict)
 
-    def _set_guild_draft(self, guild_id: int, draft: dict[str, Any]) -> None:
+    def _set_guild_draft(self, guild_id: int, draft: Draft) -> None:
         """Set the draft for a specific guild.
 
         Args:
             guild_id (int): The ID of the guild.
-            draft (dict[str, Any]): The draft of the guild.
+            draft (Draft): The draft of the guild.
         """
         guild_state = self._get_guild_state(guild_id)
-        guild_state["draft"] = draft
+        guild_state["draft"] = draft.to_dict()
         self._set_guild_state(guild_id, guild_state)
 
-    def _get_last_published_in_guild(self, guild_id: int) -> dict[str, Any] | None:
+    def _get_last_published_in_guild(self, guild_id: int) -> PublishedMessage | None:
         """Get the last published state for a specific guild.
 
         Args:
             guild_id (int): The ID of the guild.
 
         Returns:
-            dict[str, Any] | None: The last published state of the guild, or None if not found.
+            PublishedMessage | None: The last published state of the guild, or None if not found.
         """
         guild_state = self._get_guild_state(guild_id)
-        published = guild_state.get("published")
-        if not published:
+        published_dict = guild_state.get("published")
+        if not published_dict:
             logger.warning(f"No published formations data stored for guild {guild_id}.")
             return None
-        return published
+        return PublishedMessage.from_dict(published_dict)
 
-    def _set_last_published_in_guild(self, guild_id: int, published: dict[str, Any]) -> None:
+    def _set_last_published_in_guild(self, guild_id: int, published: PublishedMessage) -> None:
         """Set the last published state for a specific guild.
 
         Args:
             guild_id (int): The ID of the guild.
-            published (dict[str, Any]): The published state of the guild.
+            published (PublishedMessage): The published state of the guild.
         """
         guild_state = self._get_guild_state(guild_id)
-        guild_state["published"] = published
+        guild_state["published"] = published.to_dict()
         self._set_guild_state(guild_id, guild_state)
 
     # -- Reaction Logs & Updates --
@@ -1173,8 +1182,8 @@ class FormationManagement(commands.Cog):
             logger.debug(f"No published formations message recorded for guild {guild_id}; skipping update.")
             return
         guild = self.bot.get_guild(guild_id)
-        channel_id = pub.get("channel_id")
-        message_id = pub.get("message_id")
+        channel_id = pub.channel_id
+        message_id = pub.message_id
         if not guild or not channel_id or not message_id:
             logger.warning(
                 f"Incomplete published formations state for guild {guild_id} (channel={channel_id}, message={message_id})."
@@ -1190,14 +1199,12 @@ class FormationManagement(commands.Cog):
             return
         logger.debug(f"Fetched published message {message_id} in channel {channel_id} for guild {guild_id}.")
 
-        message_payload: dict[str, Any] = pub.get("message", {})
-        header = message_payload.get("header")
-        role_id = message_payload.get("role_id")
-        intro = message_payload.get("intro")
-        end = message_payload.get("end")
-
-        raw_fms = message_payload.get("fms", [])
-        fms: list[Formation] = [Formation(**fm_dict) for fm_dict in raw_fms]
+        message_payload = pub.message
+        header = message_payload.header
+        role_id = message_payload.role_id
+        intro = message_payload.intro
+        end = message_payload.end
+        fms = list(message_payload.fms)
         tracked_emojis = {fm.emoji for fm in fms if fm.emoji}
 
         if not header or not role_id or not intro or not end or not fms:
@@ -1274,9 +1281,21 @@ class FormationManagement(commands.Cog):
             fm.registered_users = registered
             fm.waitlisted_users = waitlisted
 
-        updated_fms = [fm.to_dict() for fm in fms]
-        pub["message"]["fms"] = updated_fms
-        self._set_last_published_in_guild(guild_id, pub)
+        updated_message_payload = Draft(
+            header=header,
+            role_id=role_id,
+            intro=intro,
+            fms=fms,
+            end=end,
+        )
+        self._set_last_published_in_guild(
+            guild_id,
+            PublishedMessage(
+                message_id=pub.message_id,
+                channel_id=pub.channel_id,
+                message=updated_message_payload,
+            ),
+        )
 
         content = render_message(header, role_id, intro, fms, end)
 
@@ -1330,11 +1349,9 @@ class FormationManagement(commands.Cog):
             if not pub:
                 continue
 
-            message_payload = pub.get("message", {})
-            raw_fms = message_payload.get("fms", [])
-            if not raw_fms:
+            fms = list(pub.message.fms)
+            if not fms:
                 continue
-            fms: list[Formation] = [Formation(**fm_dict) for fm_dict in raw_fms]
 
             for fm in fms:
                 if fm.notified:
@@ -1354,9 +1371,21 @@ class FormationManagement(commands.Cog):
 
                     fm.notified = True
 
-            updated_fms = [fm.to_dict() for fm in fms]
-            pub["message"]["fms"] = updated_fms
-            self._set_last_published_in_guild(guild_id, pub)
+            updated_draft = Draft(
+                header=pub.message.header,
+                role_id=pub.message.role_id,
+                intro=pub.message.intro,
+                fms=fms,
+                end=pub.message.end,
+            )
+            self._set_last_published_in_guild(
+                guild_id,
+                PublishedMessage(
+                    message_id=pub.message_id,
+                    channel_id=pub.channel_id,
+                    message=updated_draft,
+                ),
+            )
 
     @_check_upcoming_formations.before_loop
     async def _before_check_upcoming_formations(self) -> None:

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from discord import Guild
 
 from fablabot.cogs.helpers.formation_rendering import format_formation_export, humanize_dt
-from fablabot.cogs.utils import get_or_fetch_member, send_dm_to_member
+from fablabot.cogs.helpers.utils import get_or_fetch_member, send_dm_to_member
 
 if TYPE_CHECKING:
     from fablabot.cogs.helpers.formation_models import Formation

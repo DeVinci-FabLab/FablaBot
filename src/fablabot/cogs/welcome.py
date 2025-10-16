@@ -11,7 +11,7 @@ from discord.ext import commands
 from discord.utils import get
 
 from fablabot.cogs.constants import ErrorMessages, RoleNames
-from fablabot.cogs.utils import (
+from fablabot.cogs.helpers.utils import (
     ADMIN_ROLES,
     check_has_role,
     escape_md,

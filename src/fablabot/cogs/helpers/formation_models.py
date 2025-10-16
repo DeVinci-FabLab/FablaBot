@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 PARIS_TZ = ZoneInfo("Europe/Paris")
@@ -74,15 +74,20 @@ class Draft:
         header (str): The header text for the message.
         role_id (int): The role ID to mention.
         intro (str): Introduction text.
-        fms (list[dict[str, Any]]): List of formations as dictionaries.
+        fms (list[Formation]): List of Formation objects.
         end (str): Ending text.
     """
 
     header: str
+    """The header text for the message."""
     role_id: int
+    """The role ID to mention."""
     intro: str
-    fms: list[dict[str, Any]]
+    """Introduction text."""
+    fms: list[Formation]
+    """List of Formation objects."""
     end: str
+    """Ending text."""
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the Draft instance to a dictionary.
@@ -90,7 +95,31 @@ class Draft:
         Returns:
             dict[str, Any]: The dictionary representation of the Draft.
         """
-        return asdict(self)
+        return {
+            "header": self.header,
+            "role_id": self.role_id,
+            "intro": self.intro,
+            "fms": [fm.to_dict() for fm in self.fms],
+            "end": self.end,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Draft:
+        """Create a Draft instance from a dictionary.
+
+        Args:
+            data (dict[str, Any]): Dictionary containing draft data.
+
+        Returns:
+            Draft: The Draft instance.
+        """
+        return cls(
+            header=data.get("header", ""),
+            role_id=data.get("role_id", 0),
+            intro=data.get("intro", ""),
+            fms=[Formation(**fm) for fm in data.get("fms", [])],
+            end=data.get("end", ""),
+        )
 
 
 @dataclass
@@ -100,12 +129,15 @@ class PublishedMessage:
     Attributes:
         message_id (int): The Discord message ID.
         channel_id (int): The Discord channel ID.
-        message (dict[str, Any]): The message payload with formations.
+        message (Draft): The message payload with formations.
     """
 
     message_id: int
+    """The Discord message ID."""
     channel_id: int
-    message: dict[str, Any]
+    """The Discord channel ID."""
+    message: Draft
+    """The message payload with formations."""
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the PublishedMessage instance to a dictionary.
@@ -113,7 +145,27 @@ class PublishedMessage:
         Returns:
             dict[str, Any]: The dictionary representation of the PublishedMessage.
         """
-        return asdict(self)
+        return {
+            "message_id": self.message_id,
+            "channel_id": self.channel_id,
+            "message": self.message.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PublishedMessage:
+        """Create a PublishedMessage instance from a dictionary.
+
+        Args:
+            data (dict[str, Any]): Dictionary containing published message data.
+
+        Returns:
+            PublishedMessage: The PublishedMessage instance.
+        """
+        return cls(
+            message_id=data.get("message_id", 0),
+            channel_id=data.get("channel_id", 0),
+            message=Draft.from_dict(data.get("message", {})),
+        )
 
 
 @dataclass
@@ -130,11 +182,17 @@ class ReactionEvent:
     """
 
     message_id: int
+    """The Discord message ID."""
     user_id: int
+    """The Discord user ID."""
     user_name: str | None
+    """The Discord user name."""
     emoji: str
-    action: str
+    """The emoji used in the reaction."""
+    action: Literal["add", "remove"]
+    """The action taken ('add' or 'remove')."""
     ts_iso: str
+    """The timestamp in ISO format."""
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the ReactionEvent instance to a dictionary.

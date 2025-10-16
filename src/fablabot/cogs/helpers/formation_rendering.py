@@ -11,7 +11,7 @@ from discord import Guild
 from discord.utils import get
 
 from fablabot.cogs.constants import Emojis, RoleNames
-from fablabot.cogs.utils import escape_md
+from fablabot.cogs.helpers.utils import escape_md
 
 if TYPE_CHECKING:
     from fablabot.cogs.helpers.formation_models import Formation
