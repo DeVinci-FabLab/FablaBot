@@ -87,11 +87,11 @@ def render_message(
     for fm in fms:
         line_block = [
             f"{fm.emoji} **{fm.name}** avec {fm.trainer_mention}",
-            f"{Emojis.DATE} {humanize_dt(fm.start_dt)}  — "
-            f"{Emojis.HOURGLASS} {fm.duration}  — "
-            f"{Emojis.PEOPLE} {len(fm.registered_users)}/{fm.seats} place(s)",
+            f"> {humanize_dt(fm.start_dt)}  — "
+            f"{Emojis.get_clock_emoji(fm.start_dt)} {fm.duration}  — "
+            f"{Emojis.PEOPLE} {len(fm.registered_users)}/{fm.seats} places",
         ]
-        line_block += [fm.description] if fm.description else []
+        line_block += [f"> {fm.description}"] if fm.description else []
         lines.append("\n".join(line_block))
         lines.append("")
 
