@@ -1,35 +1,34 @@
 [project]
-name = "fablabot"
-version = "0.1.0"
+dependencies = [
+  "discord-py==2.5.2",
+  "emoji>=2.15.0",
+  "python-dotenv==1.0.0",
+  "selenium==4.8.3",
+  "tzdata>=2025.2",
+  "webdriver-manager==3.8.5",
+]
 description = "General purpose Discord bot for the DeVinci Fablab discord server."
+name = "fablabot"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = [
-    "discord-py==2.5.2",
-    "emoji>=2.15.0",
-    "python-dotenv==1.0.0",
-    "selenium==4.8.3",
-    "tzdata>=2025.2",
-    "webdriver-manager==3.8.5",
-]
+version = "0.1.0"
 
 [build-system]
 requires = ["setuptools"]
 
 [tool.setuptools.packages.find]
-where = ["src"]
 include = ["fablabot*"]
+where = ["src"]
 
 [project.scripts]
-main = "fablabot.main:main"
 doc_builder = "fablabot._build_docs:build_docs"
-
+main = "fablabot.main:main"
 
 [dependency-groups]
 dev = [
-    "pdoc>=15.0.3",
-    "ruff>=0.12.9",
-    "typing-extensions>=4.15.0",
+  "pdoc>=15.0.3",
+  "ruff>=0.12.9",
+  "typing-extensions>=4.15.0",
 ]
 
 [tool.ruff]
@@ -40,23 +39,23 @@ target-version = "py313"
 docstring-code-format = true
 
 [tool.ruff.lint]
-select = [
-    "B",
-    "C4",
-    "E",
-    "F",
-    "I",
-    "N",
-    "PIE",
-    "PTH",
-    "RET",
-    "RUF",
-    "SIM",
-    "UP",
-    "W",
-    "D",
-]
 ignore = ["D105", "E5", "PTH123", "W505"]
+select = [
+  "B",
+  "C4",
+  "E",
+  "F",
+  "I",
+  "N",
+  "PIE",
+  "PTH",
+  "RET",
+  "RUF",
+  "SIM",
+  "UP",
+  "W",
+  "D",
+]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -66,3 +65,37 @@ max-doc-length = 128
 
 [tool.ruff.lint.isort]
 force-sort-within-sections = true
+
+[tool.pydoclint]
+allow-init-docstring = true
+baseline = "pydoclint-baseline.txt"
+check-style-mismatch = true
+exclude = '\.venv'
+generate-baseline = true
+show-filenames-in-every-violation-message = true
+skip-checking-short-docstrings = false
+style = 'google'
+
+[tool.pylint.main]
+disable = [
+  "E0401", # import-error -> False positive
+  "R0801", # duplicate-code
+  "R0902", # too-many-instance-attributes
+  "R0903", # too-few-public-methods
+  "W0212", # protected-access -> Best management with ruff
+  "W0511", # fixme
+  "W0613", # unused-argument -> Best management with ruff
+  "W1113", # keyword-arg-before-vararg -> Best management with ruff
+  "W1203", # logging-f-string-interpolation
+  "W0718",
+]
+enable = "all"
+exit-zero = true
+ignore = ".venv"
+max-line-length = 128
+msg-template = "{line}:{column}: {msg_id}: {msg} ({symbol})"
+output-format = "text"
+
+[tool.pylint.logging]
+logging-format-style = "new"
+logging-modules = ["loggerplusplus"]
