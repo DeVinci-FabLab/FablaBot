@@ -11,7 +11,7 @@ from discord.app_commands import AppCommandContext
 from discord.ext import commands
 from dotenv import load_dotenv
 
-from fablabot.cogs import ChannelManagement, FormationManagement, UserManagement, Welcome
+from fablabot.cogs import ChannelManagement, FormationManagement, MessageManagement, UserManagement, Welcome
 from fablabot.discord_log_handler import DiscordLogHandler
 
 logger = logging.getLogger(__name__)
@@ -35,12 +35,19 @@ class Fablabot(commands.Bot):
             - voice_states: for voice channel management
             - guild_messages: for message handling in guilds
             - reactions: for handling message reactions
+            - message_content: for reading message content
         """
         super().__init__(
             command_prefix=commands.when_mentioned,
             allowed_contexts=AppCommandContext(guild=True, dm_channel=False),
             intents=Intents(
-                guilds=True, members=True, expressions=True, voice_states=True, guild_messages=True, reactions=True
+                guilds=True,
+                members=True,
+                expressions=True,
+                voice_states=True,
+                guild_messages=True,
+                reactions=True,
+                message_content=True,
             ),
         )
         self.log_handler: DiscordLogHandler | None = None
@@ -56,7 +63,13 @@ class Fablabot(commands.Bot):
         self.log_handler = handler
 
         self.tree.clear_commands(guild=None)
-        for cog in (ChannelManagement(self), FormationManagement(self), UserManagement(self), Welcome(self)):
+        for cog in (
+            ChannelManagement(self),
+            FormationManagement(self),
+            MessageManagement(self),
+            UserManagement(self),
+            Welcome(self),
+        ):
             await self.add_cog(cog)
             logger.info(f"Loaded cog {cog.__class__.__name__}")
 

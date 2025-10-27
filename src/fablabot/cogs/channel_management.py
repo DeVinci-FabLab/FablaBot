@@ -10,9 +10,6 @@ from warnings import deprecated
 from discord import (
     AuditLogAction,
     CategoryChannel,
-    DMChannel,
-    ForumChannel,
-    GroupChannel,
     Guild,
     HTTPException,
     Interaction,
@@ -29,7 +26,6 @@ from discord.utils import get
 
 from fablabot.cogs.helpers import (
     ADMIN_ROLES,
-    ErrorMessages,
     RoleNames,
     check_has_role,
     escape_md,
@@ -57,7 +53,6 @@ class ChannelManagement(commands.Cog):
 
     Commands:
         - /text help: Display help for text channel management commands.
-        - /text clear: Clear the current text channel of its last messages.
         - /text create: Create a new text channel in the specified category.
         - /text rename: Rename an existing text channel.
         - /text delete: Delete a text channel.
@@ -99,7 +94,6 @@ class ChannelManagement(commands.Cog):
         """
         help_message = (
             "**Commandes de gestion des salons textuels :**\n"
-            "- `/text clear [messages]`: Nettoie le salon actuel de ses derniers messages. "
             "Par défaut, 5 messages sont supprimés.\n"
             "- `/text create <channel> <category>`: Crée un nouveau salon textuel dans la catégorie spécifiée.\n"
             "- `/text rename <channel> <new_name>`: Renomme un salon textuel existant.\n"
@@ -109,45 +103,6 @@ class ChannelManagement(commands.Cog):
             "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
         )
         await interaction.response.send_message(help_message, ephemeral=True)
-
-    @text_group.command(name="clear", description="Nettoie le salon actuel de ses derniers messages.")
-    @app_commands.describe(messages="Le nombre de messages à supprimer (par défaut 5)")
-    async def text_clear(self, interaction: Interaction, messages: app_commands.Range[int, 1, 50] = 5) -> None:
-        """Clears the current channel of its last messages.
-
-        Args:
-            interaction (Interaction): The Discord interaction context.
-            messages (app_commands.Range[int, 1, 50], optional): The number of messages to purge. Defaults to 5.
-        """
-        log_request(logger, "text.clear", interaction, messages=messages)
-        assert not isinstance(
-            interaction.channel,
-            ForumChannel | CategoryChannel | DMChannel | GroupChannel | None,
-        )
-        if not interaction.permissions.manage_messages:
-            logger.warning(f"Insufficient permissions for manage_messages: {interaction.user}")
-            await interaction.response.send_message(ErrorMessages.NO_PERMISSION_MANAGE_MESSAGES, ephemeral=True)
-            return
-        if interaction.channel.name.endswith("_bot"):
-            logger.warning(f"Attempt to clear {interaction.channel.name} channel")
-            await interaction.response.send_message(
-                f"Vous ne pouvez pas nettoyer le salon {interaction.channel.mention}."
-                f" Veuillez contacter le pôle numérique si nécessaire.",
-                ephemeral=True,
-            )
-            return
-        await interaction.response.send_message("Nettoyage en cours...", ephemeral=True)
-        try:
-            deleted = await interaction.channel.purge(
-                limit=messages,
-                reason=f"With clear command by {interaction.user}",
-            )
-        except HTTPException:
-            logger.exception(f"HTTP error while purging {messages} messages in {interaction.channel}")
-            await interaction.edit_original_response(content=ErrorMessages.CHANNEL_CLEAR_FAILED)
-            return
-        logger.info(f"Deleted {len(deleted)} messages in channel {interaction.channel.name}")
-        await interaction.edit_original_response(content=f"{len(deleted)} messages supprimés avec succès !")
 
     @text_group.command(name="create", description="Crée un nouveau salon dans la catégorie spécifiée.")
     @app_commands.describe(

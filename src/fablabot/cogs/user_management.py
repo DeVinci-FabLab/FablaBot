@@ -30,7 +30,6 @@ from fablabot.cogs.helpers import (
     log_request,
     safe_add_roles,
     safe_remove_roles,
-    send_dm_to_member,
 )
 
 logger = logging.getLogger(__name__)
@@ -47,7 +46,6 @@ class UserManagement(commands.Cog):
         - /user remove_role: Remove a role from a single user.
         - /user add_roles: Add a role to multiple users via a selector.
         - /user remove_roles: Remove a role from multiple users via a selector.
-        - /user dm: Send a direct message to multiple users.
 
     Attributes:
         user_group (app_commands.Group): Command group for user management commands.
@@ -83,7 +81,6 @@ class UserManagement(commands.Cog):
             "- `/user remove_role <user> <role>` : Retire un rôle à un utilisateur.\n"
             "- `/user add_roles <role>` : Donne un rôle à plusieurs utilisateurs via un sélecteur.\n"
             "- `/user remove_roles <role>` : Retire un rôle à plusieurs utilisateurs via un sélecteur.\n"
-            "- `/user dm <message>` : Envoie un message privé à plusieurs utilisateurs via un sélecteur.\n"
             "- `/user help` : Affiche cette aide pour les commandes de gestion des utilisateurs.\n"
             "\n"
             "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
@@ -305,46 +302,6 @@ class UserManagement(commands.Cog):
             f"Sélectionnez les membres à qui retirer {escape_md(role.name)} puis cliquez sur **Confirmer**.", view=view
         )
 
-    # -- Communications --
-
-    @user_group.command(
-        name="dm",
-        description="Envoie un message privé à plusieurs utilisateurs via un sélecteur.",
-    )
-    @app_commands.describe(message="Le message à envoyer en MP.")
-    async def user_dm(self, interaction: Interaction, message: str) -> None:
-        """Send a direct message to multiple users.
-
-        Args:
-            interaction (Interaction): The Discord interaction context.
-            message (str): The message content to send.
-        """
-        log_request(logger, "user.dm", interaction, message=message)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-
-        assert isinstance(interaction.user, Member)
-
-        role_names = {role.name for role in interaction.user.roles}
-        if RoleNames.BUREAU not in role_names:
-            logger.warning(f"Unauthorized dm by {interaction.user}")
-            await interaction.response.send_message("Permissions insuffisantes.", ephemeral=True)
-            return
-
-        message += (
-            f"\n\n*Ce message vous a été envoyé par un membre du Bureau du Fablab. Merci de ne pas y répondre directement.*"
-            f"\nPour plus d'informations, contactez <@{interaction.user.id}>."
-        )
-
-        view = BulkDMView(interaction.user, message)
-        await interaction.response.send_message(
-            (
-                "Selectionnez les membres a qui envoyer le message puis cliquez sur **Confirmer**.\n\n"
-                f"Message à envoyer :\n>>> {message}"
-            ),
-            view=view,
-        )
-
     # endregion User Slash Commands Group
 
     # region ====== Helpers ======
@@ -466,7 +423,7 @@ async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(UserManagement(bot))
 
 
-# region ====== UI Views ======
+# region ====== UI View ======
 
 
 class BulkRoleView(ui.View):
@@ -575,81 +532,4 @@ class BulkRoleView(ui.View):
         await interaction.edit_original_response(content="\n".join(lines), view=None)
 
 
-class BulkDMView(ui.View):
-    """View for bulk direct message sending."""
-
-    def __init__(
-        self,
-        sender: Member,
-        message: str,
-        *,
-        timeout: float = 180.0,
-    ) -> None:
-        """Initialize the view for bulk direct messages.
-
-        Args:
-            sender (Member): The member initiating the message sending.
-            message (str): The message to send to the selected members.
-            timeout (float, optional): The timeout duration in seconds. Defaults to 180.0.
-        """
-        super().__init__(timeout=timeout)
-        self.sender = sender
-        self.message = message
-
-        async def _on_select(interaction: Interaction) -> None:
-            if not interaction.response.is_done():
-                await interaction.response.defer()
-
-        self.select: ui.UserSelect[Any] = ui.UserSelect(
-            placeholder="Sélectionne les membres…",
-            min_values=1,
-            max_values=25,
-        )
-        self.select.callback = _on_select
-
-        self.confirm_button: ui.Button[Any] = ui.Button(label="Confirmer", style=ButtonStyle.primary)
-        self.confirm_button.callback = self.confirm
-
-        self.add_item(self.select)
-        self.add_item(self.confirm_button)
-
-    async def confirm(self, interaction: Interaction) -> None:
-        """Confirm the direct message sending.
-
-        Args:
-            interaction (Interaction): The Discord interaction triggered by the confirm button.
-        """
-        assert interaction.guild is not None
-        members: list[Member] = [m for m in self.select.values if isinstance(m, Member)]
-        if not members:
-            await interaction.response.send_message("Aucun membre sélectionné.", ephemeral=True)
-            return
-
-        delivered: list[Member] = []
-        failed: list[Member] = []
-
-        for member in members:
-            if await send_dm_to_member(logger, interaction.guild, member, self.message, "Bulk"):
-                delivered.append(member)
-            else:
-                failed.append(member)
-
-        logger.info(f"Bulk DM by {self.sender} delivered to {delivered} with failures {failed}")
-
-        lines: list[str] = ["Envoi des messages terminé."]
-        if delivered:
-            lines.append("Succès : " + ", ".join(format_member_mention(member) for member in delivered))
-        if failed:
-            lines.append("Échecs : " + ", ".join(format_member_mention(member) for member in failed))
-        lines.append("Contenu envoyé :")
-        lines.append(f">>> {self.message}")
-
-        for child in self.children:
-            if isinstance(child, ui.Button | ui.UserSelect):
-                child.disabled = True
-        await interaction.response.edit_message(view=self)
-
-        await interaction.edit_original_response(content="\n".join(lines), view=None)
-
-
-# endregion UI Views
+# endregion UI View
