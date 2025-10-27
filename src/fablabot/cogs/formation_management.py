@@ -755,6 +755,7 @@ class FormationManagement(commands.Cog):
 
         try:
             msg = await channel.send(content, suppress_embeds=True)
+            await msg.publish()
         except Exception:
             logger.exception(f"Guild {interaction.guild.id} failed to publish the formations draft in {channel!r}.")
             await interaction.followup.send(
