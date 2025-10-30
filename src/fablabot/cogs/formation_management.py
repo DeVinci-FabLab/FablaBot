@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import csv
 from datetime import datetime, timedelta
 import io
@@ -755,7 +756,6 @@ class FormationManagement(commands.Cog):
 
         try:
             msg = await channel.send(content, suppress_embeds=True)
-            await msg.publish()
         except Exception:
             logger.exception(f"Guild {interaction.guild.id} failed to publish the formations draft in {channel!r}.")
             await interaction.followup.send(
@@ -763,6 +763,9 @@ class FormationManagement(commands.Cog):
                 ephemeral=True,
             )
             return
+
+        with contextlib.suppress(Exception):
+            await msg.publish()
 
         success_reactions = 0
         for fm in fms:
