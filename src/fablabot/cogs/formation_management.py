@@ -921,6 +921,17 @@ class FormationManagement(commands.Cog):
             if fm_emojis and emoji_str not in fm_emojis:
                 return
 
+            formation = next((fm for fm in pub.message.fms if fm.emoji == emoji_str), None)
+            if formation:
+                now = datetime.now(PARIS_TZ)
+                registration_deadline = formation.start_dt + timedelta(minutes=20)
+                if now > registration_deadline:
+                    logger.info(
+                        f"Ignoring reaction {emoji_str} for formation {formation.name!r} "
+                        f"from user {payload.user_id} - registration closed (formation started + 10 minutes)."
+                    )
+                    return
+
             member_name = member.name if member else None
             reaction_event = ReactionEvent(
                 message_id=payload.message_id,
