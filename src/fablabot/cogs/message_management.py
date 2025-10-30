@@ -150,18 +150,22 @@ class MessageManagement(commands.Cog):
             await interaction.response.send_message("Permissions insuffisantes.", ephemeral=True)
             return
 
+        await interaction.response.defer(thinking=True)
+        followup_mes = await interaction.followup.send("Sélection des membres en cours...", wait=True)
+
         message += (
             f"\n\n*Ce message vous a été envoyé par un membre du Bureau du Fablab. Merci de ne pas y répondre directement.*"
             f"\nPour plus d'informations, contactez <@{interaction.user.id}>."
         )
 
-        view = BulkDMView(interaction.user, message)
-        await interaction.response.send_message(
+        view = BulkDMView(interaction.user, followup_mes.id, message)
+        await interaction.followup.send(
             (
                 "Selectionnez les membres a qui envoyer le message puis cliquez sur **Confirmer**.\n\n"
                 f"Message à envoyer :\n>>> {message}"
             ),
             view=view,
+            ephemeral=True,
         )
 
     # endregion Message Slash Commands Group
@@ -209,19 +213,19 @@ class BulkDMView(ui.View):
     def __init__(
         self,
         sender: Member,
+        followup_id: int,
         message: str,
-        *,
-        timeout: float = 180.0,
     ) -> None:
         """Initialize the view for bulk direct messages.
 
         Args:
             sender (Member): The member initiating the message sending.
+            followup_id (int): The ID of the follow-up message to edit with results.
             message (str): The message to send to the selected members.
-            timeout (float, optional): The timeout duration in seconds. Defaults to 180.0.
         """
-        super().__init__(timeout=timeout)
+        super().__init__()
         self.sender = sender
+        self.followup_id = followup_id
         self.message = message
 
         async def _on_select(interaction: Interaction) -> None:
@@ -253,6 +257,11 @@ class BulkDMView(ui.View):
             await interaction.response.send_message("Aucun membre sélectionné.", ephemeral=True)
             return
 
+        for child in self.children:
+            if isinstance(child, ui.Button | ui.UserSelect):
+                child.disabled = True
+        await interaction.response.edit_message(view=self)
+
         delivered: list[Member] = []
         failed: list[Member] = []
 
@@ -272,12 +281,8 @@ class BulkDMView(ui.View):
         lines.append("Contenu envoyé :")
         lines.append(f">>> {self.message}")
 
-        for child in self.children:
-            if isinstance(child, ui.Button | ui.UserSelect):
-                child.disabled = True
-        await interaction.response.edit_message(view=self)
-
-        await interaction.edit_original_response(content="\n".join(lines), view=None)
+        await interaction.followup.edit_message(self.followup_id, content="\n".join(lines))
+        await interaction.delete_original_response()
 
 
 # endregion UI View

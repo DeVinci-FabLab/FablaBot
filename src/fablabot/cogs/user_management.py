@@ -273,9 +273,14 @@ class UserManagement(commands.Cog):
             await interaction.response.send_message(ErrorMessages.NO_PERMISSION_ADD_ROLE, ephemeral=True)
             return
 
-        view = BulkRoleView(role, interaction.user, action="add")
-        await interaction.response.send_message(
-            f"Sélectionnez les membres à qui ajouter {escape_md(role.name)} puis cliquez sur **Confirmer**.", view=view
+        await interaction.response.defer(thinking=True)
+        followup_mes = await interaction.followup.send("Sélection des membres en cours...", wait=True)
+
+        view = BulkRoleView(role, interaction.user, followup_mes.id, action="add")
+        await interaction.followup.send(
+            f"Sélectionnez les membres à qui ajouter {escape_md(role.name)} puis cliquez sur **Confirmer**.",
+            view=view,
+            ephemeral=True,
         )
 
     @user_group.command(name="remove_roles", description="Retire un rôle à plusieurs utilisateurs via un sélecteur.")
@@ -297,9 +302,14 @@ class UserManagement(commands.Cog):
             await interaction.response.send_message(ErrorMessages.NO_PERMISSION_REMOVE_ROLE, ephemeral=True)
             return
 
-        view = BulkRoleView(role, interaction.user, action="remove")
-        await interaction.response.send_message(
-            f"Sélectionnez les membres à qui retirer {escape_md(role.name)} puis cliquez sur **Confirmer**.", view=view
+        await interaction.response.defer(thinking=True)
+        followup_mes = await interaction.followup.send("Sélection des membres en cours...", wait=True)
+
+        view = BulkRoleView(role, interaction.user, followup_mes.id, action="remove")
+        await interaction.followup.send(
+            f"Sélectionnez les membres à qui retirer {escape_md(role.name)} puis cliquez sur **Confirmer**.",
+            view=view,
+            ephemeral=True,
         )
 
     # endregion User Slash Commands Group
@@ -433,21 +443,22 @@ class BulkRoleView(ui.View):
         self,
         role: Role,
         user: Member,
+        followup_id: int,
         *,
         action: Literal["add", "remove"],
-        timeout: float = 180.0,
     ) -> None:
         """View for bulk role assignment/removal.
 
         Args:
             role (Role): The role to assign.
             user (Member): The member initiating the role assignment.
+            followup_id (int): The ID of the follow-up message to edit with results.
             action (Literal["add", "remove"]): "add" to add the role, "remove" to remove it.
-            timeout (float, optional): The timeout duration in seconds. Defaults to 180.0.
         """
-        super().__init__(timeout=timeout)
+        super().__init__()
         self.role = role
         self.user = user
+        self.followup_id = followup_id
         self.action = action
 
         async def _on_select(interaction: Interaction) -> None:
@@ -477,6 +488,11 @@ class BulkRoleView(ui.View):
         if not members:
             await interaction.response.send_message("Aucun membre sélectionné.", ephemeral=True)
             return
+
+        for child in self.children:
+            if isinstance(child, ui.Button | ui.UserSelect):
+                child.disabled = True
+        await interaction.response.edit_message(view=self)
 
         modified: list[Member] = []
         already: list[Member] = []
@@ -524,12 +540,8 @@ class BulkRoleView(ui.View):
         if failed:
             lines.append(f"Échec : {', '.join(format_member_mention(m) for m in failed)}")
 
-        for child in self.children:
-            if isinstance(child, ui.Button | ui.UserSelect):
-                child.disabled = True
-        await interaction.response.edit_message(view=self)
-
-        await interaction.edit_original_response(content="\n".join(lines), view=None)
+        await interaction.followup.edit_message(self.followup_id, content="\n".join(lines))
+        await interaction.delete_original_response()
 
 
 # endregion UI View
