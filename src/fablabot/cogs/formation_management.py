@@ -1319,7 +1319,7 @@ class FormationManagement(commands.Cog):
             async for user in reaction.users():
                 if user.bot:
                     continue
-                reactions_snapshot.setdefault(emoji_str, {})[user.id] = user.name
+                reactions_snapshot.setdefault(emoji_str, {})[user.id] = f"{user.display_name} ({user.name})"
 
         waitlist_notifications: list[tuple[int, str, int]] = []
         promotion_notifications: list[tuple[int, Formation]] = []
