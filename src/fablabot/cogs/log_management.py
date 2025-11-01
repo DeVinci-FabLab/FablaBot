@@ -19,8 +19,8 @@ from fablabot.cogs.helpers import (
     is_in_allowed_channel,
     log_request,
 )
-from fablabot.discord_log_handler import DiscordLogHandler
 from fablabot.guild_config import set_log_channel_id
+from fablabot.logging_handlers import DiscordLogHandler
 
 logger = logging.getLogger(__name__)
 

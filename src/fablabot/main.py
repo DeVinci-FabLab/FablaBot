@@ -12,7 +12,7 @@ from discord.ext import commands
 from dotenv import load_dotenv
 
 from fablabot.cogs import ChannelManagement, FormationManagement, LogManagement, MessageManagement, UserManagement, Welcome
-from fablabot.discord_log_handler import DiscordLogHandler
+from fablabot.logging_handlers import DailyFileHandler, DiscordLogHandler
 
 logger = logging.getLogger(__name__)
 load_dotenv()
@@ -20,6 +20,8 @@ load_dotenv()
 DISCORD_TOKEN_FILE = os.environ.get("DISCORD_TOKEN_FILE") or ""
 with open(DISCORD_TOKEN_FILE) as f:
     DISCORD_TOKEN = f.read().strip()
+
+LOG_PATH = "logs"
 
 
 class Fablabot(commands.Bot):
@@ -56,11 +58,14 @@ class Fablabot(commands.Bot):
     @override
     async def setup_hook(self) -> None:
         """Load the bot extensions."""
-        handler = DiscordLogHandler(self)
-        handler.setLevel(logging.ERROR)
-        logging.getLogger().addHandler(handler)
-        logging.getLogger().setLevel(logging.DEBUG)
-        self.log_handler = handler
+        discord_handler = DiscordLogHandler(self, logging.ERROR)
+        logging.getLogger().addHandler(discord_handler)
+
+        file_handler = DailyFileHandler(log_dir=LOG_PATH, level=logging.DEBUG)
+        logging.getLogger().addHandler(file_handler)
+
+        logging.getLogger().setLevel(logging.INFO)
+        self.log_handler = discord_handler
 
         self.tree.clear_commands(guild=None)
         for cog in (
