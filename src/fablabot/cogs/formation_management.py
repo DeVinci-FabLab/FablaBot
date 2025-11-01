@@ -56,7 +56,7 @@ ALLOWED_ROLES = {RoleNames.RESPO_FORMATIONS, RoleNames.ADMIN_TEMP, RoleNames.ADM
 DATA_FILE = "data/formations_state.json"
 DISCORD_EMOJI_RE = re.compile(r"^<a?:\w+:\d+>$")
 TRAINER_NOTIFICATION_ADVANCE = timedelta(hours=1)
-REACTION_LOG_RETENTION = timedelta(days=30)
+REACTION_LOG_RETENTION = timedelta(days=20)
 
 
 class FormationManagement(commands.Cog):
@@ -114,6 +114,7 @@ class FormationManagement(commands.Cog):
         ```
         """
         self._reaction_lock = asyncio.Lock()
+        self._pending_update_tasks: dict[int, asyncio.Task] = {}
         self._purge_all_reaction_logs()
         self._check_upcoming_formations.start()
         logger.info("FormationManagement initialized")
@@ -122,6 +123,12 @@ class FormationManagement(commands.Cog):
     async def cog_unload(self) -> None:
         """Clean up when the cog is unloaded."""
         self._check_upcoming_formations.cancel()
+        for task in list(self._pending_update_tasks.values()):
+            try:
+                task.cancel()
+            except Exception:
+                logger.exception("Failed to cancel pending scheduled update task during cog unload.")
+        self._pending_update_tasks.clear()
         logger.info("FormationManagement unloaded")
 
     # region ====== Fm Slash Commands Group ======
@@ -945,7 +952,7 @@ class FormationManagement(commands.Cog):
 
             self._log_reaction(payload.guild_id, reaction_event)
 
-            await self._update_published_message(payload.guild_id)
+            self._schedule_update(payload.guild_id)
 
     # endregion Event Listeners
 
@@ -1266,6 +1273,35 @@ class FormationManagement(commands.Cog):
         history.sort(key=lambda ev: ev.ts_iso or "")
         logger.debug(f"Loaded {len(history)} reaction events for guild {guild_id} message {message_id}.")
         return history
+
+    def _schedule_update(self, guild_id: int, delay: float = 2.0) -> None:
+        """Schedule a debounced update for a guild's published message.
+
+        If an update is already scheduled and not finished, this is a no-op. The
+        scheduled coroutine waits `delay` seconds before invoking
+        `_update_published_message`, coalescing rapid events.
+
+        Args:
+            guild_id (int): The ID of the guild.
+            delay (float, optional): The delay in seconds before performing the update. Defaults to 2.0.
+        """
+        existing = self._pending_update_tasks.get(guild_id)
+        if existing and not existing.done():
+            return
+
+        async def _delayed() -> None:
+            try:
+                await asyncio.sleep(delay)
+                await self._update_published_message(guild_id)
+            except asyncio.CancelledError:
+                logger.debug(f"Scheduled update for guild {guild_id} was cancelled.")
+            except Exception:
+                logger.exception(f"Error during scheduled update for guild {guild_id}.")
+            finally:
+                self._pending_update_tasks.pop(guild_id, None)
+
+        task = asyncio.create_task(_delayed())
+        self._pending_update_tasks[guild_id] = task
 
     async def _update_published_message(self, guild_id: int) -> None:
         """Update the published message to reflect current registrations.
