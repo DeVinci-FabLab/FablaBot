@@ -52,20 +52,23 @@ class Fablabot(commands.Bot):
                 message_content=True,
             ),
         )
-        self.log_handler: DiscordLogHandler | None = None
+        self.discord_log_handler: DiscordLogHandler | None = None
+        self.file_log_handler: DailyFileHandler | None = None
         logger.info("Bot initialized")
 
     @override
     async def setup_hook(self) -> None:
         """Load the bot extensions."""
-        discord_handler = DiscordLogHandler(self, logging.ERROR)
+        discord_handler = DiscordLogHandler(self)
         logging.getLogger().addHandler(discord_handler)
 
-        file_handler = DailyFileHandler(log_dir=LOG_PATH, level=logging.DEBUG)
+        file_handler = DailyFileHandler()
         logging.getLogger().addHandler(file_handler)
 
         logging.getLogger().setLevel(logging.INFO)
-        self.log_handler = discord_handler
+
+        self.discord_log_handler = discord_handler
+        self.file_log_handler = file_handler
 
         self.tree.clear_commands(guild=None)
         for cog in (

@@ -7,6 +7,8 @@ import logging
 from pathlib import Path
 from typing import override
 
+from discord import File
+
 LOG_PATH = "logs"
 MAX_LOG_AGE_DAYS = 15
 
@@ -23,9 +25,9 @@ class DailyFileHandler(logging.FileHandler):
         """Initialize the daily file handler.
 
         Args:
-            log_dir: Directory where log files will be stored.
-            level: Logging level for this handler.
-            max_age_days: Maximum age in days for log files. Older files will be deleted.
+            log_dir (str): Directory where log files will be stored. Defaults to `LOG_PATH`.
+            level (int): Logging level for this handler. Defaults to `logging.DEBUG`.
+            max_age_days (int): Maximum age in days for log files. Older files will be deleted. Defaults to `MAX_LOG_AGE_DAYS`.
         """
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -38,6 +40,41 @@ class DailyFileHandler(logging.FileHandler):
         self.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s:%(name)s: %(message)s"))
 
         self._cleanup_old_logs()
+
+    @override
+    def emit(self, record: logging.LogRecord) -> None:
+        """Emit a log record, switching to a new file if the date has changed.
+
+        Args:
+            record (logging.LogRecord): The log record to emit.
+        """
+        current_date = datetime.now().date()
+
+        if current_date != self.current_date:
+            self.close()
+            self.current_date = current_date
+            self.baseFilename = str(self.log_dir / f"{self.current_date}.log")
+            self.stream = self._open()
+
+            self._cleanup_old_logs()
+
+        super().emit(record)
+
+    async def export_logs(self, date_str: str) -> File | None:
+        """Export log file for the given date.
+
+        Args:
+            date_str (str): The date for which to export logs in YYYY-MM-DD format.
+
+        Returns:
+            File | None: The Discord File object for the log file, or None if the file
+        """
+        log_file = self.log_dir / f"{date_str}.log"
+
+        if log_file.exists():
+            return File(log_file, filename=f"{date_str}.log")
+
+        return None
 
     def _cleanup_old_logs(self) -> None:
         """Delete log files older than max_age_days."""
@@ -56,22 +93,3 @@ class DailyFileHandler(logging.FileHandler):
                     logging.getLogger(__name__).info(f"Deleted old log file: {log_file.name}")
             except (ValueError, OSError) as e:
                 logging.getLogger(__name__).warning(f"Could not process log file {log_file.name}: {e}")
-
-    @override
-    def emit(self, record: logging.LogRecord) -> None:
-        """Emit a log record, switching to a new file if the date has changed.
-
-        Args:
-            record: The log record to emit.
-        """
-        current_date = datetime.now().date()
-
-        if current_date != self.current_date:
-            self.close()
-            self.current_date = current_date
-            self.baseFilename = str(self.log_dir / f"{self.current_date}.log")
-            self.stream = self._open()
-
-            self._cleanup_old_logs()
-
-        super().emit(record)

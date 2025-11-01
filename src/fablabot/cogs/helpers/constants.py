@@ -40,6 +40,9 @@ class RoleNames:
     BUREAU = "Bureau"
     """Office/Bureau role."""
 
+    POLE_NUMERIQUE = "Pôle Numérique"
+    """Digital Pole role."""
+
     SBIRE_BUREAU = "Sbire Bureau"
     """Office assistant role."""
 
