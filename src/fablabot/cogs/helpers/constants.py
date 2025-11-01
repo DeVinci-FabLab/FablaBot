@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
+PARIS_TZ = ZoneInfo("Europe/Paris")
 MAX_MSG_CHARS = 1900
 
 

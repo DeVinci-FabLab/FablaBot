@@ -5,9 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any, Literal
-from zoneinfo import ZoneInfo
 
-PARIS_TZ = ZoneInfo("Europe/Paris")
+from fablabot.cogs.helpers.constants import PARIS_TZ
 
 
 @dataclass
