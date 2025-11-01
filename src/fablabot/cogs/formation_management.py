@@ -928,7 +928,7 @@ class FormationManagement(commands.Cog):
                 if now > registration_deadline:
                     logger.info(
                         f"Ignoring reaction {emoji_str} for formation {formation.name!r} "
-                        f"from user {payload.user_id} - registration closed (formation started + 10 minutes)."
+                        f"from user {payload.user_id} - registration closed."
                     )
                     return
 

@@ -132,7 +132,7 @@ def format_respo_contacts(guild: Guild) -> str:
         logger.debug(f"Role '{RoleNames.RESPO_FORMATIONS}' has no human members in guild {guild.id}; using fallback contacts.")
         return "un·e membre du Pôle Formations"
     mentions = [member.mention for member in members]
-    logger.debug(f"Resolved {len(mentions)} formation manager contacts for guild {guild.id}.")
+    logger.debug(f"Resolved {len(mentions)} formation contacts for guild {guild.id}.")
     return " ou ".join(mentions)
 
 

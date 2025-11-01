@@ -53,7 +53,7 @@ services:
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
     volumes:
-      - ./data:/app/data
+      - ${VOLUMES_PATH}/fablabot/data:/app/data
 
 secrets:
   discord_token:
