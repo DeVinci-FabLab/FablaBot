@@ -10,6 +10,7 @@ services:
       - ./src:/app/src
       - ./pyproject.toml:/app/pyproject.toml
       - ./data:/app/data
+      - ./logs:/app/logs
     environment:
       - DISCORD_TOKEN_FILE=/run/secrets/discord_token
       - GUILD_TOKEN_FILE=/run/secrets/guild_token
@@ -37,6 +38,7 @@ services:
       - personal_id
     volumes:
       - ./data:/app/data
+      - ./logs:/app/logs
 
   python-prod:
     image: ghcr.io/devinci-fablab/fablabot:latest
@@ -54,6 +56,7 @@ services:
       - "com.centurylinklabs.watchtower.enable=true"
     volumes:
       - ${VOLUMES_PATH}/fablabot/data:/app/data
+      - ${VOLUMES_PATH}/fablabot/logs:/app/logs
 
 secrets:
   discord_token:
