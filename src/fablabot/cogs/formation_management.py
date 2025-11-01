@@ -38,6 +38,7 @@ from fablabot.cogs.helpers import (
     RoleNames,
     format_current_registrations,
     format_respo_contacts,
+    notify_participants_before_formation,
     notify_responsible_before_formation,
     notify_trainer_before_formation,
     parse_date_time,
@@ -992,6 +993,11 @@ class FormationManagement(commands.Cog):
                         fm,
                         send_contacts,
                         moment="hour_before",
+                    )
+                    await notify_participants_before_formation(
+                        guild,
+                        fm,
+                        send_contacts,
                     )
 
                     fm.notified_hour_before = True

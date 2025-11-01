@@ -200,3 +200,31 @@ async def notify_responsible_before_formation(
         message = f"Salut {responsible.display_name} !\n{timing_line}\n\n{formation_export}\n\n"
 
         await send_dm_to_member(logger, guild, responsible, message, subject)
+
+
+async def notify_participants_before_formation(
+    guild: Guild,
+    formation: Formation,
+    contacts: str,
+) -> None:
+    """Send a DM to all participants of the formation.
+
+    Args:
+        guild (Guild): The guild where the formation is taking place.
+        formation (Formation): The formation starting soon.
+        contacts (str): The contact string for formation managers.
+    """
+    datetime_text = humanize_dt(formation.start_dt).lower()[2:-2]
+
+    message_content = f"La formation **{formation.name}** commence bientôt (le {datetime_text}).\n\n*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
+
+    for entry in formation.registered_users:
+        participant_id = int(entry["user_id"])
+        participant = await get_or_fetch_member(guild, participant_id)
+        if participant is None:
+            logger.error(f"Failed to fetch participant {participant_id} for formation {formation.name!r}.")
+            continue
+
+        message = f"Salut {participant.display_name} !\n{message_content}"
+
+        await send_dm_to_member(logger, guild, participant, message, f"reminder for formation {formation.name}")

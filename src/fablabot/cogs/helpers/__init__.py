@@ -3,6 +3,7 @@
 from fablabot.cogs.helpers.constants import EASTER_EGGS, EasterEggTrigger, Emojis, ErrorMessages, RoleNames
 from fablabot.cogs.helpers.formation_models import PARIS_TZ, Draft, Formation, PublishedMessage, ReactionEvent
 from fablabot.cogs.helpers.formation_notifications import (
+    notify_participants_before_formation,
     notify_responsible_before_formation,
     notify_trainer_before_formation,
     send_promotion_dm,
@@ -60,6 +61,7 @@ __all__ = [
     "humanize_dt",
     "is_in_allowed_channel",
     "log_request",
+    "notify_participants_before_formation",
     "notify_responsible_before_formation",
     "notify_trainer_before_formation",
     "parse_date_time",
