@@ -37,8 +37,6 @@ from fablabot.cogs.helpers import (
     safe_delete_channel,
     safe_edit_channel,
 )
-from fablabot.discord_log_handler import DiscordLogHandler
-from fablabot.guild_config import set_log_channel_id
 
 logger = logging.getLogger(__name__)
 
@@ -371,58 +369,6 @@ class ChannelManagement(commands.Cog):
         await interaction.response.send_message(f"Le salon vocal {escape_md(channel_name)} a été supprimé.")
 
     # endregion Vocal Slash Commands Group
-
-    # region ====== Log Slash Commands Group ======
-    log_group = app_commands.Group(name="log", description="Configuration des logs du bot")
-
-    @log_group.command(name="set", description="Configure le salon recevant les logs du bot en cas d'erreur.")
-    @app_commands.describe(channel="Salon textuel qui recevra les logs du bot.")
-    async def log_set(self, interaction: Interaction, channel: TextChannel) -> None:
-        """Configure the log channel destination for Discord logging.
-
-        Args:
-            interaction (Interaction): The Discord interaction context.
-            channel (TextChannel): The text channel receiving bot logs.
-        """
-        log_request(logger, "log.set", interaction, channel=channel.name, channel_id=channel.id)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-
-        if not await check_has_role(logger, interaction, ADMIN_ROLES):
-            return
-
-        handler = getattr(self.bot, "log_handler", None)
-        if not isinstance(handler, DiscordLogHandler):
-            logger.error("DiscordLogHandler is not initialized on the bot.")
-            await interaction.response.send_message(
-                "Le gestionnaire de logs n'est pas initialisé sur ce bot.",
-                ephemeral=True,
-            )
-            return
-
-        previous_id = handler.log_channel_id
-        if previous_id == channel.id:
-            await interaction.response.send_message(
-                f"{channel.mention} est déjà configuré comme salon de logs.",
-                ephemeral=True,
-            )
-            return
-
-        previous_channel: TextChannel | None = None
-        maybe_previous = self.bot.get_channel(previous_id)
-        if isinstance(maybe_previous, TextChannel):
-            previous_channel = maybe_previous
-
-        handler.set_log_channel(channel)
-        set_log_channel_id(channel.id)
-        logger.info(msg=f"Log channel set to {channel} (id={channel.id}) by {interaction.user} (id={interaction.user.id})")
-
-        confirmation = f"Les logs seront désormais envoyés dans {format_channel_mention(channel)}."
-        if previous_channel is not None:
-            confirmation += f" Ancien salon : {format_channel_mention(previous_channel)}."
-        await interaction.response.send_message(confirmation)
-
-    # endregion Log Slash Commands Group
 
     # region ====== Event Listeners ======
 
