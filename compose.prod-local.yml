@@ -1,6 +1,9 @@
 services:
-  python-prod:
-    image: ghcr.io/devinci-fablab/fablabot:latest
+  python-prod-local:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: production
     container_name: fablabot-prod
     restart: unless-stopped
     environment:
@@ -11,11 +14,9 @@ services:
       - discord_token
       - guild_token
       - personal_id
-    labels:
-      - "com.centurylinklabs.watchtower.enable=true"
     volumes:
-      - ${VOLUMES_PATH}/fablabot/data:/app/data
-      - ${VOLUMES_PATH}/fablabot/logs:/app/logs
+      - ./data:/app/data
+      - ./logs:/app/logs
 
 secrets:
   discord_token:
