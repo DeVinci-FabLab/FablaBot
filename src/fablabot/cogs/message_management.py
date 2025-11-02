@@ -216,36 +216,56 @@ class MessageManagement(commands.Cog):
 
     # region ====== Suggest Slash Commands Group ======
 
-    suggest_group = app_commands.Group(name="suggest", description="Suggestions de fonctionnalités")
+    suggest_group = app_commands.Group(name="suggest_to", description="Suggestions de fonctionnalités")
+
+    BUREAU_SUGGESTION_CONFIG = SuggestionConfig(
+        embed_title="Nouvelle suggestion pour le Bureau",
+        role_name=RoleNames.BUREAU,
+        channel_name="bureau-general",
+        success_message="Suggestion envoyée au Bureau. Merci !",
+        error_message="Aucun salon 'bureau-general' n'est configuré pour recevoir les suggestions.",
+    )
+
+    COMMUNICATION_SUGGESTION_CONFIG = SuggestionConfig(
+        embed_title="Nouvelle suggestion pour le Pôle Communication",
+        role_name=RoleNames.RESPO_COMMUNICATION,
+        channel_name="pole-communication",
+        success_message="Suggestion envoyée au Pôle Communication. Merci !",
+        error_message="Aucun·e Respo Communication et aucun salon 'pole-communication' ne sont configurés pour recevoir les suggestions.",
+    )
+
+    EVENTS_SUGGESTION_CONFIG = SuggestionConfig(
+        embed_title="Nouvelle suggestion pour le Pôle Événements",
+        role_name=RoleNames.RESPO_EVENTS,
+        channel_name="pole-events",
+        success_message="Suggestion envoyée au Pôle Événements. Merci !",
+        error_message="Aucun·e Respo Events et aucun salon 'pole-events' ne sont configurés pour recevoir les suggestions.",
+    )
 
     FORMATION_SUGGESTION_CONFIG = SuggestionConfig(
         embed_title="Nouvelle suggestion de formation",
         role_name=RoleNames.RESPO_FORMATIONS,
         channel_name="pole-formations",
         success_message="Suggestion envoyée au pôle formations. Merci !",
-        error_message="Aucun·e respo formation et aucun salon 'pole-formations' n'est configuré·e pour recevoir les suggestions.",
+        error_message="Aucun·e respo formation et aucun salon 'pole-formations' ne sont configurés pour recevoir les suggestions.",
+    )
+
+    PARTENARIATS_SUGGESTION_CONFIG = SuggestionConfig(
+        embed_title="Nouvelle suggestion pour le Pôle Partenariats",
+        role_name=RoleNames.RESPO_PARTENARIATS,
+        channel_name="pole-partenariats",
+        success_message="Suggestion envoyée au Pôle Partenariats. Merci !",
+        error_message="Aucun·e Respo Partenariats et aucun salon 'pole-partenariats' ne sont configurés pour recevoir les suggestions.",
     )
 
     IT_SUGGESTION_CONFIG = SuggestionConfig(
-        embed_title="Nouvelle suggestion de fonctionnalité IT",
+        embed_title="Nouvelle suggestion pour le Pôle Numérique",
         role_name=RoleNames.RESPO_NUMERIQUE,
         channel_name="pole-numerique",
         success_message="Suggestion envoyée au pôle numérique. Merci !",
-        error_message="Aucun·e respo numérique et aucun salon 'pole-numerique' n'est configuré·e pour recevoir les suggestions.",
+        error_message="Aucun·e respo numérique et aucun salon 'pole-numerique' ne sont configurés pour recevoir les suggestions.",
     )
 
-    BUREAU_SUGGESTION_CONFIG = SuggestionConfig(
-        embed_title="Nouvelle suggestion pour le Bureau",
-        role_name=RoleNames.BUREAU,
-        channel_name="bureau",
-        success_message="Suggestion envoyée au Bureau. Merci !",
-        error_message="Aucun·e membre du Bureau et aucun salon 'bureau' n'est configuré·e pour recevoir les suggestions.",
-    )
-
-    @suggest_group.command(
-        name="help",
-        description="Affiche l'aide pour les commandes de suggestions de fonctionnalités.",
-    )
     @app_commands.describe(show="Afficher l'aide publiquement ou non")
     async def suggest_help(self, interaction: Interaction, show: bool = False) -> None:
         """Display help for feature suggestion commands.
@@ -256,38 +276,19 @@ class MessageManagement(commands.Cog):
         """
         help_text = (
             "**Commandes de suggestions de fonctionnalités :**\n"
-            "- `/suggest formation <formation>` : Demander une formation.\n"
-            "- `/suggest it_feature <feature>` : Suggérer une nouvelle fonctionnalité IT (Pour le bot discord, un site, etc.).\n"
-            "- `/suggest to_bureau <improvement>` : Suggérer une amélioration pour le Bureau.\n"
-            "- `/suggest help [show]`: Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
+            "- `/suggest_to bureau <improvement> [anonyme]` : Suggérer une amélioration pour le Bureau.\n"
+            "- `/suggest_to pole_communication <suggestion> [anonyme]` : Suggérer quelque chose au pôle communication.\n"
+            "- `/suggest_to pole_events <suggestion> [anonyme]` : Suggérer quelque chose au pôle événements.\n"
+            "- `/suggest_to pole_formation <formation> [anonyme]` : Demander une formation.\n"
+            "- `/suggest_to pole_numerique <suggestion> [anonyme]` : Suggérer une nouvelle fonctionnalité IT (Pour le bot discord, un site, etc.).\n"
+            "- `/suggest_to pole_partenariats <suggestion> [anonyme]` : Suggérer quelque chose au pôle partenariats.\n"
+            "- `/suggest_to help [show]`: Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
             "\n"
             "N'hésitez pas à suggérer des idées pour qu'on puisse s'améliorer !"
         )
         await interaction.response.send_message(help_text, ephemeral=not show)
 
-    @suggest_group.command(name="formation", description="Suggérer une formation au(x) respo(s) formations.")
-    @app_commands.describe(formation="Détails de la formation demandée")
-    async def suggest_formation(self, interaction: Interaction, formation: str) -> None:
-        """Suggest a formation to the formations responsible(s).
-
-        Args:
-            interaction (Interaction): The Discord interaction context.
-            formation (str): The details of the suggested formation.
-        """
-        await self._handle_suggestion(interaction, formation, self.FORMATION_SUGGESTION_CONFIG, "suggest.formation")
-
-    @suggest_group.command(name="it_feature", description="Suggérer une fonctionnalité IT au pôle numérique.")
-    @app_commands.describe(it_feature="Détails de la fonctionnalité IT demandée")
-    async def suggest_it_feature(self, interaction: Interaction, it_feature: str) -> None:
-        """Suggest a new IT feature to the IT team.
-
-        Args:
-            interaction (Interaction): The Discord interaction context.
-            it_feature (str): The details of the suggested IT feature.
-        """
-        await self._handle_suggestion(interaction, it_feature, self.IT_SUGGESTION_CONFIG, "suggest.it_feature")
-
-    @suggest_group.command(name="to_bureau", description="Suggérer quelque chose au bureau.")
+    @suggest_group.command(name="bureau", description="Suggérer quelque chose au bureau.")
     @app_commands.describe(suggestion="Détails de la suggestion")
     async def suggest_to_bureau(self, interaction: Interaction, suggestion: str) -> None:
         """Suggest something to the bureau.
@@ -297,6 +298,61 @@ class MessageManagement(commands.Cog):
             suggestion (str): The details of the suggested improvement.
         """
         await self._handle_suggestion(interaction, suggestion, self.BUREAU_SUGGESTION_CONFIG, "suggest.to_bureau")
+
+    @suggest_group.command(name="pole_comm", description="Suggérer quelque chose au pôle communication.")
+    @app_commands.describe(suggestion="Détails de la suggestion")
+    async def suggest_to_communication_pole(self, interaction: Interaction, suggestion: str) -> None:
+        """Suggest something to the communication pole.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            suggestion (str): The details of the suggested improvement.
+        """
+        await self._handle_suggestion(interaction, suggestion, self.COMMUNICATION_SUGGESTION_CONFIG, "suggest.to_communication")
+
+    @suggest_group.command(name="pole_events", description="Suggérer quelque chose au pôle events.")
+    @app_commands.describe(suggestion="Détails de la suggestion")
+    async def suggest_to_events_pole(self, interaction: Interaction, suggestion: str) -> None:
+        """Suggest something to the events pole.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            suggestion (str): The details of the suggested improvement.
+        """
+        await self._handle_suggestion(interaction, suggestion, self.EVENTS_SUGGESTION_CONFIG, "suggest.to_events")
+
+    @suggest_group.command(name="pole_formation", description="Suggérer une formation au pôle formations.")
+    @app_commands.describe(formation="Détails de la formation demandée")
+    async def suggest_to_pole_formation(self, interaction: Interaction, formation: str) -> None:
+        """Suggest a formation to the formations pole.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            formation (str): The details of the suggested formation.
+        """
+        await self._handle_suggestion(interaction, formation, self.FORMATION_SUGGESTION_CONFIG, "suggest.formation")
+
+    @suggest_group.command(name="pole_partenariats", description="Suggérer quelque chose au pôle partenariats.")
+    @app_commands.describe(suggestion="Détails de la suggestion")
+    async def suggest_to_pole_partenariats(self, interaction: Interaction, suggestion: str) -> None:
+        """Suggest something to the partnerships pole.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            suggestion (str): The details of the suggested improvement.
+        """
+        await self._handle_suggestion(interaction, suggestion, self.PARTENARIATS_SUGGESTION_CONFIG, "suggest.to_partenariats")
+
+    @suggest_group.command(name="pole_numerique", description="Suggérer une fonctionnalité IT au pôle numérique.")
+    @app_commands.describe(it_feature="Détails de la suggestion")
+    async def suggest_to_pole_numerique(self, interaction: Interaction, it_feature: str) -> None:
+        """Suggest a new IT feature to the IT pole.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            it_feature (str): The details of the suggested IT feature.
+        """
+        await self._handle_suggestion(interaction, it_feature, self.IT_SUGGESTION_CONFIG, "suggest.it_feature")
 
     # endregion Suggest Slash Commands Group
 
