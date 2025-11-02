@@ -166,7 +166,6 @@ async def notify_trainer_before_formation(
 async def notify_responsible_before_formation(
     guild: Guild,
     formation: Formation,
-    contacts: str,
     moment: Literal["hour_before", "start"] = "hour_before",
 ) -> None:
     """Send a DM to the training responsible with the list of registered attendees.

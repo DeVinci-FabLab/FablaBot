@@ -1009,7 +1009,6 @@ class FormationManagement(commands.Cog):
                     await notify_responsible_before_formation(
                         guild,
                         fm,
-                        send_contacts,
                         moment="hour_before",
                     )
                     await notify_participants_before_formation(
@@ -1031,7 +1030,6 @@ class FormationManagement(commands.Cog):
                     await notify_responsible_before_formation(
                         guild,
                         fm,
-                        send_contacts,
                         moment="start",
                     )
 
