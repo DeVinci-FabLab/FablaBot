@@ -78,13 +78,14 @@ async def is_in_allowed_channel(logger: Logger, interaction: Interaction) -> boo
                 f"Stored commands channel id {stored_channel_id} could not be fetched for guild {interaction.guild.id}",
             )
             set_commands_channel_id(interaction.guild.id, None)
-        if isinstance(maybe_channel, TextChannel):
-            commands_channel = maybe_channel
-        elif maybe_channel is not None:
-            logger.warning(
-                f"Stored commands channel id {stored_channel_id} is not a TextChannel for guild {interaction.guild.id}",
-            )
-            set_commands_channel_id(interaction.guild.id, None)
+        else:
+            if isinstance(maybe_channel, TextChannel):
+                commands_channel = maybe_channel
+            elif maybe_channel is not None:
+                logger.warning(
+                    f"Stored commands channel id {stored_channel_id} is not a TextChannel for guild {interaction.guild.id}",
+                )
+                set_commands_channel_id(interaction.guild.id, None)
 
     if commands_channel is None:
         maybe_channel = get(interaction.guild.channels, name=COMMANDS_CHANNEL_NAME)
@@ -222,6 +223,27 @@ async def get_or_fetch_member(guild: Guild, member_id: int) -> Member | None:
         return await guild.fetch_member(member_id)
     except Exception:
         return None
+
+
+def get_members_by_role(logger: Logger, guild: Guild, role: Role | str) -> set[Member]:
+    """Get all members in a guild that have a specific role.
+
+    Args:
+        logger (Logger): The logger of the cog.
+        guild (Guild): The guild to search in.
+        role (Role | str): The role to filter members by.
+
+    Returns:
+        set[Member]: Set of members that have the specified role.
+    """
+    if isinstance(role, Role):
+        return set(role.members)
+
+    role_obj = get(guild.roles, name=role)
+    if role_obj is None:
+        logger.error(f"Role '{role}' not found in guild {guild.id}; returning empty member set.")
+        return set()
+    return set(role_obj.members)
 
 
 # region ====== Formatting Helpers ======

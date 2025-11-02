@@ -11,7 +11,7 @@ from discord import Guild
 from discord.utils import get
 
 from fablabot.cogs.helpers.constants import MAX_MSG_CHARS, Emojis, RoleNames
-from fablabot.cogs.helpers.utils import escape_md
+from fablabot.cogs.helpers.utils import escape_md, get_members_by_role
 
 if TYPE_CHECKING:
     from fablabot.cogs.helpers.formation_models import Formation
@@ -127,7 +127,7 @@ def format_respo_contacts(guild: Guild) -> str:
     if role is None:
         logger.debug(f"Role '{RoleNames.RESPO_FORMATIONS}' missing in guild {guild.id}; using fallback contacts.")
         return "un·e membre du Pôle Formations"
-    members = [member for member in role.members if not member.bot]
+    members = get_members_by_role(logger, guild, role)
     if not members:
         logger.debug(f"Role '{RoleNames.RESPO_FORMATIONS}' has no human members in guild {guild.id}; using fallback contacts.")
         return "un·e membre du Pôle Formations"

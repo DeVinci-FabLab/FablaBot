@@ -9,8 +9,9 @@ from typing import TYPE_CHECKING, Literal
 
 from discord import Guild
 
+from fablabot.cogs.helpers.constants import RoleNames
 from fablabot.cogs.helpers.formation_rendering import format_formation_export, humanize_dt
-from fablabot.cogs.helpers.utils import get_or_fetch_member, send_dm_to_member
+from fablabot.cogs.helpers.utils import get_members_by_role, get_or_fetch_member, send_dm_to_member
 
 if TYPE_CHECKING:
     from fablabot.cogs.helpers.formation_models import Formation
@@ -176,17 +177,9 @@ async def notify_responsible_before_formation(
         contacts (str): The contact string for formation managers.
         moment (Literal["hour_before", "start"]): When the notification is sent.
     """
-    responsibles_ids: list[int] = [int(id) for id in re.findall(r"<@!?(\d+)>", contacts)]
-    if not responsibles_ids:
-        logger.warning(f"Could not extract responsible IDs from mention {contacts!r} for formation {formation.name!r}.")
-        return
+    responsibles = get_members_by_role(logger, guild, RoleNames.RESPO_FORMATIONS)
 
-    for responsible_id in responsibles_ids:
-        responsible = await get_or_fetch_member(guild, responsible_id)
-        if responsible is None:
-            logger.error(f"Failed to fetch responsible {responsible_id} for formation {formation.name!r}.")
-            continue
-
+    for responsible in responsibles:
         datetime_text = humanize_dt(formation.start_dt).lower()[2:-2]
         formation_export = format_formation_export(formation)
 
@@ -200,6 +193,9 @@ async def notify_responsible_before_formation(
         message = f"Salut {responsible.display_name} !\n{timing_line}\n\n{formation_export}\n\n"
 
         await send_dm_to_member(logger, guild, responsible, message, subject)
+
+    if not responsibles:
+        logger.error(f"No responsible found to notify for formation {formation.name!r} in guild {guild.id}.")
 
 
 async def notify_participants_before_formation(
