@@ -38,7 +38,6 @@ from fablabot.cogs.helpers import (
     RoleNames,
     format_current_registrations,
     format_respo_contacts,
-    get_or_fetch_member,
     notify_participants_before_formation,
     notify_responsible_before_formation,
     notify_trainer_before_formation,
@@ -74,7 +73,6 @@ class FormationManagement(commands.Cog):
         - /fm preview: Preview the draft.
         - /fm publish: Publish the draft to a channel.
         - /fm export: Export the draft as a message.
-        - /fm suggest: Suggest a formation.
 
     Listeners:
         - on_raw_reaction_event: Log reactions (add/remove) on messages published by this cog.
@@ -905,63 +903,6 @@ class FormationManagement(commands.Cog):
                 ),
             ],
         )
-
-    @fm_group.command(name="suggest", description="Suggérer une formation au(x) respo(s) formations.")
-    @app_commands.describe(formation="Détails de la formation demandée")
-    async def fm_suggest(self, interaction: Interaction, formation: str) -> None:
-        """Suggest a formation to the administrators.
-
-        Args:
-            interaction (Interaction): The Discord interaction context.
-            formation (str): The details of the suggested formation.
-        """
-        log_request(logger, "fm.suggest", interaction, formation=formation)
-
-        await interaction.response.defer(thinking=True)
-
-        suggest_text = formation.strip()
-        if not suggest_text:
-            await interaction.followup.send("Le texte de la suggestion ne peut pas être vide.", ephemeral=True)
-            return
-
-        assert interaction.guild is not None
-
-        contacts = format_respo_contacts(interaction.guild)
-        responsibles_ids: list[int] = [int(id) for id in re.findall(r"<@!?(\d+)>", contacts)]
-
-        if not responsibles_ids:
-            logger.warning(f"Guild {interaction.guild.id} has no formation responsibles configured for suggestions.")
-            await interaction.followup.send(
-                "Aucun·e respo formation n'est configuré·e pour recevoir les suggestions.", ephemeral=True
-            )
-            return
-
-        suggest_embed = Embed(
-            title="Nouvelle suggestion de formation",
-            description=suggest_text,
-            color=0x00AAFF,
-            timestamp=datetime.now(PARIS_TZ),
-        )
-        suggest_embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
-        suggest_embed.add_field(name="Utilisateur·ice", value=interaction.user.mention, inline=False)
-
-        for responsible_id in responsibles_ids:
-            responsible = await get_or_fetch_member(interaction.guild, responsible_id)
-            if responsible is None:
-                logger.error(f"Failed to fetch responsible {responsible_id}.")
-                continue
-            try:
-                await responsible.send(embed=suggest_embed)
-            except Exception:
-                logger.exception(
-                    f"Failed to send formation suggestion from user {interaction.user.id} to responsible {responsible.id}."
-                )
-
-        logger.info(
-            f"Guild {interaction.guild.id} user {interaction.user.id} suggested a formation to "
-            f"{len(responsibles_ids)} responsible(s)."
-        )
-        await interaction.followup.send("Suggestion envoyée au(x) respo(s) formations. Merci !", ephemeral=True)
 
     # endregion Fm Slash Commands Group
 

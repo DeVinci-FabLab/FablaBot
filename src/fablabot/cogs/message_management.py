@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 import logging
 import random
 from typing import Any
@@ -11,6 +12,7 @@ from discord import (
     ButtonStyle,
     CategoryChannel,
     DMChannel,
+    Embed,
     ForumChannel,
     GroupChannel,
     HTTPException,
@@ -25,9 +27,11 @@ from discord import (
     ui,
 )
 from discord.ext import commands
+from discord.utils import get
 
 from fablabot.cogs.helpers import (
     EASTER_EGGS,
+    PARIS_TZ,
     ErrorMessages,
     RoleNames,
     format_member_mention,
@@ -46,6 +50,10 @@ class MessageManagement(commands.Cog):
         - /message help: Display help for message management commands.
         - /message clear: Clear the current text channel of its last messages.
         - /message dm: Send a direct message to multiple users.
+        - /suggest help: Display help for feature suggestion commands.
+        - /suggest fm: Suggest a new formation.
+        - /suggest it_feature: Suggest a new IT feature.
+        - /suggest for_bureau: Suggest an improvement for the Bureau.
 
     Listeners:
         - on_message: Easter egg listener for specific message content.
@@ -171,6 +179,94 @@ class MessageManagement(commands.Cog):
         )
 
     # endregion Message Slash Commands Group
+
+    # region ====== Suggest Slash Commands Group ======
+
+    suggest_group = app_commands.Group(name="suggest", description="Suggestions de fonctionnalités")
+
+    @suggest_group.command(
+        name="help",
+        description="Affiche l'aide pour les commandes de suggestions de fonctionnalités.",
+    )
+    @app_commands.describe(show="Afficher l'aide publiquement ou non")
+    async def suggest_help(self, interaction: Interaction, show: bool = False) -> None:
+        """Display help for feature suggestion commands.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            show (bool): Whether to show the help publicly or not.
+        """
+        help_text = (
+            "**Commandes de suggestions de fonctionnalités :**\n"
+            "- `/suggest fm <formation>` : Demander une formation.\n"
+            "- `/suggest it_feature <feature>` : Suggérer une nouvelle fonctionnalité IT (Pour le bot discord, un site, etc.).\n"
+            "- `/suggest for_bureau <improvement>` : Suggérer une amélioration pour le Bureau.\n"
+            "- `/suggest help [show]`: Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
+            "\n"
+            "N'hésitez pas à suggérer des idées pour qu'on puisse s'améliorer !"
+        )
+        await interaction.response.send_message(help_text, ephemeral=not show)
+
+    @suggest_group.command(name="suggest", description="Suggérer une formation au(x) respo(s) formations.")
+    @app_commands.describe(formation="Détails de la formation demandée")
+    async def suggest_fm(self, interaction: Interaction, formation: str) -> None:
+        """Suggest a formation to the formations responsible(s).
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            formation (str): The details of the suggested formation.
+        """
+        log_request(logger, "suggest.fm", interaction, formation=formation)
+
+        await interaction.response.defer(thinking=True)
+
+        suggest_text = formation.strip()
+        if not suggest_text:
+            await interaction.followup.send("Le texte de la suggestion ne peut pas être vide.", ephemeral=True)
+            return
+
+        guild = interaction.guild
+        assert guild is not None
+
+        role = get(guild.roles, name=RoleNames.RESPO_FORMATIONS)
+
+        if role is None:
+            logger.error(f"Role '{RoleNames.RESPO_FORMATIONS}' missing in guild {guild.id}.")
+            await interaction.followup.send(
+                "Le rôle des respo formations est manquant sur ce serveur. "
+                "Veuillez contacter le pôle numérique pour résoudre ce problème.",
+                ephemeral=True,
+            )
+            return
+        members = [member for member in role.members if not member.bot]
+        if not members:
+            logger.warning(f"Guild {guild.id} has no formation responsibles configured for suggestions.")
+            await interaction.followup.send(
+                "Aucun·e respo formation n'est configuré·e pour recevoir les suggestions.", ephemeral=True
+            )
+            return
+
+        suggest_embed = Embed(
+            title="Nouvelle suggestion de formation",
+            description=suggest_text,
+            color=0x00AAFF,
+            timestamp=datetime.now(PARIS_TZ),
+        )
+        suggest_embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+        suggest_embed.add_field(name="Utilisateur·ice", value=interaction.user.mention, inline=False)
+
+        for responsible in members:
+            try:
+                await responsible.send(embed=suggest_embed)
+            except Exception:
+                logger.exception(
+                    f"Failed to send formation suggestion from user {interaction.user.id} to responsible {responsible.id}."
+                )
+
+        logger.info(f"Guild {guild.id} user {interaction.user.id} suggested a formation to {len(members)} responsible(s).")
+        await interaction.followup.send("Suggestion envoyée au(x) respo(s) formations. Merci !", ephemeral=True)
+
+    # endregion Suggest Slash Commands Group
 
     # region ====== Listeners ======
 
