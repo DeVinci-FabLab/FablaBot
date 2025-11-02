@@ -274,6 +274,7 @@ class MessageManagement(commands.Cog):
         error_message="Aucun·e respo numérique et aucun salon 'pole-numerique' ne sont configurés pour recevoir les suggestions.",
     )
 
+    @suggest_group.command(name="help", description="Affiche l'aide pour les commandes de suggestions de fonctionnalités.")
     @app_commands.describe(show="Afficher l'aide publiquement ou non")
     async def suggest_help(self, interaction: Interaction, show: bool = False) -> None:
         """Display help for feature suggestion commands.
@@ -284,13 +285,13 @@ class MessageManagement(commands.Cog):
         """
         help_text = (
             "**Commandes de suggestions de fonctionnalités :**\n"
-            "- `/suggest_to codir <improvement> [anonyme]` : Suggérer une amélioration pour le CoDir.\n"
-            "- `/suggest_to bureau <improvement> [anonyme]` : Suggérer une amélioration pour le Bureau.\n"
-            "- `/suggest_to pole_communication <suggestion> [anonyme]` : Suggérer quelque chose au pôle communication.\n"
-            "- `/suggest_to pole_events <suggestion> [anonyme]` : Suggérer quelque chose au pôle événements.\n"
-            "- `/suggest_to pole_formation <formation> [anonyme]` : Demander une formation.\n"
-            "- `/suggest_to pole_numerique <suggestion> [anonyme]` : Suggérer une nouvelle fonctionnalité IT (Pour le bot discord, un site, etc.).\n"
-            "- `/suggest_to pole_partenariats <suggestion> [anonyme]` : Suggérer quelque chose au pôle partenariats.\n"
+            "- `/suggest_to codir <suggestion> [anonymous]` : Suggérer quelque chose au CoDir.\n"
+            "- `/suggest_to bureau <suggestion> [anonymous]` : Suggérer quelque chose au Bureau.\n"
+            "- `/suggest_to pole_communication <suggestion> [anonymous]` : Suggérer quelque chose au pôle communication.\n"
+            "- `/suggest_to pole_events <suggestion> [anonymous]` : Suggérer quelque chose au pôle événements.\n"
+            "- `/suggest_to pole_formation <formation> [anonymous]` : Demander une formation.\n"
+            "- `/suggest_to pole_numerique <suggestion> [anonymous]` : Suggérer une nouvelle fonctionnalité IT (Pour le bot discord, un site, etc.).\n"
+            "- `/suggest_to pole_partenariats <suggestion> [anonymous]` : Suggérer quelque chose au pôle partenariats.\n"
             "- `/suggest_to help [show]`: Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
             "\n"
             "N'hésitez pas à suggérer des idées pour qu'on puisse s'améliorer !"
@@ -298,81 +299,92 @@ class MessageManagement(commands.Cog):
         await interaction.response.send_message(help_text, ephemeral=not show)
 
     @suggest_group.command(name="codir", description="Suggérer quelque chose au CoDir.")
-    @app_commands.describe(suggestion="Détails de la suggestion")
-    async def suggest_to_codir(self, interaction: Interaction, suggestion: str) -> None:
+    @app_commands.describe(suggestion="Détails de la suggestion", anonymous="Souhaitez-vous rester anonyme ?")
+    async def suggest_to_codir(self, interaction: Interaction, suggestion: str, anonymous: bool = False) -> None:
         """Suggest something to the CoDir.
 
         Args:
             interaction (Interaction): The Discord interaction context.
             suggestion (str): The details of the suggested improvement.
+            anonymous (bool): Whether the suggestion is anonymous or not. Defaults to False.
         """
-        await self._handle_suggestion(interaction, suggestion, self.CODIR_SUGGESTION_CONFIG, "suggest.to_codir")
+        await self._handle_suggestion(interaction, suggestion, anonymous, self.CODIR_SUGGESTION_CONFIG, "suggest.to_codir")
 
     @suggest_group.command(name="bureau", description="Suggérer quelque chose au bureau.")
-    @app_commands.describe(suggestion="Détails de la suggestion")
-    async def suggest_to_bureau(self, interaction: Interaction, suggestion: str) -> None:
+    @app_commands.describe(suggestion="Détails de la suggestion", anonymous="Souhaitez-vous rester anonyme ?")
+    async def suggest_to_bureau(self, interaction: Interaction, suggestion: str, anonymous: bool = False) -> None:
         """Suggest something to the bureau.
 
         Args:
             interaction (Interaction): The Discord interaction context.
             suggestion (str): The details of the suggested improvement.
+            anonymous (bool): Whether the suggestion is anonymous or not. Defaults to False.
         """
-        await self._handle_suggestion(interaction, suggestion, self.BUREAU_SUGGESTION_CONFIG, "suggest.to_bureau")
+        await self._handle_suggestion(interaction, suggestion, anonymous, self.BUREAU_SUGGESTION_CONFIG, "suggest.to_bureau")
 
     @suggest_group.command(name="pole_comm", description="Suggérer quelque chose au pôle communication.")
-    @app_commands.describe(suggestion="Détails de la suggestion")
-    async def suggest_to_communication_pole(self, interaction: Interaction, suggestion: str) -> None:
+    @app_commands.describe(suggestion="Détails de la suggestion", anonymous="Souhaitez-vous rester anonyme ?")
+    async def suggest_to_communication_pole(self, interaction: Interaction, suggestion: str, anonymous: bool = False) -> None:
         """Suggest something to the communication pole.
 
         Args:
             interaction (Interaction): The Discord interaction context.
             suggestion (str): The details of the suggested improvement.
+            anonymous (bool): Whether the suggestion is anonymous or not. Defaults to False.
         """
-        await self._handle_suggestion(interaction, suggestion, self.COMMUNICATION_SUGGESTION_CONFIG, "suggest.to_communication")
+        await self._handle_suggestion(
+            interaction, suggestion, anonymous, self.COMMUNICATION_SUGGESTION_CONFIG, "suggest.to_communication"
+        )
 
     @suggest_group.command(name="pole_events", description="Suggérer quelque chose au pôle events.")
-    @app_commands.describe(suggestion="Détails de la suggestion")
-    async def suggest_to_events_pole(self, interaction: Interaction, suggestion: str) -> None:
+    @app_commands.describe(suggestion="Détails de la suggestion", anonymous="Souhaitez-vous rester anonyme ?")
+    async def suggest_to_events_pole(self, interaction: Interaction, suggestion: str, anonymous: bool = False) -> None:
         """Suggest something to the events pole.
 
         Args:
             interaction (Interaction): The Discord interaction context.
             suggestion (str): The details of the suggested improvement.
+            anonymous (bool): Whether the suggestion is anonymous or not. Defaults to False.
         """
-        await self._handle_suggestion(interaction, suggestion, self.EVENTS_SUGGESTION_CONFIG, "suggest.to_events")
+        await self._handle_suggestion(interaction, suggestion, anonymous, self.EVENTS_SUGGESTION_CONFIG, "suggest.to_events")
 
     @suggest_group.command(name="pole_formation", description="Suggérer une formation au pôle formations.")
-    @app_commands.describe(formation="Détails de la formation demandée")
-    async def suggest_to_pole_formation(self, interaction: Interaction, formation: str) -> None:
+    @app_commands.describe(formation="Détails de la formation demandée", anonymous="Souhaitez-vous rester anonyme ?")
+    async def suggest_to_pole_formation(self, interaction: Interaction, formation: str, anonymous: bool = False) -> None:
         """Suggest a formation to the formations pole.
 
         Args:
             interaction (Interaction): The Discord interaction context.
             formation (str): The details of the suggested formation.
+            anonymous (bool): Whether the suggestion is anonymous or not. Defaults to False.
         """
-        await self._handle_suggestion(interaction, formation, self.FORMATION_SUGGESTION_CONFIG, "suggest.formation")
+        await self._handle_suggestion(interaction, formation, anonymous, self.FORMATION_SUGGESTION_CONFIG, "suggest.formation")
 
     @suggest_group.command(name="pole_partenariats", description="Suggérer quelque chose au pôle partenariats.")
-    @app_commands.describe(suggestion="Détails de la suggestion")
-    async def suggest_to_pole_partenariats(self, interaction: Interaction, suggestion: str) -> None:
+    @app_commands.describe(suggestion="Détails de la suggestion", anonymous="Souhaitez-vous rester anonyme ?")
+    async def suggest_to_pole_partenariats(self, interaction: Interaction, suggestion: str, anonymous: bool = False) -> None:
         """Suggest something to the partnerships pole.
 
         Args:
             interaction (Interaction): The Discord interaction context.
             suggestion (str): The details of the suggested improvement.
+            anonymous (bool): Whether the suggestion is anonymous or not. Defaults to False.
         """
-        await self._handle_suggestion(interaction, suggestion, self.PARTENARIATS_SUGGESTION_CONFIG, "suggest.to_partenariats")
+        await self._handle_suggestion(
+            interaction, suggestion, anonymous, self.PARTENARIATS_SUGGESTION_CONFIG, "suggest.to_partenariats"
+        )
 
     @suggest_group.command(name="pole_numerique", description="Suggérer une fonctionnalité IT au pôle numérique.")
-    @app_commands.describe(it_feature="Détails de la suggestion")
-    async def suggest_to_pole_numerique(self, interaction: Interaction, it_feature: str) -> None:
+    @app_commands.describe(it_feature="Détails de la suggestion", anonymous="Souhaitez-vous rester anonyme ?")
+    async def suggest_to_pole_numerique(self, interaction: Interaction, it_feature: str, anonymous: bool = False) -> None:
         """Suggest a new IT feature to the IT pole.
 
         Args:
             interaction (Interaction): The Discord interaction context.
             it_feature (str): The details of the suggested IT feature.
+            anonymous (bool): Whether the suggestion is anonymous or not. Defaults to False.
         """
-        await self._handle_suggestion(interaction, it_feature, self.IT_SUGGESTION_CONFIG, "suggest.it_feature")
+        await self._handle_suggestion(interaction, it_feature, anonymous, self.IT_SUGGESTION_CONFIG, "suggest.it_feature")
 
     # endregion Suggest Slash Commands Group
 
@@ -405,6 +417,7 @@ class MessageManagement(commands.Cog):
         self,
         interaction: Interaction,
         suggestion_text: str,
+        anonymous: bool,
         config: SuggestionConfig,
         command_name: str,
     ) -> None:
@@ -413,11 +426,11 @@ class MessageManagement(commands.Cog):
         Args:
             interaction: The Discord interaction context.
             suggestion_text: The raw suggestion text.
+            anonymous: Whether the suggestion is anonymous or not.
             config: The suggestion configuration.
             command_name: The command name for logging (e.g., "suggest.formation").
         """
-        log_request(logger, command_name, interaction, suggestion=suggestion_text)
-        await interaction.response.defer(thinking=True)
+        log_request(logger, command_name, interaction, suggestion=suggestion_text, anonymous=anonymous)
 
         cleaned_text = suggestion_text.strip()
         if not cleaned_text:
@@ -434,19 +447,20 @@ class MessageManagement(commands.Cog):
             color=config.embed_color,
             timestamp=datetime.now(PARIS_TZ),
         )
-        embed.set_author(name=author.display_name, icon_url=author.display_avatar.url)
-        embed.add_field(name="Utilisateur·ice", value=author.mention, inline=False)
+        if not anonymous:
+            embed.set_author(name=author.display_name, icon_url=author.display_avatar.url)
+            embed.add_field(name="Utilisateur·ice", value=author.mention, inline=False)
 
-        success = await self._send_suggestion(interaction.guild, embed, config, author.id)
+        success = await self._send_suggestion(interaction.guild, embed, config, author.id if not anonymous else None)
 
         if not success:
-            await interaction.followup.send(config.error_message, ephemeral=True)
+            await interaction.response.send_message(config.error_message, ephemeral=True)
             return
 
         logger.info(
-            f"Guild {interaction.guild.id} user {interaction.user.id or 'Anonymous'} made a suggestion via {command_name}."
+            f"Guild {interaction.guild.id} user {interaction.user.id if not anonymous else 'Anonymous'} made a suggestion via {command_name}."
         )
-        await interaction.followup.send(config.success_message, ephemeral=True)
+        await interaction.response.send_message(config.success_message, ephemeral=True)
 
     async def _send_suggestion(
         self,

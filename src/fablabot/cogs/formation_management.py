@@ -155,7 +155,7 @@ class FormationManagement(commands.Cog):
             "- `/fm clear` : Effacer le brouillon actuel.\n"
             "- `/fm preview` : Prévisualiser le brouillon actuel.\n"
             "- `/fm publish <channel>` : Publier le brouillon dans un salon spécifique.\n"
-            "- `/fm export [message_id] [publication_channel]` : Exporter le brouillon sous forme de message.\n"
+            "- `/fm export [message_id]` : Exporter le brouillon sous forme de message.\n"
             "- `/fm help [show]` : Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
             "\n"
             "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
