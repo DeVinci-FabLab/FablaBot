@@ -147,7 +147,7 @@ async def check_has_role(logger: Logger, interaction: Interaction, roles: set[st
     return True
 
 
-async def _can_dm_user(user: Member) -> bool:
+async def can_dm_user(user: Member) -> bool:
     """Check if the bot can send a DM to the user.
 
     Args:
@@ -189,7 +189,7 @@ async def send_dm_to_member(
     if member.bot:
         return False
 
-    if not await _can_dm_user(member):
+    if not await can_dm_user(member):
         logger.error(f"Cannot DM user {member.id} ({member.name!r}) in guild {guild.id}; skipping {dm_type} DM.")
         return False
 

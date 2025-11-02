@@ -20,6 +20,7 @@ from fablabot.cogs.helpers.formation_rendering import (
 )
 from fablabot.cogs.helpers.utils import (
     ADMIN_ROLES,
+    can_dm_user,
     check_has_role,
     escape_md,
     format_channel_mention,
@@ -50,6 +51,7 @@ __all__ = [
     "PublishedMessage",
     "ReactionEvent",
     "RoleNames",
+    "can_dm_user",
     "check_has_role",
     "escape_md",
     "format_channel_mention",

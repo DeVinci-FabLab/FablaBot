@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 import logging
 import random
@@ -15,6 +16,7 @@ from discord import (
     Embed,
     ForumChannel,
     GroupChannel,
+    Guild,
     HTTPException,
     Interaction,
     Member,
@@ -34,13 +36,41 @@ from fablabot.cogs.helpers import (
     PARIS_TZ,
     ErrorMessages,
     RoleNames,
+    can_dm_user,
     format_member_mention,
+    get_members_by_role,
     is_in_allowed_channel,
     log_request,
     send_dm_to_member,
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SuggestionConfig:
+    """Configuration for a suggestion type.
+
+    Attributes:
+        embed_title (str): The title of the suggestion embed.
+        role_name (str | None): The role name to get responsible members.
+        channel_name (str | None): The channel name to send the suggestion to.
+        embed_color (int): The color of the embed. Defaults to 0x00AAFF.
+        success_message (str): The success message to send to the user.
+        error_message (str): The error message when no recipients are configured.
+    """
+
+    embed_title: str
+    """The title of the suggestion embed."""
+    role_name: str | None
+    """The role name to get responsible members."""
+    channel_name: str | None
+    """The channel name to send the suggestion to."""
+    success_message: str
+    """The success message to send to the user."""
+    error_message: str
+    """The error message when no recipients are configured."""
+    embed_color: int = 0x00AAFF
 
 
 class MessageManagement(commands.Cog):
@@ -53,13 +83,17 @@ class MessageManagement(commands.Cog):
         - /suggest help: Display help for feature suggestion commands.
         - /suggest fm: Suggest a new formation.
         - /suggest it_feature: Suggest a new IT feature.
-        - /suggest for_bureau: Suggest an improvement for the Bureau.
+        - /suggest to_bureau: Suggest an improvement for the Bureau.
 
     Listeners:
         - on_message: Easter egg listener for specific message content.
 
     Attributes:
         message_group (app_commands.Group): Command group for message management commands.
+        suggest_group (app_commands.Group): Command group for feature suggestion commands.
+        FORMATION_SUGGESTION_CONFIG (SuggestionConfig): Configuration for formation suggestions.
+        IT_SUGGESTION_CONFIG (SuggestionConfig): Configuration for IT feature suggestions.
+        BUREAU_SUGGESTION_CONFIG (SuggestionConfig): Configuration for Bureau suggestions.
     """
 
     def __init__(self, bot: commands.Bot) -> None:
@@ -184,6 +218,30 @@ class MessageManagement(commands.Cog):
 
     suggest_group = app_commands.Group(name="suggest", description="Suggestions de fonctionnalités")
 
+    FORMATION_SUGGESTION_CONFIG = SuggestionConfig(
+        embed_title="Nouvelle suggestion de formation",
+        role_name=RoleNames.RESPO_FORMATIONS,
+        channel_name="pole-formations",
+        success_message="Suggestion envoyée au pôle formations. Merci !",
+        error_message="Aucun·e respo formation et aucun salon 'pole-formations' n'est configuré·e pour recevoir les suggestions.",
+    )
+
+    IT_SUGGESTION_CONFIG = SuggestionConfig(
+        embed_title="Nouvelle suggestion de fonctionnalité IT",
+        role_name=RoleNames.RESPO_NUMERIQUE,
+        channel_name="pole-numerique",
+        success_message="Suggestion envoyée au pôle numérique. Merci !",
+        error_message="Aucun·e respo numérique et aucun salon 'pole-numerique' n'est configuré·e pour recevoir les suggestions.",
+    )
+
+    BUREAU_SUGGESTION_CONFIG = SuggestionConfig(
+        embed_title="Nouvelle suggestion pour le Bureau",
+        role_name=RoleNames.BUREAU,
+        channel_name="bureau",
+        success_message="Suggestion envoyée au Bureau. Merci !",
+        error_message="Aucun·e membre du Bureau et aucun salon 'bureau' n'est configuré·e pour recevoir les suggestions.",
+    )
+
     @suggest_group.command(
         name="help",
         description="Affiche l'aide pour les commandes de suggestions de fonctionnalités.",
@@ -198,73 +256,47 @@ class MessageManagement(commands.Cog):
         """
         help_text = (
             "**Commandes de suggestions de fonctionnalités :**\n"
-            "- `/suggest fm <formation>` : Demander une formation.\n"
+            "- `/suggest formation <formation>` : Demander une formation.\n"
             "- `/suggest it_feature <feature>` : Suggérer une nouvelle fonctionnalité IT (Pour le bot discord, un site, etc.).\n"
-            "- `/suggest for_bureau <improvement>` : Suggérer une amélioration pour le Bureau.\n"
+            "- `/suggest to_bureau <improvement>` : Suggérer une amélioration pour le Bureau.\n"
             "- `/suggest help [show]`: Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
             "\n"
             "N'hésitez pas à suggérer des idées pour qu'on puisse s'améliorer !"
         )
         await interaction.response.send_message(help_text, ephemeral=not show)
 
-    @suggest_group.command(name="suggest", description="Suggérer une formation au(x) respo(s) formations.")
+    @suggest_group.command(name="formation", description="Suggérer une formation au(x) respo(s) formations.")
     @app_commands.describe(formation="Détails de la formation demandée")
-    async def suggest_fm(self, interaction: Interaction, formation: str) -> None:
+    async def suggest_formation(self, interaction: Interaction, formation: str) -> None:
         """Suggest a formation to the formations responsible(s).
 
         Args:
             interaction (Interaction): The Discord interaction context.
             formation (str): The details of the suggested formation.
         """
-        log_request(logger, "suggest.fm", interaction, formation=formation)
+        await self._handle_suggestion(interaction, formation, self.FORMATION_SUGGESTION_CONFIG, "suggest.formation")
 
-        await interaction.response.defer(thinking=True)
+    @suggest_group.command(name="it_feature", description="Suggérer une fonctionnalité IT au pôle numérique.")
+    @app_commands.describe(it_feature="Détails de la fonctionnalité IT demandée")
+    async def suggest_it_feature(self, interaction: Interaction, it_feature: str) -> None:
+        """Suggest a new IT feature to the IT team.
 
-        suggest_text = formation.strip()
-        if not suggest_text:
-            await interaction.followup.send("Le texte de la suggestion ne peut pas être vide.", ephemeral=True)
-            return
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            it_feature (str): The details of the suggested IT feature.
+        """
+        await self._handle_suggestion(interaction, it_feature, self.IT_SUGGESTION_CONFIG, "suggest.it_feature")
 
-        guild = interaction.guild
-        assert guild is not None
+    @suggest_group.command(name="to_bureau", description="Suggérer quelque chose au bureau.")
+    @app_commands.describe(suggestion="Détails de la suggestion")
+    async def suggest_to_bureau(self, interaction: Interaction, suggestion: str) -> None:
+        """Suggest something to the bureau.
 
-        role = get(guild.roles, name=RoleNames.RESPO_FORMATIONS)
-
-        if role is None:
-            logger.error(f"Role '{RoleNames.RESPO_FORMATIONS}' missing in guild {guild.id}.")
-            await interaction.followup.send(
-                "Le rôle des respo formations est manquant sur ce serveur. "
-                "Veuillez contacter le pôle numérique pour résoudre ce problème.",
-                ephemeral=True,
-            )
-            return
-        members = [member for member in role.members if not member.bot]
-        if not members:
-            logger.warning(f"Guild {guild.id} has no formation responsibles configured for suggestions.")
-            await interaction.followup.send(
-                "Aucun·e respo formation n'est configuré·e pour recevoir les suggestions.", ephemeral=True
-            )
-            return
-
-        suggest_embed = Embed(
-            title="Nouvelle suggestion de formation",
-            description=suggest_text,
-            color=0x00AAFF,
-            timestamp=datetime.now(PARIS_TZ),
-        )
-        suggest_embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
-        suggest_embed.add_field(name="Utilisateur·ice", value=interaction.user.mention, inline=False)
-
-        for responsible in members:
-            try:
-                await responsible.send(embed=suggest_embed)
-            except Exception:
-                logger.exception(
-                    f"Failed to send formation suggestion from user {interaction.user.id} to responsible {responsible.id}."
-                )
-
-        logger.info(f"Guild {guild.id} user {interaction.user.id} suggested a formation to {len(members)} responsible(s).")
-        await interaction.followup.send("Suggestion envoyée au(x) respo(s) formations. Merci !", ephemeral=True)
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            suggestion (str): The details of the suggested improvement.
+        """
+        await self._handle_suggestion(interaction, suggestion, self.BUREAU_SUGGESTION_CONFIG, "suggest.to_bureau")
 
     # endregion Suggest Slash Commands Group
 
@@ -290,6 +322,101 @@ class MessageManagement(commands.Cog):
                 logger.info(f"Easter egg triggered by {message.author} in {message.channel}: {egg.keywords}")
 
     # endregion Listeners
+
+    # region ====== Helpers ======
+
+    async def _handle_suggestion(
+        self,
+        interaction: Interaction,
+        suggestion_text: str,
+        config: SuggestionConfig,
+        command_name: str,
+    ) -> None:
+        """Handle a suggestion command.
+
+        Args:
+            interaction: The Discord interaction context.
+            suggestion_text: The raw suggestion text.
+            config: The suggestion configuration.
+            command_name: The command name for logging (e.g., "suggest.formation").
+        """
+        log_request(logger, command_name, interaction, suggestion=suggestion_text)
+        await interaction.response.defer(thinking=True)
+
+        cleaned_text = suggestion_text.strip()
+        if not cleaned_text:
+            await interaction.followup.send("Le texte de la suggestion ne peut pas être vide.", ephemeral=True)
+            return
+
+        assert interaction.guild is not None
+        author = interaction.user
+        assert isinstance(author, Member)
+
+        embed = Embed(
+            title=config.embed_title,
+            description=suggestion_text,
+            color=config.embed_color,
+            timestamp=datetime.now(PARIS_TZ),
+        )
+        embed.set_author(name=author.display_name, icon_url=author.display_avatar.url)
+        embed.add_field(name="Utilisateur·ice", value=author.mention, inline=False)
+
+        success = await self._send_suggestion(interaction.guild, embed, config, author.id)
+
+        if not success:
+            await interaction.followup.send(config.error_message, ephemeral=True)
+            return
+
+        logger.info(
+            f"Guild {interaction.guild.id} user {interaction.user.id or 'Anonymous'} made a suggestion via {command_name}."
+        )
+        await interaction.followup.send(config.success_message, ephemeral=True)
+
+    async def _send_suggestion(
+        self,
+        guild: Guild,
+        embed: Embed,
+        config: SuggestionConfig,
+        user_id: int | None,
+    ) -> bool:
+        """Send a suggestion to responsible members and channel.
+
+        Args:
+            guild (Guild): The guild where the suggestion is made.
+            embed (Embed): The suggestion embed to send.
+            config (SuggestionConfig): The suggestion configuration.
+            user_id (int | None): The ID of the user making the suggestion.
+
+        Returns:
+            True if at least one recipient received the suggestion, False otherwise.
+        """
+        responsibles: set[Member] = get_members_by_role(logger, guild, role=config.role_name) if config.role_name else set()
+        channel = get(guild.text_channels, name=config.channel_name) if config.channel_name else None
+
+        if not responsibles and not channel:
+            logger.error(
+                f"Guild {guild.id} has no {config.role_name} responsibles and no {config.channel_name} channel configured."
+            )
+            return False
+
+        for responsible in responsibles:
+            if await can_dm_user(responsible):
+                try:
+                    await responsible.send(embed=embed)
+                except Exception:
+                    logger.exception(
+                        f"Failed to send suggestion from user {user_id or 'Anonymous'} to responsible {responsible.id}."
+                    )
+
+        if channel:
+            try:
+                await channel.send(embed=embed)
+            except Exception:
+                logger.exception(f"Failed to send suggestion from user {user_id or 'Anonymous'} to channel {channel.id}.")
+
+        return True
+
+    # endregion Helpers
 
 
 @deprecated("Load the cog using `bot.add_cog()` instead.")
