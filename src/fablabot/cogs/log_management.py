@@ -32,9 +32,9 @@ class LogManagement(commands.Cog):
     """Cog to register log management commands.
 
     Commands:
-        - /log help
-        - /log set channel:<#salon>
-        - /log export date:[DD/MM/YYYY]
+        - /log help: Display help for log management commands.
+        - /log set: Configure the channel receiving bot logs.
+        - /log export: Export the logs.
 
     Attributes:
         log_group (app_commands.Group): Command group for log management commands.
@@ -63,6 +63,7 @@ class LogManagement(commands.Cog):
             "**Commandes de gestion des logs :**\n"
             "- `/log set <channel>`: Configure le salon recevant les logs du bot.\n"
             "- `/log export [date]`: Exporte les logs récents.\n"
+            "- `/log help`: Affiche cette aide.\n"
             "\n"
             "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
         )

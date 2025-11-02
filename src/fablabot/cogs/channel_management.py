@@ -58,7 +58,6 @@ class ChannelManagement(commands.Cog):
         - /vocal create: Create a new voice channel in the specified category.
         - /vocal rename: Rename an existing voice channel.
         - /vocal delete: Delete a voice channel.
-        - /log set: Configure the text channel receiving bot logs on errors.
 
     Listeners:
         - on_message_delete: Notify when a message is deleted in a bot channel, log the deleter and resend the content.

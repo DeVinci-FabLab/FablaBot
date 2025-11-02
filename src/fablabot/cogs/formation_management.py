@@ -64,17 +64,17 @@ class FormationManagement(commands.Cog):
     """Hebdo formations management cog (Draft -> Publish -> Export).
 
     Commands:
-        - /fm help
-        - /fm start intro:<str> end:<str> role:<@Role>
-        - /fm edit_text [intro] [end]
-        - /fm add emoji:<str> name:<str> trainer:<@Member> date:<DD/MM/YYYY> hour:<HH:MM> duration:<str> seats:<int> description:<str>
-        - /fm edit index:<int> [emoji] [name] [trainer] [date] [hour] [duration] [seats] [description]
-        - /fm remove index:<int>
-        - /fm clear
-        - /fm preview
-        - /fm publish channel:<#salon>
-        - /fm export [message_id] [publication_channel]
-        - /fm suggest formation:<str>
+        - /fm help: Display help for formation management commands.
+        - /fm start: Start/overwrite a draft with an introduction, ending and role to mention.
+        - /fm edit_text: Edit the draft introduction and/or ending.
+        - /fm add: Add a new formation to the draft.
+        - /fm edit: Edit an existing formation in the draft.
+        - /fm remove: Remove a formation from the draft.
+        - /fm clear: Clear the draft.
+        - /fm preview: Preview the draft.
+        - /fm publish: Publish the draft to a channel.
+        - /fm export: Export the draft as a message.
+        - /fm suggest: Suggest a formation.
 
     Listeners:
         - on_raw_reaction_event: Log reactions (add/remove) on messages published by this cog.
@@ -146,16 +146,16 @@ class FormationManagement(commands.Cog):
         help_message = (
             "**Commandes de gestion des formations :**\n"
             "- `/fm start <intro> <end> <role>` : Démarrer un nouveau brouillon de formation.\n"
-            "- `/fm edit_text [intro] [end]` : Modifier le texte d'introduction et/ou de conclusion du brouillon.\n"
-            "- `/fm add <emoji> <name> <trainer> <date> <hour> <duration> <seats> <description>` :"
+            "- `/fm edit_text [intro] [end] [role]` : Modifier le texte d'introduction et/ou de conclusion du brouillon et le rôle à mentionner.\n"
+            "- `/fm add <emoji> <name> <trainer> <date> <hour> <duration> <seats> [description]` :"
             " Ajouter une nouvelle formation au brouillon.\n"
             "- `/fm edit <index> [emoji] [name] [trainer] [date] [hour] [duration] [seats] [description]` :"
             " Modifier une formation existante dans le brouillon.\n"
             "- `/fm remove <index>` : Supprimer une formation du brouillon.\n"
             "- `/fm clear` : Effacer le brouillon actuel.\n"
             "- `/fm preview` : Prévisualiser le brouillon actuel.\n"
-            "- `/fm publish` <channel> : Publier le brouillon dans un salon spécifique.\n"
-            "- `/fm export` [message_id] [publication_channel] : Exporter le brouillon sous forme de message.\n"
+            "- `/fm publish <channel>` : Publier le brouillon dans un salon spécifique.\n"
+            "- `/fm export [message_id] [publication_channel]` : Exporter le brouillon sous forme de message.\n"
             "- `/fm suggest <formation>` : Demander une formation.\n"
             "\n"
             "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
