@@ -218,9 +218,17 @@ class MessageManagement(commands.Cog):
 
     suggest_group = app_commands.Group(name="suggest_to", description="Suggestions de fonctionnalités")
 
+    CODIR_SUGGESTION_CONFIG = SuggestionConfig(
+        embed_title="Nouvelle suggestion pour le CoDir",
+        role_name=None,
+        channel_name="codir-general",
+        success_message="Suggestion envoyée au CoDir. Merci !",
+        error_message="Aucun salon 'codir-general' n'est configuré pour recevoir les suggestions.",
+    )
+
     BUREAU_SUGGESTION_CONFIG = SuggestionConfig(
         embed_title="Nouvelle suggestion pour le Bureau",
-        role_name=RoleNames.BUREAU,
+        role_name=None,
         channel_name="bureau-general",
         success_message="Suggestion envoyée au Bureau. Merci !",
         error_message="Aucun salon 'bureau-general' n'est configuré pour recevoir les suggestions.",
@@ -276,6 +284,7 @@ class MessageManagement(commands.Cog):
         """
         help_text = (
             "**Commandes de suggestions de fonctionnalités :**\n"
+            "- `/suggest_to codir <improvement> [anonyme]` : Suggérer une amélioration pour le CoDir.\n"
             "- `/suggest_to bureau <improvement> [anonyme]` : Suggérer une amélioration pour le Bureau.\n"
             "- `/suggest_to pole_communication <suggestion> [anonyme]` : Suggérer quelque chose au pôle communication.\n"
             "- `/suggest_to pole_events <suggestion> [anonyme]` : Suggérer quelque chose au pôle événements.\n"
@@ -287,6 +296,17 @@ class MessageManagement(commands.Cog):
             "N'hésitez pas à suggérer des idées pour qu'on puisse s'améliorer !"
         )
         await interaction.response.send_message(help_text, ephemeral=not show)
+
+    @suggest_group.command(name="codir", description="Suggérer quelque chose au CoDir.")
+    @app_commands.describe(suggestion="Détails de la suggestion")
+    async def suggest_to_codir(self, interaction: Interaction, suggestion: str) -> None:
+        """Suggest something to the CoDir.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            suggestion (str): The details of the suggested improvement.
+        """
+        await self._handle_suggestion(interaction, suggestion, self.CODIR_SUGGESTION_CONFIG, "suggest.to_codir")
 
     @suggest_group.command(name="bureau", description="Suggérer quelque chose au bureau.")
     @app_commands.describe(suggestion="Détails de la suggestion")
