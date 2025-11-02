@@ -147,9 +147,9 @@ class FormationManagement(commands.Cog):
             "**Commandes de gestion des formations :**\n"
             "- `/fm start <intro> <end> <role>` : Démarrer un nouveau brouillon de formation.\n"
             "- `/fm edit_text [intro] [end] [role]` : Modifier le texte d'introduction et/ou de conclusion du brouillon et le rôle à mentionner.\n"
-            "- `/fm add <emoji> <name> <trainer> <date> <hour> <duration> <seats> [description]` :"
+            "- `/fm add <emoji> <name> <trainer> <date> <hour> <duration> <seats> [description] [excusable]` :"
             " Ajouter une nouvelle formation au brouillon.\n"
-            "- `/fm edit <index> [emoji] [name] [trainer] [date] [hour] [duration] [seats] [description]` :"
+            "- `/fm edit <index> [emoji] [name] [trainer] [date] [hour] [duration] [seats] [description] [excusable]` :"
             " Modifier une formation existante dans le brouillon.\n"
             "- `/fm remove <index>` : Supprimer une formation du brouillon.\n"
             "- `/fm clear` : Effacer le brouillon actuel.\n"
@@ -320,6 +320,7 @@ class FormationManagement(commands.Cog):
         duration="Durée en texte, ce sera affiché comme tel",
         seats="Nombre de places",
         description="Brève description",
+        excusable="Absences excusables ?",
     )
     async def fm_add(
         self,
@@ -332,6 +333,7 @@ class FormationManagement(commands.Cog):
         duration: str,
         seats: app_commands.Range[int, 1, 500],
         description: str = "",
+        excusable: bool = True,
     ) -> None:
         """Add a formation to the draft (automatically sorted by date/time).
 
@@ -345,6 +347,7 @@ class FormationManagement(commands.Cog):
             duration (str): The duration of the formation in text format.
             seats (app_commands.Range[int, 1, 500]): The number of seats for the formation.
             description (str, optional): The description of the formation. Defaults to "".
+            excusable (bool, optional): Whether absences are excusable for this formation. Defaults to True.
         """
         log_request(
             logger,
@@ -358,6 +361,7 @@ class FormationManagement(commands.Cog):
             hour=hour,
             duration=duration,
             seats=seats,
+            excusable=excusable,
         )
         if not await is_in_allowed_channel(logger, interaction):
             return
@@ -400,6 +404,7 @@ class FormationManagement(commands.Cog):
             duration=duration.strip(),
             seats=int(seats),
             description=description.strip(),
+            excusable=excusable,
         )
 
         fms = list(draft.fms)
@@ -444,6 +449,7 @@ class FormationManagement(commands.Cog):
         duration="Nouvelle durée affichée",
         seats="Nouveau nombre de places",
         description="Nouvelle description",
+        excusable="Absences excusables ?",
     )
     async def fm_edit(
         self,
@@ -457,6 +463,7 @@ class FormationManagement(commands.Cog):
         duration: str | None = None,
         seats: app_commands.Range[int, 1, 500] | None = None,
         description: str | None = None,
+        excusable: bool | None = None,
     ) -> None:
         """Edit a formation in the draft while keeping other entries untouched.
 
@@ -471,6 +478,7 @@ class FormationManagement(commands.Cog):
             duration (str | None, optional): New duration for the formation. Defaults to None.
             seats (app_commands.Range[int, 1, 500] | None, optional): New number of seats for the formation. Defaults to None.
             description (str | None, optional): New description for the formation. Defaults to None.
+            excusable (bool | None, optional): Whether absences are excusable for this formation. Defaults to None.
         """
         log_request(
             logger,
@@ -484,6 +492,8 @@ class FormationManagement(commands.Cog):
             hour=hour,
             duration=duration,
             seats=seats,
+            description=description,
+            excusable=excusable,
         )
         if not await is_in_allowed_channel(logger, interaction):
             return
@@ -540,8 +550,6 @@ class FormationManagement(commands.Cog):
             await interaction.response.send_message(ErrorMessages.INVALID_DURATION, ephemeral=True)
             return
 
-        new_description = original.description if description is None else description.strip()
-
         new_seats = original.seats if seats is None else seats
 
         new_start_iso = original.start_iso
@@ -561,6 +569,10 @@ class FormationManagement(commands.Cog):
                 )
                 return
 
+        new_description = original.description if description is None else description.strip()
+
+        new_excusable = original.excusable if excusable is None else excusable
+
         updated = Formation(
             emoji=new_emoji,
             name=new_name,
@@ -569,6 +581,7 @@ class FormationManagement(commands.Cog):
             duration=new_duration,
             seats=new_seats,
             description=new_description,
+            excusable=new_excusable,
         )
 
         fms[index - 1] = updated

@@ -86,9 +86,9 @@ def render_message(
 
     for fm in fms:
         line_block = [
-            f"{fm.emoji} **{fm.name}** avec {fm.trainer_mention}",
-            f"> {humanize_dt(fm.start_dt)}  — "
-            f"{Emojis.get_clock_emoji(fm.start_dt)} {fm.duration}  — "
+            f"{fm.emoji} **{fm.name}** avec {fm.trainer_mention}{' (excusable)' if fm.excusable else ''}",
+            f"> {humanize_dt(fm.start_dt)}  – "  # noqa: RUF001
+            f"{Emojis.get_clock_emoji(fm.start_dt)} {fm.duration}  – "  # noqa: RUF001
             f"{Emojis.PEOPLE} {len(fm.registered_users)}/{fm.seats} places",
         ]
         line_block += [f"> {fm.description}"] if fm.description else []

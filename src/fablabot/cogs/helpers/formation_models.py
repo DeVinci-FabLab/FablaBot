@@ -20,11 +20,12 @@ class Formation:
         start_iso (str): Start date/time in ISO format (timezone-aware if possible).
         duration (str): Duration of the formation in text format.
         seats (int): Number of seats available for the formation.
-        description (str): Brief description of the formation.
+        description (str): Brief description of the formation. Defaults to "".
+        excusable (bool): Whether absences are excusable for this formation. Defaults to True.
         registered_users (list[dict[str, Any]]): Ordered list of registered users metadata.
         waitlisted_users (list[dict[str, Any]]): Ordered list of waitlisted users metadata.
-        notified_hour_before (bool): Whether the trainer has been notified one hour before the formation.
-        notified_at_start (bool): Whether the trainer has been notified at the start time of the formation.
+        notified_hour_before (bool): Whether the trainer has been notified one hour before the formation. Defaults to False.
+        notified_at_start (bool): Whether the trainer has been notified at the start time of the formation. Defaults to False.
     """
 
     emoji: str
@@ -41,6 +42,8 @@ class Formation:
     """Number of seats available for the formation."""
     description: str = ""
     """Brief description of the formation."""
+    excusable: bool = True
+    """Whether absences are excusable for this formation."""
     registered_users: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
     """Registered users metadata (order preserved)."""
     waitlisted_users: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
