@@ -59,13 +59,24 @@ class Fablabot(commands.Bot):
     @override
     async def setup_hook(self) -> None:
         """Load the bot extensions."""
-        discord_handler = DiscordLogHandler(self)
-        logging.getLogger().addHandler(discord_handler)
+        root_logger = logging.getLogger()
+        for h in list(root_logger.handlers):
+            root_logger.removeHandler(h)
 
-        file_handler = DailyFileHandler()
-        logging.getLogger().addHandler(file_handler)
+        formatter = logging.Formatter("[%(asctime)s] |  %(levelname)s  | %(name)s: %(message)s")
 
-        logging.getLogger().setLevel(logging.INFO)
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(formatter)
+        root_logger.addHandler(console_handler)
+
+        file_handler = DailyFileHandler(level=logging.DEBUG, formatter=formatter)
+        root_logger.addHandler(file_handler)
+
+        discord_handler = DiscordLogHandler(self, level=logging.ERROR)
+        root_logger.addHandler(discord_handler)
+
+        root_logger.setLevel(logging.DEBUG)
 
         self.discord_log_handler = discord_handler
         self.file_log_handler = file_handler
@@ -100,7 +111,6 @@ class Fablabot(commands.Bot):
 
 def main() -> None:
     """Run the bot using the token from the environment."""
-    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s:%(name)s: %(message)s")
     logger.info("Starting FablaBot")
     bot = Fablabot()
     logger.info("Running bot")

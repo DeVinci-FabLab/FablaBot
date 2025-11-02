@@ -21,12 +21,20 @@ class DailyFileHandler(logging.FileHandler):
     Log files older than MAX_LOG_AGE_DAYS are automatically deleted.
     """
 
-    def __init__(self, log_dir: str = LOG_PATH, level: int = logging.DEBUG, max_age_days: int = MAX_LOG_AGE_DAYS) -> None:
+    def __init__(
+        self,
+        *,
+        log_dir: str = LOG_PATH,
+        level: int = logging.DEBUG,
+        formatter: logging.Formatter,
+        max_age_days: int = MAX_LOG_AGE_DAYS,
+    ) -> None:
         """Initialize the daily file handler.
 
         Args:
             log_dir (str): Directory where log files will be stored. Defaults to `LOG_PATH`.
             level (int): Logging level for this handler. Defaults to `logging.DEBUG`.
+            formatter (logging.Formatter): Formatter for log messages.
             max_age_days (int): Maximum age in days for log files. Older files will be deleted. Defaults to `MAX_LOG_AGE_DAYS`.
         """
         self.log_dir = Path(log_dir)
@@ -37,7 +45,7 @@ class DailyFileHandler(logging.FileHandler):
         log_file = self.log_dir / f"{self.current_date}.log"
         super().__init__(log_file, mode="a", encoding="utf-8")
         self.setLevel(level)
-        self.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s:%(name)s: %(message)s"))
+        self.setFormatter(formatter)
 
         self._cleanup_old_logs()
 
