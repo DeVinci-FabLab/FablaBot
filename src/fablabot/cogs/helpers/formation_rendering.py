@@ -127,7 +127,7 @@ def format_respo_contacts(guild: Guild) -> str:
     if role is None:
         logger.debug(f"Role '{RoleNames.RESPO_FORMATIONS}' missing in guild {guild.id}; using fallback contacts.")
         return "un·e membre du Pôle Formations"
-    members = get_members_by_role(logger, guild, role)
+    members = get_members_by_role(role=role)
     if not members:
         logger.debug(f"Role '{RoleNames.RESPO_FORMATIONS}' has no human members in guild {guild.id}; using fallback contacts.")
         return "un·e membre du Pôle Formations"

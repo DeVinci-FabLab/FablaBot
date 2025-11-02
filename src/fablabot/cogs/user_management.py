@@ -31,6 +31,7 @@ from fablabot.cogs.helpers import (
     safe_add_roles,
     safe_remove_roles,
 )
+from fablabot.cogs.helpers.utils import get_members_by_role
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ class UserManagement(commands.Cog):
         - /user remove_role: Remove a role from a single user.
         - /user add_roles: Add a role to multiple users via a selector.
         - /user remove_roles: Remove a role from multiple users via a selector.
+        - /user with_roles: Get members with specific roles.
 
     Attributes:
         user_group (app_commands.Group): Command group for user management commands.
@@ -83,6 +85,7 @@ class UserManagement(commands.Cog):
             "- `/user remove_role <user> <role>` : Retire un rôle à un utilisateur.\n"
             "- `/user add_roles <role>` : Donne un rôle à plusieurs utilisateurs via un sélecteur.\n"
             "- `/user remove_roles <role>` : Retire un rôle à plusieurs utilisateurs via un sélecteur.\n"
+            "- `/user with_roles` : Obtenir les membres avec des rôles spécifiques.\n"
             "- `/user help [show]` : Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
             "\n"
             "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
@@ -278,7 +281,7 @@ class UserManagement(commands.Cog):
         await interaction.response.defer(thinking=True)
         followup_mes = await interaction.followup.send("Sélection des membres en cours...", wait=True)
 
-        view = BulkRoleView(role, interaction.user, followup_mes.id, action="add")
+        view = BulkRoleAssignmentView(role, interaction.user, followup_mes.id, action="add")
         await interaction.followup.send(
             f"Sélectionnez les membres à qui ajouter {escape_md(role.name)} puis cliquez sur **Confirmer**.",
             view=view,
@@ -307,9 +310,30 @@ class UserManagement(commands.Cog):
         await interaction.response.defer(thinking=True)
         followup_mes = await interaction.followup.send("Sélection des membres en cours...", wait=True)
 
-        view = BulkRoleView(role, interaction.user, followup_mes.id, action="remove")
+        view = BulkRoleAssignmentView(role, interaction.user, followup_mes.id, action="remove")
         await interaction.followup.send(
             f"Sélectionnez les membres à qui retirer {escape_md(role.name)} puis cliquez sur **Confirmer**.",
+            view=view,
+            ephemeral=True,
+        )
+
+    @user_group.command(name="with_roles", description="Obtenir les membres avec des rôles spécifiques.")
+    async def user_with_roles(self, interaction: Interaction) -> None:
+        """Get members with specific roles.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+        """
+        log_request(logger, "user.with_roles", interaction)
+        if not await is_in_allowed_channel(logger, interaction):
+            return
+
+        await interaction.response.defer(thinking=True)
+        followup_mes = await interaction.followup.send("Sélection des rôles en cours...", wait=True)
+
+        view = MultiRoleSelectorView(followup_mes.id)
+        await interaction.followup.send(
+            "Sélectionnez les rôles que vous recherchez puis cliquez sur **Confirmer**.",
             view=view,
             ephemeral=True,
         )
@@ -438,7 +462,7 @@ async def setup(bot: commands.Bot) -> None:
 # region ====== UI View ======
 
 
-class BulkRoleView(ui.View):
+class BulkRoleAssignmentView(ui.View):
     """View for bulk role assignment/removal."""
 
     def __init__(
@@ -449,7 +473,7 @@ class BulkRoleView(ui.View):
         *,
         action: Literal["add", "remove"],
     ) -> None:
-        """View for bulk role assignment/removal.
+        """Initialize the view for bulk role assignment/removal.
 
         Args:
             role (Role): The role to assign.
@@ -472,10 +496,10 @@ class BulkRoleView(ui.View):
             min_values=1,
             max_values=25,
         )
-        self.select.callback = _on_select
+        self.select.callback = _on_select  # type: ignore
 
         self.confirm_button: ui.Button[Any] = ui.Button(label="Confirmer", style=ButtonStyle.primary)
-        self.confirm_button.callback = self.confirm
+        self.confirm_button.callback = self.confirm  # type: ignore
 
         self.add_item(self.select)
         self.add_item(self.confirm_button)
@@ -541,6 +565,75 @@ class BulkRoleView(ui.View):
             lines.append(f"Déjà {already_str[self.action]} chez : {', '.join(format_member_mention(m) for m in already)}")
         if failed:
             lines.append(f"Échec : {', '.join(format_member_mention(m) for m in failed)}")
+
+        await interaction.followup.edit_message(self.followup_id, content="\n".join(lines))
+        await interaction.delete_original_response()
+
+
+class MultiRoleSelectorView(ui.View):
+    """View for multi role selection."""
+
+    def __init__(
+        self,
+        followup_id: int,
+    ) -> None:
+        """Initialize the view for multi role selection.
+
+        Args:
+            followup_id (int): The ID of the follow-up message to edit with results.
+        """
+        super().__init__()
+        self.followup_id = followup_id
+
+        async def _on_select(interaction: Interaction) -> None:
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+
+        self.select: ui.RoleSelect[Any] = ui.RoleSelect(
+            placeholder="Sélectionne les rôles…",
+            min_values=1,
+            max_values=25,
+        )
+        self.select.callback = _on_select  # type: ignore
+
+        self.confirm_button: ui.Button[Any] = ui.Button(label="Confirmer", style=ButtonStyle.primary)
+        self.confirm_button.callback = self.confirm  # type: ignore
+
+        self.add_item(self.select)
+        self.add_item(self.confirm_button)
+
+    async def confirm(self, interaction: Interaction) -> None:
+        """Confirm the bulk role assignment/removal.
+
+        Args:
+            interaction (Interaction): The Discord interaction triggered by the confirm button.
+        """
+        roles: list[Role] = [r for r in self.select.values if isinstance(r, Role)]
+        if not roles:
+            await interaction.response.send_message("Aucun rôle sélectionné.", ephemeral=True)
+            return
+
+        logger.info(f"Roles selected: {roles}")
+
+        for child in self.children:
+            if isinstance(child, ui.Button | ui.UserSelect):
+                child.disabled = True
+        await interaction.response.edit_message(view=self)
+
+        assert interaction.guild is not None
+        members: set[Member] = set(interaction.guild.members)
+
+        lines: list[str] = ["Rôles sélectionnés :"]
+        for role in roles:
+            role_members = get_members_by_role(role=role)
+            lines.append(f"- {format_role_mention(role)} : {len(role_members)} membre{'s' if len(role_members) != 1 else ''}")
+            members &= role_members
+
+        lines.append(f"\nMembre(s) avec tous les rôles sélectionnés ({len(members)}) :")
+        if not members:
+            lines.append("_(Aucun membre)_")
+        for member in members:
+            lines.append(f"- {format_member_mention(member)}")
 
         await interaction.followup.edit_message(self.followup_id, content="\n".join(lines))
         await interaction.delete_original_response()

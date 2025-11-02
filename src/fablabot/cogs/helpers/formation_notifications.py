@@ -177,7 +177,7 @@ async def notify_responsible_before_formation(
         contacts (str): The contact string for formation managers.
         moment (Literal["hour_before", "start"]): When the notification is sent.
     """
-    responsibles = get_members_by_role(logger, guild, RoleNames.RESPO_FORMATIONS)
+    responsibles = get_members_by_role(logger, guild, role=RoleNames.RESPO_FORMATIONS)
 
     for responsible in responsibles:
         datetime_text = humanize_dt(formation.start_dt).lower()[2:-2]

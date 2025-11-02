@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from logging import Logger
-from typing import Any
+from typing import Any, overload
 
 from discord import (
     CategoryChannel,
@@ -225,12 +225,23 @@ async def get_or_fetch_member(guild: Guild, member_id: int) -> Member | None:
         return None
 
 
-def get_members_by_role(logger: Logger, guild: Guild, role: Role | str) -> set[Member]:
+@overload
+def get_members_by_role(logger: Logger, guild: Guild, *, role: str) -> set[Member]: ...
+@overload
+def get_members_by_role(*, role: Role) -> set[Member]: ...
+
+
+def get_members_by_role(
+    logger: Logger | None = None,
+    guild: Guild | None = None,
+    *,
+    role: Role | str,
+) -> set[Member]:
     """Get all members in a guild that have a specific role.
 
     Args:
-        logger (Logger): The logger of the cog.
-        guild (Guild): The guild to search in.
+        logger (Logger | None): The logger of the cog. Defaults to None.
+        guild (Guild | None): The guild to search in. Defaults to None.
         role (Role | str): The role to filter members by.
 
     Returns:
@@ -238,6 +249,9 @@ def get_members_by_role(logger: Logger, guild: Guild, role: Role | str) -> set[M
     """
     if isinstance(role, Role):
         return set(role.members)
+
+    assert logger is not None
+    assert guild is not None
 
     role_obj = get(guild.roles, name=role)
     if role_obj is None:

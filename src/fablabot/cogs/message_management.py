@@ -335,10 +335,10 @@ class BulkDMView(ui.View):
             min_values=1,
             max_values=25,
         )
-        self.select.callback = _on_select
+        self.select.callback = _on_select  # type: ignore
 
         self.confirm_button: ui.Button[Any] = ui.Button(label="Confirmer", style=ButtonStyle.primary)
-        self.confirm_button.callback = self.confirm
+        self.confirm_button.callback = self.confirm  # type: ignore
 
         self.add_item(self.select)
         self.add_item(self.confirm_button)
