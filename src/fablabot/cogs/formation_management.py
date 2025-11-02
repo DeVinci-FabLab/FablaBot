@@ -828,17 +828,13 @@ class FormationManagement(commands.Cog):
     @fm_group.command(name="export", description="Exporter la liste des membres ayant (dé)réagi aux émojis des FMs.")
     @app_commands.describe(
         message_id="ID du message publié (optionnel si dernière publication)",
-        publication_channel="Salon du message publié (optionnel si dernière publication)",
     )
-    async def fm_export(
-        self, interaction: Interaction, message_id: str | None = None, publication_channel: TextChannel | None = None
-    ) -> None:
+    async def fm_export(self, interaction: Interaction, message_id: str | None = None) -> None:
         """Export the list of members who reacted (added/removed) to the formation emojis.
 
         Args:
             interaction (Interaction): The Discord interaction context.
             message_id (str | None, optional): The ID of the published message. Defaults to None.
-            publication_channel (TextChannel | None, optional): The channel of the published message. Defaults to None.
         """
         log_request(logger, "fm.export", interaction, message_id=message_id)
         if not await is_in_allowed_channel(logger, interaction):
@@ -848,14 +844,13 @@ class FormationManagement(commands.Cog):
 
         assert interaction.guild is not None
         published = self._get_last_published_in_guild(interaction.guild.id)
-        if not published and (not message_id or not publication_channel):
+        if not published and not message_id:
             logger.warning(f"Guild {interaction.guild.id} tried to export reactions without published message or ID.")
             await interaction.response.send_message(ErrorMessages.NO_PUBLISHED_MESSAGE, ephemeral=True)
             return
 
         target_message_id = int(message_id) if message_id else published.message_id if published else None
-        target_channel_id = int(publication_channel.id) if publication_channel else published.channel_id if published else None
-        if not target_message_id or not target_channel_id:
+        if not target_message_id:
             logger.error(f"Guild {interaction.guild.id} has inconsistent published message data: {published}")
             await interaction.response.send_message(ErrorMessages.INCONSISTENT_PUBLISHED_DATA, ephemeral=True)
             return
@@ -881,7 +876,7 @@ class FormationManagement(commands.Cog):
                 ]
             )
 
-        if message_id or publication_channel:
+        if message_id:
             await interaction.response.send_message(
                 content="Export du message spécifié.",
                 file=File(
