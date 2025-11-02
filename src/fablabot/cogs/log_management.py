@@ -53,21 +53,23 @@ class LogManagement(commands.Cog):
     log_group = app_commands.Group(name="log", description="Configuration des logs du bot")
 
     @log_group.command(name="help", description="Affiche l'aide pour les commandes de gestion des logs.")
-    async def log_help(self, interaction: Interaction) -> None:
+    @app_commands.describe(show="Afficher l'aide publiquement ou non")
+    async def log_help(self, interaction: Interaction, show: bool = False) -> None:
         """Display help for log management commands.
 
         Args:
             interaction (Interaction): The Discord interaction context.
+            show (bool): Whether to show the help publicly or not.
         """
         help_text = (
             "**Commandes de gestion des logs :**\n"
             "- `/log set <channel>`: Configure le salon recevant les logs du bot.\n"
             "- `/log export [date]`: Exporte les logs récents.\n"
-            "- `/log help`: Affiche cette aide.\n"
+            "- `/log help [show]`: Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
             "\n"
             "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
         )
-        await interaction.response.send_message(help_text, ephemeral=True)
+        await interaction.response.send_message(help_text, ephemeral=not show)
 
     @log_group.command(name="set", description="Configure le salon recevant les logs du bot en cas d'erreur.")
     @app_commands.describe(channel="Salon textuel qui recevra les logs du bot.")

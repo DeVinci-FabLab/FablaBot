@@ -71,21 +71,23 @@ class MessageManagement(commands.Cog):
         name="help",
         description="Affiche l'aide pour les commandes de gestion des messages.",
     )
-    async def message_help(self, interaction: Interaction) -> None:
+    @app_commands.describe(show="Afficher l'aide publiquement ou non")
+    async def message_help(self, interaction: Interaction, show: bool = False) -> None:
         """Display help for message management commands.
 
         Args:
             interaction (Interaction): The Discord interaction context.
+            show (bool): Whether to show the help publicly or not.
         """
         help_text = (
             "**Commandes de gestion des messages :**\n"
             "- `/message clear [messages]`: Nettoie le salon actuel de ses derniers messages.\n"
             "- `/message dm`: Envoie un message privé à plusieurs utilisateurs via un sélecteur.\n"
-            "- `/message help`: Affiche cette aide.\n"
+            "- `/message help [show]`: Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
             "\n"
             "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
         )
-        await interaction.response.send_message(help_text, ephemeral=True)
+        await interaction.response.send_message(help_text, ephemeral=not show)
 
     @message_group.command(name="clear", description="Nettoie le salon actuel de ses derniers messages.")
     @app_commands.describe(messages="Le nombre de messages à supprimer (par défaut 5)")

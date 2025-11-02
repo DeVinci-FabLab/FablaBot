@@ -83,23 +83,24 @@ class ChannelManagement(commands.Cog):
     text_group = app_commands.Group(name="text", description="Gestion des salons textuels")
 
     @text_group.command(name="help", description="Affiche l'aide pour les commandes de gestion des salons textuels.")
-    async def text_help(self, interaction: Interaction) -> None:
+    @app_commands.describe(show="Afficher l'aide publiquement ou non")
+    async def text_help(self, interaction: Interaction, show: bool = False) -> None:
         """Display help for text channel management commands.
 
         Args:
             interaction (Interaction): The Discord interaction context.
+            show (bool): Whether to show the help publicly or not.
         """
         help_message = (
             "**Commandes de gestion des salons textuels :**\n"
-            "Par défaut, 5 messages sont supprimés.\n"
             "- `/text create <channel> <category>`: Crée un nouveau salon textuel dans la catégorie spécifiée.\n"
             "- `/text rename <channel> <new_name>`: Renomme un salon textuel existant.\n"
             "- `/text delete <channel>`: Supprime un salon textuel existant.\n"
-            "- `/text help`: Affiche cette aide pour les commandes de gestion des salons textuels.\n"
+            "- `/text help [show]` : Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
             "\n"
             "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
         )
-        await interaction.response.send_message(help_message, ephemeral=True)
+        await interaction.response.send_message(help_message, ephemeral=not show)
 
     @text_group.command(name="create", description="Crée un nouveau salon dans la catégorie spécifiée.")
     @app_commands.describe(
@@ -201,11 +202,13 @@ class ChannelManagement(commands.Cog):
     vocal_group = app_commands.Group(name="vocal", description="Gestion des salons vocaux dynamiques")
 
     @vocal_group.command(name="help", description="Affiche l'aide pour les commandes de gestion des salons vocaux.")
-    async def vocal_help(self, interaction: Interaction) -> None:
+    @app_commands.describe(show="Afficher l'aide publiquement ou non")
+    async def vocal_help(self, interaction: Interaction, show: bool = False) -> None:
         """Display help for vocal channel management commands.
 
         Args:
             interaction (Interaction): The Discord interaction context.
+            show (bool): Whether to show the help publicly or not.
         """
         help_message = (
             "**Commandes de gestion des salons vocaux :**\n"
@@ -213,11 +216,11 @@ class ChannelManagement(commands.Cog):
             "Crée un nouveau salon vocal dans la catégorie spécifiée. Par défaut, le salon est temporaire et illimité.\n"
             "- `/vocal rename <channel> <new_name>`: Renomme un salon vocal existant.\n"
             "- `/vocal delete <channel>`: Supprime un salon vocal existant.\n"
-            "- `/vocal help`: Affiche cette aide pour les commandes de gestion des salons vocaux.\n"
+            "- `/vocal help [show]`: Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
             "\n"
             "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
         )
-        await interaction.response.send_message(help_message, ephemeral=True)
+        await interaction.response.send_message(help_message, ephemeral=not show)
 
     @vocal_group.command(name="create", description="Crée un salon vocal personnalisé.")
     @app_commands.describe(

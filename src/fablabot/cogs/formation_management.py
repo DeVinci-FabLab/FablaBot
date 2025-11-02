@@ -137,11 +137,13 @@ class FormationManagement(commands.Cog):
     fm_group = app_commands.Group(name="fm", description="Gère les annonces de Formations et les inscriptions.")
 
     @fm_group.command(name="help", description="Afficher l'aide pour les commandes de gestion des formations.")
-    async def fm_help(self, interaction: Interaction) -> None:
+    @app_commands.describe(show="Afficher l'aide publiquement ou non")
+    async def fm_help(self, interaction: Interaction, show: bool = False) -> None:
         """Display help information for the formation management commands.
 
         Args:
             interaction (Interaction): The Discord interaction context.
+            show (bool): Whether to show the help publicly or not.
         """
         help_message = (
             "**Commandes de gestion des formations :**\n"
@@ -156,11 +158,11 @@ class FormationManagement(commands.Cog):
             "- `/fm preview` : Prévisualiser le brouillon actuel.\n"
             "- `/fm publish <channel>` : Publier le brouillon dans un salon spécifique.\n"
             "- `/fm export [message_id] [publication_channel]` : Exporter le brouillon sous forme de message.\n"
-            "- `/fm suggest <formation>` : Demander une formation.\n"
+            "- `/fm help [show]` : Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
             "\n"
             "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
         )
-        await interaction.response.send_message(help_message, ephemeral=True)
+        await interaction.response.send_message(help_message, ephemeral=not show)
 
     @fm_group.command(name="start", description="Démarrer/écraser un brouillon avec une introduction.")
     @app_commands.describe(

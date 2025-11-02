@@ -67,11 +67,13 @@ class UserManagement(commands.Cog):
     user_group = app_commands.Group(name="user", description="Gestion des utilisateurs")
 
     @user_group.command(name="help", description="Affiche l'aide pour les commandes de gestion des utilisateurs.")
-    async def user_help(self, interaction: Interaction) -> None:
+    @app_commands.describe(show="Afficher l'aide publiquement ou non")
+    async def user_help(self, interaction: Interaction, show: bool = False) -> None:
         """Display help for user management commands.
 
         Args:
             interaction (Interaction): The Discord interaction context.
+            show (bool): Whether to show the help publicly or not.
         """
         help_message = (
             "**Commandes de gestion des utilisateurs :**\n"
@@ -81,11 +83,11 @@ class UserManagement(commands.Cog):
             "- `/user remove_role <user> <role>` : Retire un rôle à un utilisateur.\n"
             "- `/user add_roles <role>` : Donne un rôle à plusieurs utilisateurs via un sélecteur.\n"
             "- `/user remove_roles <role>` : Retire un rôle à plusieurs utilisateurs via un sélecteur.\n"
-            "- `/user help` : Affiche cette aide pour les commandes de gestion des utilisateurs.\n"
+            "- `/user help [show]` : Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
             "\n"
             "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
         )
-        await interaction.response.send_message(help_message, ephemeral=True)
+        await interaction.response.send_message(help_message, ephemeral=not show)
 
     @user_group.command(name="op", description="Donne des droits admin temporaires à un utilisateur.")
     @app_commands.describe(
