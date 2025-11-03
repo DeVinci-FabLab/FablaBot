@@ -406,7 +406,7 @@ class MessageManagement(commands.Cog):
 
         for egg in EASTER_EGGS:
             if any(keyword in message.content.lower() for keyword in egg.keywords) and random.random() < egg.probability:
-                await message.channel.send(content=egg.response)
+                await message.channel.send(content=egg.response, reference=message)
                 logger.info(f"Easter egg triggered by {message.author} in {message.channel}: {egg.keywords}")
 
     # endregion Listeners
@@ -430,7 +430,9 @@ class MessageManagement(commands.Cog):
             config: The suggestion configuration.
             command_name: The command name for logging (e.g., "suggest.formation").
         """
-        log_request(logger, command_name, interaction, suggestion=suggestion_text, anonymous=anonymous)
+        logger.info(
+            f"[{command_name}]: user={interaction.user if not anonymous else 'Anonymous'!r} suggestion_text={suggestion_text!r}"
+        )
 
         cleaned_text = suggestion_text.strip()
         if not cleaned_text:
@@ -450,6 +452,11 @@ class MessageManagement(commands.Cog):
         if not anonymous:
             embed.set_author(name=author.display_name, icon_url=author.display_avatar.url)
             embed.add_field(name="Utilisateur·ice", value=author.mention, inline=False)
+        else:
+            embed.set_author(
+                name="Anonymous",
+                icon_url="https://e7.pngegg.com/pngimages/84/165/png-clipart-united-states-avatar-organization-information-user-avatar-service-computer-wallpaper-thumbnail.png",
+            )
 
         success = await self._send_suggestion(interaction.guild, embed, config, author.id if not anonymous else None)
 

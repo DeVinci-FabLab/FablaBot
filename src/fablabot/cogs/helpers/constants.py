@@ -230,12 +230,12 @@ EASTER_EGGS: list[EasterEggTrigger] = [
         1.0,
     ),
     EasterEggTrigger(
-        ["t'es pas net"],
+        ["t'es pas net", "baptiste"],
         "https://tenor.com/view/baptiste-feu-fire-gif-13214452",
         1.0,
     ),
     EasterEggTrigger(
-        ["feu", "brûl", "brul"],
+        ["feu ", "brûl", "brul"],
         "https://tenor.com/view/elmo-fire-burn-flame-gif-5042503",
         1 / 4,
     ),
