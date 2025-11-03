@@ -11,7 +11,15 @@ from discord.app_commands import AppCommandContext
 from discord.ext import commands
 from dotenv import load_dotenv
 
-from fablabot.cogs import ChannelManagement, FormationManagement, LogManagement, MessageManagement, UserManagement, Welcome
+from fablabot.cogs import (
+    ChannelManagement,
+    FormationManagement,
+    LogManagement,
+    MessageManagement,
+    SuggestionManagement,
+    UserManagement,
+    Welcome,
+)
 from fablabot.logging_handlers import DailyFileHandler, DiscordLogHandler
 
 logger = logging.getLogger(__name__)
@@ -87,6 +95,7 @@ class Fablabot(commands.Bot):
             FormationManagement(self),
             LogManagement(self),
             MessageManagement(self),
+            SuggestionManagement(self),
             UserManagement(self),
             Welcome(self),
         ):

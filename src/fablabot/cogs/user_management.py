@@ -447,7 +447,7 @@ class UserManagement(commands.Cog):
             bool: `True` if the member is responsible for the formation, `False` otherwise.
         """
         role_names = {role.name for role in member.roles}
-        return RoleNames.RESPO_FORMATIONS in role_names and target_role.name.startswith("F - ")
+        return RoleNames.RESPO_FORMATION in role_names and target_role.name.startswith("F - ")
 
     # endregion Helpers
 
