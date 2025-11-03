@@ -104,7 +104,7 @@ class SuggestionManagement(commands.Cog):
 
     COMMUNICATION_SUGGESTION_CONFIG = SuggestionConfig(
         embed_title="Nouvelle suggestion pour le Pôle Communication",
-        role_name=RoleNames.RESPO_COMMUNICATION,
+        role_name=RoleNames.COMMUNICATION_MANAGER,
         channel_name="pole-communication",
         success_message="Suggestion envoyée au Pôle Communication. Merci !",
         error_message="Aucun·e Respo Communication et aucun salon 'pole-communication'"
@@ -113,7 +113,7 @@ class SuggestionManagement(commands.Cog):
 
     EVENT_SUGGESTION_CONFIG = SuggestionConfig(
         embed_title="Nouvelle suggestion pour le Pôle Événements",
-        role_name=RoleNames.RESPO_EVENT,
+        role_name=RoleNames.EVENTS_MANAGER,
         channel_name="pole-event",
         success_message="Suggestion envoyée au Pôle Events. Merci !",
         error_message="Aucun·e Respo Events et aucun salon 'pole-events' ne sont configurés pour recevoir les suggestions.",
@@ -121,7 +121,7 @@ class SuggestionManagement(commands.Cog):
 
     TRAINING_SUGGESTION_CONFIG = SuggestionConfig(
         embed_title="Nouvelle suggestion de formation",
-        role_name=RoleNames.RESPO_FORMATION,
+        role_name=RoleNames.TRAININGS_MANAGER,
         channel_name="pole-formation",
         success_message="Suggestion envoyée au Pôle Formation. Merci !",
         error_message="Aucun·e Respo Formation et aucun salon 'pole-formation'"
@@ -130,7 +130,7 @@ class SuggestionManagement(commands.Cog):
 
     IT_SUGGESTION_CONFIG = SuggestionConfig(
         embed_title="Nouvelle suggestion pour le Pôle Numérique",
-        role_name=RoleNames.RESPO_NUMERIQUE,
+        role_name=RoleNames.DIGITAL_MANAGER,
         channel_name="pole-numerique",
         success_message="Suggestion envoyée au Pôle Numérique. Merci !",
         error_message="Aucun·e Respo Numérique et aucun salon 'pole-numerique'"
@@ -139,7 +139,7 @@ class SuggestionManagement(commands.Cog):
 
     PARTERSHIPS_SUGGESTION_CONFIG = SuggestionConfig(
         embed_title="Nouvelle suggestion pour le Pôle Partenariat",
-        role_name=RoleNames.RESPO_PARTENARIAT,
+        role_name=RoleNames.PARTNERSHIPS_MANAGER,
         channel_name="pole-partenariat",
         success_message="Suggestion envoyée au Pôle Partenariat. Merci !",
         error_message="Aucun·e Respo Partenariat et aucun salon 'pole-partenariat'"
@@ -148,7 +148,7 @@ class SuggestionManagement(commands.Cog):
 
     PROJECTS_SUGGESTION_CONFIG = SuggestionConfig(
         embed_title="Nouvelle suggestion pour le Pôle Projets",
-        role_name=RoleNames.RESPO_PROJETS,
+        role_name=RoleNames.PROJECTS_MANAGER,
         channel_name=None,
         success_message="Suggestion envoyée au Pôle Projets. Merci !",
         error_message="Aucun·e Respo Projets n'est configuré·e pour recevoir les suggestions.",

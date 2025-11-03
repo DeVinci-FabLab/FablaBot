@@ -123,13 +123,13 @@ def format_respo_contacts(guild: Guild) -> str:
         str: The contact string.
     """
     logger.debug(f"Resolving formation contacts for guild {guild.id}.")
-    role = get(guild.roles, name=RoleNames.RESPO_FORMATION)
+    role = get(guild.roles, name=RoleNames.TRAININGS_MANAGER)
     if role is None:
-        logger.debug(f"Role '{RoleNames.RESPO_FORMATION}' missing in guild {guild.id}; using fallback contacts.")
+        logger.debug(f"Role '{RoleNames.TRAININGS_MANAGER}' missing in guild {guild.id}; using fallback contacts.")
         return "un·e membre du Pôle Formations"
     members = get_members_by_role(role=role)
     if not members:
-        logger.debug(f"Role '{RoleNames.RESPO_FORMATION}' has no human members in guild {guild.id}; using fallback contacts.")
+        logger.debug(f"Role '{RoleNames.TRAININGS_MANAGER}' has no human members in guild {guild.id}; using fallback contacts.")
         return "un·e membre du Pôle Formations"
     mentions = [member.mention for member in members]
     logger.debug(f"Resolved {len(mentions)} formation contacts for guild {guild.id}.")

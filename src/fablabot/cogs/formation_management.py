@@ -52,7 +52,7 @@ from fablabot.cogs.helpers.utils import check_has_role, is_in_allowed_channel, l
 logger = logging.getLogger(__name__)
 
 
-ALLOWED_ROLES = {RoleNames.RESPO_FORMATION, RoleNames.ADMIN_TEMP, RoleNames.ADMIN}
+ALLOWED_ROLES = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN_TEMP, RoleNames.ADMIN}
 DATA_FILE = "data/formations_state.json"
 DISCORD_EMOJI_RE = re.compile(r"^<a?:\w+:\d+>$")
 TRAINER_NOTIFICATION_ADVANCE = timedelta(hours=1)

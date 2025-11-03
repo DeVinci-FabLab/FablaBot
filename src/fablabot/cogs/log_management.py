@@ -133,7 +133,7 @@ class LogManagement(commands.Cog):
         if not await is_in_allowed_channel(logger, interaction):
             return
 
-        if not await check_has_role(logger, interaction, ADMIN_ROLES | {RoleNames.RESPO_NUMERIQUE, RoleNames.POLE_NUMERIQUE}):
+        if not await check_has_role(logger, interaction, ADMIN_ROLES | {RoleNames.DIGITAL_MANAGER, RoleNames.DIGITAL_POLE}):
             return
 
         file_log_handler = getattr(self.bot, "file_log_handler", None)

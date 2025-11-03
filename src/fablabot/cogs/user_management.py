@@ -125,7 +125,7 @@ class UserManagement(commands.Cog):
             await interaction.response.send_message("Rôles administratifs manquants sur le serveur.", ephemeral=True)
             return
         assert isinstance(interaction.user, Member)
-        if not self._can_assign_role(interaction.user, admin_role) and RoleNames.RESPO_NUMERIQUE not in (
+        if not self._can_assign_role(interaction.user, admin_role) and RoleNames.DIGITAL_MANAGER not in (
             r.name for r in interaction.user.roles
         ):
             logger.warning(f"Unauthorized op attempt by {interaction.user}")
@@ -173,7 +173,7 @@ class UserManagement(commands.Cog):
             )
             return
         assert isinstance(interaction.user, Member)
-        if not self._can_assign_role(interaction.user, admin_role) and RoleNames.RESPO_NUMERIQUE not in (
+        if not self._can_assign_role(interaction.user, admin_role) and RoleNames.DIGITAL_MANAGER not in (
             r.name for r in interaction.user.roles
         ):
             logger.warning(f"Unauthorized deop attempt by {interaction.user}")
@@ -447,7 +447,7 @@ class UserManagement(commands.Cog):
             bool: `True` if the member is responsible for the formation, `False` otherwise.
         """
         role_names = {role.name for role in member.roles}
-        return RoleNames.RESPO_FORMATION in role_names and target_role.name.startswith("F - ")
+        return RoleNames.TRAININGS_MANAGER in role_names and target_role.name.startswith("F - ")
 
     # endregion Helpers
 

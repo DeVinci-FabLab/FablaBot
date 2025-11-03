@@ -31,28 +31,28 @@ class RoleNames:
     SECRETARY = "Secrétaire Général"
     """General secretary role."""
 
-    RESPO_COMMUNICATION = "Respo Communication"
+    COMMUNICATION_MANAGER = "Respo Communication"
     """Communications manager role."""
 
-    RESPO_EVENT = "Respo Event"
+    EVENTS_MANAGER = "Respo Event"
     """Events manager role."""
 
-    RESPO_FORMATION = "Respo Formation"
+    TRAININGS_MANAGER = "Respo Formation"
     """Training manager role."""
 
-    RESPO_NUMERIQUE = "Respo Numérique"
+    DIGITAL_MANAGER = "Respo Numérique"
     """IT manager role."""
 
-    RESPO_PARTENARIAT = "Respo Partenariat"
+    PARTNERSHIPS_MANAGER = "Respo Partenariat"
     """Partnerships manager role."""
 
-    RESPO_PROJET = "Respo Projet"
+    PROJECTS_MANAGER = "Respo Projet"
     """Project manager role."""
 
     BUREAU = "Bureau"
     """Office/Bureau role."""
 
-    POLE_NUMERIQUE = "Pôle Numérique"
+    DIGITAL_POLE = "Pôle Numérique"
     """Digital Pole role."""
 
     SBIRE_BUREAU = "Sbire Bureau"
