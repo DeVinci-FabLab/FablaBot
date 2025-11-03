@@ -67,7 +67,6 @@ class ChannelManagement(commands.Cog):
     Attributes:
         text_group (app_commands.Group): Command group for text channel management commands.
         vocal_group (app_commands.Group): Command group for voice channel management commands.
-        log_group (app_commands.Group): Command group for bot log configuration commands.
     """
 
     def __init__(self, bot: commands.Bot) -> None:

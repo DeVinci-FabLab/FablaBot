@@ -46,6 +46,8 @@ from fablabot.cogs.helpers import (
 
 logger = logging.getLogger(__name__)
 
+ANONYMOUS_ICON_URL = "https://e7.pngegg.com/pngimages/84/165/png-clipart-united-states-avatar-organization-information-user-avatar-service-computer-wallpaper-thumbnail.png"
+
 
 @dataclass
 class SuggestionConfig:
@@ -91,9 +93,6 @@ class MessageManagement(commands.Cog):
     Attributes:
         message_group (app_commands.Group): Command group for message management commands.
         suggest_group (app_commands.Group): Command group for feature suggestion commands.
-        FORMATION_SUGGESTION_CONFIG (SuggestionConfig): Configuration for formation suggestions.
-        IT_SUGGESTION_CONFIG (SuggestionConfig): Configuration for IT feature suggestions.
-        BUREAU_SUGGESTION_CONFIG (SuggestionConfig): Configuration for Bureau suggestions.
     """
 
     def __init__(self, bot: commands.Bot) -> None:
@@ -239,7 +238,8 @@ class MessageManagement(commands.Cog):
         role_name=RoleNames.RESPO_COMMUNICATION,
         channel_name="pole-communication",
         success_message="Suggestion envoyée au Pôle Communication. Merci !",
-        error_message="Aucun·e Respo Communication et aucun salon 'pole-communication' ne sont configurés pour recevoir les suggestions.",
+        error_message="Aucun·e Respo Communication et aucun salon 'pole-communication'"
+        " ne sont configurés pour recevoir les suggestions.",
     )
 
     EVENTS_SUGGESTION_CONFIG = SuggestionConfig(
@@ -255,7 +255,8 @@ class MessageManagement(commands.Cog):
         role_name=RoleNames.RESPO_FORMATIONS,
         channel_name="pole-formations",
         success_message="Suggestion envoyée au pôle formations. Merci !",
-        error_message="Aucun·e respo formation et aucun salon 'pole-formations' ne sont configurés pour recevoir les suggestions.",
+        error_message="Aucun·e respo formation et aucun salon 'pole-formations'"
+        " ne sont configurés pour recevoir les suggestions.",
     )
 
     PARTENARIATS_SUGGESTION_CONFIG = SuggestionConfig(
@@ -263,7 +264,8 @@ class MessageManagement(commands.Cog):
         role_name=RoleNames.RESPO_PARTENARIATS,
         channel_name="pole-partenariats",
         success_message="Suggestion envoyée au Pôle Partenariats. Merci !",
-        error_message="Aucun·e Respo Partenariats et aucun salon 'pole-partenariats' ne sont configurés pour recevoir les suggestions.",
+        error_message="Aucun·e Respo Partenariats et aucun salon 'pole-partenariats'"
+        " ne sont configurés pour recevoir les suggestions.",
     )
 
     IT_SUGGESTION_CONFIG = SuggestionConfig(
@@ -271,7 +273,8 @@ class MessageManagement(commands.Cog):
         role_name=RoleNames.RESPO_NUMERIQUE,
         channel_name="pole-numerique",
         success_message="Suggestion envoyée au pôle numérique. Merci !",
-        error_message="Aucun·e respo numérique et aucun salon 'pole-numerique' ne sont configurés pour recevoir les suggestions.",
+        error_message="Aucun·e respo numérique et aucun salon 'pole-numerique'"
+        " ne sont configurés pour recevoir les suggestions.",
     )
 
     @suggest_group.command(name="help", description="Affiche l'aide pour les commandes de suggestions de fonctionnalités.")
@@ -290,7 +293,8 @@ class MessageManagement(commands.Cog):
             "- `/suggest_to pole_communication <suggestion> [anonymous]` : Suggérer quelque chose au pôle communication.\n"
             "- `/suggest_to pole_events <suggestion> [anonymous]` : Suggérer quelque chose au pôle événements.\n"
             "- `/suggest_to pole_formation <formation> [anonymous]` : Demander une formation.\n"
-            "- `/suggest_to pole_numerique <suggestion> [anonymous]` : Suggérer une nouvelle fonctionnalité IT (Pour le bot discord, un site, etc.).\n"
+            "- `/suggest_to pole_numerique <suggestion> [anonymous]` : "
+            "Suggérer une nouvelle fonctionnalité IT (Pour le bot discord, un site, etc.).\n"
             "- `/suggest_to pole_partenariats <suggestion> [anonymous]` : Suggérer quelque chose au pôle partenariats.\n"
             "- `/suggest_to help [show]`: Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
             "\n"
@@ -455,7 +459,7 @@ class MessageManagement(commands.Cog):
         else:
             embed.set_author(
                 name="Anonymous",
-                icon_url="https://e7.pngegg.com/pngimages/84/165/png-clipart-united-states-avatar-organization-information-user-avatar-service-computer-wallpaper-thumbnail.png",
+                icon_url=ANONYMOUS_ICON_URL,
             )
 
         success = await self._send_suggestion(interaction.guild, embed, config, author.id if not anonymous else None)
@@ -465,7 +469,8 @@ class MessageManagement(commands.Cog):
             return
 
         logger.info(
-            f"Guild {interaction.guild.id} user {interaction.user.id if not anonymous else 'Anonymous'} made a suggestion via {command_name}."
+            f"Guild {interaction.guild.id} user "
+            f"{interaction.user.id if not anonymous else 'Anonymous'} made a suggestion via {command_name}."
         )
         await interaction.response.send_message(config.success_message, ephemeral=True)
 

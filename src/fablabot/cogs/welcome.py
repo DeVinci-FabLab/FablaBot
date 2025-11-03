@@ -224,7 +224,8 @@ class Welcome(commands.Cog):
             await channel.send(
                 "Comment accéder au serveur discord :\n"
                 " - Utilisez `/nick` pour ajouter votre prénom à votre username\n"
-                " - Envoyez un message contenant votre adresse mail `~@edu.devinci.fr` et votre ville (Paris, Nantes, Montepellier) pour recevoir la validation\n"
+                " - Envoyez un message contenant votre adresse mail `~@edu.devinci.fr`"
+                " et votre ville (Paris, Nantes, Montepellier) pour recevoir la validation\n"
                 "   Assurez vous d 'avoir envoyé votre RI signé sur le formulaire !\n"
                 "\n"
                 "Vous êtes un ancien ? Envoyez simplement un message précisant que vous en êtes un 🙂"

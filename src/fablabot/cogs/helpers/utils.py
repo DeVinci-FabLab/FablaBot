@@ -134,7 +134,7 @@ async def check_has_role(logger: Logger, interaction: Interaction, roles: set[st
 
     assert isinstance(interaction.user, Member)
     member_role_names = {role.name for role in interaction.user.roles}
-    if not (member_role_names & roles):
+    if not member_role_names & roles:
         logger.warning(
             f"User {interaction.user} doesn't have any of the roles {', '.join(roles)} in the guild {interaction.guild.id}"
         )
@@ -200,9 +200,9 @@ async def send_dm_to_member(
     except Exception:
         logger.exception(f"Failed to send {dm_type} DM to user {member} in guild {guild.id}.")
         return False
-    else:
-        logger.info(f"Sent {dm_type} DM to user {member} in guild {guild.id}.")
-        return True
+
+    logger.info(f"Sent {dm_type} DM to user {member} in guild {guild.id}.")
+    return True
 
 
 async def get_or_fetch_member(guild: Guild, member_id: int) -> Member | None:

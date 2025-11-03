@@ -1,4 +1,7 @@
-"""User management commands and permission utilities for Discord Bot. Provides slash commands for temporary admin and role assignments."""
+"""User management commands and permission utilities for Discord Bot.
+
+Provides slash commands for temporary admin and role assignments.
+"""
 
 from __future__ import annotations
 

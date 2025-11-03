@@ -146,7 +146,8 @@ class FormationManagement(commands.Cog):
         help_message = (
             "**Commandes de gestion des formations :**\n"
             "- `/fm start <intro> <end> <role>` : Démarrer un nouveau brouillon de formation.\n"
-            "- `/fm edit_text [intro] [end] [role]` : Modifier le texte d'introduction et/ou de conclusion du brouillon et le rôle à mentionner.\n"
+            "- `/fm edit_text [intro] [end] [role]` : "
+            "Modifier le texte d'introduction et/ou de conclusion du brouillon et le rôle à mentionner.\n"
             "- `/fm add <emoji> <name> <trainer> <date> <hour> <duration> <seats> [description] [excusable]` :"
             " Ajouter une nouvelle formation au brouillon.\n"
             "- `/fm edit <index> [emoji] [name] [trainer] [date] [hour] [duration] [seats] [description] [excusable]` :"
@@ -1201,7 +1202,8 @@ class FormationManagement(commands.Cog):
         log.append(reaction_event)
         guild_state["reactions_log"] = [event.to_dict() for event in log]
         logger.debug(
-            f"Logged {reaction_event.action} reaction for guild {guild_id} message {reaction_event.message_id} user {reaction_event.user_id} with emoji {reaction_event.emoji} (Paris time: {reaction_event.ts_iso})."
+            f"Logged {reaction_event.action} reaction for guild {guild_id} message {reaction_event.message_id} "
+            f"user {reaction_event.user_id} with emoji {reaction_event.emoji} (Paris time: {reaction_event.ts_iso})."
         )
         self._set_guild_state(guild_id, guild_state)
 

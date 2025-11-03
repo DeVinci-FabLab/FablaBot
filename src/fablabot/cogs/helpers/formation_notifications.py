@@ -174,7 +174,6 @@ async def notify_responsible_before_formation(
     Args:
         guild (Guild): The guild where the formation is taking place.
         formation (Formation): The formation starting soon.
-        contacts (str): The contact string for formation managers.
         moment (Literal["hour_before", "start"]): When the notification is sent.
     """
     responsibles = get_members_by_role(logger, guild, role=RoleNames.RESPO_FORMATIONS)
