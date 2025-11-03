@@ -34,16 +34,16 @@ class RoleNames:
     RESPO_COMMUNICATION = "Respo Communication"
     """Communications manager role."""
 
-    RESPO_EVENTS = "Respo Events"
+    RESPO_EVENTS = "Respo Event"
     """Events manager role."""
 
-    RESPO_FORMATIONS = "Respo Formations"
+    RESPO_FORMATIONS = "Respo Formation"
     """Training manager role."""
 
     RESPO_NUMERIQUE = "Respo Numérique"
     """IT manager role."""
 
-    RESPO_PARTENARIATS = "Respo Partenariats"
+    RESPO_PARTENARIATS = "Respo Partenariat"
     """Partnerships manager role."""
 
     BUREAU = "Bureau"

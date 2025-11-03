@@ -245,26 +245,26 @@ class MessageManagement(commands.Cog):
     EVENTS_SUGGESTION_CONFIG = SuggestionConfig(
         embed_title="Nouvelle suggestion pour le Pôle Événements",
         role_name=RoleNames.RESPO_EVENTS,
-        channel_name="pole-events",
-        success_message="Suggestion envoyée au Pôle Événements. Merci !",
+        channel_name="pole-event",
+        success_message="Suggestion envoyée au Pôle Events. Merci !",
         error_message="Aucun·e Respo Events et aucun salon 'pole-events' ne sont configurés pour recevoir les suggestions.",
     )
 
     FORMATION_SUGGESTION_CONFIG = SuggestionConfig(
         embed_title="Nouvelle suggestion de formation",
         role_name=RoleNames.RESPO_FORMATIONS,
-        channel_name="pole-formations",
-        success_message="Suggestion envoyée au pôle formations. Merci !",
-        error_message="Aucun·e respo formation et aucun salon 'pole-formations'"
+        channel_name="pole-formation",
+        success_message="Suggestion envoyée au Pôle Formation. Merci !",
+        error_message="Aucun·e Respo Formation et aucun salon 'pole-formation'"
         " ne sont configurés pour recevoir les suggestions.",
     )
 
     PARTENARIATS_SUGGESTION_CONFIG = SuggestionConfig(
-        embed_title="Nouvelle suggestion pour le Pôle Partenariats",
+        embed_title="Nouvelle suggestion pour le Pôle Partenariat",
         role_name=RoleNames.RESPO_PARTENARIATS,
-        channel_name="pole-partenariats",
-        success_message="Suggestion envoyée au Pôle Partenariats. Merci !",
-        error_message="Aucun·e Respo Partenariats et aucun salon 'pole-partenariats'"
+        channel_name="pole-partenariat",
+        success_message="Suggestion envoyée au Pôle Partenariat. Merci !",
+        error_message="Aucun·e Respo Partenariat et aucun salon 'pole-partenariat'"
         " ne sont configurés pour recevoir les suggestions.",
     )
 
@@ -272,8 +272,8 @@ class MessageManagement(commands.Cog):
         embed_title="Nouvelle suggestion pour le Pôle Numérique",
         role_name=RoleNames.RESPO_NUMERIQUE,
         channel_name="pole-numerique",
-        success_message="Suggestion envoyée au pôle numérique. Merci !",
-        error_message="Aucun·e respo numérique et aucun salon 'pole-numerique'"
+        success_message="Suggestion envoyée au Pôle Numérique. Merci !",
+        error_message="Aucun·e Respo Numérique et aucun salon 'pole-numerique'"
         " ne sont configurés pour recevoir les suggestions.",
     )
 
