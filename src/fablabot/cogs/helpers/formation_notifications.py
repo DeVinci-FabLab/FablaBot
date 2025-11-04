@@ -157,6 +157,7 @@ async def notify_trainer_before_formation(
         f"Salut {trainer.display_name} !\n"
         f"{timing_line}\n\n"
         f"{formation_export}\n\n"
+        "Merci de transmettre au **CoDir** la liste des participants à excuser si besoin.\n\n"
         f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
     )
 
@@ -176,20 +177,20 @@ async def notify_responsible_before_formation(
         formation (Formation): The formation starting soon.
         moment (Literal["hour_before", "start"]): When the notification is sent.
     """
+    datetime_text = humanize_dt(formation.start_dt).lower()[2:-2]
+    formation_export = format_formation_export(formation)
+
+    if moment == "hour_before":
+        timing_line = f"La formation **{formation.name}** commence bientôt (le {datetime_text})."
+        subject = f"export reminder for formation {formation.name}"
+    else:
+        timing_line = f"La formation **{formation.name}** commence maintenant (le {datetime_text})."
+        subject = f"start export for formation {formation.name}"
+
     responsibles = get_members_by_role(logger, guild, role=RoleNames.TRAININGS_MANAGER)
 
     for responsible in responsibles:
-        datetime_text = humanize_dt(formation.start_dt).lower()[2:-2]
-        formation_export = format_formation_export(formation)
-
-        if moment == "hour_before":
-            timing_line = f"La formation **{formation.name}** commence bientôt (le {datetime_text})."
-            subject = f"export reminder for formation {formation.name}"
-        else:
-            timing_line = f"La formation **{formation.name}** commence maintenant (le {datetime_text})."
-            subject = f"start export for formation {formation.name}"
-
-        message = f"Salut {responsible.display_name} !\n{timing_line}\n\n{formation_export}\n\n"
+        message = f"Salut {responsible.display_name} !\n{timing_line}\n\n{formation_export}"
 
         await send_dm_to_member(logger, guild, responsible, message, subject)
 
