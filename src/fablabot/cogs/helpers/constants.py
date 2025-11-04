@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+import re
 from zoneinfo import ZoneInfo
 
 PARIS_TZ = ZoneInfo("Europe/Paris")
 MAX_MSG_CHARS = 1900
+DISCORD_EMOJI_RE = re.compile(r"^<a?:\w+:\d+>$")
 
 
 class RoleNames:

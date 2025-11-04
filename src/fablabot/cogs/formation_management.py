@@ -10,7 +10,6 @@ import io
 import json
 import logging
 from pathlib import Path
-import re
 from typing import Any, Literal, cast, override
 from warnings import deprecated
 
@@ -28,6 +27,7 @@ from discord.ext import commands, tasks
 from emoji import EMOJI_DATA
 
 from fablabot.cogs.helpers import (
+    DISCORD_EMOJI_RE,
     PARIS_TZ,
     Draft,
     Emojis,
@@ -54,7 +54,6 @@ logger = logging.getLogger(__name__)
 
 ALLOWED_ROLES = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN_TEMP, RoleNames.ADMIN}
 DATA_FILE = "data/formations_state.json"
-DISCORD_EMOJI_RE = re.compile(r"^<a?:\w+:\d+>$")
 TRAINER_NOTIFICATION_ADVANCE = timedelta(hours=1)
 REACTION_LOG_RETENTION = timedelta(days=20)
 

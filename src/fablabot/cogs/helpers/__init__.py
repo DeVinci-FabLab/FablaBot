@@ -1,6 +1,14 @@
 """Helpers for formation management cog."""
 
-from fablabot.cogs.helpers.constants import EASTER_EGGS, PARIS_TZ, EasterEggTrigger, Emojis, ErrorMessages, RoleNames
+from fablabot.cogs.helpers.constants import (
+    DISCORD_EMOJI_RE,
+    EASTER_EGGS,
+    PARIS_TZ,
+    EasterEggTrigger,
+    Emojis,
+    ErrorMessages,
+    RoleNames,
+)
 from fablabot.cogs.helpers.formation_models import Draft, Formation, PublishedMessage, ReactionEvent
 from fablabot.cogs.helpers.formation_notifications import (
     notify_participants_before_formation,
@@ -41,6 +49,7 @@ from fablabot.cogs.helpers.utils import (
 
 __all__ = [
     "ADMIN_ROLES",
+    "DISCORD_EMOJI_RE",
     "EASTER_EGGS",
     "PARIS_TZ",
     "Draft",
