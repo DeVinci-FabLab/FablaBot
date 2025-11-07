@@ -10,9 +10,6 @@ from warnings import deprecated
 from discord import (
     AuditLogAction,
     CategoryChannel,
-    DMChannel,
-    ForumChannel,
-    GroupChannel,
     Guild,
     HTTPException,
     Interaction,
@@ -29,7 +26,6 @@ from discord.utils import get
 
 from fablabot.cogs.helpers import (
     ADMIN_ROLES,
-    ErrorMessages,
     RoleNames,
     check_has_role,
     escape_md,
@@ -41,8 +37,6 @@ from fablabot.cogs.helpers import (
     safe_delete_channel,
     safe_edit_channel,
 )
-from fablabot.discord_log_handler import DiscordLogHandler
-from fablabot.guild_config import set_log_channel_id
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +51,6 @@ class ChannelManagement(commands.Cog):
 
     Commands:
         - /text help: Display help for text channel management commands.
-        - /text clear: Clear the current text channel of its last messages.
         - /text create: Create a new text channel in the specified category.
         - /text rename: Rename an existing text channel.
         - /text delete: Delete a text channel.
@@ -65,7 +58,6 @@ class ChannelManagement(commands.Cog):
         - /vocal create: Create a new voice channel in the specified category.
         - /vocal rename: Rename an existing voice channel.
         - /vocal delete: Delete a voice channel.
-        - /log set: Configure the text channel receiving bot logs on errors.
 
     Listeners:
         - on_message_delete: Notify when a message is deleted in a bot channel, log the deleter and resend the content.
@@ -75,7 +67,6 @@ class ChannelManagement(commands.Cog):
     Attributes:
         text_group (app_commands.Group): Command group for text channel management commands.
         vocal_group (app_commands.Group): Command group for voice channel management commands.
-        log_group (app_commands.Group): Command group for bot log configuration commands.
     """
 
     def __init__(self, bot: commands.Bot) -> None:
@@ -91,63 +82,24 @@ class ChannelManagement(commands.Cog):
     text_group = app_commands.Group(name="text", description="Gestion des salons textuels")
 
     @text_group.command(name="help", description="Affiche l'aide pour les commandes de gestion des salons textuels.")
-    async def text_help(self, interaction: Interaction) -> None:
+    @app_commands.describe(show="Afficher l'aide publiquement ou non")
+    async def text_help(self, interaction: Interaction, show: bool = False) -> None:
         """Display help for text channel management commands.
 
         Args:
             interaction (Interaction): The Discord interaction context.
+            show (bool): Whether to show the help publicly or not.
         """
         help_message = (
             "**Commandes de gestion des salons textuels :**\n"
-            "- `/text clear [messages]`: Nettoie le salon actuel de ses derniers messages. "
-            "Par défaut, 5 messages sont supprimés.\n"
             "- `/text create <channel> <category>`: Crée un nouveau salon textuel dans la catégorie spécifiée.\n"
             "- `/text rename <channel> <new_name>`: Renomme un salon textuel existant.\n"
             "- `/text delete <channel>`: Supprime un salon textuel existant.\n"
-            "- `/text help`: Affiche cette aide pour les commandes de gestion des salons textuels.\n"
+            "- `/text help [show]` : Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
             "\n"
             "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
         )
-        await interaction.response.send_message(help_message, ephemeral=True)
-
-    @text_group.command(name="clear", description="Nettoie le salon actuel de ses derniers messages.")
-    @app_commands.describe(messages="Le nombre de messages à supprimer (par défaut 5)")
-    async def text_clear(self, interaction: Interaction, messages: app_commands.Range[int, 1, 50] = 5) -> None:
-        """Clears the current channel of its last messages.
-
-        Args:
-            interaction (Interaction): The Discord interaction context.
-            messages (app_commands.Range[int, 1, 50], optional): The number of messages to purge. Defaults to 5.
-        """
-        log_request(logger, "text.clear", interaction, messages=messages)
-        assert not isinstance(
-            interaction.channel,
-            ForumChannel | CategoryChannel | DMChannel | GroupChannel | None,
-        )
-        if not interaction.permissions.manage_messages:
-            logger.warning(f"Insufficient permissions for manage_messages: {interaction.user}")
-            await interaction.response.send_message(ErrorMessages.NO_PERMISSION_MANAGE_MESSAGES, ephemeral=True)
-            return
-        if interaction.channel.name.endswith("_bot"):
-            logger.warning(f"Attempt to clear {interaction.channel.name} channel")
-            await interaction.response.send_message(
-                f"Vous ne pouvez pas nettoyer le salon {interaction.channel.mention}."
-                f" Veuillez contacter le pôle numérique si nécessaire.",
-                ephemeral=True,
-            )
-            return
-        await interaction.response.send_message("Nettoyage en cours...", ephemeral=True)
-        try:
-            deleted = await interaction.channel.purge(
-                limit=messages,
-                reason=f"With clear command by {interaction.user}",
-            )
-        except HTTPException:
-            logger.exception(f"HTTP error while purging {messages} messages in {interaction.channel}")
-            await interaction.edit_original_response(content=ErrorMessages.CHANNEL_CLEAR_FAILED)
-            return
-        logger.info(f"Deleted {len(deleted)} messages in channel {interaction.channel.name}")
-        await interaction.edit_original_response(content=f"{len(deleted)} messages supprimés avec succès !")
+        await interaction.response.send_message(help_message, ephemeral=not show)
 
     @text_group.command(name="create", description="Crée un nouveau salon dans la catégorie spécifiée.")
     @app_commands.describe(
@@ -249,11 +201,13 @@ class ChannelManagement(commands.Cog):
     vocal_group = app_commands.Group(name="vocal", description="Gestion des salons vocaux dynamiques")
 
     @vocal_group.command(name="help", description="Affiche l'aide pour les commandes de gestion des salons vocaux.")
-    async def vocal_help(self, interaction: Interaction) -> None:
+    @app_commands.describe(show="Afficher l'aide publiquement ou non")
+    async def vocal_help(self, interaction: Interaction, show: bool = False) -> None:
         """Display help for vocal channel management commands.
 
         Args:
             interaction (Interaction): The Discord interaction context.
+            show (bool): Whether to show the help publicly or not.
         """
         help_message = (
             "**Commandes de gestion des salons vocaux :**\n"
@@ -261,11 +215,11 @@ class ChannelManagement(commands.Cog):
             "Crée un nouveau salon vocal dans la catégorie spécifiée. Par défaut, le salon est temporaire et illimité.\n"
             "- `/vocal rename <channel> <new_name>`: Renomme un salon vocal existant.\n"
             "- `/vocal delete <channel>`: Supprime un salon vocal existant.\n"
-            "- `/vocal help`: Affiche cette aide pour les commandes de gestion des salons vocaux.\n"
+            "- `/vocal help [show]`: Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
             "\n"
             "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
         )
-        await interaction.response.send_message(help_message, ephemeral=True)
+        await interaction.response.send_message(help_message, ephemeral=not show)
 
     @vocal_group.command(name="create", description="Crée un salon vocal personnalisé.")
     @app_commands.describe(
@@ -416,58 +370,6 @@ class ChannelManagement(commands.Cog):
         await interaction.response.send_message(f"Le salon vocal {escape_md(channel_name)} a été supprimé.")
 
     # endregion Vocal Slash Commands Group
-
-    # region ====== Log Slash Commands Group ======
-    log_group = app_commands.Group(name="log", description="Configuration des logs du bot")
-
-    @log_group.command(name="set", description="Configure le salon recevant les logs du bot en cas d'erreur.")
-    @app_commands.describe(channel="Salon textuel qui recevra les logs du bot.")
-    async def log_set(self, interaction: Interaction, channel: TextChannel) -> None:
-        """Configure the log channel destination for Discord logging.
-
-        Args:
-            interaction (Interaction): The Discord interaction context.
-            channel (TextChannel): The text channel receiving bot logs.
-        """
-        log_request(logger, "log.set", interaction, channel=channel.name, channel_id=channel.id)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-
-        if not await check_has_role(logger, interaction, ADMIN_ROLES):
-            return
-
-        handler = getattr(self.bot, "log_handler", None)
-        if not isinstance(handler, DiscordLogHandler):
-            logger.error("DiscordLogHandler is not initialized on the bot.")
-            await interaction.response.send_message(
-                "Le gestionnaire de logs n'est pas initialisé sur ce bot.",
-                ephemeral=True,
-            )
-            return
-
-        previous_id = handler.log_channel_id
-        if previous_id == channel.id:
-            await interaction.response.send_message(
-                f"{channel.mention} est déjà configuré comme salon de logs.",
-                ephemeral=True,
-            )
-            return
-
-        previous_channel: TextChannel | None = None
-        maybe_previous = self.bot.get_channel(previous_id)
-        if isinstance(maybe_previous, TextChannel):
-            previous_channel = maybe_previous
-
-        handler.set_log_channel(channel)
-        set_log_channel_id(channel.id)
-        logger.info(msg=f"Log channel set to {channel} (id={channel.id}) by {interaction.user} (id={interaction.user.id})")
-
-        confirmation = f"Les logs seront désormais envoyés dans {format_channel_mention(channel)}."
-        if previous_channel is not None:
-            confirmation += f" Ancien salon : {format_channel_mention(previous_channel)}."
-        await interaction.response.send_message(confirmation)
-
-    # endregion Log Slash Commands Group
 
     # region ====== Event Listeners ======
 

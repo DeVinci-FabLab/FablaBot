@@ -9,8 +9,9 @@ from typing import TYPE_CHECKING, Literal
 
 from discord import Guild
 
+from fablabot.cogs.helpers.constants import RoleNames
 from fablabot.cogs.helpers.formation_rendering import format_formation_export, humanize_dt
-from fablabot.cogs.helpers.utils import get_or_fetch_member, send_dm_to_member
+from fablabot.cogs.helpers.utils import get_members_by_role, get_or_fetch_member, send_dm_to_member
 
 if TYPE_CHECKING:
     from fablabot.cogs.helpers.formation_models import Formation
@@ -156,6 +157,7 @@ async def notify_trainer_before_formation(
         f"Salut {trainer.display_name} !\n"
         f"{timing_line}\n\n"
         f"{formation_export}\n\n"
+        "Merci de transmettre au **CoDir** la liste des participants à excuser si besoin.\n\n"
         f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
     )
 
@@ -165,7 +167,7 @@ async def notify_trainer_before_formation(
 async def notify_responsible_before_formation(
     guild: Guild,
     formation: Formation,
-    contacts: str,
+    *,
     moment: Literal["hour_before", "start"] = "hour_before",
 ) -> None:
     """Send a DM to the training responsible with the list of registered attendees.
@@ -173,30 +175,52 @@ async def notify_responsible_before_formation(
     Args:
         guild (Guild): The guild where the formation is taking place.
         formation (Formation): The formation starting soon.
-        contacts (str): The contact string for formation managers.
         moment (Literal["hour_before", "start"]): When the notification is sent.
     """
-    responsibles_ids: list[int] = [int(id) for id in re.findall(r"<@!?(\d+)>", contacts)]
-    if not responsibles_ids:
-        logger.warning(f"Could not extract responsible IDs from mention {contacts!r} for formation {formation.name!r}.")
-        return
+    datetime_text = humanize_dt(formation.start_dt).lower()[2:-2]
+    formation_export = format_formation_export(formation)
 
-    for responsible_id in responsibles_ids:
-        responsible = await get_or_fetch_member(guild, responsible_id)
-        if responsible is None:
-            logger.error(f"Failed to fetch responsible {responsible_id} for formation {formation.name!r}.")
-            continue
+    if moment == "hour_before":
+        timing_line = f"La formation **{formation.name}** commence bientôt (le {datetime_text})."
+        subject = f"export reminder for formation {formation.name}"
+    else:
+        timing_line = f"La formation **{formation.name}** commence maintenant (le {datetime_text})."
+        subject = f"start export for formation {formation.name}"
 
-        datetime_text = humanize_dt(formation.start_dt).lower()[2:-2]
-        formation_export = format_formation_export(formation)
+    responsibles = get_members_by_role(logger, guild, role=RoleNames.TRAININGS_MANAGER)
 
-        if moment == "hour_before":
-            timing_line = f"La formation **{formation.name}** commence bientôt (le {datetime_text})."
-            subject = f"export reminder for formation {formation.name}"
-        else:
-            timing_line = f"La formation **{formation.name}** commence maintenant (le {datetime_text})."
-            subject = f"start export for formation {formation.name}"
-
-        message = f"Salut {responsible.display_name} !\n{timing_line}\n\n{formation_export}\n\n"
+    for responsible in responsibles:
+        message = f"Salut {responsible.display_name} !\n{timing_line}\n\n{formation_export}"
 
         await send_dm_to_member(logger, guild, responsible, message, subject)
+
+    if not responsibles:
+        logger.error(f"No responsible found to notify for formation {formation.name!r} in guild {guild.id}.")
+
+
+async def notify_participants_before_formation(
+    guild: Guild,
+    formation: Formation,
+    contacts: str,
+) -> None:
+    """Send a DM to all participants of the formation.
+
+    Args:
+        guild (Guild): The guild where the formation is taking place.
+        formation (Formation): The formation starting soon.
+        contacts (str): The contact string for formation managers.
+    """
+    datetime_text = humanize_dt(formation.start_dt).lower()[2:-2]
+
+    message_content = f"La formation **{formation.name}** commence bientôt (le {datetime_text}).\n\n*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
+
+    for entry in formation.registered_users:
+        participant_id = int(entry["user_id"])
+        participant = await get_or_fetch_member(guild, participant_id)
+        if participant is None:
+            logger.error(f"Failed to fetch participant {participant_id} for formation {formation.name!r}.")
+            continue
+
+        message = f"Salut {participant.display_name} !\n{message_content}"
+
+        await send_dm_to_member(logger, guild, participant, message, f"reminder for formation {formation.name}")

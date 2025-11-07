@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from logging import Logger
-from typing import Any
+from typing import Any, overload
 
 from discord import (
     CategoryChannel,
@@ -78,13 +78,14 @@ async def is_in_allowed_channel(logger: Logger, interaction: Interaction) -> boo
                 f"Stored commands channel id {stored_channel_id} could not be fetched for guild {interaction.guild.id}",
             )
             set_commands_channel_id(interaction.guild.id, None)
-        if isinstance(maybe_channel, TextChannel):
-            commands_channel = maybe_channel
-        elif maybe_channel is not None:
-            logger.warning(
-                f"Stored commands channel id {stored_channel_id} is not a TextChannel for guild {interaction.guild.id}",
-            )
-            set_commands_channel_id(interaction.guild.id, None)
+        else:
+            if isinstance(maybe_channel, TextChannel):
+                commands_channel = maybe_channel
+            elif maybe_channel is not None:
+                logger.warning(
+                    f"Stored commands channel id {stored_channel_id} is not a TextChannel for guild {interaction.guild.id}",
+                )
+                set_commands_channel_id(interaction.guild.id, None)
 
     if commands_channel is None:
         maybe_channel = get(interaction.guild.channels, name=COMMANDS_CHANNEL_NAME)
@@ -133,7 +134,7 @@ async def check_has_role(logger: Logger, interaction: Interaction, roles: set[st
 
     assert isinstance(interaction.user, Member)
     member_role_names = {role.name for role in interaction.user.roles}
-    if not (member_role_names & roles):
+    if not member_role_names & roles:
         logger.warning(
             f"User {interaction.user} doesn't have any of the roles {', '.join(roles)} in the guild {interaction.guild.id}"
         )
@@ -146,7 +147,7 @@ async def check_has_role(logger: Logger, interaction: Interaction, roles: set[st
     return True
 
 
-async def _can_dm_user(user: Member) -> bool:
+async def can_dm_user(user: Member) -> bool:
     """Check if the bot can send a DM to the user.
 
     Args:
@@ -188,7 +189,7 @@ async def send_dm_to_member(
     if member.bot:
         return False
 
-    if not await _can_dm_user(member):
+    if not await can_dm_user(member):
         logger.error(f"Cannot DM user {member.id} ({member.name!r}) in guild {guild.id}; skipping {dm_type} DM.")
         return False
 
@@ -199,9 +200,9 @@ async def send_dm_to_member(
     except Exception:
         logger.exception(f"Failed to send {dm_type} DM to user {member} in guild {guild.id}.")
         return False
-    else:
-        logger.info(f"Sent {dm_type} DM to user {member} in guild {guild.id}.")
-        return True
+
+    logger.info(f"Sent {dm_type} DM to user {member} in guild {guild.id}.")
+    return True
 
 
 async def get_or_fetch_member(guild: Guild, member_id: int) -> Member | None:
@@ -222,6 +223,41 @@ async def get_or_fetch_member(guild: Guild, member_id: int) -> Member | None:
         return await guild.fetch_member(member_id)
     except Exception:
         return None
+
+
+@overload
+def get_members_by_role(logger: Logger, guild: Guild, *, role: str) -> set[Member]: ...
+@overload
+def get_members_by_role(*, role: Role) -> set[Member]: ...
+
+
+def get_members_by_role(
+    logger: Logger | None = None,
+    guild: Guild | None = None,
+    *,
+    role: Role | str,
+) -> set[Member]:
+    """Get all members in a guild that have a specific role.
+
+    Args:
+        logger (Logger | None): The logger of the cog. Defaults to None.
+        guild (Guild | None): The guild to search in. Defaults to None.
+        role (Role | str): The role to filter members by.
+
+    Returns:
+        set[Member]: Set of members that have the specified role.
+    """
+    if isinstance(role, Role):
+        return set(role.members)
+
+    assert logger is not None
+    assert guild is not None
+
+    role_obj = get(guild.roles, name=role)
+    if role_obj is None:
+        logger.error(f"Role '{role}' not found in guild {guild.id}; returning empty member set.")
+        return set()
+    return set(role_obj.members)
 
 
 # region ====== Formatting Helpers ======

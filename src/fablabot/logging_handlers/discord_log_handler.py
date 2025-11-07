@@ -19,11 +19,12 @@ CYAN = "\u001b[34m"
 class DiscordLogHandler(logging.Handler):
     """An logging handler that posts messages to a Discord channel."""
 
-    def __init__(self, bot: commands.Bot):
+    def __init__(self, bot: commands.Bot, level: int = logging.ERROR) -> None:
         """Initializes the DiscordLogHandler.
 
         Args:
             bot (commands.Bot): The bot instance to use for sending log messages.
+            level (int): The logging level for this handler.
         """
         super().__init__()
         self.bot = bot
@@ -33,6 +34,7 @@ class DiscordLogHandler(logging.Handler):
             f"{RED}[%(levelname)s]{CLEAR} {CYAN}{UNDERLINE}%(module)s.%(funcName)s{CLEAR}{CYAN}:{CLEAR} %(message)s"
         )
         self.setFormatter(logging.Formatter(ansi_log_format))
+        self.setLevel(level)
 
     @override
     def emit(self, record: logging.LogRecord) -> None:

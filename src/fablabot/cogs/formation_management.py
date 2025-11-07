@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import csv
 from datetime import datetime, timedelta
 import io
 import json
 import logging
 from pathlib import Path
-import re
 from typing import Any, Literal, cast, override
 from warnings import deprecated
 
@@ -27,6 +27,7 @@ from discord.ext import commands, tasks
 from emoji import EMOJI_DATA
 
 from fablabot.cogs.helpers import (
+    DISCORD_EMOJI_RE,
     PARIS_TZ,
     Draft,
     Emojis,
@@ -37,6 +38,7 @@ from fablabot.cogs.helpers import (
     RoleNames,
     format_current_registrations,
     format_respo_contacts,
+    notify_participants_before_formation,
     notify_responsible_before_formation,
     notify_trainer_before_formation,
     parse_date_time,
@@ -50,27 +52,26 @@ from fablabot.cogs.helpers.utils import check_has_role, is_in_allowed_channel, l
 logger = logging.getLogger(__name__)
 
 
-ALLOWED_ROLES = {RoleNames.RESPO_FORMATIONS, RoleNames.ADMIN_TEMP, RoleNames.ADMIN}
+ALLOWED_ROLES = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN_TEMP, RoleNames.ADMIN}
 DATA_FILE = "data/formations_state.json"
-DISCORD_EMOJI_RE = re.compile(r"^<a?:\w+:\d+>$")
 TRAINER_NOTIFICATION_ADVANCE = timedelta(hours=1)
-REACTION_LOG_RETENTION = timedelta(days=30)
+REACTION_LOG_RETENTION = timedelta(days=20)
 
 
 class FormationManagement(commands.Cog):
     """Hebdo formations management cog (Draft -> Publish -> Export).
 
     Commands:
-        - /fm help
-        - /fm start intro:<str> end:<str> role:<@Role>
-        - /fm edit_text [intro] [end]
-        - /fm add emoji:<str> name:<str> trainer:<@Member> date:<DD/MM/YYYY> hour:<HH:MM> duration:<str> seats:<int> description:<str>
-        - /fm edit index:<int> [emoji] [name] [trainer] [date] [hour] [duration] [seats] [description]
-        - /fm remove index:<int>
-        - /fm clear
-        - /fm preview
-        - /fm publish channel:<#salon>
-        - /fm export [message_id] [publication_channel]
+        - /fm help: Display help for formation management commands.
+        - /fm start: Start/overwrite a draft with an introduction, ending and role to mention.
+        - /fm edit_text: Edit the draft introduction and/or ending.
+        - /fm add: Add a new formation to the draft.
+        - /fm edit: Edit an existing formation in the draft.
+        - /fm remove: Remove a formation from the draft.
+        - /fm clear: Clear the draft.
+        - /fm preview: Preview the draft.
+        - /fm publish: Publish the draft to a channel.
+        - /fm export: Export the draft as a message.
 
     Listeners:
         - on_raw_reaction_event: Log reactions (add/remove) on messages published by this cog.
@@ -112,6 +113,7 @@ class FormationManagement(commands.Cog):
         ```
         """
         self._reaction_lock = asyncio.Lock()
+        self._pending_update_tasks: dict[int, asyncio.Task] = {}
         self._purge_all_reaction_logs()
         self._check_upcoming_formations.start()
         logger.info("FormationManagement initialized")
@@ -120,35 +122,45 @@ class FormationManagement(commands.Cog):
     async def cog_unload(self) -> None:
         """Clean up when the cog is unloaded."""
         self._check_upcoming_formations.cancel()
+        for task in list(self._pending_update_tasks.values()):
+            try:
+                task.cancel()
+            except Exception:
+                logger.exception("Failed to cancel pending scheduled update task during cog unload.")
+        self._pending_update_tasks.clear()
         logger.info("FormationManagement unloaded")
 
     # region ====== Fm Slash Commands Group ======
     fm_group = app_commands.Group(name="fm", description="Gère les annonces de Formations et les inscriptions.")
 
     @fm_group.command(name="help", description="Afficher l'aide pour les commandes de gestion des formations.")
-    async def fm_help(self, interaction: Interaction) -> None:
+    @app_commands.describe(show="Afficher l'aide publiquement ou non")
+    async def fm_help(self, interaction: Interaction, show: bool = False) -> None:
         """Display help information for the formation management commands.
 
         Args:
             interaction (Interaction): The Discord interaction context.
+            show (bool): Whether to show the help publicly or not.
         """
         help_message = (
             "**Commandes de gestion des formations :**\n"
             "- `/fm start <intro> <end> <role>` : Démarrer un nouveau brouillon de formation.\n"
-            "- `/fm edit_text [intro] [end]` : Modifier le texte d'introduction et/ou de conclusion du brouillon.\n"
-            "- `/fm add <emoji> <name> <trainer> <date> <hour> <duration> <seats> <description>` :"
+            "- `/fm edit_text [intro] [end] [role]` : "
+            "Modifier le texte d'introduction et/ou de conclusion du brouillon et le rôle à mentionner.\n"
+            "- `/fm add <emoji> <name> <trainer> <date> <hour> <duration> <seats> [description] [excusable]` :"
             " Ajouter une nouvelle formation au brouillon.\n"
-            "- `/fm edit <index> [emoji] [name] [trainer] [date] [hour] [duration] [seats] [description]` :"
+            "- `/fm edit <index> [emoji] [name] [trainer] [date] [hour] [duration] [seats] [description] [excusable]` :"
             " Modifier une formation existante dans le brouillon.\n"
             "- `/fm remove <index>` : Supprimer une formation du brouillon.\n"
             "- `/fm clear` : Effacer le brouillon actuel.\n"
             "- `/fm preview` : Prévisualiser le brouillon actuel.\n"
-            "- `/fm publish` <channel> : Publier le brouillon dans un salon spécifique.\n"
-            "- `/fm export` [message_id] [publication_channel] : Exporter le brouillon sous forme de message.\n"
+            "- `/fm publish <channel>` : Publier le brouillon dans un salon spécifique.\n"
+            "- `/fm export [message_id]` : Exporter le brouillon sous forme de message.\n"
+            "- `/fm help [show]` : Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
             "\n"
             "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
         )
-        await interaction.response.send_message(help_message, ephemeral=True)
+        await interaction.response.send_message(help_message, ephemeral=not show)
 
     @fm_group.command(name="start", description="Démarrer/écraser un brouillon avec une introduction.")
     @app_commands.describe(
@@ -308,6 +320,7 @@ class FormationManagement(commands.Cog):
         duration="Durée en texte, ce sera affiché comme tel",
         seats="Nombre de places",
         description="Brève description",
+        excusable="Absences excusables ?",
     )
     async def fm_add(
         self,
@@ -320,6 +333,7 @@ class FormationManagement(commands.Cog):
         duration: str,
         seats: app_commands.Range[int, 1, 500],
         description: str = "",
+        excusable: bool = True,
     ) -> None:
         """Add a formation to the draft (automatically sorted by date/time).
 
@@ -333,6 +347,7 @@ class FormationManagement(commands.Cog):
             duration (str): The duration of the formation in text format.
             seats (app_commands.Range[int, 1, 500]): The number of seats for the formation.
             description (str, optional): The description of the formation. Defaults to "".
+            excusable (bool, optional): Whether absences are excusable for this formation. Defaults to True.
         """
         log_request(
             logger,
@@ -346,6 +361,7 @@ class FormationManagement(commands.Cog):
             hour=hour,
             duration=duration,
             seats=seats,
+            excusable=excusable,
         )
         if not await is_in_allowed_channel(logger, interaction):
             return
@@ -388,6 +404,7 @@ class FormationManagement(commands.Cog):
             duration=duration.strip(),
             seats=int(seats),
             description=description.strip(),
+            excusable=excusable,
         )
 
         fms = list(draft.fms)
@@ -432,6 +449,7 @@ class FormationManagement(commands.Cog):
         duration="Nouvelle durée affichée",
         seats="Nouveau nombre de places",
         description="Nouvelle description",
+        excusable="Absences excusables ?",
     )
     async def fm_edit(
         self,
@@ -445,6 +463,7 @@ class FormationManagement(commands.Cog):
         duration: str | None = None,
         seats: app_commands.Range[int, 1, 500] | None = None,
         description: str | None = None,
+        excusable: bool | None = None,
     ) -> None:
         """Edit a formation in the draft while keeping other entries untouched.
 
@@ -459,6 +478,7 @@ class FormationManagement(commands.Cog):
             duration (str | None, optional): New duration for the formation. Defaults to None.
             seats (app_commands.Range[int, 1, 500] | None, optional): New number of seats for the formation. Defaults to None.
             description (str | None, optional): New description for the formation. Defaults to None.
+            excusable (bool | None, optional): Whether absences are excusable for this formation. Defaults to None.
         """
         log_request(
             logger,
@@ -472,6 +492,8 @@ class FormationManagement(commands.Cog):
             hour=hour,
             duration=duration,
             seats=seats,
+            description=description,
+            excusable=excusable,
         )
         if not await is_in_allowed_channel(logger, interaction):
             return
@@ -528,8 +550,6 @@ class FormationManagement(commands.Cog):
             await interaction.response.send_message(ErrorMessages.INVALID_DURATION, ephemeral=True)
             return
 
-        new_description = original.description if description is None else description.strip()
-
         new_seats = original.seats if seats is None else seats
 
         new_start_iso = original.start_iso
@@ -549,6 +569,10 @@ class FormationManagement(commands.Cog):
                 )
                 return
 
+        new_description = original.description if description is None else description.strip()
+
+        new_excusable = original.excusable if excusable is None else excusable
+
         updated = Formation(
             emoji=new_emoji,
             name=new_name,
@@ -557,6 +581,7 @@ class FormationManagement(commands.Cog):
             duration=new_duration,
             seats=new_seats,
             description=new_description,
+            excusable=new_excusable,
         )
 
         fms[index - 1] = updated
@@ -763,6 +788,9 @@ class FormationManagement(commands.Cog):
             )
             return
 
+        with contextlib.suppress(Exception):
+            await msg.publish()
+
         success_reactions = 0
         for fm in fms:
             try:
@@ -800,17 +828,13 @@ class FormationManagement(commands.Cog):
     @fm_group.command(name="export", description="Exporter la liste des membres ayant (dé)réagi aux émojis des FMs.")
     @app_commands.describe(
         message_id="ID du message publié (optionnel si dernière publication)",
-        publication_channel="Salon du message publié (optionnel si dernière publication)",
     )
-    async def fm_export(
-        self, interaction: Interaction, message_id: str | None = None, publication_channel: TextChannel | None = None
-    ) -> None:
+    async def fm_export(self, interaction: Interaction, message_id: str | None = None) -> None:
         """Export the list of members who reacted (added/removed) to the formation emojis.
 
         Args:
             interaction (Interaction): The Discord interaction context.
             message_id (str | None, optional): The ID of the published message. Defaults to None.
-            publication_channel (TextChannel | None, optional): The channel of the published message. Defaults to None.
         """
         log_request(logger, "fm.export", interaction, message_id=message_id)
         if not await is_in_allowed_channel(logger, interaction):
@@ -820,14 +844,13 @@ class FormationManagement(commands.Cog):
 
         assert interaction.guild is not None
         published = self._get_last_published_in_guild(interaction.guild.id)
-        if not published and (not message_id or not publication_channel):
+        if not published and not message_id:
             logger.warning(f"Guild {interaction.guild.id} tried to export reactions without published message or ID.")
             await interaction.response.send_message(ErrorMessages.NO_PUBLISHED_MESSAGE, ephemeral=True)
             return
 
         target_message_id = int(message_id) if message_id else published.message_id if published else None
-        target_channel_id = int(publication_channel.id) if publication_channel else published.channel_id if published else None
-        if not target_message_id or not target_channel_id:
+        if not target_message_id:
             logger.error(f"Guild {interaction.guild.id} has inconsistent published message data: {published}")
             await interaction.response.send_message(ErrorMessages.INCONSISTENT_PUBLISHED_DATA, ephemeral=True)
             return
@@ -853,7 +876,7 @@ class FormationManagement(commands.Cog):
                 ]
             )
 
-        if message_id or publication_channel:
+        if message_id:
             await interaction.response.send_message(
                 content="Export du message spécifié.",
                 file=File(
@@ -917,6 +940,17 @@ class FormationManagement(commands.Cog):
             if fm_emojis and emoji_str not in fm_emojis:
                 return
 
+            formation = next((fm for fm in pub.message.fms if fm.emoji == emoji_str), None)
+            if formation:
+                now = datetime.now(PARIS_TZ)
+                registration_deadline = formation.start_dt + timedelta(minutes=20)
+                if now > registration_deadline:
+                    logger.info(
+                        f"Ignoring reaction {emoji_str} for formation {formation.name!r} "
+                        f"from user {payload.user_id} - registration closed."
+                    )
+                    return
+
             member_name = member.name if member else None
             reaction_event = ReactionEvent(
                 message_id=payload.message_id,
@@ -929,7 +963,7 @@ class FormationManagement(commands.Cog):
 
             self._log_reaction(payload.guild_id, reaction_event)
 
-            await self._update_published_message(payload.guild_id)
+            self._schedule_update(payload.guild_id)
 
     # endregion Event Listeners
 
@@ -975,8 +1009,12 @@ class FormationManagement(commands.Cog):
                     await notify_responsible_before_formation(
                         guild,
                         fm,
-                        send_contacts,
                         moment="hour_before",
+                    )
+                    await notify_participants_before_formation(
+                        guild,
+                        fm,
+                        send_contacts,
                     )
 
                     fm.notified_hour_before = True
@@ -992,7 +1030,6 @@ class FormationManagement(commands.Cog):
                     await notify_responsible_before_formation(
                         guild,
                         fm,
-                        send_contacts,
                         moment="start",
                     )
 
@@ -1164,7 +1201,8 @@ class FormationManagement(commands.Cog):
         log.append(reaction_event)
         guild_state["reactions_log"] = [event.to_dict() for event in log]
         logger.debug(
-            f"Logged {reaction_event.action} reaction for guild {guild_id} message {reaction_event.message_id} user {reaction_event.user_id} with emoji {reaction_event.emoji} (Paris time: {reaction_event.ts_iso})."
+            f"Logged {reaction_event.action} reaction for guild {guild_id} message {reaction_event.message_id} "
+            f"user {reaction_event.user_id} with emoji {reaction_event.emoji} (Paris time: {reaction_event.ts_iso})."
         )
         self._set_guild_state(guild_id, guild_state)
 
@@ -1246,6 +1284,35 @@ class FormationManagement(commands.Cog):
         logger.debug(f"Loaded {len(history)} reaction events for guild {guild_id} message {message_id}.")
         return history
 
+    def _schedule_update(self, guild_id: int, delay: float = 2.0) -> None:
+        """Schedule a debounced update for a guild's published message.
+
+        If an update is already scheduled and not finished, this is a no-op. The
+        scheduled coroutine waits `delay` seconds before invoking
+        `_update_published_message`, coalescing rapid events.
+
+        Args:
+            guild_id (int): The ID of the guild.
+            delay (float, optional): The delay in seconds before performing the update. Defaults to 2.0.
+        """
+        existing = self._pending_update_tasks.get(guild_id)
+        if existing and not existing.done():
+            return
+
+        async def _delayed() -> None:
+            try:
+                await asyncio.sleep(delay)
+                await self._update_published_message(guild_id)
+            except asyncio.CancelledError:
+                logger.debug(f"Scheduled update for guild {guild_id} was cancelled.")
+            except Exception:
+                logger.exception(f"Error during scheduled update for guild {guild_id}.")
+            finally:
+                self._pending_update_tasks.pop(guild_id, None)
+
+        task = asyncio.create_task(_delayed())
+        self._pending_update_tasks[guild_id] = task
+
     async def _update_published_message(self, guild_id: int) -> None:
         """Update the published message to reflect current registrations.
 
@@ -1315,7 +1382,7 @@ class FormationManagement(commands.Cog):
             async for user in reaction.users():
                 if user.bot:
                     continue
-                reactions_snapshot.setdefault(emoji_str, {})[user.id] = user.name
+                reactions_snapshot.setdefault(emoji_str, {})[user.id] = f"{user.display_name} ({user.name})"
 
         waitlist_notifications: list[tuple[int, str, int]] = []
         promotion_notifications: list[tuple[int, Formation]] = []

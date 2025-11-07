@@ -1,0 +1,22 @@
+services:
+  python-dev:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: development
+    container_name: fablabot-dev
+    restart: unless-stopped
+    volumes:
+      - ./src:/app/src
+      - ./pyproject.toml:/app/pyproject.toml
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - DISCORD_TOKEN_FILE=/run/secrets/discord_token
+      - GUILD_TOKEN_FILE=/run/secrets/guild_token
+      - PERSONAL_ID_FILE=/run/secrets/personal_id
+    secrets:
+      - discord_token
+      - guild_token
+      - personal_id
+    command: uv run -m fablabot.main

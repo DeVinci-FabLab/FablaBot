@@ -11,7 +11,7 @@ from discord import Guild
 from discord.utils import get
 
 from fablabot.cogs.helpers.constants import MAX_MSG_CHARS, Emojis, RoleNames
-from fablabot.cogs.helpers.utils import escape_md
+from fablabot.cogs.helpers.utils import escape_md, get_members_by_role
 
 if TYPE_CHECKING:
     from fablabot.cogs.helpers.formation_models import Formation
@@ -86,12 +86,12 @@ def render_message(
 
     for fm in fms:
         line_block = [
-            f"{fm.emoji} **{fm.name}** avec {fm.trainer_mention}",
-            f"{Emojis.DATE} {humanize_dt(fm.start_dt)}  — "
-            f"{Emojis.HOURGLASS} {fm.duration}  — "
-            f"{Emojis.PEOPLE} {len(fm.registered_users)}/{fm.seats} place(s)",
+            f"{fm.emoji} **{fm.name}** avec {fm.trainer_mention}{' (excusable)' if fm.excusable else ''}",
+            f"> {humanize_dt(fm.start_dt)}  – "  # noqa: RUF001
+            f"{Emojis.get_clock_emoji(fm.start_dt)} {fm.duration}  – "  # noqa: RUF001
+            f"{Emojis.PEOPLE} {len(fm.registered_users)}/{fm.seats} places",
         ]
-        line_block += [fm.description] if fm.description else []
+        line_block += [f"> {fm.description}"] if fm.description else []
         lines.append("\n".join(line_block))
         lines.append("")
 
@@ -123,16 +123,16 @@ def format_respo_contacts(guild: Guild) -> str:
         str: The contact string.
     """
     logger.debug(f"Resolving formation contacts for guild {guild.id}.")
-    role = get(guild.roles, name=RoleNames.RESPO_FORMATIONS)
+    role = get(guild.roles, name=RoleNames.TRAININGS_MANAGER)
     if role is None:
-        logger.debug(f"Role '{RoleNames.RESPO_FORMATIONS}' missing in guild {guild.id}; using fallback contacts.")
+        logger.debug(f"Role '{RoleNames.TRAININGS_MANAGER}' missing in guild {guild.id}; using fallback contacts.")
         return "un·e membre du Pôle Formations"
-    members = [member for member in role.members if not member.bot]
+    members = get_members_by_role(role=role)
     if not members:
-        logger.debug(f"Role '{RoleNames.RESPO_FORMATIONS}' has no human members in guild {guild.id}; using fallback contacts.")
+        logger.debug(f"Role '{RoleNames.TRAININGS_MANAGER}' has no human members in guild {guild.id}; using fallback contacts.")
         return "un·e membre du Pôle Formations"
     mentions = [member.mention for member in members]
-    logger.debug(f"Resolved {len(mentions)} formation manager contacts for guild {guild.id}.")
+    logger.debug(f"Resolved {len(mentions)} formation contacts for guild {guild.id}.")
     return " ou ".join(mentions)
 
 

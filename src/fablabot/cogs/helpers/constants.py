@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+import re
+from zoneinfo import ZoneInfo
+
+PARIS_TZ = ZoneInfo("Europe/Paris")
 MAX_MSG_CHARS = 1900
+DISCORD_EMOJI_RE = re.compile(r"^<a?:\w+:\d+>$")
 
 
 class RoleNames:
@@ -26,14 +33,29 @@ class RoleNames:
     SECRETARY = "Secrétaire Général"
     """General secretary role."""
 
-    RESPO_FORMATIONS = "Respo Formations"
+    COMMUNICATION_MANAGER = "Respo Communication"
+    """Communications manager role."""
+
+    EVENTS_MANAGER = "Respo Event"
+    """Events manager role."""
+
+    TRAININGS_MANAGER = "Respo Formation"
     """Training manager role."""
 
-    RESPO_NUMERIQUE = "Respo Numérique"
+    DIGITAL_MANAGER = "Respo Numérique"
     """IT manager role."""
+
+    PARTNERSHIPS_MANAGER = "Respo Partenariat"
+    """Partnerships manager role."""
+
+    PROJECTS_MANAGER = "Respo Projet"
+    """Project manager role."""
 
     BUREAU = "Bureau"
     """Office/Bureau role."""
+
+    DIGITAL_POLE = "Pôle Numérique"
+    """Digital Pole role."""
 
     SBIRE_BUREAU = "Sbire Bureau"
     """Office assistant role."""
@@ -120,9 +142,106 @@ class ErrorMessages:
 class Emojis:
     """Discord emojis used throughout the bot."""
 
-    DATE = ":date:"
-    HOURGLASS = ":hourglass_flowing_sand:"
     PEOPLE = ":busts_in_silhouette:"
     ARROW_RIGHT = ":arrow_right:"
     WARNING = ":warning:"
     LOUDSPEAKER = ":loudspeaker:"
+
+    @staticmethod
+    def get_clock_emoji(dt: datetime) -> str:
+        """Get the clock emoji corresponding to the given hour and minute.
+
+        Args:
+            dt (datetime): The datetime to get the clock emoji for.
+
+        Returns:
+            str: The corresponding clock emoji.
+        """
+        dt = Emojis.round_hour(dt)
+        clock_emojis = {
+            (0, 0): ":clock12:",
+            (0, 30): ":clock1230:",
+            (1, 0): ":clock1:",
+            (1, 30): ":clock130:",
+            (2, 0): ":clock2:",
+            (2, 30): ":clock230:",
+            (3, 0): ":clock3:",
+            (3, 30): ":clock330:",
+            (4, 0): ":clock4:",
+            (4, 30): ":clock430:",
+            (5, 0): ":clock5:",
+            (5, 30): ":clock530:",
+            (6, 0): ":clock6:",
+            (6, 30): ":clock630:",
+            (7, 0): ":clock7:",
+            (7, 30): ":clock730:",
+            (8, 0): ":clock8:",
+            (8, 30): ":clock830:",
+            (9, 0): ":clock9:",
+            (9, 30): ":clock930:",
+            (10, 0): ":clock10:",
+            (10, 30): ":clock1030:",
+            (11, 0): ":clock11:",
+            (11, 30): ":clock1130:",
+        }
+        return clock_emojis.get((dt.hour % 12, dt.minute), ":clock12:")
+
+    @staticmethod
+    def round_hour(dt: datetime) -> datetime:
+        """Round a datetime to the nearest hour emoji.
+
+        Args:
+            dt (datetime): The datetime to round.
+
+        Returns:
+            datetime: The rounded datetime.
+        """
+        if dt.minute >= 45:
+            dt += timedelta(hours=1)
+            dt = dt.replace(minute=0, second=0, microsecond=0)
+        elif dt.minute < 15:
+            dt = dt.replace(minute=0, second=0, microsecond=0)
+        else:
+            dt = dt.replace(minute=30, second=0, microsecond=0)
+        return dt
+
+
+@dataclass
+class EasterEggTrigger:
+    """Structure for defining an Easter egg trigger."""
+
+    keywords: list[str]
+    """List of keywords that trigger the Easter egg."""
+    response: str
+    """Response to send when the Easter egg is triggered."""
+    probability: float
+    """Probability of triggering the Easter egg when keywords are found."""
+
+
+EASTER_EGGS: list[EasterEggTrigger] = [
+    EasterEggTrigger(
+        ["c'est pas sorcier"],
+        "https://tenor.com/view/c-est-pas-sorcier-c%27est-pas-sorcier-jamy-fred-sabine-gif-499752155684427888",
+        1.0,
+    ),
+    EasterEggTrigger(
+        ["autiste", "autisme"],
+        "https://tenor.com/view/autism-autistic-spongebob-i%27m-autistic-spongebob-meme-gif-990745265488627503",
+        1 / 3,
+    ),
+    EasterEggTrigger(
+        ["contre nature", "c'est bizarre"],
+        "https://tenor.com/view/lpj-gif-7210529",
+        1.0,
+    ),
+    EasterEggTrigger(
+        ["t'es pas net", "baptiste"],
+        "https://tenor.com/view/baptiste-feu-fire-gif-13214452",
+        1.0,
+    ),
+    EasterEggTrigger(
+        ["feu ", "brûl", "brul"],
+        "https://tenor.com/view/elmo-fire-burn-flame-gif-5042503",
+        1 / 4,
+    ),
+]

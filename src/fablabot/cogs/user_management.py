@@ -1,4 +1,7 @@
-"""User management commands and permission utilities for Discord Bot. Provides slash commands for temporary admin and role assignments."""
+"""User management commands and permission utilities for Discord Bot.
+
+Provides slash commands for temporary admin and role assignments.
+"""
 
 from __future__ import annotations
 
@@ -30,8 +33,8 @@ from fablabot.cogs.helpers import (
     log_request,
     safe_add_roles,
     safe_remove_roles,
-    send_dm_to_member,
 )
+from fablabot.cogs.helpers.utils import get_members_by_role
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +50,7 @@ class UserManagement(commands.Cog):
         - /user remove_role: Remove a role from a single user.
         - /user add_roles: Add a role to multiple users via a selector.
         - /user remove_roles: Remove a role from multiple users via a selector.
-        - /user dm: Send a direct message to multiple users.
+        - /user with_roles: Get members with specific roles.
 
     Attributes:
         user_group (app_commands.Group): Command group for user management commands.
@@ -69,11 +72,13 @@ class UserManagement(commands.Cog):
     user_group = app_commands.Group(name="user", description="Gestion des utilisateurs")
 
     @user_group.command(name="help", description="Affiche l'aide pour les commandes de gestion des utilisateurs.")
-    async def user_help(self, interaction: Interaction) -> None:
+    @app_commands.describe(show="Afficher l'aide publiquement ou non")
+    async def user_help(self, interaction: Interaction, show: bool = False) -> None:
         """Display help for user management commands.
 
         Args:
             interaction (Interaction): The Discord interaction context.
+            show (bool): Whether to show the help publicly or not.
         """
         help_message = (
             "**Commandes de gestion des utilisateurs :**\n"
@@ -83,12 +88,12 @@ class UserManagement(commands.Cog):
             "- `/user remove_role <user> <role>` : Retire un rôle à un utilisateur.\n"
             "- `/user add_roles <role>` : Donne un rôle à plusieurs utilisateurs via un sélecteur.\n"
             "- `/user remove_roles <role>` : Retire un rôle à plusieurs utilisateurs via un sélecteur.\n"
-            "- `/user dm <message>` : Envoie un message privé à plusieurs utilisateurs via un sélecteur.\n"
-            "- `/user help` : Affiche cette aide pour les commandes de gestion des utilisateurs.\n"
+            "- `/user with_roles` : Obtenir les membres avec des rôles spécifiques.\n"
+            "- `/user help [show]` : Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
             "\n"
             "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
         )
-        await interaction.response.send_message(help_message, ephemeral=True)
+        await interaction.response.send_message(help_message, ephemeral=not show)
 
     @user_group.command(name="op", description="Donne des droits admin temporaires à un utilisateur.")
     @app_commands.describe(
@@ -120,7 +125,7 @@ class UserManagement(commands.Cog):
             await interaction.response.send_message("Rôles administratifs manquants sur le serveur.", ephemeral=True)
             return
         assert isinstance(interaction.user, Member)
-        if not self._can_assign_role(interaction.user, admin_role) and RoleNames.RESPO_NUMERIQUE not in (
+        if not self._can_assign_role(interaction.user, admin_role) and RoleNames.DIGITAL_MANAGER not in (
             r.name for r in interaction.user.roles
         ):
             logger.warning(f"Unauthorized op attempt by {interaction.user}")
@@ -168,7 +173,7 @@ class UserManagement(commands.Cog):
             )
             return
         assert isinstance(interaction.user, Member)
-        if not self._can_assign_role(interaction.user, admin_role) and RoleNames.RESPO_NUMERIQUE not in (
+        if not self._can_assign_role(interaction.user, admin_role) and RoleNames.DIGITAL_MANAGER not in (
             r.name for r in interaction.user.roles
         ):
             logger.warning(f"Unauthorized deop attempt by {interaction.user}")
@@ -276,9 +281,14 @@ class UserManagement(commands.Cog):
             await interaction.response.send_message(ErrorMessages.NO_PERMISSION_ADD_ROLE, ephemeral=True)
             return
 
-        view = BulkRoleView(role, interaction.user, action="add")
-        await interaction.response.send_message(
-            f"Sélectionnez les membres à qui ajouter {escape_md(role.name)} puis cliquez sur **Confirmer**.", view=view
+        await interaction.response.defer(thinking=True)
+        followup_mes = await interaction.followup.send("Sélection des membres en cours...", wait=True)
+
+        view = BulkRoleAssignmentView(role, interaction.user, followup_mes.id, action="add")
+        await interaction.followup.send(
+            f"Sélectionnez les membres à qui ajouter {escape_md(role.name)} puis cliquez sur **Confirmer**.",
+            view=view,
+            ephemeral=True,
         )
 
     @user_group.command(name="remove_roles", description="Retire un rôle à plusieurs utilisateurs via un sélecteur.")
@@ -300,49 +310,35 @@ class UserManagement(commands.Cog):
             await interaction.response.send_message(ErrorMessages.NO_PERMISSION_REMOVE_ROLE, ephemeral=True)
             return
 
-        view = BulkRoleView(role, interaction.user, action="remove")
-        await interaction.response.send_message(
-            f"Sélectionnez les membres à qui retirer {escape_md(role.name)} puis cliquez sur **Confirmer**.", view=view
+        await interaction.response.defer(thinking=True)
+        followup_mes = await interaction.followup.send("Sélection des membres en cours...", wait=True)
+
+        view = BulkRoleAssignmentView(role, interaction.user, followup_mes.id, action="remove")
+        await interaction.followup.send(
+            f"Sélectionnez les membres à qui retirer {escape_md(role.name)} puis cliquez sur **Confirmer**.",
+            view=view,
+            ephemeral=True,
         )
 
-    # -- Communications --
-
-    @user_group.command(
-        name="dm",
-        description="Envoie un message privé à plusieurs utilisateurs via un sélecteur.",
-    )
-    @app_commands.describe(message="Le message à envoyer en MP.")
-    async def user_dm(self, interaction: Interaction, message: str) -> None:
-        """Send a direct message to multiple users.
+    @user_group.command(name="with_roles", description="Obtenir les membres avec des rôles spécifiques.")
+    async def user_with_roles(self, interaction: Interaction) -> None:
+        """Get members with specific roles.
 
         Args:
             interaction (Interaction): The Discord interaction context.
-            message (str): The message content to send.
         """
-        log_request(logger, "user.dm", interaction, message=message)
+        log_request(logger, "user.with_roles", interaction)
         if not await is_in_allowed_channel(logger, interaction):
             return
 
-        assert isinstance(interaction.user, Member)
+        await interaction.response.defer(thinking=True)
+        followup_mes = await interaction.followup.send("Sélection des rôles en cours...", wait=True)
 
-        role_names = {role.name for role in interaction.user.roles}
-        if RoleNames.BUREAU not in role_names:
-            logger.warning(f"Unauthorized dm by {interaction.user}")
-            await interaction.response.send_message("Permissions insuffisantes.", ephemeral=True)
-            return
-
-        message += (
-            f"\n\n*Ce message vous a été envoyé par un membre du Bureau du Fablab. Merci de ne pas y répondre directement.*"
-            f"\nPour plus d'informations, contactez <@{interaction.user.id}>."
-        )
-
-        view = BulkDMView(interaction.user, message)
-        await interaction.response.send_message(
-            (
-                "Selectionnez les membres a qui envoyer le message puis cliquez sur **Confirmer**.\n\n"
-                f"Message à envoyer :\n>>> {message}"
-            ),
+        view = MultiRoleSelectorView(followup_mes.id)
+        await interaction.followup.send(
+            "Sélectionnez les rôles que vous recherchez puis cliquez sur **Confirmer**.",
             view=view,
+            ephemeral=True,
         )
 
     # endregion User Slash Commands Group
@@ -451,7 +447,7 @@ class UserManagement(commands.Cog):
             bool: `True` if the member is responsible for the formation, `False` otherwise.
         """
         role_names = {role.name for role in member.roles}
-        return RoleNames.RESPO_FORMATIONS in role_names and target_role.name.startswith("F - ")
+        return RoleNames.TRAININGS_MANAGER in role_names and target_role.name.startswith("F - ")
 
     # endregion Helpers
 
@@ -466,31 +462,32 @@ async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(UserManagement(bot))
 
 
-# region ====== UI Views ======
+# region ====== UI View ======
 
 
-class BulkRoleView(ui.View):
+class BulkRoleAssignmentView(ui.View):
     """View for bulk role assignment/removal."""
 
     def __init__(
         self,
         role: Role,
         user: Member,
+        followup_id: int,
         *,
         action: Literal["add", "remove"],
-        timeout: float = 180.0,
     ) -> None:
-        """View for bulk role assignment/removal.
+        """Initialize the view for bulk role assignment/removal.
 
         Args:
             role (Role): The role to assign.
             user (Member): The member initiating the role assignment.
+            followup_id (int): The ID of the follow-up message to edit with results.
             action (Literal["add", "remove"]): "add" to add the role, "remove" to remove it.
-            timeout (float, optional): The timeout duration in seconds. Defaults to 180.0.
         """
-        super().__init__(timeout=timeout)
+        super().__init__()
         self.role = role
         self.user = user
+        self.followup_id = followup_id
         self.action = action
 
         async def _on_select(interaction: Interaction) -> None:
@@ -502,10 +499,10 @@ class BulkRoleView(ui.View):
             min_values=1,
             max_values=25,
         )
-        self.select.callback = _on_select
+        self.select.callback = _on_select  # type: ignore
 
         self.confirm_button: ui.Button[Any] = ui.Button(label="Confirmer", style=ButtonStyle.primary)
-        self.confirm_button.callback = self.confirm
+        self.confirm_button.callback = self.confirm  # type: ignore
 
         self.add_item(self.select)
         self.add_item(self.confirm_button)
@@ -520,6 +517,11 @@ class BulkRoleView(ui.View):
         if not members:
             await interaction.response.send_message("Aucun membre sélectionné.", ephemeral=True)
             return
+
+        for child in self.children:
+            if isinstance(child, ui.Button | ui.UserSelect):
+                child.disabled = True
+        await interaction.response.edit_message(view=self)
 
         modified: list[Member] = []
         already: list[Member] = []
@@ -567,89 +569,77 @@ class BulkRoleView(ui.View):
         if failed:
             lines.append(f"Échec : {', '.join(format_member_mention(m) for m in failed)}")
 
-        for child in self.children:
-            if isinstance(child, ui.Button | ui.UserSelect):
-                child.disabled = True
-        await interaction.response.edit_message(view=self)
-
-        await interaction.edit_original_response(content="\n".join(lines), view=None)
+        await interaction.followup.edit_message(self.followup_id, content="\n".join(lines))
+        await interaction.delete_original_response()
 
 
-class BulkDMView(ui.View):
-    """View for bulk direct message sending."""
+class MultiRoleSelectorView(ui.View):
+    """View for multi role selection."""
 
     def __init__(
         self,
-        sender: Member,
-        message: str,
-        *,
-        timeout: float = 180.0,
+        followup_id: int,
     ) -> None:
-        """Initialize the view for bulk direct messages.
+        """Initialize the view for multi role selection.
 
         Args:
-            sender (Member): The member initiating the message sending.
-            message (str): The message to send to the selected members.
-            timeout (float, optional): The timeout duration in seconds. Defaults to 180.0.
+            followup_id (int): The ID of the follow-up message to edit with results.
         """
-        super().__init__(timeout=timeout)
-        self.sender = sender
-        self.message = message
+        super().__init__()
+        self.followup_id = followup_id
 
         async def _on_select(interaction: Interaction) -> None:
             if not interaction.response.is_done():
                 await interaction.response.defer()
 
-        self.select: ui.UserSelect[Any] = ui.UserSelect(
-            placeholder="Sélectionne les membres…",
+        self.select: ui.RoleSelect[Any] = ui.RoleSelect(
+            placeholder="Sélectionne les rôles…",
             min_values=1,
             max_values=25,
         )
-        self.select.callback = _on_select
+        self.select.callback = _on_select  # type: ignore
 
         self.confirm_button: ui.Button[Any] = ui.Button(label="Confirmer", style=ButtonStyle.primary)
-        self.confirm_button.callback = self.confirm
+        self.confirm_button.callback = self.confirm  # type: ignore
 
         self.add_item(self.select)
         self.add_item(self.confirm_button)
 
     async def confirm(self, interaction: Interaction) -> None:
-        """Confirm the direct message sending.
+        """Confirm the bulk role assignment/removal.
 
         Args:
             interaction (Interaction): The Discord interaction triggered by the confirm button.
         """
-        assert interaction.guild is not None
-        members: list[Member] = [m for m in self.select.values if isinstance(m, Member)]
-        if not members:
-            await interaction.response.send_message("Aucun membre sélectionné.", ephemeral=True)
+        roles: list[Role] = [r for r in self.select.values if isinstance(r, Role)]
+        if not roles:
+            await interaction.response.send_message("Aucun rôle sélectionné.", ephemeral=True)
             return
 
-        delivered: list[Member] = []
-        failed: list[Member] = []
-
-        for member in members:
-            if await send_dm_to_member(logger, interaction.guild, member, self.message, "Bulk"):
-                delivered.append(member)
-            else:
-                failed.append(member)
-
-        logger.info(f"Bulk DM by {self.sender} delivered to {delivered} with failures {failed}")
-
-        lines: list[str] = ["Envoi des messages terminé."]
-        if delivered:
-            lines.append("Succès : " + ", ".join(format_member_mention(member) for member in delivered))
-        if failed:
-            lines.append("Échecs : " + ", ".join(format_member_mention(member) for member in failed))
-        lines.append("Contenu envoyé :")
-        lines.append(f">>> {self.message}")
+        logger.info(f"Roles selected: {roles}")
 
         for child in self.children:
             if isinstance(child, ui.Button | ui.UserSelect):
                 child.disabled = True
         await interaction.response.edit_message(view=self)
 
-        await interaction.edit_original_response(content="\n".join(lines), view=None)
+        assert interaction.guild is not None
+        members: set[Member] = set(interaction.guild.members)
+
+        lines: list[str] = ["Rôles sélectionnés :"]
+        for role in roles:
+            role_members = get_members_by_role(role=role)
+            lines.append(f"- {format_role_mention(role)} : {len(role_members)} membre{'s' if len(role_members) != 1 else ''}")
+            members &= role_members
+
+        lines.append(f"\nMembre(s) avec tous les rôles sélectionnés ({len(members)}) :")
+        if not members:
+            lines.append("_(Aucun membre)_")
+        for member in members:
+            lines.append(f"- {format_member_mention(member)}")
+
+        await interaction.followup.edit_message(self.followup_id, content="\n".join(lines))
+        await interaction.delete_original_response()
 
 
-# endregion UI Views
+# endregion UI View

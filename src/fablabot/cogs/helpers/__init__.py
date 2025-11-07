@@ -1,8 +1,17 @@
 """Helpers for formation management cog."""
 
-from fablabot.cogs.helpers.constants import Emojis, ErrorMessages, RoleNames
-from fablabot.cogs.helpers.formation_models import PARIS_TZ, Draft, Formation, PublishedMessage, ReactionEvent
+from fablabot.cogs.helpers.constants import (
+    DISCORD_EMOJI_RE,
+    EASTER_EGGS,
+    PARIS_TZ,
+    EasterEggTrigger,
+    Emojis,
+    ErrorMessages,
+    RoleNames,
+)
+from fablabot.cogs.helpers.formation_models import Draft, Formation, PublishedMessage, ReactionEvent
 from fablabot.cogs.helpers.formation_notifications import (
+    notify_participants_before_formation,
     notify_responsible_before_formation,
     notify_trainer_before_formation,
     send_promotion_dm,
@@ -19,11 +28,13 @@ from fablabot.cogs.helpers.formation_rendering import (
 )
 from fablabot.cogs.helpers.utils import (
     ADMIN_ROLES,
+    can_dm_user,
     check_has_role,
     escape_md,
     format_channel_mention,
     format_member_mention,
     format_role_mention,
+    get_members_by_role,
     get_or_fetch_member,
     is_in_allowed_channel,
     log_request,
@@ -38,14 +49,18 @@ from fablabot.cogs.helpers.utils import (
 
 __all__ = [
     "ADMIN_ROLES",
+    "DISCORD_EMOJI_RE",
+    "EASTER_EGGS",
     "PARIS_TZ",
     "Draft",
+    "EasterEggTrigger",
     "Emojis",
     "ErrorMessages",
     "Formation",
     "PublishedMessage",
     "ReactionEvent",
     "RoleNames",
+    "can_dm_user",
     "check_has_role",
     "escape_md",
     "format_channel_mention",
@@ -54,10 +69,12 @@ __all__ = [
     "format_member_mention",
     "format_respo_contacts",
     "format_role_mention",
+    "get_members_by_role",
     "get_or_fetch_member",
     "humanize_dt",
     "is_in_allowed_channel",
     "log_request",
+    "notify_participants_before_formation",
     "notify_responsible_before_formation",
     "notify_trainer_before_formation",
     "parse_date_time",

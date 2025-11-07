@@ -57,21 +57,23 @@ class Welcome(commands.Cog):
     )
 
     @welcome_group.command(name="help", description="Affiche l'aide pour les commandes de bienvenue.")
-    async def welcome_help(self, interaction: Interaction) -> None:
+    @app_commands.describe(show="Afficher l'aide publiquement ou non")
+    async def welcome_help(self, interaction: Interaction, show: bool = False) -> None:
         """Display help for welcome commands.
 
         Args:
             interaction (Interaction): The Discord interaction object.
+            show (bool): Whether to show the help publicly or not.
         """
         help_message = (
             "**Commandes de gestion des channels de bienvenue :**\n"
             "- `/welcome verify <enable>`: Activer/désactiver la création automatique de salons de bienvenue.\n"
             "- `/welcome approve <city>`: Valider le nouveau membre. Ajoute les rôles appropriés en fonction de la ville.\n"
-            "- `/welcome help`: Affiche cette aide pour les commandes de bienvenue.\n"
+            "- `/welcome help [show]`: Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
             "\n"
             "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
         )
-        await interaction.response.send_message(help_message, ephemeral=True)
+        await interaction.response.send_message(help_message, ephemeral=not show)
 
     @welcome_group.command(
         name="verify",
@@ -222,7 +224,8 @@ class Welcome(commands.Cog):
             await channel.send(
                 "Comment accéder au serveur discord :\n"
                 " - Utilisez `/nick` pour ajouter votre prénom à votre username\n"
-                " - Envoyez un message contenant votre adresse mail `~@edu.devinci.fr` et votre ville (Paris, Nantes, Montepellier) pour recevoir la validation\n"
+                " - Envoyez un message contenant votre adresse mail `~@edu.devinci.fr`"
+                " et votre ville (Paris, Nantes, Montepellier) pour recevoir la validation\n"
                 "   Assurez vous d 'avoir envoyé votre RI signé sur le formulaire !\n"
                 "\n"
                 "Vous êtes un ancien ? Envoyez simplement un message précisant que vous en êtes un 🙂"

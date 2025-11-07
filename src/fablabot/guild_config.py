@@ -7,9 +7,9 @@ import logging
 from pathlib import Path
 from typing import Any
 
-CONFIG_FILE = Path("data/guild_config.json")
 logger = logging.getLogger(__name__)
 
+CONFIG_FILE = Path("data/guild_config.json")
 _GUILD_KEY_COMMANDS = "commands_channel_id"
 _KEY_LOG = "log_channel_id"
 _GUILD_KEY_WELCOME = "welcome_verify_enabled"
