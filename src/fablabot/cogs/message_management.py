@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
 import logging
 import random
 from typing import Any
@@ -13,10 +11,8 @@ from discord import (
     ButtonStyle,
     CategoryChannel,
     DMChannel,
-    Embed,
     ForumChannel,
     GroupChannel,
-    Guild,
     HTTPException,
     Interaction,
     Member,
@@ -29,50 +25,18 @@ from discord import (
     ui,
 )
 from discord.ext import commands
-from discord.utils import get
 
 from fablabot.cogs.helpers import (
     EASTER_EGGS,
-    PARIS_TZ,
     ErrorMessages,
     RoleNames,
-    can_dm_user,
     format_member_mention,
-    get_members_by_role,
     is_in_allowed_channel,
     log_request,
     send_dm_to_member,
 )
 
 logger = logging.getLogger(__name__)
-
-ANONYMOUS_ICON_URL = "https://e7.pngegg.com/pngimages/84/165/png-clipart-united-states-avatar-organization-information-user-avatar-service-computer-wallpaper-thumbnail.png"
-
-
-@dataclass
-class SuggestionConfig:
-    """Configuration for a suggestion type.
-
-    Attributes:
-        embed_title (str): The title of the suggestion embed.
-        role_name (str | None): The role name to get responsible members.
-        channel_name (str | None): The channel name to send the suggestion to.
-        embed_color (int): The color of the embed. Defaults to 0x00AAFF.
-        success_message (str): The success message to send to the user.
-        error_message (str): The error message when no recipients are configured.
-    """
-
-    embed_title: str
-    """The title of the suggestion embed."""
-    role_name: str | None
-    """The role name to get responsible members."""
-    channel_name: str | None
-    """The channel name to send the suggestion to."""
-    success_message: str
-    """The success message to send to the user."""
-    error_message: str
-    """The error message when no recipients are configured."""
-    embed_color: int = 0x00AAFF
 
 
 class MessageManagement(commands.Cog):
@@ -230,111 +194,6 @@ class MessageManagement(commands.Cog):
                 logger.info(f"Easter egg triggered by {message.author} in {message.channel}: {egg.keywords}")
 
     # endregion Listeners
-
-    # region ====== Helpers ======
-
-    async def _handle_suggestion(
-        self,
-        interaction: Interaction,
-        suggestion_text: str,
-        anonymous: bool,
-        config: SuggestionConfig,
-        command_name: str,
-    ) -> None:
-        """Handle a suggestion command.
-
-        Args:
-            interaction: The Discord interaction context.
-            suggestion_text: The raw suggestion text.
-            anonymous: Whether the suggestion is anonymous or not.
-            config: The suggestion configuration.
-            command_name: The command name for logging (e.g., "suggest.formation").
-        """
-        logger.info(
-            f"[{command_name}]: user={interaction.user if not anonymous else 'Anonymous'!r} suggestion_text={suggestion_text!r}"
-        )
-
-        cleaned_text = suggestion_text.strip()
-        if not cleaned_text:
-            await interaction.followup.send("Le texte de la suggestion ne peut pas être vide.", ephemeral=True)
-            return
-
-        assert interaction.guild is not None
-        author = interaction.user
-        assert isinstance(author, Member)
-
-        embed = Embed(
-            title=config.embed_title,
-            description=suggestion_text,
-            color=config.embed_color,
-            timestamp=datetime.now(PARIS_TZ),
-        )
-        if not anonymous:
-            embed.set_author(name=author.display_name, icon_url=author.display_avatar.url)
-            embed.add_field(name="Utilisateur·ice", value=author.mention, inline=False)
-        else:
-            embed.set_author(
-                name="Anonymous",
-                icon_url=ANONYMOUS_ICON_URL,
-            )
-
-        success = await self._send_suggestion(interaction.guild, embed, config, author.id if not anonymous else None)
-
-        if not success:
-            await interaction.response.send_message(config.error_message, ephemeral=True)
-            return
-
-        logger.info(
-            f"Guild {interaction.guild.id} user "
-            f"{interaction.user.id if not anonymous else 'Anonymous'} made a suggestion via {command_name}."
-        )
-        await interaction.response.send_message(config.success_message, ephemeral=True)
-
-    async def _send_suggestion(
-        self,
-        guild: Guild,
-        embed: Embed,
-        config: SuggestionConfig,
-        user_id: int | None,
-    ) -> bool:
-        """Send a suggestion to responsible members and channel.
-
-        Args:
-            guild (Guild): The guild where the suggestion is made.
-            embed (Embed): The suggestion embed to send.
-            config (SuggestionConfig): The suggestion configuration.
-            user_id (int | None): The ID of the user making the suggestion.
-
-        Returns:
-            True if at least one recipient received the suggestion, False otherwise.
-        """
-        responsibles: set[Member] = get_members_by_role(logger, guild, role=config.role_name) if config.role_name else set()
-        channel = get(guild.text_channels, name=config.channel_name) if config.channel_name else None
-
-        if not responsibles and not channel:
-            logger.error(
-                f"Guild {guild.id} has no {config.role_name} responsibles and no {config.channel_name} channel configured."
-            )
-            return False
-
-        for responsible in responsibles:
-            if await can_dm_user(responsible):
-                try:
-                    await responsible.send(embed=embed)
-                except Exception:
-                    logger.exception(
-                        f"Failed to send suggestion from user {user_id or 'Anonymous'} to responsible {responsible.id}."
-                    )
-
-        if channel:
-            try:
-                await channel.send(embed=embed)
-            except Exception:
-                logger.exception(f"Failed to send suggestion from user {user_id or 'Anonymous'} to channel {channel.id}.")
-
-        return True
-
-    # endregion Helpers
 
 
 @deprecated("Load the cog using `bot.add_cog()` instead.")
