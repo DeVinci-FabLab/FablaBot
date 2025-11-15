@@ -14,7 +14,7 @@ from fablabot.cogs.helpers.constants import MAX_MSG_CHARS, Emojis, RoleNames
 from fablabot.cogs.helpers.utils import escape_md, get_members_by_role
 
 if TYPE_CHECKING:
-    from fablabot.cogs.helpers.formation_models import Formation
+    from fablabot.cogs.helpers.formation.models import Formation
 
 logger = logging.getLogger(__name__)
 

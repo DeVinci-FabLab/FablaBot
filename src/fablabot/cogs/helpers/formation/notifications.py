@@ -10,11 +10,11 @@ from typing import TYPE_CHECKING, Literal
 from discord import Guild
 
 from fablabot.cogs.helpers.constants import RoleNames
-from fablabot.cogs.helpers.formation_rendering import format_formation_export, humanize_dt
+from fablabot.cogs.helpers.formation.rendering import format_formation_export, humanize_dt
 from fablabot.cogs.helpers.utils import get_members_by_role, get_or_fetch_member, send_dm_to_member
 
 if TYPE_CHECKING:
-    from fablabot.cogs.helpers.formation_models import Formation
+    from fablabot.cogs.helpers.formation.models import Formation
 
 logger = logging.getLogger(__name__)
 
