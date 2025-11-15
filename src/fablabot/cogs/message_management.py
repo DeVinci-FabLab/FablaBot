@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
+from pathlib import Path
 import random
-from typing import Any
+from typing import Any, Literal
 from warnings import deprecated
 
 from discord import (
@@ -13,10 +15,12 @@ from discord import (
     DMChannel,
     ForumChannel,
     GroupChannel,
+    Guild,
     HTTPException,
     Interaction,
     Member,
     Message,
+    RawReactionActionEvent,
     StageChannel,
     TextChannel,
     Thread,
@@ -25,18 +29,30 @@ from discord import (
     ui,
 )
 from discord.ext import commands
+from discord.utils import get
+from emoji import EMOJI_DATA
 
 from fablabot.cogs.helpers import (
-    EASTER_EGGS,
+    ADMIN_ROLES,
+    DISCORD_EMOJI_RE,
     ErrorMessages,
     RoleNames,
+    check_has_role,
     format_member_mention,
+    get_members_by_role,
     is_in_allowed_channel,
     log_request,
     send_dm_to_member,
 )
+from fablabot.cogs.helpers.message import (
+    EASTER_EGGS,
+    MessageDraft,
+    ReactionAction,
+)
 
 logger = logging.getLogger(__name__)
+
+MESSAGES_STATE_FILE = Path("data/messages_state.json")
 
 
 class MessageManagement(commands.Cog):

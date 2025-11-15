@@ -29,13 +29,18 @@ from emoji import EMOJI_DATA
 from fablabot.cogs.helpers import (
     DISCORD_EMOJI_RE,
     PARIS_TZ,
+    ErrorMessages,
+    RoleNames,
+    check_has_role,
+    is_in_allowed_channel,
+    log_request,
+)
+from fablabot.cogs.helpers.formation import (
     Draft,
     Emojis,
-    ErrorMessages,
     Formation,
     PublishedMessage,
     ReactionEvent,
-    RoleNames,
     format_current_registrations,
     format_respo_contacts,
     notify_participants_before_formation,
@@ -47,15 +52,14 @@ from fablabot.cogs.helpers import (
     send_registration_dm,
     send_waitlist_dm,
 )
-from fablabot.cogs.helpers.utils import check_has_role, is_in_allowed_channel, log_request
 
 logger = logging.getLogger(__name__)
 
 
 ALLOWED_ROLES = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN_TEMP, RoleNames.ADMIN}
-DATA_FILE = "data/formations_state.json"
+FM_STATE_FILE = "data/formations_state.json"
 TRAINER_NOTIFICATION_ADVANCE = timedelta(hours=1)
-REACTION_LOG_RETENTION = timedelta(days=20)
+REACTION_LOG_RETENTION = timedelta(days=30)
 
 
 class FormationManagement(commands.Cog):
@@ -1070,16 +1074,16 @@ class FormationManagement(commands.Cog):
             dict[str, dict[str, Any]]: The loaded state, or an empty dictionary if the file does not exist or an error occurs.
         """
         try:
-            with open(DATA_FILE, encoding="utf-8") as f:
+            with open(FM_STATE_FILE, encoding="utf-8") as f:
                 state = json.load(f)
         except FileNotFoundError:
-            logger.debug(f"Formations state file {DATA_FILE} not found; starting with empty state.")
+            logger.debug(f"Formations state file {FM_STATE_FILE} not found; starting with empty state.")
             return {}
         except json.JSONDecodeError:
-            logger.exception(f"Failed to decode formations state from {DATA_FILE}.")
+            logger.exception(f"Failed to decode formations state from {FM_STATE_FILE}.")
             return {}
         except Exception:
-            logger.exception(f"Unexpected error while loading formations state from {DATA_FILE}.")
+            logger.exception(f"Unexpected error while loading formations state from {FM_STATE_FILE}.")
             return {}
         logger.debug("Loaded formations state.")
         return state
@@ -1092,17 +1096,17 @@ class FormationManagement(commands.Cog):
             state (dict[str, dict[str, Any]]): The state to save.
         """
         try:
-            Path(Path(DATA_FILE).parent).mkdir(parents=True, exist_ok=True)
-            with open(DATA_FILE, "w", encoding="utf-8") as f:
+            Path(Path(FM_STATE_FILE).parent).mkdir(parents=True, exist_ok=True)
+            with open(FM_STATE_FILE, "w", encoding="utf-8") as f:
                 json.dump(state, f, ensure_ascii=False, indent=2)
         except OSError:
-            logger.exception(f"Failed to persist formations state to {DATA_FILE}")
+            logger.exception(f"Failed to persist formations state to {FM_STATE_FILE}")
         except TypeError:
             logger.exception("Invalid data encountered while serializing formations state.")
         except Exception:
-            logger.exception(f"Unexpected error while saving formations state to {DATA_FILE}.")
+            logger.exception(f"Unexpected error while saving formations state to {FM_STATE_FILE}.")
         else:
-            logger.debug(f"Saved formations state to {DATA_FILE}.")
+            logger.debug(f"Saved formations state to {FM_STATE_FILE}.")
 
     def _get_guild_state(self, guild_id: int) -> dict[str, Any]:
         """Get state for a specific guild.

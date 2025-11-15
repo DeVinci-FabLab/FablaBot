@@ -1,4 +1,4 @@
-"""Helpers for formation management cog."""
+"""Helpers for all cogs."""
 
 from fablabot.cogs.helpers import formation, message
 from fablabot.cogs.helpers.constants import (
