@@ -386,6 +386,9 @@ class ChannelManagement(commands.Cog):
             return
         if not message.channel.name.endswith("_bot"):
             return
+        if not message.author.bot:
+            logger.debug(f"Message {message.id} deleted wasn't sent by a bot, ignoring")
+            return
 
         assert message.guild is not None
         codir_mention = await self._get_codir_mention(message.guild, message.channel)
