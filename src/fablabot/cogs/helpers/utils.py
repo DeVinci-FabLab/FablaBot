@@ -22,7 +22,7 @@ from discord.utils import get
 from fablabot.cogs.helpers.constants import ErrorMessages, RoleNames
 from fablabot.guild_config import get_commands_channel_id, set_commands_channel_id
 
-COMMANDS_CHANNEL_NAME = "commandes_bot"
+_COMMANDS_CHANNEL_NAME = "commandes_bot"
 ADMIN_ROLES = {
     RoleNames.ADMIN_TEMP,
     RoleNames.ADMIN,
@@ -88,7 +88,7 @@ async def is_in_allowed_channel(logger: Logger, interaction: Interaction) -> boo
                 set_commands_channel_id(interaction.guild.id, None)
 
     if commands_channel is None:
-        maybe_channel = get(interaction.guild.channels, name=COMMANDS_CHANNEL_NAME)
+        maybe_channel = get(interaction.guild.channels, name=_COMMANDS_CHANNEL_NAME)
         if isinstance(maybe_channel, TextChannel):
             commands_channel = maybe_channel
             set_commands_channel_id(interaction.guild.id, maybe_channel.id)
@@ -103,7 +103,7 @@ async def is_in_allowed_channel(logger: Logger, interaction: Interaction) -> boo
 
     if interaction.channel != commands_channel:
         logger.warning(
-            f"Attempt to use command in a different channel than {COMMANDS_CHANNEL_NAME}: {interaction.channel.name}"
+            f"Attempt to use command in a different channel than {_COMMANDS_CHANNEL_NAME}: {interaction.channel.name}"
         )
         await interaction.response.send_message(
             f"Vous ne pouvez pas utiliser de commandes en dehors du salon {commands_channel.mention}.",
@@ -147,7 +147,7 @@ async def check_has_role(logger: Logger, interaction: Interaction, roles: set[st
     return True
 
 
-async def can_dm_user(user: Member) -> bool:
+async def _can_dm_user(user: Member) -> bool:
     """Check if the bot can send a DM to the user.
 
     Args:
@@ -189,7 +189,7 @@ async def send_dm_to_member(
     if member.bot:
         return False
 
-    if not await can_dm_user(member):
+    if not await _can_dm_user(member):
         logger.error(f"Cannot DM user {member.id} ({member.name!r}) in guild {guild.id}; skipping {dm_type} DM.")
         return False
 

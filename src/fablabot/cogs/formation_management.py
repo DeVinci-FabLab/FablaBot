@@ -36,8 +36,8 @@ from fablabot.cogs.helpers import (
     log_request,
 )
 from fablabot.cogs.helpers.formation import (
-    Draft,
     Emojis,
+    FmMessageDraft,
     Formation,
     PublishedMessage,
     ReactionEvent,
@@ -195,7 +195,7 @@ class FormationManagement(commands.Cog):
         intro_body = intro.replace("\\n", "\n").strip()
         end_body = end.replace("\\n", "\n").strip()
 
-        draft = Draft(
+        draft = FmMessageDraft(
             header=header,
             role_id=role.id,
             intro=intro_body,
@@ -281,7 +281,7 @@ class FormationManagement(commands.Cog):
             )
             return
 
-        draft = Draft(
+        draft = FmMessageDraft(
             header=draft.header,
             role_id=updated_role_id,
             intro=updated_intro,
@@ -415,7 +415,7 @@ class FormationManagement(commands.Cog):
         fms.append(fm)
         fms.sort(key=lambda x: x.start_dt)
 
-        draft = Draft(
+        draft = FmMessageDraft(
             header=draft.header,
             role_id=draft.role_id,
             intro=draft.intro,
@@ -591,7 +591,7 @@ class FormationManagement(commands.Cog):
         fms[index - 1] = updated
         fms.sort(key=lambda x: x.start_dt)
 
-        draft = Draft(
+        draft = FmMessageDraft(
             header=draft.header,
             role_id=draft.role_id,
             intro=draft.intro,
@@ -649,7 +649,7 @@ class FormationManagement(commands.Cog):
 
         removed = fms.pop(index - 1)
 
-        draft = Draft(
+        draft = FmMessageDraft(
             header=draft.header,
             role_id=draft.role_id,
             intro=draft.intro,
@@ -691,7 +691,7 @@ class FormationManagement(commands.Cog):
         assert interaction.guild is not None
         draft = self._get_guild_draft(interaction.guild.id)
 
-        draft = Draft(
+        draft = FmMessageDraft(
             header=draft.header,
             role_id=draft.role_id,
             intro=draft.intro,
@@ -806,7 +806,7 @@ class FormationManagement(commands.Cog):
                     f"for formation {fm.name!r} in published message."
                 )
 
-        published_message = Draft(
+        published_message = FmMessageDraft(
             header=draft.header,
             role_id=draft.role_id,
             intro=draft.intro,
@@ -1039,7 +1039,7 @@ class FormationManagement(commands.Cog):
 
                     fm.notified_at_start = True
 
-            updated_draft = Draft(
+            updated_draft = FmMessageDraft(
                 header=pub.message.header,
                 role_id=pub.message.role_id,
                 intro=pub.message.intro,
@@ -1133,7 +1133,7 @@ class FormationManagement(commands.Cog):
         self.state[str(guild_id)] = payload
         self._save_state(self.state)
 
-    def _get_guild_draft(self, guild_id: int) -> Draft:
+    def _get_guild_draft(self, guild_id: int) -> FmMessageDraft:
         """Get the draft state for a specific guild.
 
         Args:
@@ -1148,9 +1148,9 @@ class FormationManagement(commands.Cog):
             self._set_guild_state(guild_id, guild_state)
             guild_state["draft"] = {"header": "", "role_id": 0, "intro": "", "fms": [], "end": ""}
         draft_dict = guild_state["draft"]
-        return Draft.from_dict(draft_dict)
+        return FmMessageDraft.from_dict(draft_dict)
 
-    def _set_guild_draft(self, guild_id: int, draft: Draft) -> None:
+    def _set_guild_draft(self, guild_id: int, draft: FmMessageDraft) -> None:
         """Set the draft for a specific guild.
 
         Args:
@@ -1427,7 +1427,7 @@ class FormationManagement(commands.Cog):
             fm.registered_users = registered
             fm.waitlisted_users = waitlisted
 
-        updated_message_payload = Draft(
+        updated_message_payload = FmMessageDraft(
             header=header,
             role_id=role_id,
             intro=intro,

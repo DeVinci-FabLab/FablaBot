@@ -72,7 +72,7 @@ class Formation:
 
 
 @dataclass
-class Draft:
+class FmMessageDraft:
     """Draft message containing formations.
 
     Attributes:
@@ -109,7 +109,7 @@ class Draft:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> Draft:
+    def from_dict(cls, data: dict[str, Any]) -> FmMessageDraft:
         """Create a Draft instance from a dictionary.
 
         Args:
@@ -141,7 +141,7 @@ class PublishedMessage:
     """The Discord message ID."""
     channel_id: int
     """The Discord channel ID."""
-    message: Draft
+    message: FmMessageDraft
     """The message payload with formations."""
 
     def to_dict(self) -> dict[str, Any]:
@@ -169,7 +169,7 @@ class PublishedMessage:
         return cls(
             message_id=data.get("message_id", 0),
             channel_id=data.get("channel_id", 0),
-            message=Draft.from_dict(data.get("message", {})),
+            message=FmMessageDraft.from_dict(data.get("message", {})),
         )
 
 

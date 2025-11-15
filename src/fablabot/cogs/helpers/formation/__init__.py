@@ -1,6 +1,6 @@
 """Helpers for formation management cog."""
 
-from fablabot.cogs.helpers.formation.models import Draft, Formation, PublishedMessage, ReactionEvent
+from fablabot.cogs.helpers.formation.models import FmMessageDraft, Formation, PublishedMessage, ReactionEvent
 from fablabot.cogs.helpers.formation.notifications import (
     notify_participants_before_formation,
     notify_responsible_before_formation,
@@ -20,8 +20,8 @@ from fablabot.cogs.helpers.formation.rendering import (
 )
 
 __all__ = [
-    "Draft",
     "Emojis",
+    "FmMessageDraft",
     "Formation",
     "PublishedMessage",
     "ReactionEvent",

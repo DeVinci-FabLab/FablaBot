@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-FM_REQUEST_FORMS = "https://forms.office.com/e/MqVdQujzjf"
+_FM_REQUEST_FORMS = "https://forms.office.com/e/MqVdQujzjf"
 
 
 class Emojis:
@@ -166,7 +166,7 @@ def render_message(
         f"{Emojis.ARROW_RIGHT} Pour s'inscrire, réagis avec les émojis des formations correspondantes.",
         f"{Emojis.WARNING} Si tu ne peux plus venir, n'oublie pas de retirer ta réaction pour libérer la place.",
         "",
-        f"Tu veux apprendre autre chose ? [**Propose une formation ici**]({FM_REQUEST_FORMS})",
+        f"Tu veux apprendre autre chose ? [**Propose une formation ici**]({_FM_REQUEST_FORMS})",
     ]
     lines.append("\n".join(end_lines))
     lines.append("")
