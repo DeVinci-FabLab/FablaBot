@@ -11,6 +11,47 @@ ANONYMOUS_ICON_URL = "https://e7.pngegg.com/pngimages/84/165/png-clipart-united-
 
 
 @dataclass
+class EasterEggTrigger:
+    """Structure for defining an Easter egg trigger."""
+
+    keywords: list[str]
+    """List of keywords that trigger the Easter egg."""
+    response: str
+    """Response to send when the Easter egg is triggered."""
+    probability: float
+    """Probability of triggering the Easter egg when keywords are found."""
+
+
+EASTER_EGGS: list[EasterEggTrigger] = [
+    EasterEggTrigger(
+        ["c'est pas sorcier"],
+        "https://tenor.com/view/c-est-pas-sorcier-c%27est-pas-sorcier-jamy-fred-sabine-gif-499752155684427888",
+        1.0,
+    ),
+    EasterEggTrigger(
+        ["autiste", "autisme"],
+        "https://tenor.com/view/autism-autistic-spongebob-i%27m-autistic-spongebob-meme-gif-990745265488627503",
+        1 / 3,
+    ),
+    EasterEggTrigger(
+        ["contre nature", "c'est bizarre"],
+        "https://tenor.com/view/lpj-gif-7210529",
+        1.0,
+    ),
+    EasterEggTrigger(
+        ["t'es pas net", "baptiste"],
+        "https://tenor.com/view/baptiste-feu-fire-gif-13214452",
+        1.0,
+    ),
+    EasterEggTrigger(
+        ["feu ", "brûl", "brul"],
+        "https://tenor.com/view/elmo-fire-burn-flame-gif-5042503",
+        1 / 4,
+    ),
+]
+
+
+@dataclass
 class ReactionAction:
     """Configuration for a reaction-based action.
 

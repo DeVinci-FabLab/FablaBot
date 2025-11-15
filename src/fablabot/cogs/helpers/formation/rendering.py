@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import io
 import logging
 from typing import TYPE_CHECKING, Any
@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from discord import Guild
 from discord.utils import get
 
-from fablabot.cogs.helpers.constants import MAX_MSG_CHARS, Emojis, RoleNames
+from fablabot.cogs.helpers.constants import MAX_MSG_CHARS, RoleNames
 from fablabot.cogs.helpers.utils import escape_md, get_members_by_role
 
 if TYPE_CHECKING:
@@ -19,6 +19,73 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 FM_REQUEST_FORMS = "https://forms.office.com/e/MqVdQujzjf"
+
+
+class Emojis:
+    """Discord emojis used throughout the bot."""
+
+    PEOPLE = ":busts_in_silhouette:"
+    ARROW_RIGHT = ":arrow_right:"
+    WARNING = ":warning:"
+    LOUDSPEAKER = ":loudspeaker:"
+
+    @staticmethod
+    def get_clock_emoji(dt: datetime) -> str:
+        """Get the clock emoji corresponding to the given hour and minute.
+
+        Args:
+            dt (datetime): The datetime to get the clock emoji for.
+
+        Returns:
+            str: The corresponding clock emoji.
+        """
+        dt = Emojis.round_hour(dt)
+        clock_emojis = {
+            (0, 0): ":clock12:",
+            (0, 30): ":clock1230:",
+            (1, 0): ":clock1:",
+            (1, 30): ":clock130:",
+            (2, 0): ":clock2:",
+            (2, 30): ":clock230:",
+            (3, 0): ":clock3:",
+            (3, 30): ":clock330:",
+            (4, 0): ":clock4:",
+            (4, 30): ":clock430:",
+            (5, 0): ":clock5:",
+            (5, 30): ":clock530:",
+            (6, 0): ":clock6:",
+            (6, 30): ":clock630:",
+            (7, 0): ":clock7:",
+            (7, 30): ":clock730:",
+            (8, 0): ":clock8:",
+            (8, 30): ":clock830:",
+            (9, 0): ":clock9:",
+            (9, 30): ":clock930:",
+            (10, 0): ":clock10:",
+            (10, 30): ":clock1030:",
+            (11, 0): ":clock11:",
+            (11, 30): ":clock1130:",
+        }
+        return clock_emojis.get((dt.hour % 12, dt.minute), ":clock12:")
+
+    @staticmethod
+    def round_hour(dt: datetime) -> datetime:
+        """Round a datetime to the nearest hour emoji.
+
+        Args:
+            dt (datetime): The datetime to round.
+
+        Returns:
+            datetime: The rounded datetime.
+        """
+        if dt.minute >= 45:
+            dt += timedelta(hours=1)
+            dt = dt.replace(minute=0, second=0, microsecond=0)
+        elif dt.minute < 15:
+            dt = dt.replace(minute=0, second=0, microsecond=0)
+        else:
+            dt = dt.replace(minute=30, second=0, microsecond=0)
+        return dt
 
 
 def parse_date_time(date_str: str, hour_str: str, timezone: Any) -> datetime:

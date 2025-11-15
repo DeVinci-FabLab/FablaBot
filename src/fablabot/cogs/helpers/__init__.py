@@ -1,37 +1,11 @@
 """Helpers for formation management cog."""
 
+from fablabot.cogs.helpers import formation, message
 from fablabot.cogs.helpers.constants import (
     DISCORD_EMOJI_RE,
-    EASTER_EGGS,
     PARIS_TZ,
-    EasterEggTrigger,
-    Emojis,
     ErrorMessages,
     RoleNames,
-)
-from fablabot.cogs.helpers.formation.models import Draft, Formation, PublishedMessage, ReactionEvent
-from fablabot.cogs.helpers.formation.notifications import (
-    notify_participants_before_formation,
-    notify_responsible_before_formation,
-    notify_trainer_before_formation,
-    send_promotion_dm,
-    send_registration_dm,
-    send_waitlist_dm,
-)
-from fablabot.cogs.helpers.formation.rendering import (
-    format_current_registrations,
-    format_formation_export,
-    format_respo_contacts,
-    humanize_dt,
-    parse_date_time,
-    render_message,
-)
-from fablabot.cogs.helpers.message.models import (
-    ANONYMOUS_ICON_URL,
-    SUGGESTION_OPTIONS,
-    MessageDraft,
-    ReactionAction,
-    SuggestionConfig,
 )
 from fablabot.cogs.helpers.utils import (
     ADMIN_ROLES,
@@ -56,41 +30,22 @@ from fablabot.cogs.helpers.utils import (
 
 __all__ = [
     "ADMIN_ROLES",
-    "ANONYMOUS_ICON_URL",
     "DISCORD_EMOJI_RE",
-    "EASTER_EGGS",
     "PARIS_TZ",
-    "SUGGESTION_OPTIONS",
-    "Draft",
-    "EasterEggTrigger",
-    "Emojis",
     "ErrorMessages",
-    "Formation",
-    "MessageDraft",
-    "PublishedMessage",
-    "ReactionAction",
-    "ReactionEvent",
     "RoleNames",
-    "SuggestionConfig",
     "can_dm_user",
     "check_has_role",
     "escape_md",
     "format_channel_mention",
-    "format_current_registrations",
-    "format_formation_export",
     "format_member_mention",
-    "format_respo_contacts",
     "format_role_mention",
+    "formation",
     "get_members_by_role",
     "get_or_fetch_member",
-    "humanize_dt",
     "is_in_allowed_channel",
     "log_request",
-    "notify_participants_before_formation",
-    "notify_responsible_before_formation",
-    "notify_trainer_before_formation",
-    "parse_date_time",
-    "render_message",
+    "message",
     "safe_add_roles",
     "safe_create_text_channel",
     "safe_create_voice_channel",
@@ -98,7 +53,4 @@ __all__ = [
     "safe_edit_channel",
     "safe_remove_roles",
     "send_dm_to_member",
-    "send_promotion_dm",
-    "send_registration_dm",
-    "send_waitlist_dm",
 ]
