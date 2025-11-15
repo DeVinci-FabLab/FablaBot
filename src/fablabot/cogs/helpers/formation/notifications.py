@@ -157,7 +157,7 @@ async def notify_trainer_before_formation(
         f"Salut {trainer.display_name} !\n"
         f"{timing_line}\n\n"
         f"{formation_export}\n\n"
-        "Merci de transmettre au **CoDir** la liste des participants à excuser si besoin.\n\n"
+        f"{'Merci de transmettre au **CoDir** la liste des participants à excuser si besoin.\n\n' if formation.excusable and moment == 'start' else ''}"
         f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
     )
 
