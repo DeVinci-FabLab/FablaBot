@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from fablabot.cogs.helpers.formation.models import Formation
 
 logger = logging.getLogger(__name__)
+# TODO: trop d'appel APIs discord ici, envisager un cache
 
 
 async def send_registration_dm(
@@ -48,7 +49,7 @@ async def send_registration_dm(
         f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
     )
 
-    await send_dm_to_member(logger, guild, member, message, f"registration for formation {formation.name}")
+    await send_dm_to_member(logger, guild, member, message, dm_type=f"registration for formation {formation.name}")
 
 
 async def send_waitlist_dm(
@@ -81,7 +82,7 @@ async def send_waitlist_dm(
         f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
     )
 
-    await send_dm_to_member(logger, guild, member, message, f"waitlist for formation {formation_name}")
+    await send_dm_to_member(logger, guild, member, message, dm_type=f"waitlist for formation {formation_name}")
 
 
 async def send_promotion_dm(
@@ -114,7 +115,7 @@ async def send_promotion_dm(
         f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
     )
 
-    await send_dm_to_member(logger, guild, member, message, f"promotion for formation {formation.name}")
+    await send_dm_to_member(logger, guild, member, message, dm_type=f"promotion for formation {formation.name}")
 
 
 async def notify_trainer_before_formation(
@@ -161,7 +162,7 @@ async def notify_trainer_before_formation(
         f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
     )
 
-    await send_dm_to_member(logger, guild, trainer, message, subject)
+    await send_dm_to_member(logger, guild, trainer, message, dm_type=subject)
 
 
 async def notify_responsible_before_formation(
@@ -192,7 +193,7 @@ async def notify_responsible_before_formation(
     for responsible in responsibles:
         message = f"Salut {responsible.display_name} !\n{timing_line}\n\n{formation_export}"
 
-        await send_dm_to_member(logger, guild, responsible, message, subject)
+        await send_dm_to_member(logger, guild, responsible, message, dm_type=subject)
 
     if not responsibles:
         logger.error(f"No responsible found to notify for formation {formation.name!r} in guild {guild.id}.")
@@ -223,4 +224,4 @@ async def notify_participants_before_formation(
 
         message = f"Salut {participant.display_name} !\n{message_content}"
 
-        await send_dm_to_member(logger, guild, participant, message, f"reminder for formation {formation.name}")
+        await send_dm_to_member(logger, guild, participant, message, dm_type=f"reminder for formation {formation.name}")

@@ -7,6 +7,7 @@ from typing import Any, overload
 
 from discord import (
     CategoryChannel,
+    Embed,
     Forbidden,
     Guild,
     HTTPException,
@@ -169,7 +170,9 @@ async def send_dm_to_member(
     logger: Logger,
     guild: Guild,
     member: Member,
-    message_content: str,
+    message_content: str | None,
+    *,
+    embed: Embed | None = None,
     dm_type: str,
 ) -> bool:
     """Send a direct message to a guild member.
@@ -178,7 +181,8 @@ async def send_dm_to_member(
         logger (Logger): The logger of the cog.
         guild (Guild): The guild where the user is located.
         member (Member): The member to notify.
-        message_content (str): The message content to send.
+        message_content (str | None): The message content to send.
+        embed (Embed | None): The embed to send. Defaults to None.
         dm_type (str): The type of DM being sent (for logging purposes).
 
     Returns:
@@ -196,7 +200,10 @@ async def send_dm_to_member(
     logger.debug(f"Resolved member {member.id} ({member.display_name}) for {dm_type} DM in guild {guild.id}.")
 
     try:
-        await member.send(message_content)
+        if embed is not None:
+            await member.send(content=message_content, embed=embed)
+        else:
+            await member.send(content=message_content)
     except Exception:
         logger.exception(f"Failed to send {dm_type} DM to user {member} in guild {guild.id}.")
         return False

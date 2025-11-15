@@ -20,7 +20,7 @@ from discord import (
 from discord.ext import commands
 from discord.utils import get
 
-from fablabot.cogs.helpers import PARIS_TZ, can_dm_user, get_members_by_role
+from fablabot.cogs.helpers import PARIS_TZ, get_members_by_role, send_dm_to_member
 from fablabot.cogs.helpers.message import ANONYMOUS_ICON_URL, SUGGESTION_OPTIONS, SuggestionConfig
 
 logger = logging.getLogger(__name__)
@@ -149,14 +149,7 @@ class SuggestionManagement(commands.Cog):
             return False
 
         for responsible in responsibles:
-            if await can_dm_user(responsible):
-                try:
-                    await responsible.send(embed=embed)
-                except Exception:
-                    logger.exception(
-                        f"Failed to send suggestion from user {user_id or 'Anonymous'} to responsible {responsible.id}."
-                    )
-
+            await send_dm_to_member(logger, guild, responsible, None, embed=embed, dm_type="suggestion")
         if channel:
             try:
                 await channel.send(embed=embed)
