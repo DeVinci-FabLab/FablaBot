@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from logging import Logger
 import re
-from typing import Any, overload
+from typing import TYPE_CHECKING, Any, overload
 
 from discord import (
     CategoryChannel,
@@ -22,8 +21,11 @@ from discord import (
 from discord.utils import get
 from emoji import EMOJI_DATA
 
-from fablabot.cogs.helpers.constants import ErrorMessages
 from fablabot.guild_config import get_commands_channel_id, set_commands_channel_id
+from fablabot.helpers.constants import ErrorMessages
+
+if TYPE_CHECKING:
+    from logging import Logger
 
 _COMMANDS_CHANNEL_NAME = "commandes_bot"
 _DISCORD_EMOJI_RE = re.compile(r"^<a?:\w+:\d+>$")

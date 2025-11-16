@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any, Literal
 
-from fablabot.cogs.helpers.constants import PARIS_TZ
+from fablabot.helpers.constants import PARIS_TZ
 
 
 @dataclass

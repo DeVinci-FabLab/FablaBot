@@ -1,7 +1,6 @@
 """Helpers for formation management cog."""
 
-from fablabot.cogs.helpers.formation.models import FmMessageDraft, Formation, PublishedMessage, ReactionEvent
-from fablabot.cogs.helpers.formation.notifications import (
+from fablabot.helpers.formation.notifications import (
     notify_participants_before_formation,
     notify_responsible_before_formation,
     notify_trainer_before_formation,
@@ -9,7 +8,7 @@ from fablabot.cogs.helpers.formation.notifications import (
     send_registration_dm,
     send_waitlist_dm,
 )
-from fablabot.cogs.helpers.formation.rendering import (
+from fablabot.helpers.formation.rendering import (
     Emojis,
     format_current_registrations,
     format_formation_export,
@@ -21,10 +20,6 @@ from fablabot.cogs.helpers.formation.rendering import (
 
 __all__ = [
     "Emojis",
-    "FmMessageDraft",
-    "Formation",
-    "PublishedMessage",
-    "ReactionEvent",
     "format_current_registrations",
     "format_formation_export",
     "format_respo_contacts",

@@ -1,13 +1,14 @@
-"""Helpers for all cogs."""
+"""Helpers."""
 
-from fablabot.cogs.helpers import formation, message
-from fablabot.cogs.helpers.constants import (
+from fablabot.helpers import formation
+from fablabot.helpers.constants import (
     ADMIN_ROLES,
+    MAX_MSG_CHARS,
     PARIS_TZ,
     ErrorMessages,
     RoleNames,
 )
-from fablabot.cogs.helpers.utils import (
+from fablabot.helpers.utils import (
     check_has_role,
     escape_md,
     format_channel_mention,
@@ -29,6 +30,7 @@ from fablabot.cogs.helpers.utils import (
 
 __all__ = [
     "ADMIN_ROLES",
+    "MAX_MSG_CHARS",
     "PARIS_TZ",
     "ErrorMessages",
     "RoleNames",
@@ -43,7 +45,6 @@ __all__ = [
     "is_in_allowed_channel",
     "is_valid_emoji",
     "log_request",
-    "message",
     "safe_add_roles",
     "safe_create_text_channel",
     "safe_create_voice_channel",

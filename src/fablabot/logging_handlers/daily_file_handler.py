@@ -9,10 +9,10 @@ from typing import override
 
 from discord import File
 
-from fablabot.cogs.helpers import PARIS_TZ
+from fablabot.helpers.constants import PARIS_TZ
 
-LOG_PATH = "logs"
-MAX_LOG_AGE_DAYS = 15
+_LOG_PATH = "logs"
+_MAX_LOG_AGE_DAYS = 15
 
 
 class DailyFileHandler(logging.FileHandler):
@@ -26,10 +26,10 @@ class DailyFileHandler(logging.FileHandler):
     def __init__(
         self,
         *,
-        log_dir: str = LOG_PATH,
+        log_dir: str = _LOG_PATH,
         level: int = logging.DEBUG,
         formatter: logging.Formatter,
-        max_age_days: int = MAX_LOG_AGE_DAYS,
+        max_age_days: int = _MAX_LOG_AGE_DAYS,
     ) -> None:
         """Initialize the daily file handler.
 

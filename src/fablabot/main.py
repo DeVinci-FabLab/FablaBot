@@ -18,7 +18,7 @@ from fablabot.cogs import (
     MessageManagement,
     SuggestionManagement,
     UserManagement,
-    Welcome,
+    WelcomeManagement,
 )
 from fablabot.logging_handlers import DailyFileHandler, DiscordLogHandler
 

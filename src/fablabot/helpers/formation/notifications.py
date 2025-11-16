@@ -7,14 +7,13 @@ import logging
 import re
 from typing import TYPE_CHECKING, Literal
 
-from fablabot.cogs.helpers.constants import RoleNames
-from fablabot.cogs.helpers.formation.rendering import format_formation_export, humanize_dt
-from fablabot.cogs.helpers.utils import get_members_by_role, get_or_fetch_member, send_dm_to_member
+from fablabot.helpers import RoleNames, get_members_by_role, get_or_fetch_member, send_dm_to_member
+from fablabot.helpers.formation.rendering import format_formation_export, humanize_dt
 
 if TYPE_CHECKING:
     from discord import Guild
 
-    from fablabot.cogs.helpers.formation.models import Formation
+    from fablabot.models.formation import Formation
 
 logger = logging.getLogger(__name__)
 # TODO: trop d'appel APIs discord ici, envisager un cache

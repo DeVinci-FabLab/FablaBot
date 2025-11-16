@@ -10,7 +10,6 @@ from typing import Any, Literal
 from warnings import deprecated
 
 from discord import (
-    ButtonStyle,
     CategoryChannel,
     DMChannel,
     ForumChannel,
@@ -26,29 +25,20 @@ from discord import (
     Thread,
     VoiceChannel,
     app_commands,
-    ui,
 )
 from discord.ext import commands
-from discord.utils import get
-from emoji import EMOJI_DATA
 
-from fablabot.cogs.helpers import (
-    ADMIN_ROLES,
-    DISCORD_EMOJI_RE,
-    ErrorMessages,
-    RoleNames,
+from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames
+from fablabot.helpers.utils import (
     check_has_role,
-    format_member_mention,
     get_members_by_role,
     is_in_allowed_channel,
+    is_valid_emoji,
     log_request,
     send_dm_to_member,
 )
-from fablabot.cogs.helpers.message import (
-    EASTER_EGGS,
-    MessageDraft,
-    ReactionAction,
-)
+from fablabot.models.message import EASTER_EGGS, MessageDraft, ReactionAction
+from fablabot.ui import mui
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +166,7 @@ class MessageManagement(commands.Cog):
             f"\nPour plus d'informations, contactez <@{interaction.user.id}>."
         )
 
-        view = BulkDMView(interaction.user, followup_mes.id, message)
+        view = mui.BulkDMView(interaction.user, followup_mes.id, message)
         await interaction.followup.send(
             (
                 "Selectionnez les membres a qui envoyer le message puis cliquez sur **Confirmer**.\n\n"
@@ -220,87 +210,3 @@ async def setup(bot: commands.Bot) -> None:
         bot (commands.Bot): The bot instance.
     """
     await bot.add_cog(MessageManagement(bot))
-
-
-# region ====== UI View ======
-
-
-class BulkDMView(ui.View):
-    """View for bulk direct message sending."""
-
-    def __init__(
-        self,
-        sender: Member,
-        followup_id: int,
-        message: str,
-    ) -> None:
-        """Initialize the view for bulk direct messages.
-
-        Args:
-            sender (Member): The member initiating the message sending.
-            followup_id (int): The ID of the follow-up message to edit with results.
-            message (str): The message to send to the selected members.
-        """
-        super().__init__()
-        self.sender = sender
-        self.followup_id = followup_id
-        self.message = message
-
-        async def _on_select(interaction: Interaction) -> None:
-            if not interaction.response.is_done():
-                await interaction.response.defer()
-
-        self.select: ui.UserSelect[Any] = ui.UserSelect(
-            placeholder="Sélectionne les membres…",
-            min_values=1,
-            max_values=25,
-        )
-        self.select.callback = _on_select  # type: ignore
-
-        self.confirm_button: ui.Button[Any] = ui.Button(label="Confirmer", style=ButtonStyle.primary)
-        self.confirm_button.callback = self.confirm  # type: ignore
-
-        self.add_item(self.select)
-        self.add_item(self.confirm_button)
-
-    async def confirm(self, interaction: Interaction) -> None:
-        """Confirm the direct message sending.
-
-        Args:
-            interaction (Interaction): The Discord interaction triggered by the confirm button.
-        """
-        assert interaction.guild is not None
-        members: list[Member] = [m for m in self.select.values if isinstance(m, Member)]
-        if not members:
-            await interaction.response.send_message("Aucun membre sélectionné.", ephemeral=True)
-            return
-
-        for child in self.children:
-            if isinstance(child, ui.Button | ui.UserSelect):
-                child.disabled = True
-        await interaction.response.edit_message(view=self)
-
-        delivered: list[Member] = []
-        failed: list[Member] = []
-
-        for member in members:
-            if await send_dm_to_member(logger, interaction.guild, member, self.message, "Bulk"):
-                delivered.append(member)
-            else:
-                failed.append(member)
-
-        logger.info(f"Bulk DM by {self.sender} delivered to {delivered} with failures {failed}")
-
-        lines: list[str] = ["Envoi des messages terminé."]
-        if delivered:
-            lines.append("Succès : " + ", ".join(format_member_mention(member) for member in delivered))
-        if failed:
-            lines.append("Échecs : " + ", ".join(format_member_mention(member) for member in failed))
-        lines.append("Contenu envoyé :")
-        lines.append(f">>> {self.message}")
-
-        await interaction.followup.edit_message(self.followup_id, content="\n".join(lines))
-        await interaction.delete_original_response()
-
-
-# endregion UI View

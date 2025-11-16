@@ -10,10 +10,9 @@ from discord import HTTPException, Interaction, Member, PermissionOverwrite, Tex
 from discord.ext import commands
 from discord.utils import get
 
-from fablabot.cogs.helpers import (
-    ADMIN_ROLES,
-    ErrorMessages,
-    RoleNames,
+from fablabot.guild_config import is_welcome_verify_enabled, set_welcome_verify_enabled
+from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames
+from fablabot.helpers.utils import (
     check_has_role,
     escape_md,
     is_in_allowed_channel,
@@ -22,7 +21,6 @@ from fablabot.cogs.helpers import (
     safe_create_text_channel,
     safe_delete_channel,
 )
-from fablabot.guild_config import is_welcome_verify_enabled, set_welcome_verify_enabled
 
 logger = logging.getLogger(__name__)
 

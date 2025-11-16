@@ -1,11 +1,11 @@
-"""Message management commands for Discord Bot. Provides slash commands for sending and managing messages."""
+"""Data models for messages and related configurations."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from fablabot.cogs.helpers.constants import RoleNames
+from fablabot.helpers.constants import RoleNames
 
 ANONYMOUS_ICON_URL = "https://e7.pngegg.com/pngimages/84/165/png-clipart-united-states-avatar-organization-information-user-avatar-service-computer-wallpaper-thumbnail.png"
 
