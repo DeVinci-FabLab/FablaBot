@@ -95,10 +95,10 @@ class FmMessageDraft:
     """Ending text."""
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert the Draft instance to a dictionary.
+        """Convert the FmMessageDraft instance to a dictionary.
 
         Returns:
-            dict[str, Any]: The dictionary representation of the Draft.
+            dict[str, Any]: The dictionary representation of the FmMessageDraft.
         """
         return {
             "header": self.header,
@@ -110,13 +110,13 @@ class FmMessageDraft:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> FmMessageDraft:
-        """Create a Draft instance from a dictionary.
+        """Create a FmMessageDraft instance from a dictionary.
 
         Args:
             data (dict[str, Any]): Dictionary containing draft data.
 
         Returns:
-            Draft: The Draft instance.
+            FmMessageDraft: The FmMessageDraft instance.
         """
         return cls(
             header=data.get("header", ""),
@@ -134,7 +134,7 @@ class PublishedMessage:
     Attributes:
         message_id (int): The Discord message ID.
         channel_id (int): The Discord channel ID.
-        message (Draft): The message payload with formations.
+        message (FmMessageDraft): The message payload with formations.
     """
 
     message_id: int

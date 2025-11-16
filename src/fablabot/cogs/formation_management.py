@@ -806,7 +806,7 @@ class FormationManagement(commands.Cog):
                     f"for formation {fm.name!r} in published message."
                 )
 
-        published_message = FmMessageDraft(
+        pub_msg = FmMessageDraft(
             header=draft.header,
             role_id=draft.role_id,
             intro=draft.intro,
@@ -819,7 +819,7 @@ class FormationManagement(commands.Cog):
             PublishedMessage(
                 message_id=msg.id,
                 channel_id=channel.id,
-                message=published_message,
+                message=pub_msg,
             ),
         )
 
@@ -847,21 +847,21 @@ class FormationManagement(commands.Cog):
             return
 
         assert interaction.guild is not None
-        published = self._get_last_published_in_guild(interaction.guild.id)
-        if not published and not message_id:
+        pub = self._get_last_published_in_guild(interaction.guild.id)
+        if not pub and not message_id:
             logger.warning(f"Guild {interaction.guild.id} tried to export reactions without published message or ID.")
             await interaction.response.send_message(ErrorMessages.NO_PUBLISHED_MESSAGE, ephemeral=True)
             return
 
-        target_message_id = int(message_id) if message_id else published.message_id if published else None
+        target_message_id = int(message_id) if message_id else pub.message_id if pub else None
         if not target_message_id:
-            logger.error(f"Guild {interaction.guild.id} has inconsistent published message data: {published}")
+            logger.error(f"Guild {interaction.guild.id} has inconsistent published message data: {pub}")
             await interaction.response.send_message(ErrorMessages.INCONSISTENT_PUBLISHED_DATA, ephemeral=True)
             return
 
         fm_by_emoji: dict[str, dict[str, Any]] = {}
-        if published:
-            for fm in published.message.fms:
+        if pub:
+            for fm in pub.message.fms:
                 fm_by_emoji[fm.emoji] = {"name": fm.name, "seats": fm.seats}
 
         history = self._get_reaction_history(interaction.guild.id, target_message_id)
@@ -891,7 +891,7 @@ class FormationManagement(commands.Cog):
 
         await interaction.response.defer(thinking=True)
 
-        fms = published.message.fms if published else []
+        fms = pub.message.fms if pub else []
 
         reg_text, reg_file = format_current_registrations(fms)
         if reg_file:
@@ -1039,7 +1039,7 @@ class FormationManagement(commands.Cog):
 
                     fm.notified_at_start = True
 
-            updated_draft = FmMessageDraft(
+            updated_pub_msg = FmMessageDraft(
                 header=pub.message.header,
                 role_id=pub.message.role_id,
                 intro=pub.message.intro,
@@ -1051,7 +1051,7 @@ class FormationManagement(commands.Cog):
                 PublishedMessage(
                     message_id=pub.message_id,
                     channel_id=pub.channel_id,
-                    message=updated_draft,
+                    message=updated_pub_msg,
                 ),
             )
 
@@ -1171,11 +1171,11 @@ class FormationManagement(commands.Cog):
             PublishedMessage | None: The last published state of the guild, or None if not found.
         """
         guild_state = self._get_guild_state(guild_id)
-        published_dict = guild_state.get("published")
-        if not published_dict:
+        pub_dict = guild_state.get("published")
+        if not pub_dict:
             logger.warning(f"No published formations data stored for guild {guild_id}.")
             return None
-        return PublishedMessage.from_dict(published_dict)
+        return PublishedMessage.from_dict(pub_dict)
 
     def _set_last_published_in_guild(self, guild_id: int, published: PublishedMessage) -> None:
         """Set the last published state for a specific guild.
@@ -1345,12 +1345,12 @@ class FormationManagement(commands.Cog):
             return
         logger.debug(f"Fetched published message {message_id} in channel {channel_id} for guild {guild_id}.")
 
-        message_payload = pub.message
-        header = message_payload.header
-        role_id = message_payload.role_id
-        intro = message_payload.intro
-        end = message_payload.end
-        fms = list(message_payload.fms)
+        pub_msg = pub.message
+        header = pub_msg.header
+        role_id = pub_msg.role_id
+        intro = pub_msg.intro
+        end = pub_msg.end
+        fms = list(pub_msg.fms)
         tracked_emojis = {fm.emoji for fm in fms if fm.emoji}
 
         if not header or not role_id or not intro or not end or not fms:

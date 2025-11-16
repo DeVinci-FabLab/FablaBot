@@ -374,33 +374,31 @@ class ChannelManagement(commands.Cog):
     # region ====== Event Listeners ======
 
     @commands.Cog.listener()
-    async def on_message_delete(self, message: Message) -> None:
+    async def on_message_delete(self, msg: Message) -> None:
         """Handle message deletion events.
 
         Args:
-            message (Message): The deleted message.
+            msg (Message): The deleted message.
         """
-        logger.debug(f"Message {message} deleted")
-        if not isinstance(message.channel, TextChannel):
-            logger.debug(f"Message {message.id} deleted in non-text channel {message.channel}")
+        logger.debug(f"Message {msg} deleted")
+        if not isinstance(msg.channel, TextChannel):
+            logger.debug(f"Message {msg.id} deleted in non-text channel {msg.channel}")
             return
-        if not message.channel.name.endswith("_bot"):
+        if not msg.channel.name.endswith("_bot"):
             return
-        if not message.author.bot:
-            logger.debug(f"Message {message.id} deleted wasn't sent by a bot, ignoring")
+        if not msg.author.bot:
+            logger.debug(f"Message {msg.id} deleted wasn't sent by a bot, ignoring")
             return
 
-        assert message.guild is not None
-        codir_mention = await self._get_codir_mention(message.guild, message.channel)
+        assert msg.guild is not None
+        codir_mention = await self._get_codir_mention(msg.guild, msg.channel)
         try:
-            async for entry in message.guild.audit_logs(limit=1, action=AuditLogAction.message_delete):
+            async for entry in msg.guild.audit_logs(limit=1, action=AuditLogAction.message_delete):
                 deleter = entry.user
                 assert isinstance(deleter, Member)
-                logger.warning(f"Message deleted in channel {message.channel.name!r} by {deleter.name!r} : {message.content}")
+                logger.warning(f"Message deleted in channel {msg.channel.name!r} by {deleter.name!r} : {msg.content}")
                 try:
-                    await message.channel.send(
-                        f"{codir_mention}Un message a été supprimé par {deleter.mention} :\n> {message.content}"
-                    )
+                    await msg.channel.send(f"{codir_mention}Un message a été supprimé par {deleter.mention} :\n> {msg.content}")
                 except HTTPException:
                     logger.exception("HTTP error while notifying message deletion")
         except HTTPException:
@@ -462,31 +460,27 @@ class ChannelManagement(commands.Cog):
                 logger.info(f"Cancelled remove task for channel {after.channel.name}")
 
         for category in member.guild.categories:
-            for voice_channel in category.voice_channels:
-                if voice_channel.name.endswith(DYNAMIC_SUFFIX):
-                    await self._manage_voice_channels(category, voice_channel)
-                elif (
-                    voice_channel.name.endswith(EPHEMERAL_SUFFIX)
-                    and not voice_channel.members
-                    and voice_channel.id not in self.remove_tasks
-                ):
-                    self.remove_tasks[voice_channel.id] = asyncio.create_task(self._delayed_delete(voice_channel, 60))
+            for vc in category.voice_channels:
+                if vc.name.endswith(DYNAMIC_SUFFIX):
+                    await self._manage_voice_channels(category, vc)
+                elif vc.name.endswith(EPHEMERAL_SUFFIX) and not vc.members and vc.id not in self.remove_tasks:
+                    self.remove_tasks[vc.id] = asyncio.create_task(self._delayed_delete(vc, 60))
 
     # endregion Event Listeners
 
     # region ====== Helpers ======
     # -- Voice Channel Helpers --
 
-    async def _manage_voice_channels(self, category: CategoryChannel, base_channel: VoiceChannel) -> None:
+    async def _manage_voice_channels(self, category: CategoryChannel, base_vc: VoiceChannel) -> None:
         """Manage voice channels in a category.
 
         Args:
             category (CategoryChannel): The category to manage channels in.
-            base_channel (VoiceChannel): The base channel to manage.
+            base_vc (VoiceChannel): The base voice channel to manage.
         """
-        logger.debug(f"_manage_voice_channels: category={category.name} base={base_channel.name}")
-        channels = [vc for vc in category.voice_channels if vc.name.startswith(base_channel.name)]
-        empty = [vc for vc in channels if not vc.members]
+        logger.debug(f"_manage_voice_channels: category={category.name} base={base_vc.name}")
+        vcs = [vc for vc in category.voice_channels if vc.name.startswith(base_vc.name)]
+        empty = [vc for vc in vcs if not vc.members]
 
         if len(empty) > 1:
             empty.sort(key=lambda c: c.name)
@@ -495,40 +489,40 @@ class ChannelManagement(commands.Cog):
                     self.remove_tasks[vc.id] = asyncio.create_task(self._delayed_delete(vc, 10))
 
         if not empty:
-            channel_names = {c.name for c in channels}
-            for idx in range(1, len(channels) + 2):
-                new_name = f"{base_channel.name}{INDEX_SEPARATOR}{idx}"
-                if new_name not in channel_names:
-                    new_channel, error = await safe_create_voice_channel(
+            vc_names = {vc.name for vc in vcs}
+            for idx in range(1, len(vcs) + 2):
+                new_name = f"{base_vc.name}{INDEX_SEPARATOR}{idx}"
+                if new_name not in vc_names:
+                    new_vc, error = await safe_create_voice_channel(
                         logger,
                         category,
                         new_name,
-                        bitrate=base_channel.bitrate,
-                        user_limit=base_channel.user_limit,
-                        rtc_region=base_channel.rtc_region,
-                        video_quality_mode=base_channel.video_quality_mode,
-                        overwrites=base_channel.overwrites,
+                        bitrate=base_vc.bitrate,
+                        user_limit=base_vc.user_limit,
+                        rtc_region=base_vc.rtc_region,
+                        video_quality_mode=base_vc.video_quality_mode,
+                        overwrites=base_vc.overwrites,
                         reason="Creating additional dynamic voice channel",
                     )
-                    if not new_channel or error:
+                    if not new_vc or error:
                         logger.exception(error)
                     else:
-                        logger.info(f"Created additional dynamic voice channel {new_channel} in category {category.name!r}")
+                        logger.info(f"Created additional dynamic voice channel {new_vc} in category {category.name!r}")
                     break
 
-    async def _delayed_delete(self, channel: VoiceChannel, timeout: int) -> None:
-        """Wait a specified amount of time then delete the channel if still empty.
+    async def _delayed_delete(self, vc: VoiceChannel, timeout: int) -> None:
+        """Wait a specified amount of time then delete the voice channel if still empty.
 
         Args:
-            channel (VoiceChannel): The channel to delete.
+            vc (VoiceChannel): The voice channel to delete.
             timeout (int): The time to wait before deleting the channel in seconds.
         """
-        logger.debug(f"_delayed_delete: channel={channel} timeout={timeout}")
+        logger.debug(f"_delayed_delete: channel={vc} timeout={timeout}")
         await asyncio.sleep(timeout)
-        if not channel.members:
-            success, error = await safe_delete_channel(logger, channel, reason="Auto-deleting empty temporary voice channel")
+        if not vc.members:
+            success, error = await safe_delete_channel(logger, vc, reason="Auto-deleting empty temporary voice channel")
             if not success:
-                logger.error(f"Failed to delete empty voice channel {channel.name!r}: {error}")
+                logger.error(f"Failed to delete empty voice channel {vc.name!r}: {error}")
 
     @staticmethod
     async def _get_codir_mention(guild: Guild, channel: TextChannel) -> str:
