@@ -24,15 +24,14 @@ from discord import (
     app_commands,
 )
 from discord.ext import commands, tasks
-from emoji import EMOJI_DATA
 
 from fablabot.cogs.helpers import (
-    DISCORD_EMOJI_RE,
     PARIS_TZ,
     ErrorMessages,
     RoleNames,
     check_has_role,
     is_in_allowed_channel,
+    is_valid_emoji,
     log_request,
 )
 from fablabot.cogs.helpers.formation import (
@@ -377,11 +376,7 @@ class FormationManagement(commands.Cog):
 
         emoji_clean = emoji.strip()
 
-        if not emoji_clean or (
-            emoji_clean not in EMOJI_DATA
-            and not 0x1F1E6 <= ord(emoji_clean) <= 0x1F1FF
-            and not DISCORD_EMOJI_RE.match(emoji_clean)
-        ):
+        if not is_valid_emoji(emoji_clean):
             logger.warning(f"Guild {interaction.guild.id} tried to add formation with invalid emoji: {emoji_clean!r}.")
             await interaction.response.send_message(ErrorMessages.INVALID_EMOJI, ephemeral=True)
             return
@@ -523,21 +518,13 @@ class FormationManagement(commands.Cog):
         new_emoji = original.emoji
         if emoji is not None:
             candidate = emoji.strip()
-            if not candidate:
-                logger.warning(f"Guild {interaction.guild.id} provided an empty emoji while editing a formation.")
+            if not is_valid_emoji(candidate):
+                logger.warning(f"Guild {interaction.guild.id} tried to edit formation with invalid emoji: {candidate!r}.")
                 await interaction.response.send_message(ErrorMessages.INVALID_EMOJI, ephemeral=True)
                 return
             if any(i != index - 1 and fm.emoji == candidate for i, fm in enumerate(fms)):
                 logger.warning(f"Guild {interaction.guild.id} tried to reuse emoji {candidate} while editing formation.")
                 await interaction.response.send_message(ErrorMessages.EMOJI_ALREADY_USED, ephemeral=True)
-                return
-            if not candidate or (
-                candidate not in EMOJI_DATA
-                and not 0x1F1E6 <= ord(candidate) <= 0x1F1FF
-                and not DISCORD_EMOJI_RE.match(candidate)
-            ):
-                logger.warning(f"Guild {interaction.guild.id} tried to edit formation with invalid emoji: {candidate!r}.")
-                await interaction.response.send_message(ErrorMessages.INVALID_EMOJI, ephemeral=True)
                 return
             new_emoji = candidate
 

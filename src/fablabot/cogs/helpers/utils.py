@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from logging import Logger
+import re
 from typing import Any, overload
 
 from discord import (
@@ -19,18 +20,13 @@ from discord import (
     VoiceChannel,
 )
 from discord.utils import get
+from emoji import EMOJI_DATA
 
-from fablabot.cogs.helpers.constants import ErrorMessages, RoleNames
+from fablabot.cogs.helpers.constants import ErrorMessages
 from fablabot.guild_config import get_commands_channel_id, set_commands_channel_id
 
 _COMMANDS_CHANNEL_NAME = "commandes_bot"
-ADMIN_ROLES = {
-    RoleNames.ADMIN_TEMP,
-    RoleNames.ADMIN,
-    RoleNames.PRESIDENT,
-    RoleNames.VICE_PRESIDENT,
-    RoleNames.SECRETARY,
-}
+_DISCORD_EMOJI_RE = re.compile(r"^<a?:\w+:\d+>$")
 
 
 def log_request(logger: Logger, command_name: str, interaction: Interaction, **kwargs: Any) -> None:
@@ -146,6 +142,22 @@ async def check_has_role(logger: Logger, interaction: Interaction, roles: set[st
         )
         return False
     return True
+
+
+def is_valid_emoji(emoji: str) -> bool:
+    """Check if an emoji is valid.
+
+    Args:
+        emoji (str): The emoji to check.
+
+    Returns:
+        bool: True if valid, False otherwise.
+    """
+    emoji_clean = emoji.strip()
+
+    return emoji_clean is not None and (
+        emoji_clean in EMOJI_DATA or 0x1F1E6 <= ord(emoji_clean) <= 0x1F1FF or _DISCORD_EMOJI_RE.match(emoji_clean) is not None
+    )
 
 
 async def _can_dm_user(user: Member) -> bool:

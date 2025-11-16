@@ -2,13 +2,12 @@
 
 from fablabot.cogs.helpers import formation, message
 from fablabot.cogs.helpers.constants import (
-    DISCORD_EMOJI_RE,
+    ADMIN_ROLES,
     PARIS_TZ,
     ErrorMessages,
     RoleNames,
 )
 from fablabot.cogs.helpers.utils import (
-    ADMIN_ROLES,
     check_has_role,
     escape_md,
     format_channel_mention,
@@ -17,6 +16,7 @@ from fablabot.cogs.helpers.utils import (
     get_members_by_role,
     get_or_fetch_member,
     is_in_allowed_channel,
+    is_valid_emoji,
     log_request,
     safe_add_roles,
     safe_create_text_channel,
@@ -29,7 +29,6 @@ from fablabot.cogs.helpers.utils import (
 
 __all__ = [
     "ADMIN_ROLES",
-    "DISCORD_EMOJI_RE",
     "PARIS_TZ",
     "ErrorMessages",
     "RoleNames",
@@ -42,6 +41,7 @@ __all__ = [
     "get_members_by_role",
     "get_or_fetch_member",
     "is_in_allowed_channel",
+    "is_valid_emoji",
     "log_request",
     "message",
     "safe_add_roles",

@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import re
 from zoneinfo import ZoneInfo
 
 PARIS_TZ = ZoneInfo("Europe/Paris")
 MAX_MSG_CHARS = 1900
-DISCORD_EMOJI_RE = re.compile(r"^<a?:\w+:\d+>$")
 
 
 class RoleNames:
@@ -60,6 +58,15 @@ class RoleNames:
 
     MEMBER_VERIFIED = "Membre ✓"
     """Verified member role."""
+
+
+ADMIN_ROLES = {
+    RoleNames.ADMIN_TEMP,
+    RoleNames.ADMIN,
+    RoleNames.PRESIDENT,
+    RoleNames.VICE_PRESIDENT,
+    RoleNames.SECRETARY,
+}
 
 
 class ErrorMessages:
