@@ -7,7 +7,7 @@ from fablabot.cogs.log_management import LogManagement
 from fablabot.cogs.message_management import MessageManagement
 from fablabot.cogs.suggestion_management import SuggestionManagement
 from fablabot.cogs.user_management import UserManagement
-from fablabot.cogs.welcome import Welcome
+from fablabot.cogs.welcome_management import WelcomeManagement
 
 __all__ = [
     "ChannelManagement",
@@ -16,6 +16,6 @@ __all__ = [
     "MessageManagement",
     "SuggestionManagement",
     "UserManagement",
-    "Welcome",
+    "WelcomeManagement",
     "helpers",
 ]

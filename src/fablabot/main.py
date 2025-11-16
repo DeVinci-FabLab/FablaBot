@@ -97,7 +97,7 @@ class Fablabot(commands.Bot):
             MessageManagement(self),
             SuggestionManagement(self),
             UserManagement(self),
-            Welcome(self),
+            WelcomeManagement(self),
         ):
             await self.add_cog(cog)
             logger.info(f"Loaded cog {cog.__class__.__name__}")

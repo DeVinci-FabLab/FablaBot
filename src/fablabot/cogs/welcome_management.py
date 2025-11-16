@@ -27,7 +27,7 @@ from fablabot.guild_config import is_welcome_verify_enabled, set_welcome_verify_
 logger = logging.getLogger(__name__)
 
 
-class Welcome(commands.Cog):
+class WelcomeManagement(commands.Cog):
     """Manages welcome messages and related features.
 
     Commands:
@@ -53,7 +53,8 @@ class Welcome(commands.Cog):
     # region ====== Welcome Slash Commands Group ======
 
     welcome_group = app_commands.Group(
-        name="welcome", description="Gestion des messages de bienvenue et des fonctionnalités associées."
+        name="welcome",
+        description="Gestion des messages de bienvenue et des fonctionnalités associées.",
     )
 
     @welcome_group.command(name="help", description="Affiche l'aide pour les commandes de bienvenue.")
@@ -129,7 +130,8 @@ class Welcome(commands.Cog):
         if not channel.name.startswith("welcome-"):
             logger.warning("The approve command was not used in a welcome channel.")
             await interaction.response.send_message(
-                "Cette commande doit être utilisée dans un salon de bienvenue.", ephemeral=True
+                "Cette commande doit être utilisée dans un salon de bienvenue.",
+                ephemeral=True,
             )
             return
 
@@ -142,7 +144,8 @@ class Welcome(commands.Cog):
         if member is None:
             logger.warning(f"Member not found: {member_name}")
             await interaction.response.send_message(
-                ErrorMessages.MEMBER_NOT_FOUND.format(member_name=escape_md(member_name)), ephemeral=True
+                ErrorMessages.MEMBER_NOT_FOUND.format(member_name=escape_md(member_name)),
+                ephemeral=True,
             )
             return
 
@@ -150,14 +153,16 @@ class Welcome(commands.Cog):
         city_role = get(interaction.guild.roles, name=city_role_name)
         if city_role is None:
             await interaction.response.send_message(
-                ErrorMessages.ROLE_NOT_FOUND.format(role_name=city_role_name), ephemeral=True
+                ErrorMessages.ROLE_NOT_FOUND.format(role_name=city_role_name),
+                ephemeral=True,
             )
             return
 
         member_role = get(interaction.guild.roles, name=RoleNames.MEMBER_VERIFIED)
         if member_role is None:
             await interaction.response.send_message(
-                ErrorMessages.ROLE_NOT_FOUND.format(role_name=RoleNames.MEMBER_VERIFIED), ephemeral=True
+                ErrorMessages.ROLE_NOT_FOUND.format(role_name=RoleNames.MEMBER_VERIFIED),
+                ephemeral=True,
             )
             return
 
@@ -167,11 +172,14 @@ class Welcome(commands.Cog):
             return
 
         await interaction.response.send_message(
-            f"Le membre {member.mention} a été validé avec succès et les rôles ont été attribués.", ephemeral=True
+            f"Le membre {member.mention} a été validé avec succès et les rôles ont été attribués.",
+            ephemeral=True,
         )
 
         success, error = await safe_delete_channel(
-            logger, channel, reason="Salon de bienvenue supprimé après validation du membre"
+            logger,
+            channel,
+            reason="Salon de bienvenue supprimé après validation du membre",
         )
         if not success:
             await interaction.response.send_message(error, ephemeral=True)
@@ -228,7 +236,7 @@ class Welcome(commands.Cog):
                 " et votre ville (Paris, Nantes, Montepellier) pour recevoir la validation\n"
                 "   Assurez vous d 'avoir envoyé votre RI signé sur le formulaire !\n"
                 "\n"
-                "Vous êtes un ancien ? Envoyez simplement un message précisant que vous en êtes un 🙂"
+                "Vous êtes un ancien ? Envoyez simplement un message précisant que vous en êtes un 🙂",
             )
         except HTTPException:
             logger.exception(f"Failed to send welcome message for {member.name}")
@@ -244,4 +252,4 @@ async def setup(bot: commands.Bot) -> None:
     Args:
         bot (commands.Bot): The bot instance.
     """
-    await bot.add_cog(Welcome(bot))
+    await bot.add_cog(WelcomeManagement(bot))
