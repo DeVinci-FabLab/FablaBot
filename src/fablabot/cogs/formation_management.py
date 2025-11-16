@@ -1242,12 +1242,11 @@ class FormationManagement(commands.Cog):
         return filtered
 
     @staticmethod
-    def _get_last_known_user_name(log: list[ReactionEvent], message_id: int, user_id: int) -> str | None:
+    def _get_last_known_user_name(log: list[ReactionEvent], user_id: int) -> str | None:
         """Get the last known user name from the log.
 
         Args:
             log (list[ReactionEvent]): The reaction log.
-            message_id (int): The ID of the message.
             user_id (int): The ID of the user.
 
         Returns:
