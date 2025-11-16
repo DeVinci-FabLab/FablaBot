@@ -7,13 +7,14 @@ import io
 import logging
 from typing import TYPE_CHECKING, Any
 
-from discord import Guild
 from discord.utils import get
 
-from fablabot.cogs.helpers.constants import MAX_MSG_CHARS, RoleNames
+from fablabot.cogs.helpers.constants import MAX_MSG_CHARS, PARIS_TZ, RoleNames
 from fablabot.cogs.helpers.utils import escape_md, get_members_by_role
 
 if TYPE_CHECKING:
+    from discord import Guild
+
     from fablabot.cogs.helpers.formation.models import Formation
 
 logger = logging.getLogger(__name__)
@@ -198,7 +199,7 @@ def format_respo_contacts(guild: Guild) -> str:
     if not members:
         logger.debug(f"Role '{RoleNames.TRAININGS_MANAGER}' has no human members in guild {guild.id}; using fallback contacts.")
         return "un·e membre du Pôle Formations"
-    mentions = [member.mention for member in members]
+    mentions = [m.mention for m in members]
     logger.debug(f"Resolved {len(mentions)} formation contacts for guild {guild.id}.")
     return " ou ".join(mentions)
 
@@ -220,9 +221,9 @@ def format_formation_export(formation: Formation) -> str:
         for idx, user_entry in enumerate(formation.registered_users, start=1):
             user_id = user_entry.get("user_id")
             username = user_entry.get("username", "Utilisateur inconnu")
-            ts = user_entry.get("ts_iso", datetime.min.isoformat(timespec="seconds"))
+            ts = user_entry.get("ts_iso", datetime.min.replace(tzinfo=PARIS_TZ).isoformat(timespec="seconds"))
             dt = datetime.fromisoformat(ts)
-            when = humanize_dt(dt).lower()[2:-2] if dt != datetime.min else "n/a"
+            when = humanize_dt(dt).lower()[2:-2] if dt != datetime.min.replace(tzinfo=PARIS_TZ) else "n/a"
             lines.append(f"{idx}. <@{user_id}> ({escape_md(username)}) · inscrit·e le {when}")
     else:
         lines.append("_(Aucune inscription)_")
@@ -231,9 +232,9 @@ def format_formation_export(formation: Formation) -> str:
         for idx, user_entry in enumerate(formation.waitlisted_users, start=len(formation.registered_users) + 1):
             user_id = user_entry.get("user_id")
             username = user_entry.get("username", "Utilisateur inconnu")
-            ts = user_entry.get("ts_iso", datetime.min)
+            ts = user_entry.get("ts_iso", datetime.min.replace(tzinfo=PARIS_TZ).isoformat(timespec="seconds"))
             dt = datetime.fromisoformat(ts)
-            when = humanize_dt(dt).lower()[2:-2] if dt != datetime.min else "n/a"
+            when = humanize_dt(dt).lower()[2:-2] if dt != datetime.min.replace(tzinfo=PARIS_TZ) else "n/a"
             lines.append(f"{idx}. <@{user_id}> ({escape_md(username)}) · inscrit·e le {when} (en attente)")
 
     return "\n".join(lines)

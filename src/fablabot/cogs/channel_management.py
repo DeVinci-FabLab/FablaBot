@@ -139,7 +139,7 @@ class ChannelManagement(commands.Cog):
             return
         logger.info(f"Created text channel {new_channel!r} in category {category!r}")
         await interaction.response.send_message(
-            f"Le salon textuel {format_channel_mention(channel=new_channel)} a été créé dans {escape_md(category.name)}."
+            f"Le salon textuel {format_channel_mention(channel=new_channel)} a été créé dans {escape_md(category.name)}.",
         )
 
     @text_group.command(name="rename", description="Renomme un salon textuel.")
@@ -161,14 +161,17 @@ class ChannelManagement(commands.Cog):
 
         old_name = channel.name
         success, error = await safe_edit_channel(
-            logger, channel, reason=f"With rename command by {interaction.user}", name=new_name
+            logger,
+            channel,
+            reason=f"With rename command by {interaction.user}",
+            name=new_name,
         )
         if not success:
             await interaction.response.send_message(error, ephemeral=True)
             return
         logger.info(f"Renamed channel {channel} from {old_name!r} to {new_name!r}")
         await interaction.response.send_message(
-            f"Le salon textuel {channel.mention}, anciennement {escape_md(old_name)}, a été renommé en {escape_md(new_name)}."
+            f"Le salon textuel {channel.mention}, anciennement {escape_md(old_name)}, a été renommé en {escape_md(new_name)}.",
         )
 
     @text_group.command(name="delete", description="Supprime un salon textuel.")
@@ -319,7 +322,10 @@ class ChannelManagement(commands.Cog):
         if old_name.endswith(DYNAMIC_SUFFIX) and not new_name.endswith(DYNAMIC_SUFFIX):
             new_name += DYNAMIC_SUFFIX
         success, error = await safe_edit_channel(
-            logger, channel, reason=f"With rename command by {interaction.user}", name=new_name
+            logger,
+            channel,
+            reason=f"With rename command by {interaction.user}",
+            name=new_name,
         )
         if not success:
             await interaction.response.send_message(error, ephemeral=True)
@@ -331,14 +337,17 @@ class ChannelManagement(commands.Cog):
                 suffix = vc.name[len(old_name) :]
                 new_vc_name = f"{new_name}{suffix}"
                 success, error = await safe_edit_channel(
-                    logger, vc, reason="Renaming associated dynamic channel", name=new_vc_name
+                    logger,
+                    vc,
+                    reason="Renaming associated dynamic channel",
+                    name=new_vc_name,
                 )
                 if not success:
                     await interaction.response.send_message(error, ephemeral=True)
                     return
                 logger.info(f"Renamed associated dynamic channel {vc} from {old_name + suffix!r} to {new_vc_name!r}")
         await interaction.response.send_message(
-            f"Le salon vocal {channel.mention}, anciennement {escape_md(old_name)}, a été renommé en {escape_md(new_name)}."
+            f"Le salon vocal {channel.mention}, anciennement {escape_md(old_name)}, a été renommé en {escape_md(new_name)}.",
         )
 
     @vocal_group.command(name="delete", description="Supprime un salon vocal.")
@@ -431,12 +440,12 @@ class ChannelManagement(commands.Cog):
                 deleter = entry.user
                 assert isinstance(deleter, Member)
                 logger.warning(
-                    f"Message with ID {payload.message_id} not found in channel {channel.name}. Deleted by {deleter.name!r}."
+                    f"Message with ID {payload.message_id} not found in channel {channel.name}. Deleted by {deleter.name!r}.",
                 )
                 try:
                     await channel.send(
                         f"{codir_mention}Un message irrécupérable a été supprimé par {deleter.mention}."
-                        f"\nID du message : {payload.message_id}."
+                        f"\nID du message : {payload.message_id}.",
                     )
                 except HTTPException:
                     logger.exception("HTTP error while notifying message deletion")

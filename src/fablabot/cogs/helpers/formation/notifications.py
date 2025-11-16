@@ -7,13 +7,13 @@ import logging
 import re
 from typing import TYPE_CHECKING, Literal
 
-from discord import Guild
-
 from fablabot.cogs.helpers.constants import RoleNames
 from fablabot.cogs.helpers.formation.rendering import format_formation_export, humanize_dt
 from fablabot.cogs.helpers.utils import get_members_by_role, get_or_fetch_member, send_dm_to_member
 
 if TYPE_CHECKING:
+    from discord import Guild
+
     from fablabot.cogs.helpers.formation.models import Formation
 
 logger = logging.getLogger(__name__)
@@ -154,11 +154,13 @@ async def notify_trainer_before_formation(
         timing_line = f"Ta formation **{formation.name}** commence maintenant (le {datetime_text})."
         subject = f"start alert for formation {formation.name}"
 
+    excusable_line = "Merci de transmettre au **CoDir** la liste des participants à excuser si besoin.\n\n"
+
     message = (
         f"Salut {trainer.display_name} !\n"
         f"{timing_line}\n\n"
         f"{formation_export}\n\n"
-        f"{'Merci de transmettre au **CoDir** la liste des participants à excuser si besoin.\n\n' if formation.excusable and moment == 'start' else ''}"
+        f"{excusable_line if formation.excusable and moment == 'start' else ''}"
         f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
     )
 
@@ -213,7 +215,10 @@ async def notify_participants_before_formation(
     """
     datetime_text = humanize_dt(formation.start_dt).lower()[2:-2]
 
-    message_content = f"La formation **{formation.name}** commence bientôt (le {datetime_text}).\n\n*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
+    message_content = (
+        f"La formation **{formation.name}** commence bientôt (le {datetime_text}).\n\n"
+        f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
+    )
 
     for entry in formation.registered_users:
         participant_id = int(entry["user_id"])

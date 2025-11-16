@@ -301,7 +301,7 @@ class FormationManagement(commands.Cog):
         end_changed = updated_end != current_end
         logger.info(
             f"Guild {interaction.guild.id} updated draft intro/end "
-            f"(intro_changed={intro_changed}, end_changed={end_changed}, role_changed={role_changed})."
+            f"(intro_changed={intro_changed}, end_changed={end_changed}, role_changed={role_changed}).",
         )
 
         await interaction.response.send_message(
@@ -391,7 +391,8 @@ class FormationManagement(commands.Cog):
         except Exception:
             logger.warning(f"Guild {interaction.guild.id} tried to add formation with invalid date/hour: {date} {hour}.")
             await interaction.response.send_message(
-                "Date/heure invalides. Exemples: date `15/09/2025`, heure `18:08`.", ephemeral=True
+                "Date/heure invalides. Exemples: date `15/09/2025`, heure `18:08`.",
+                ephemeral=True,
             )
             return
 
@@ -790,7 +791,7 @@ class FormationManagement(commands.Cog):
             except Exception:
                 logger.exception(
                     f"Guild {interaction.guild.id} failed to add reaction {fm.emoji!r} "
-                    f"for formation {fm.name!r} in published message."
+                    f"for formation {fm.name!r} in published message.",
                 )
 
         pub_msg = FmMessageDraft(
@@ -813,7 +814,7 @@ class FormationManagement(commands.Cog):
         logger.info(f"Guild {interaction.guild.id} published the formations draft in {channel}.")
         await interaction.followup.send(
             f"Message publié dans {channel.mention} (ID: `{msg.id}`) avec "
-            f"{success_reactions}/{len(fms)} réaction(s) ajoutée(s)."
+            f"{success_reactions}/{len(fms)} réaction(s) ajoutée(s).",
         )
 
     @fm_group.command(name="export", description="Exporter la liste des membres ayant (dé)réagi aux émojis des FMs.")
@@ -864,14 +865,15 @@ class FormationManagement(commands.Cog):
                     fm_by_emoji.get(ev.emoji, {}).get("name", ""),
                     ev.user_name or "",
                     ev.user_id,
-                ]
+                ],
             )
 
         if message_id:
             await interaction.response.send_message(
                 content="Export du message spécifié.",
                 file=File(
-                    fp=io.BytesIO(history_csv.getvalue().encode(encoding="utf-8")), filename="formations_reactions_log.csv"
+                    fp=io.BytesIO(history_csv.getvalue().encode(encoding="utf-8")),
+                    filename="formations_reactions_log.csv",
                 ),
             )
             return
@@ -887,7 +889,8 @@ class FormationManagement(commands.Cog):
                 files=[
                     File(reg_file, filename="inscriptions_ordre_inscription.txt"),
                     File(
-                        fp=io.BytesIO(history_csv.getvalue().encode(encoding="utf-8")), filename="formations_reactions_log.csv"
+                        fp=io.BytesIO(history_csv.getvalue().encode(encoding="utf-8")),
+                        filename="formations_reactions_log.csv",
                     ),
                 ],
             )
@@ -938,7 +941,7 @@ class FormationManagement(commands.Cog):
                 if now > registration_deadline:
                     logger.info(
                         f"Ignoring reaction {emoji_str} for formation {formation.name!r} "
-                        f"from user {payload.user_id} - registration closed."
+                        f"from user {payload.user_id} - registration closed.",
                     )
                     return
 
@@ -948,7 +951,7 @@ class FormationManagement(commands.Cog):
                 user_id=payload.user_id,
                 user_name=member_name,
                 emoji=emoji_str,
-                action=cast(Literal["add", "remove"], payload.event_type.removeprefix("REACTION_").lower()),
+                action=cast("Literal['add', 'remove']", payload.event_type.removeprefix("REACTION_").lower()),
                 ts_iso=datetime.now(PARIS_TZ).isoformat(timespec="seconds"),
             )
 
@@ -1188,12 +1191,12 @@ class FormationManagement(commands.Cog):
         guild_state = self._get_guild_state(guild_id)
         log = [ReactionEvent.from_dict(entry) for entry in guild_state.get("reactions_log") or []]
         if reaction_event.user_name is None:
-            reaction_event.user_name = self._get_last_known_user_name(log, reaction_event.message_id, reaction_event.user_id)
+            reaction_event.user_name = self._get_last_known_user_name(log, reaction_event.user_id)
         log.append(reaction_event)
         guild_state["reactions_log"] = [event.to_dict() for event in log]
         logger.debug(
             f"Logged {reaction_event.action} reaction for guild {guild_id} message {reaction_event.message_id} "
-            f"user {reaction_event.user_id} with emoji {reaction_event.emoji} (Paris time: {reaction_event.ts_iso})."
+            f"user {reaction_event.user_id} with emoji {reaction_event.emoji} (Paris time: {reaction_event.ts_iso}).",
         )
         self._set_guild_state(guild_id, guild_state)
 
@@ -1318,7 +1321,7 @@ class FormationManagement(commands.Cog):
         message_id = pub.message_id
         if not guild or not channel_id or not message_id:
             logger.warning(
-                f"Incomplete published formations state for guild {guild_id} (channel={channel_id}, message={message_id})."
+                f"Incomplete published formations state for guild {guild_id} (channel={channel_id}, message={message_id}).",
             )
             return
         channel = guild.get_channel(channel_id)
@@ -1342,7 +1345,7 @@ class FormationManagement(commands.Cog):
         if not header or not role_id or not intro or not end or not fms:
             logger.warning(
                 f"Published formations payload incomplete for guild {guild_id}; "
-                f"header={bool(header)} role_id={bool(role_id)} intro={bool(intro)} end={bool(end)} formations={len(fms)}."
+                f"header={bool(header)} role_id={bool(role_id)} intro={bool(intro)} end={bool(end)} formations={len(fms)}.",
             )
             return
 

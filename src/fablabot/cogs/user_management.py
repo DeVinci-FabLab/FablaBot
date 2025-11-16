@@ -102,7 +102,11 @@ class UserManagement(commands.Cog):
         time="Durée en minutes (par défaut 5)",
     )
     async def user_op(
-        self, interaction: Interaction, member: Member, reason: str, time: app_commands.Range[int, 1, 90] = 5
+        self,
+        interaction: Interaction,
+        member: Member,
+        reason: str,
+        time: app_commands.Range[int, 1, 90] = 5,
     ) -> None:
         """Grant temporary admin privileges to a user.
 
@@ -133,7 +137,10 @@ class UserManagement(commands.Cog):
             return
 
         success, error = await safe_add_roles(
-            logger, member, admin_role, reason=f"Add with op command by {interaction.user} for {reason}"
+            logger,
+            member,
+            admin_role,
+            reason=f"Add with op command by {interaction.user} for {reason}",
         )
         if not success:
             await interaction.response.send_message(error, ephemeral=True)
@@ -142,12 +149,12 @@ class UserManagement(commands.Cog):
         old_task = self.deop_tasks.pop(member.id, None)
         if old_task:
             old_task.cancel()
-        task = asyncio.create_task(self._schedule_deop(interaction, member, time, admin_role, codir_role))
+        task = asyncio.create_task(self._schedule_deop(interaction, member, time, admin_role))
         self.deop_tasks[member.id] = task
         logger.info(f"Granted {member} temporary admin for {time} minutes for reason: {reason}")
         await interaction.response.send_message(
             f"{codir_role.mention} Droits admin donnés à {format_member_mention(member)} pour {time} minutes. "
-            f"Raison: {escape_md(reason)}"
+            f"Raison: {escape_md(reason)}",
         )
 
     @user_group.command(name="deop", description="Retire les droits admin temporaires d'un utilisateur.")
@@ -169,7 +176,8 @@ class UserManagement(commands.Cog):
         if admin_role is None:
             logger.error(f"Role {RoleNames.ADMIN_TEMP} not found")
             await interaction.response.send_message(
-                ErrorMessages.ROLE_NOT_FOUND.format(role_name=RoleNames.ADMIN_TEMP), ephemeral=True
+                ErrorMessages.ROLE_NOT_FOUND.format(role_name=RoleNames.ADMIN_TEMP),
+                ephemeral=True,
             )
             return
         assert isinstance(interaction.user, Member)
@@ -181,7 +189,10 @@ class UserManagement(commands.Cog):
             return
 
         success, error = await safe_remove_roles(
-            logger, member, admin_role, reason=f"Remove with op command by {interaction.user}"
+            logger,
+            member,
+            admin_role,
+            reason=f"Remove with op command by {interaction.user}",
         )
         if not success:
             await interaction.response.send_message(error, ephemeral=True)
@@ -224,7 +235,7 @@ class UserManagement(commands.Cog):
         logger.info(f"Added role {role} to {member}")
         await interaction.response.defer(thinking=True)
         await interaction.followup.send(
-            content=f"Le rôle {format_role_mention(role)} a été ajouté à {format_member_mention(member)}."
+            content=f"Le rôle {format_role_mention(role)} a été ajouté à {format_member_mention(member)}.",
         )
 
     @user_group.command(name="remove_role", description="Retire un rôle à un utilisateur.")
@@ -247,7 +258,10 @@ class UserManagement(commands.Cog):
             return
 
         success, error = await safe_remove_roles(
-            logger, member, role, reason=f"Remove with remove_role command by {interaction.user}"
+            logger,
+            member,
+            role,
+            reason=f"Remove with remove_role command by {interaction.user}",
         )
         if not success:
             await interaction.response.send_message(error, ephemeral=True)
@@ -256,7 +270,7 @@ class UserManagement(commands.Cog):
         logger.info(f"Removed role {role} from {member}")
         await interaction.response.defer(thinking=True)
         await interaction.followup.send(
-            content=f"Le rôle {format_role_mention(role)} a été retiré à {format_member_mention(member)}."
+            content=f"Le rôle {format_role_mention(role)} a été retiré à {format_member_mention(member)}.",
         )
 
     @user_group.command(
@@ -347,7 +361,11 @@ class UserManagement(commands.Cog):
     # -- Scheduling --
 
     async def _schedule_deop(
-        self, interaction: Interaction, member: Member, time: int, admin_role: Role, codir_role: Role
+        self,
+        interaction: Interaction,
+        member: Member,
+        time: int,
+        admin_role: Role,
     ) -> None:
         """Schedule removal of temporary admin role after timeout.
 
@@ -356,14 +374,16 @@ class UserManagement(commands.Cog):
             member (Member): The user to remove the role from.
             time (int): The time in minutes to wait before removing the role.
             admin_role (Role): The admin role to remove.
-            codir_role (Role): The CoDir role to prevent if there is an error.
         """
         logger.debug(f"Scheduling deop for {member} after {time} minutes")
         try:
             await asyncio.sleep(time * 60)
             if member.id in self.deop_tasks:
                 success, error = await safe_remove_roles(
-                    logger, member, admin_role, reason="Scheduled removal of temporary admin role"
+                    logger,
+                    member,
+                    admin_role,
+                    reason="Scheduled removal of temporary admin role",
                 )
                 if not success:
                     await interaction.followup.send(str(error))
@@ -371,13 +391,14 @@ class UserManagement(commands.Cog):
 
                 logger.info(f"Revoked temporary admin from {member} after {time} minutes")
                 await interaction.followup.send(
-                    f"Droits admin retirés de {format_member_mention(member)} après {time} minutes."
+                    f"Droits admin retirés de {format_member_mention(member)} après {time} minutes.",
                 )
             self.deop_tasks.pop(member.id, None)
         except asyncio.CancelledError:
             logger.info(f"Deop timer cancelled for {member}")
         except Exception as e:
-            logger.exception(f"Error in deop task for {member}: {e}")
+            logger.exception(f"Error in deop task for {member}: {e}")  # TODO: redondant
+            # FIXME: exception quand deop est appelé manuellement avant la fin du timer
 
     # -- Permission Checks --
 

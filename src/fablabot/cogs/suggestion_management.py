@@ -64,25 +64,25 @@ class SuggestionManagement(commands.Cog):
 
     # region ====== Helpers ======
 
-    async def _handle_suggestion(
+    async def handle_suggestion(
         self,
         interaction: Interaction,
         suggestion_text: str,
-        anonymous: bool,
         config: SuggestionConfig,
-        command_name: str,
+        *,
+        anonymous: bool,
     ) -> None:
         """Handle a suggestion command.
 
         Args:
             interaction: The Discord interaction context.
             suggestion_text: The raw suggestion text.
-            anonymous: Whether the suggestion is anonymous or not.
             config: The suggestion configuration.
-            command_name: The command name for logging (e.g., "suggest.formation").
+            anonymous: Whether the suggestion is anonymous or not.
         """
         logger.info(
-            f"[{command_name}]: user={interaction.user if not anonymous else 'Anonymous'!r} suggestion_text={suggestion_text!r}"
+            f"[{config.command_name}]: user={interaction.user if not anonymous else 'Anonymous'!r} "
+            f"suggestion_text={suggestion_text!r}",
         )
 
         cleaned_text = suggestion_text.strip()
@@ -117,7 +117,7 @@ class SuggestionManagement(commands.Cog):
 
         logger.info(
             f"Guild {interaction.guild.id} user "
-            f"{interaction.user.id if not anonymous else 'Anonymous'} made a suggestion via {command_name}."
+            f"{interaction.user.id if not anonymous else 'Anonymous'} made a suggestion via {config.command_name}.",
         )
         await interaction.response.send_message(config.success_message, ephemeral=True)
 
@@ -144,7 +144,7 @@ class SuggestionManagement(commands.Cog):
 
         if not responsibles and not channel:
             logger.error(
-                f"Guild {guild.id} has no {config.role_name} responsibles and no {config.channel_name} channel configured."
+                f"Guild {guild.id} has no {config.role_name} responsibles and no {config.channel_name} channel configured.",
             )
             return False
 

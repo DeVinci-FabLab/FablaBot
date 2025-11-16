@@ -39,22 +39,31 @@ target-version = "py313"
 docstring-code-format = true
 
 [tool.ruff.lint]
-ignore = ["D105", "E5", "PTH123", "W505"]
+ignore = ["D105", "PTH123"]
 select = [
+  "ARG",
   "B",
   "C4",
+  "COM",
+  "D",
+  "DTZ",
   "E",
   "F",
   "I",
   "N",
+  "PGH",
   "PIE",
+  "PLR",
   "PTH",
+  "PYI",
   "RET",
   "RUF",
   "SIM",
+  "SLF",
+  "TC",
+  "TRY",
   "UP",
   "W",
-  "D",
 ]
 
 [tool.ruff.lint.pydocstyle]
@@ -86,6 +95,7 @@ disable = [
   "W0511", # fixme
   "W0613", # unused-argument -> Best management with ruff
   "W1113", # keyword-arg-before-vararg -> Best management with ruff
+  "W1202", # logging-format-interpolation
   "W1203", # logging-f-string-interpolation
   "W0718",
 ]
@@ -98,4 +108,4 @@ output-format = "text"
 
 [tool.pylint.logging]
 logging-format-style = "new"
-logging-modules = ["loggerplusplus"]
+logging-modules = ["logging"]

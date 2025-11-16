@@ -124,6 +124,8 @@ class SuggestionConfig:
     """Configuration for a suggestion type.
 
     Attributes:
+        label (str): The label of the suggestion type.
+        command_name (str): The command name for logging purposes.
         embed_title (str): The title of the suggestion embed.
         role_name (str | None): The role name to get responsible members.
         channel_name (str | None): The channel name to send the suggestion to.
@@ -132,6 +134,10 @@ class SuggestionConfig:
         error_message (str): The error message when no recipients are configured.
     """
 
+    label: str
+    """The label of the suggestion type."""
+    command_name: str
+    """The command name for logging purposes."""
     embed_title: str
     """The title of the suggestion embed."""
     role_name: str | None
@@ -146,6 +152,8 @@ class SuggestionConfig:
 
 
 _CODIR_SUGGESTION_CONFIG = SuggestionConfig(
+    label="CoDir",
+    command_name="suggest.to_codir",
     embed_title="Nouvelle suggestion pour le CoDir",
     role_name=None,
     channel_name="codir-general",
@@ -154,6 +162,8 @@ _CODIR_SUGGESTION_CONFIG = SuggestionConfig(
 )
 
 _BUREAU_SUGGESTION_CONFIG = SuggestionConfig(
+    label="Bureau",
+    command_name="suggest.to_bureau",
     embed_title="Nouvelle suggestion pour le Bureau",
     role_name=None,
     channel_name="bureau-general",
@@ -162,6 +172,8 @@ _BUREAU_SUGGESTION_CONFIG = SuggestionConfig(
 )
 
 _COMMUNICATION_SUGGESTION_CONFIG = SuggestionConfig(
+    label="Pôle Communication",
+    command_name="suggest.to_communication",
     embed_title="Nouvelle suggestion pour le Pôle Communication",
     role_name=RoleNames.COMMUNICATION_MANAGER,
     channel_name="pole-communication",
@@ -170,7 +182,9 @@ _COMMUNICATION_SUGGESTION_CONFIG = SuggestionConfig(
     " ne sont configurés pour recevoir les suggestions.",
 )
 
-_EVENT_SUGGESTION_CONFIG = SuggestionConfig(
+_EVENTS_SUGGESTION_CONFIG = SuggestionConfig(
+    label="Pôle Event",
+    command_name="suggest.to_events",
     embed_title="Nouvelle suggestion pour le Pôle Événements",
     role_name=RoleNames.EVENTS_MANAGER,
     channel_name="pole-event",
@@ -179,6 +193,8 @@ _EVENT_SUGGESTION_CONFIG = SuggestionConfig(
 )
 
 _TRAINING_SUGGESTION_CONFIG = SuggestionConfig(
+    label="Pôle Formation",
+    command_name="suggest.to_trainings",
     embed_title="Nouvelle suggestion de formation",
     role_name=RoleNames.TRAININGS_MANAGER,
     channel_name="pole-formation",
@@ -187,6 +203,8 @@ _TRAINING_SUGGESTION_CONFIG = SuggestionConfig(
 )
 
 _IT_SUGGESTION_CONFIG = SuggestionConfig(
+    label="Pôle Numérique",
+    command_name="suggest.to_it",
     embed_title="Nouvelle suggestion pour le Pôle Numérique",
     role_name=RoleNames.DIGITAL_MANAGER,
     channel_name="pole-numerique",
@@ -195,6 +213,8 @@ _IT_SUGGESTION_CONFIG = SuggestionConfig(
 )
 
 _PARTNERSHIPS_SUGGESTION_CONFIG = SuggestionConfig(
+    label="Pôle Partenariat",
+    command_name="suggest.to_partnerships",
     embed_title="Nouvelle suggestion pour le Pôle Partenariat",
     role_name=RoleNames.PARTNERSHIPS_MANAGER,
     channel_name="pole-partenariat",
@@ -204,6 +224,8 @@ _PARTNERSHIPS_SUGGESTION_CONFIG = SuggestionConfig(
 )
 
 _PROJECTS_SUGGESTION_CONFIG = SuggestionConfig(
+    label="Pôle Projet",
+    command_name="suggest.to_projects",
     embed_title="Nouvelle suggestion pour le Pôle Projets",
     role_name=RoleNames.PROJECTS_MANAGER,
     channel_name=None,
@@ -211,13 +233,13 @@ _PROJECTS_SUGGESTION_CONFIG = SuggestionConfig(
     error_message="Aucun·e Respo Projets n'est configuré·e pour recevoir les suggestions.",
 )
 
-SUGGESTION_OPTIONS: dict[str, tuple[str, SuggestionConfig, str]] = {
-    "codir": ("CoDir", _CODIR_SUGGESTION_CONFIG, "suggest.to_codir"),
-    "bureau": ("Bureau", _BUREAU_SUGGESTION_CONFIG, "suggest.to_bureau"),
-    "communication": ("Pôle Communication", _COMMUNICATION_SUGGESTION_CONFIG, "suggest.to_communication"),
-    "events": ("Pôle Event", _EVENT_SUGGESTION_CONFIG, "suggest.to_event"),
-    "formation": ("Pôle Formation", _TRAINING_SUGGESTION_CONFIG, "suggest.formation"),
-    "numerique": ("Pôle Numérique", _IT_SUGGESTION_CONFIG, "suggest.it_feature"),
-    "partenariat": ("Pôle Partenariat", _PARTNERSHIPS_SUGGESTION_CONFIG, "suggest.to_partenariat"),
-    "projets": ("Pôle Projet", _PROJECTS_SUGGESTION_CONFIG, "suggest.to_projet"),
+SUGGESTION_OPTIONS: dict[str, SuggestionConfig] = {
+    "codir": _CODIR_SUGGESTION_CONFIG,
+    "bureau": _BUREAU_SUGGESTION_CONFIG,
+    "communication": _COMMUNICATION_SUGGESTION_CONFIG,
+    "event": _EVENTS_SUGGESTION_CONFIG,
+    "formation": _TRAINING_SUGGESTION_CONFIG,
+    "numerique": _IT_SUGGESTION_CONFIG,
+    "partenariat": _PARTNERSHIPS_SUGGESTION_CONFIG,
+    "projet": _PROJECTS_SUGGESTION_CONFIG,
 }

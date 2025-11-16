@@ -68,7 +68,7 @@ async def is_in_allowed_channel(logger: Logger, interaction: Interaction) -> boo
     if stored_channel_id is not None:
         try:
             maybe_channel: Any = interaction.guild.get_channel(stored_channel_id) or await interaction.guild.fetch_channel(
-                stored_channel_id
+                stored_channel_id,
             )
         except Exception:
             logger.warning(
@@ -100,7 +100,7 @@ async def is_in_allowed_channel(logger: Logger, interaction: Interaction) -> boo
 
     if interaction.channel != commands_channel:
         logger.warning(
-            f"Attempt to use command in a different channel than {_COMMANDS_CHANNEL_NAME}: {interaction.channel.name}"
+            f"Attempt to use command in a different channel than {_COMMANDS_CHANNEL_NAME}: {interaction.channel.name}",
         )
         await interaction.response.send_message(
             f"Vous ne pouvez pas utiliser de commandes en dehors du salon {commands_channel.mention}.",
@@ -133,7 +133,7 @@ async def check_has_role(logger: Logger, interaction: Interaction, roles: set[st
     member_role_names = {role.name for role in interaction.user.roles}
     if not member_role_names & roles:
         logger.warning(
-            f"User {interaction.user} doesn't have any of the roles {', '.join(roles)} in the guild {interaction.guild.id}"
+            f"User {interaction.user} doesn't have any of the roles {', '.join(roles)} in the guild {interaction.guild.id}",
         )
         msg = f"Il est requis d'avoir au moins l'un des rôles suivants pour utiliser cette commande : {', '.join(roles)}."
         await interaction.response.send_message(
@@ -171,11 +171,9 @@ async def _can_dm_user(user: Member) -> bool:
     """
     try:
         await user.send()
-        return True
     except Forbidden:
         return False
-    except HTTPException:
-        return True
+    return True
 
 
 async def send_dm_to_member(
@@ -355,15 +353,15 @@ async def safe_add_roles(
     """
     try:
         await member.add_roles(*roles, reason=reason)
-        return True, None
     except Forbidden:
         logger.exception(f"Forbidden to add roles {roles} to {member}")
         return False, ErrorMessages.ROLE_ADD_FAILED
     except HTTPException:
         logger.exception(f"HTTP error while adding roles {roles} to {member}")
         return False, ErrorMessages.HTTP_ERROR.format(
-            operation=f"l'ajout des rôles {', '.join(role.name for role in roles)} à {format_member_mention(member)}"
+            operation=f"l'ajout des rôles {', '.join(role.name for role in roles)} à {format_member_mention(member)}",
         )
+    return True, None
 
 
 async def safe_remove_roles(
@@ -385,15 +383,15 @@ async def safe_remove_roles(
     """
     try:
         await member.remove_roles(*roles, reason=reason)
-        return True, None
     except Forbidden:
         logger.exception(f"Forbidden to remove roles {roles} from {member}")
         return False, ErrorMessages.ROLE_REMOVE_FAILED
     except HTTPException:
         logger.exception(f"HTTP error while removing roles {roles} from {member}")
         return False, ErrorMessages.HTTP_ERROR.format(
-            operation=f"le retrait des rôles {', '.join(role.name for role in roles)} à {format_member_mention(member)}"
+            operation=f"le retrait des rôles {', '.join(role.name for role in roles)} à {format_member_mention(member)}",
         )
+    return True, None
 
 
 async def safe_create_text_channel(
@@ -424,10 +422,10 @@ async def safe_create_text_channel(
             reason=reason,
             **options,
         )
-        return channel, None
     except HTTPException:
         logger.exception(f"HTTP error while creating text channel {name!r} in category {category}")
         return None, ErrorMessages.CHANNEL_CREATE_FAILED.format(channel_type=f"salon textuel {name!r}")
+    return channel, None
 
 
 async def safe_create_voice_channel(
@@ -458,10 +456,10 @@ async def safe_create_voice_channel(
             reason=reason,
             **options,
         )
-        return channel, None
     except HTTPException:
         logger.exception(f"HTTP error while creating voice channel {name!r} in category {category}")
         return None, ErrorMessages.CHANNEL_CREATE_FAILED.format(channel_type=f"salon vocal {name!r}")
+    return channel, None
 
 
 async def safe_delete_channel(
@@ -482,10 +480,10 @@ async def safe_delete_channel(
     channel_type = "salon textuel" if isinstance(channel, TextChannel) else "salon vocal"
     try:
         await channel.delete(reason=reason)
-        return True, None
     except HTTPException:
         logger.exception(f"HTTP error while deleting channel {channel}")
         return False, ErrorMessages.CHANNEL_DELETE_FAILED.format(channel_type=channel_type)
+    return True, None
 
 
 async def safe_edit_channel(
@@ -508,10 +506,10 @@ async def safe_edit_channel(
     channel_type = "salon textuel" if isinstance(channel, TextChannel) else "salon vocal"
     try:
         await channel.edit(reason=reason, **options)
-        return True, None
     except HTTPException:
         logger.exception(f"HTTP error while editing channel {channel}")
         return False, ErrorMessages.CHANNEL_EDIT_FAILED.format(channel_type=channel_type)
+    return True, None
 
 
 # endregion Safe Discord Operations

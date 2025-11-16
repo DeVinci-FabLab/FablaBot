@@ -120,7 +120,7 @@ class LogManagement(commands.Cog):
 
     @log_group.command(name="export", description="Exporte les logs récents.")
     @app_commands.describe(
-        date="Date des logs à exporter (format : DD/MM/YYYY). Si non spécifié, les logs d'aujourd'hui seront exportés."
+        date="Date des logs à exporter (format : DD/MM/YYYY). Si non spécifié, les logs d'aujourd'hui seront exportés.",
     )
     async def log_export(self, interaction: Interaction, date: str | None = None) -> None:
         """Export recent logs.

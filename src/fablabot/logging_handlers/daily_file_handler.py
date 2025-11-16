@@ -9,6 +9,8 @@ from typing import override
 
 from discord import File
 
+from fablabot.cogs.helpers import PARIS_TZ
+
 LOG_PATH = "logs"
 MAX_LOG_AGE_DAYS = 15
 
@@ -39,7 +41,7 @@ class DailyFileHandler(logging.FileHandler):
         """
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        self.current_date = datetime.now().date()
+        self.current_date = datetime.now(PARIS_TZ).date()
         self.max_age_days = max_age_days
 
         log_file = self.log_dir / f"{self.current_date}.log"
@@ -56,7 +58,7 @@ class DailyFileHandler(logging.FileHandler):
         Args:
             record (logging.LogRecord): The log record to emit.
         """
-        current_date = datetime.now().date()
+        current_date = datetime.now(PARIS_TZ).date()
 
         if current_date != self.current_date:
             self.close()
@@ -89,12 +91,12 @@ class DailyFileHandler(logging.FileHandler):
         if not self.log_dir.exists():
             return
 
-        cutoff_date = datetime.now().date() - timedelta(days=self.max_age_days)
+        cutoff_date = datetime.now(PARIS_TZ).date() - timedelta(days=self.max_age_days)
 
         for log_file in self.log_dir.glob("*.log"):
             try:
                 file_date_str = log_file.stem
-                file_date = datetime.strptime(file_date_str, "%Y-%m-%d").date()
+                file_date = datetime.strptime(file_date_str, "%Y-%m-%d").replace(tzinfo=PARIS_TZ).date()
 
                 if file_date < cutoff_date:
                     log_file.unlink()

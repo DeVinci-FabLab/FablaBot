@@ -33,11 +33,8 @@ def _load_all() -> dict[str, dict[str, Any]]:
     if not isinstance(data, dict):
         logger.warning("Guild configuration file does not contain an object; ignoring contents.")
         return {}
-    result: dict[str, dict[str, Any]] = {}
-    for guild_id, payload in data.items():
-        if isinstance(guild_id, str) and isinstance(payload, dict):
-            result[guild_id] = payload
-    return result
+
+    return {guild_id: payload for guild_id, payload in data.items() if isinstance(payload, dict)}
 
 
 def _save_all(data: dict[str, dict[str, Any]]) -> None:
@@ -70,10 +67,9 @@ def _update_entry(guild_id: int | None, **updates: Any) -> None:
             if field in entry:
                 entry.pop(field)
                 changed = True
-        else:
-            if entry.get(field) != value:
-                entry[field] = value
-                changed = True
+        elif entry.get(field) != value:
+            entry[field] = value
+            changed = True
     if not changed:
         return
     if entry:
