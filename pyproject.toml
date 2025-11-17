@@ -1,6 +1,6 @@
 [project]
 dependencies = [
-  "discord-py==2.5.2",
+  "discord-py>=2.6.4",
   "emoji>=2.15.0",
   "python-dotenv==1.0.0",
   "selenium==4.8.3",
@@ -93,11 +93,12 @@ disable = [
   "R0903", # too-few-public-methods
   "W0212", # protected-access -> Best management with ruff
   "W0511", # fixme
+  "W0611", # unused-import -> Best management with ruff
   "W0613", # unused-argument -> Best management with ruff
+  "W0718",
   "W1113", # keyword-arg-before-vararg -> Best management with ruff
   "W1202", # logging-format-interpolation
   "W1203", # logging-f-string-interpolation
-  "W0718",
 ]
 enable = "all"
 exit-zero = true
