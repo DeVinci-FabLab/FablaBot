@@ -761,9 +761,6 @@ class FormationManagement(commands.Cog):
             )
             return
 
-        with contextlib.suppress(Exception):
-            await msg.publish()
-
         success_reactions = 0
         for fm in fms:
             try:
@@ -797,6 +794,13 @@ class FormationManagement(commands.Cog):
             f"Message publié dans {channel.mention} (ID: `{msg.id}`) avec "
             f"{success_reactions}/{len(fms)} réaction(s) ajoutée(s).",
         )
+
+        await asyncio.sleep(24 * 60 * 60)
+        with contextlib.suppress(Exception):
+            await msg.publish()
+
+        logger.info(f"Guild {interaction.guild.id} published the formations message as announcement.")
+        await interaction.followup.send("Message publié en mode annonce.")
 
     @fm_group.command(name="export", description="Exporter la liste des membres ayant (dé)réagi aux émojis des FMs.")
     @app_commands.describe(
@@ -969,12 +973,15 @@ class FormationManagement(commands.Cog):
             if not fms:
                 continue
 
+            send_contacts: str | None = None
+
             for fm in fms:
                 if fm.notified_at_start:
                     continue
 
-                send_contacts = format_respo_contacts(guild)
                 if not fm.notified_hour_before and notification_window_start <= fm.start_dt <= notification_window_end:
+                    if send_contacts is None:
+                        send_contacts = format_respo_contacts(guild)
                     await notify_trainer_before_formation(
                         guild,
                         fm,
@@ -996,6 +1003,8 @@ class FormationManagement(commands.Cog):
                     continue
 
                 if start_window_start <= fm.start_dt <= start_window_end:
+                    if send_contacts is None:
+                        send_contacts = format_respo_contacts(guild)
                     await notify_trainer_before_formation(
                         guild,
                         fm,
