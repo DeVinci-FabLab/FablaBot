@@ -175,6 +175,8 @@ async def _can_dm_user(user: Member) -> bool:
         await user.send()
     except Forbidden:
         return False
+    except HTTPException:
+        return True
     return True
 
 
