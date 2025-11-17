@@ -29,8 +29,6 @@ DISCORD_TOKEN_FILE = os.environ.get("DISCORD_TOKEN_FILE") or ""
 with open(DISCORD_TOKEN_FILE) as f:
     DISCORD_TOKEN = f.read().strip()
 
-LOG_PATH = "logs"
-
 
 class Fablabot(commands.Bot):
     """Discord bot implementation for the DeVinci Fablab server."""
