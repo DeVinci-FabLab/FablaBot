@@ -18,7 +18,6 @@ from discord.ext import commands, tasks
 
 from fablabot.helpers.constants import PARIS_TZ, ErrorMessages, RoleNames
 from fablabot.helpers.formation import (
-    Emojis,
     format_current_registrations,
     format_respo_contacts,
     notify_participants_before_formation,
@@ -32,6 +31,7 @@ from fablabot.helpers.formation import (
 )
 from fablabot.helpers.utils import check_has_role, is_in_allowed_channel, is_valid_emoji, log_request
 from fablabot.models.formation import FmMessageDraft, Formation, PublishedMessage, ReactionEvent
+from fablabot.ui import fmui
 
 logger = logging.getLogger(__name__)
 
@@ -128,8 +128,8 @@ class FormationManagement(commands.Cog):
         """
         help_message = (
             "**Commandes de gestion des formations :**\n"
-            "- `/fm start <intro> <end> <role>` : Démarrer un nouveau brouillon de formation.\n"
-            "- `/fm edit_text [intro] [end] [role]` : "
+            "- `/fm start <role>` : Démarrer un nouveau brouillon de formation.\n"
+            "- `/fm edit_text [role] [text]` : "
             "Modifier le texte d'introduction et/ou de conclusion du brouillon et le rôle à mentionner.\n"
             "- `/fm add <emoji> <name> <trainer> <date> <hour> <duration> <seats> [description] [excusable]` :"
             " Ajouter une nouvelle formation au brouillon.\n"
@@ -147,128 +147,75 @@ class FormationManagement(commands.Cog):
         await interaction.response.send_message(help_message, ephemeral=not show)
 
     @fm_group.command(name="start", description="Démarrer/écraser un brouillon avec une introduction.")
-    @app_commands.describe(
-        intro="Texte d'introduction affiché en tête du message (utilisez \\n pour un saut de ligne)",
-        end="Texte de fin affiché en bas du message (utilisez \\n pour un saut de ligne)",
-        role="Rôle à mentionner",
-    )
-    async def fm_start(self, interaction: Interaction, intro: str, end: str, role: Role) -> None:
+    @app_commands.describe(role="Rôle à mentionner")
+    async def fm_start(self, interaction: Interaction, role: Role) -> None:
         """Start a new draft with an introduction.
 
         Args:
             interaction (Interaction): The Discord interaction context.
-            intro (str): The introduction text.
-            end (str): The ending text.
             role (Role): The role to mention.
         """
-        log_request(logger, "fm.start", interaction, intro=intro)
+        log_request(logger, "fm.start", interaction, role=role)
         if not await is_in_allowed_channel(logger, interaction):
             return
         if not await check_has_role(logger, interaction, ALLOWED_ROLES):
             return
-        assert interaction.guild is not None
 
-        emoji_set = {emoji for emoji in interaction.guild.emojis if emoji.name == "dvfl"}
-        emoji = emoji_set.pop() if emoji_set else Emojis.LOUDSPEAKER
-        header = f"# [FORMATIONS] {emoji}"
-
-        intro_body = intro.replace("\\n", "\n").strip()
-        end_body = end.replace("\\n", "\n").strip()
-
-        draft = FmMessageDraft(
-            header=header,
-            role_id=role.id,
-            intro=intro_body,
-            fms=[],
-            end=end_body,
-        )
-        self._set_guild_draft(interaction.guild.id, draft)
-
-        content = render_message(
-            draft.header,
-            draft.role_id,
-            draft.intro,
-            draft.fms,
-            draft.end,
-        )
-        logger.info(f"Guild {interaction.guild.id} started a new formations draft.")
-        await interaction.response.send_message(
-            "Brouillon initialisé.\nUtilise **/fm add** pour ajouter des formations. **/fm preview** pour voir le rendu.",
-            embed=Embed(
-                title="Aperçu brouillon — 0 formation",
-                description=f"{content or '_(vide)_'}",
-            ),
-            ephemeral=True,
-        )
+        await interaction.response.send_modal(fmui.StartFmModal(self, role.id))
 
     @fm_group.command(name="edit_text", description="Modifier l'introduction et/ou la conclusion du brouillon.")
     @app_commands.describe(
-        intro="Nouveau texte d'introduction (laisser vide pour conserver)",
-        end="Nouveau texte de conclusion (laisser vide pour conserver)",
         role="Nouveau rôle à mentionner (laisser vide pour conserver)",
+        text="Modifier l'introduction ou la conclusion",
     )
     async def fm_edit_text(
         self,
         interaction: Interaction,
-        intro: str | None = None,
-        end: str | None = None,
         role: Role | None = None,
+        text: bool = False,
     ) -> None:
         """Edit the draft introduction and/or ending.
 
         Args:
             interaction (Interaction): The Discord interaction context.
-            intro (str | None, optional): The new introduction text.
-            end (str | None, optional): The new ending text.
-            role (Role | None, optional): The new role to mention.
+            role (Role | None, optional): The new role to mention. Defaults to None.
+            text (bool, optional): Whether to modify the introduction or conclusion text. Defaults to False.
         """
-        log_request(logger, "fm.edit_text", interaction, intro=intro, end=end, role=role)
+        log_request(logger, "fm.edit_text", interaction, role=role)
         if not await is_in_allowed_channel(logger, interaction):
             return
         if not await check_has_role(logger, interaction, ALLOWED_ROLES):
             return
 
-        if intro is None and end is None and role is None:
+        if role is None and text is False:
             await interaction.response.send_message(
-                "Aucun champ à modifier. Fournis au moins `intro`, `end` ou `role`.",
+                "Aucun champ à modifier. Fournis au moins `text` ou `role`.",
                 ephemeral=True,
             )
             return
 
         assert interaction.guild is not None
-        draft = self._get_guild_draft(interaction.guild.id)
+        draft = self.get_guild_draft(interaction.guild.id)
 
-        current_intro = draft.intro
-        current_end = draft.end
-        current_role_id = draft.role_id
-
-        updated_intro = current_intro if intro is None else intro.strip()
-        updated_end = current_end if end is None else end.strip()
-
-        updated_intro = updated_intro.replace("\\n", "\n")
-        updated_end = updated_end.replace("\\n", "\n")
-
-        updated_role_id = current_role_id
-        role_changed = False
-        if role is not None:
-            updated_role_id = role.id
-            role_changed = current_role_id != updated_role_id
-
-        if updated_intro == current_intro and updated_end == current_end and not role_changed:
-            await interaction.response.send_message(
-                "Aucune modification détectée.",
-                ephemeral=True,
+        if text:
+            await interaction.response.send_modal(
+                fmui.EditTextModal(self, role.id if role else draft.role_id, draft.intro, draft.end),
             )
+            return
+
+        assert role is not None
+        if draft.role_id == role.id:
+            await interaction.response.send_message("Aucune modification détectée.", ephemeral=True)
             return
 
         draft = FmMessageDraft(
             header=draft.header,
-            role_id=updated_role_id,
-            intro=updated_intro,
+            role_id=role.id,
+            intro=draft.intro,
             fms=draft.fms,
-            end=updated_end,
+            end=draft.end,
         )
-        self._set_guild_draft(interaction.guild.id, draft)
+        self.set_guild_draft(interaction.guild.id, draft)
 
         content = render_message(
             draft.header,
@@ -278,12 +225,7 @@ class FormationManagement(commands.Cog):
             draft.end,
         )
 
-        intro_changed = updated_intro != current_intro
-        end_changed = updated_end != current_end
-        logger.info(
-            f"Guild {interaction.guild.id} updated draft intro/end "
-            f"(intro_changed={intro_changed}, end_changed={end_changed}, role_changed={role_changed}).",
-        )
+        logger.info(f"Guild {interaction.guild.id} updated draft role_id to {role.id}.")
 
         await interaction.response.send_message(
             "Brouillon mis à jour.",
@@ -353,7 +295,7 @@ class FormationManagement(commands.Cog):
             return
 
         assert interaction.guild is not None
-        draft = self._get_guild_draft(interaction.guild.id)
+        draft = self.get_guild_draft(interaction.guild.id)
 
         emoji_clean = emoji.strip()
 
@@ -399,7 +341,7 @@ class FormationManagement(commands.Cog):
             fms=fms,
             end=draft.end,
         )
-        self._set_guild_draft(interaction.guild.id, draft)
+        self.set_guild_draft(interaction.guild.id, draft)
 
         preview = render_message(
             draft.header,
@@ -482,7 +424,7 @@ class FormationManagement(commands.Cog):
             return
 
         assert interaction.guild is not None
-        draft = self._get_guild_draft(interaction.guild.id)
+        draft = self.get_guild_draft(interaction.guild.id)
         fms = sorted(draft.fms, key=lambda x: x.start_dt)
 
         if index > len(fms):
@@ -567,7 +509,7 @@ class FormationManagement(commands.Cog):
             fms=fms,
             end=draft.end,
         )
-        self._set_guild_draft(interaction.guild.id, draft)
+        self.set_guild_draft(interaction.guild.id, draft)
 
         preview = render_message(
             draft.header,
@@ -608,7 +550,7 @@ class FormationManagement(commands.Cog):
             return
 
         assert interaction.guild is not None
-        draft = self._get_guild_draft(interaction.guild.id)
+        draft = self.get_guild_draft(interaction.guild.id)
         fms = sorted(draft.fms, key=lambda x: x.start_dt)
 
         if index > len(fms):
@@ -625,7 +567,7 @@ class FormationManagement(commands.Cog):
             fms=fms,
             end=draft.end,
         )
-        self._set_guild_draft(interaction.guild.id, draft)
+        self.set_guild_draft(interaction.guild.id, draft)
 
         preview = render_message(
             draft.header,
@@ -658,7 +600,7 @@ class FormationManagement(commands.Cog):
             return
 
         assert interaction.guild is not None
-        draft = self._get_guild_draft(interaction.guild.id)
+        draft = self.get_guild_draft(interaction.guild.id)
 
         draft = FmMessageDraft(
             header=draft.header,
@@ -667,7 +609,7 @@ class FormationManagement(commands.Cog):
             fms=[],
             end=draft.end,
         )
-        self._set_guild_draft(interaction.guild.id, draft)
+        self.set_guild_draft(interaction.guild.id, draft)
 
         content = render_message(
             draft.header,
@@ -702,7 +644,7 @@ class FormationManagement(commands.Cog):
 
         await interaction.response.defer(thinking=True)
         assert interaction.guild is not None
-        draft = self._get_guild_draft(interaction.guild.id)
+        draft = self.get_guild_draft(interaction.guild.id)
         fms = sorted(draft.fms, key=lambda x: x.start_dt)
 
         content = render_message(
@@ -734,7 +676,7 @@ class FormationManagement(commands.Cog):
             return
 
         assert interaction.guild is not None
-        draft = self._get_guild_draft(interaction.guild.id)
+        draft = self.get_guild_draft(interaction.guild.id)
         if not draft.fms:
             logger.warning(f"Guild {interaction.guild.id} tried to publish empty formations draft.")
             await interaction.response.send_message(ErrorMessages.DRAFT_EMPTY, ephemeral=True)
@@ -1113,14 +1055,14 @@ class FormationManagement(commands.Cog):
         self.state[str(guild_id)] = payload
         self._save_state(self.state)
 
-    def _get_guild_draft(self, guild_id: int) -> FmMessageDraft:
+    def get_guild_draft(self, guild_id: int) -> FmMessageDraft:
         """Get the draft state for a specific guild.
 
         Args:
             guild_id (int): The ID of the guild.
 
         Returns:
-            Draft: The draft of the guild.
+            FmMessageDraft: The draft of the guild.
         """
         guild_state = self._get_guild_state(guild_id)
         if "draft" not in guild_state:
@@ -1130,12 +1072,12 @@ class FormationManagement(commands.Cog):
         draft_dict = guild_state["draft"]
         return FmMessageDraft.from_dict(draft_dict)
 
-    def _set_guild_draft(self, guild_id: int, draft: FmMessageDraft) -> None:
+    def set_guild_draft(self, guild_id: int, draft: FmMessageDraft) -> None:
         """Set the draft for a specific guild.
 
         Args:
             guild_id (int): The ID of the guild.
-            draft (Draft): The draft of the guild.
+            draft (FmMessageDraft): The draft of the guild.
         """
         guild_state = self._get_guild_state(guild_id)
         guild_state["draft"] = draft.to_dict()

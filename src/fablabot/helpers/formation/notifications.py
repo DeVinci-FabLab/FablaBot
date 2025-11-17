@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from fablabot.models.formation import Formation
 
 logger = logging.getLogger(__name__)
-# TODO: trop d'appel APIs discord ici, envisager un cache
 
 
 async def send_registration_dm(
