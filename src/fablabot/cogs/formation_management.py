@@ -47,10 +47,10 @@ class FormationManagement(commands.Cog):
 
     Commands:
         - /fm help: Display help for formation management commands.
-        - /fm start: Start/overwrite a draft with an introduction, ending and role to mention.
-        - /fm edit_text: Edit the draft introduction and/or ending.
-        - /fm add: Add a new formation to the draft.
-        - /fm edit: Edit an existing formation in the draft.
+        - /fm start: Start/overwrite a draft with an introduction, ending and role to mention (uses modal).
+        - /fm edit_text: Edit the draft introduction and/or ending (uses modal if text=True).
+        - /fm add: Add a new formation to the draft (uses modal for text inputs).
+        - /fm edit: Edit an existing formation in the draft (uses modal for text inputs).
         - /fm remove: Remove a formation from the draft.
         - /fm clear: Clear the draft.
         - /fm preview: Preview the draft.
@@ -128,11 +128,11 @@ class FormationManagement(commands.Cog):
         """
         help_message = (
             "**Commandes de gestion des formations :**\n"
-            "- `/fm start <role>` : Démarrer un nouveau brouillon de formation.\n"
+            "- `/fm start <role>` : Démarrer un nouveau brouillon de formation (modal pour intro/conclusion).\n"
             "- `/fm edit_text [role] [text]` : "
             "Modifier le texte d'introduction et/ou de conclusion du brouillon et le rôle à mentionner.\n"
-            "- `/fm add <emoji> <name> <trainer> <date> <hour> <duration> <seats> [description] [excusable]` :"
-            " Ajouter une nouvelle formation au brouillon.\n"
+            "- `/fm add <emoji> <trainer> <date> <hour> <duration> <seats>` : "
+            "Ajouter une nouvelle formation au brouillon (modal pour nom/description/excusable).\n"
             "- `/fm edit <index> [emoji] [name] [trainer] [date] [hour] [duration] [seats] [description] [excusable]` :"
             " Modifier une formation existante dans le brouillon.\n"
             "- `/fm remove <index>` : Supprimer une formation du brouillon.\n"
@@ -239,40 +239,34 @@ class FormationManagement(commands.Cog):
     @fm_group.command(name="add", description="Ajouter une formation au brouillon (triée automatiquement par date/heure).")
     @app_commands.describe(
         emoji="Émoji unique pour cette FM (ex: 🔧)",
-        name="Nom de la formation",
         trainer="Formateur·ice",
         date="Date au format DD/MM/YYYY",
         hour="Heure au format HH:MM (24h)",
-        duration="Durée en texte, ce sera affiché comme tel",
+        duration="Durée en texte, ce sera affiché tel quel",
         seats="Nombre de places",
-        description="Brève description",
         excusable="Absences excusables ?",
     )
     async def fm_add(
         self,
         interaction: Interaction,
         emoji: str,
-        name: str,
         trainer: Member,
         date: str,
         hour: str,
         duration: str,
         seats: app_commands.Range[int, 1, 500],
-        description: str = "",
         excusable: bool = True,
     ) -> None:
         """Add a formation to the draft (automatically sorted by date/time).
 
         Args:
             interaction (Interaction): The Discord interaction context.
-            emoji (str): The emoji for the formation.
-            name (str): The name of the formation.
+            emoji (str): Unique emoji for this formation (e.g., 🔧).
             trainer (Member): The trainer.
-            date (str): The date of the formation.
-            hour (str): The hour of the formation.
-            duration (str): The duration of the formation in text format.
-            seats (app_commands.Range[int, 1, 500]): The number of seats for the formation.
-            description (str, optional): The description of the formation. Defaults to "".
+            date (str): Date in DD/MM/YYYY format.
+            hour (str): Time in HH:MM (24h) format.
+            duration (str): Duration as text, displayed as is.
+            seats (int): Number of seats.
             excusable (bool, optional): Whether absences are excusable for this formation. Defaults to True.
         """
         log_request(
@@ -280,14 +274,11 @@ class FormationManagement(commands.Cog):
             "fm.add",
             interaction,
             emoji=emoji,
-            name=name,
-            description=description,
             trainer=trainer,
             date=date,
             hour=hour,
             duration=duration,
             seats=seats,
-            excusable=excusable,
         )
         if not await is_in_allowed_channel(logger, interaction):
             return
@@ -319,46 +310,8 @@ class FormationManagement(commands.Cog):
             )
             return
 
-        fm = Formation(
-            emoji=emoji_clean,
-            name=name.strip(),
-            trainer_mention=trainer.mention,
-            start_iso=start_dt.isoformat(),
-            duration=duration.strip(),
-            seats=int(seats),
-            description=description.strip(),
-            excusable=excusable,
-        )
-
-        fms = list(draft.fms)
-        fms.append(fm)
-        fms.sort(key=lambda x: x.start_dt)
-
-        draft = FmMessageDraft(
-            header=draft.header,
-            role_id=draft.role_id,
-            intro=draft.intro,
-            fms=fms,
-            end=draft.end,
-        )
-        self.set_guild_draft(interaction.guild.id, draft)
-
-        preview = render_message(
-            draft.header,
-            draft.role_id,
-            draft.intro,
-            draft.fms,
-            draft.end,
-        )
-        logger.info(f"Guild {interaction.guild.id} added formation {fm.name!r} ({fm.start_iso}) to draft.")
-        await interaction.response.send_message(
-            "Formation ajoutée & brouillon mis à jour (trié). "
-            "Utilise **/fm add** pour ajouter d'autres formations. **/fm preview** pour voir le rendu.",
-            embed=Embed(
-                title=f"Aperçu brouillon — {len(fms)} formation(s)",
-                description=f"{preview or '_(vide)_'}",
-            ),
-            ephemeral=True,
+        await interaction.response.send_modal(
+            fmui.AddFmModal(self, emoji_clean, trainer.mention, start_dt.isoformat(), duration.strip(), int(seats), excusable),
         )
 
     @fm_group.command(name="edit", description="Modifier une formation existante (champs optionnels).")
