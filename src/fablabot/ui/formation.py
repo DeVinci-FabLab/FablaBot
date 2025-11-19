@@ -6,6 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from discord import ButtonStyle, Embed, Interaction, TextStyle, ui
+from emoji import emojize
 
 from fablabot.helpers.constants import PARIS_TZ, ErrorMessages
 from fablabot.helpers.formation import Emojis, parse_date_time, render_message
@@ -474,7 +475,7 @@ class EditFormationView(ui.View):
 
         edit_emoji_button = self.find_item(EDIT_EMOJI_BUTTON_ID)
         assert isinstance(edit_emoji_button, ui.Button)
-        edit_emoji_button.label = f"Émoji: {self.current_emoji}"
+        edit_emoji_button.label = f"Modifier émoji : {self.current_emoji}"
 
         if self.current_excusable:
             make_excusable_button = self.find_item(MAKE_EXCUSABLE_BUTTON_ID)
@@ -493,7 +494,27 @@ class EditFormationView(ui.View):
             interaction (Interaction): The interaction that triggered the button click.
             button (ui.Button): The button that was clicked.
         """
-        # TODO: avec view textinput
+        modal = ui.Modal(title="Modifier l'émoji")
+        emoji_input: ui.TextInput[Any] = ui.TextInput(
+            label="Émoji",
+            style=TextStyle.short,
+            placeholder="ex: 🔧",
+            default=self.current_emoji,
+            required=True,
+            max_length=20,
+        )
+        modal.add_item(emoji_input)
+
+        async def on_submit_emoji(interaction_modal: Interaction) -> None:
+            self.current_emoji = emojize(emoji_input.value.strip(), language="alias")
+            button.label = f"Modifier émoji : {self.current_emoji}"
+            await interaction_modal.response.edit_message(
+                content=f"Modification: {self.current_emoji} {self.current_name}",
+                view=self,
+            )
+
+        modal.on_submit = on_submit_emoji  # type: ignore[method-assign]
+        await interaction.response.send_modal(modal)
 
     @ui.button(label="Modifier nom & description", style=ButtonStyle.secondary, row=0)
     async def edit_name_desc_button(self, interaction: Interaction, _button: ui.Button) -> None:
