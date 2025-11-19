@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, cast
 
 from discord import ButtonStyle, Embed, Interaction, TextStyle, ui
 from emoji import emojize
@@ -14,6 +14,8 @@ from fablabot.helpers.utils import is_valid_emoji, log_request
 from fablabot.models.formation import FmMessageDraft, Formation
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from fablabot.cogs import FormationManagement
 
 logger = logging.getLogger(__name__)
@@ -22,6 +24,9 @@ EDIT_EMOJI_BUTTON_ID = 13
 EDIT_TRAINER_BUTTON_ID = 14
 MAKE_EXCUSABLE_BUTTON_ID = 15
 MAKE_NON_EXCUSABLE_BUTTON_ID = 16
+MAX_FORMATION_BUTTONS = 25
+MIN_SEATS = 1
+MAX_SEATS = 500
 
 
 class StartFmModal(ui.Modal, title="Commencer une annonce de formation"):
@@ -47,16 +52,14 @@ class StartFmModal(ui.Modal, title="Commencer une annonce de formation"):
         max_length=200,
     )
 
-    def __init__(self, cog: FormationManagement, role_id: int, *args, **kwargs) -> None:
+    def __init__(self, cog: FormationManagement, role_id: int) -> None:
         """Initialize the StartFmModal.
 
         Args:
             cog (FormationManagement): FormationManagement cog instance.
             role_id (int): Role ID to mention in the formation message.
-            *args: Additional positional arguments.
-            **kwargs: Additional keyword arguments.
         """
-        super().__init__(*args, **kwargs)
+        super().__init__()
         self.cog = cog
         self.role_id = role_id
 
@@ -138,8 +141,6 @@ class EditTextModal(ui.Modal, title="Modifier le texte de l'annonce de formation
         role_id: int,
         intro: str,
         end: str,
-        *args,
-        **kwargs,
     ) -> None:
         """Initialize the StartFmModal.
 
@@ -148,10 +149,8 @@ class EditTextModal(ui.Modal, title="Modifier le texte de l'annonce de formation
             role_id (int): Role ID to mention in the formation message.
             intro (str): Old introduction text.
             end (str): Old conclusion text.
-            *args: Additional positional arguments.
-            **kwargs: Additional keyword arguments.
         """
-        super().__init__(*args, **kwargs)
+        super().__init__()
         self.cog = cog
         self.role_id = role_id
         self.intro_input.default = intro
@@ -252,8 +251,6 @@ class AddFmModal(ui.Modal, title="Ajouter une formation"):
         duration: str,
         seats: int,
         excusable: bool,
-        *args,
-        **kwargs,
     ) -> None:
         """Initialize the AddFmModal.
 
@@ -265,10 +262,8 @@ class AddFmModal(ui.Modal, title="Ajouter une formation"):
             duration (str): The duration of the formation.
             seats (int): The number of seats available.
             excusable (bool): Whether absences are excusable for this formation.
-            *args: Additional positional arguments.
-            **kwargs: Additional keyword arguments.
         """
-        super().__init__(*args, **kwargs)
+        super().__init__()
         self.cog = cog
         self.emoji = emoji
         self.trainer_mention = trainer_mention
@@ -332,32 +327,25 @@ class AddFmModal(ui.Modal, title="Ajouter une formation"):
         await interaction.response.send_message(
             "Formation ajoutée & brouillon mis à jour (trié). "
             "Utilise **/fm add** pour ajouter d'autres formations. **/fm preview** pour voir le rendu.",
-            embed=Embed(
-                title=f"Aperçu brouillon — {len(fms)} formation(s)",
-                description=f"{preview or '_(vide)_'}",
-            ),
+            embed=Embed(title=f"Aperçu brouillon — {len(fms)} formation(s)", description=preview or "_(vide)_"),
             ephemeral=True,
         )
 
 
-class SelectFormationButton(ui.Button):
+class SelectFormationButton(ui.Button["SelectFormationView"]):
     """Button to select a formation to edit."""
 
-    def __init__(self, formation_index: int, formation: Formation, *args, **kwargs) -> None:
+    def __init__(self, formation_index: int, formation: Formation) -> None:
         """Initialize the SelectFormationButton.
 
         Args:
             formation_index (int): The index of the formation (1-based).
             formation (Formation): The formation object.
-            *args: Additional positional arguments.
-            **kwargs: Additional keyword arguments.
         """
         super().__init__(
             label=f"{formation.emoji} {formation.name}",
             style=ButtonStyle.primary,
             custom_id=f"select_fm_{formation_index}",
-            *args,
-            **kwargs,
         )
         self.formation_index = formation_index
         self.formation = formation
@@ -368,7 +356,11 @@ class SelectFormationButton(ui.Button):
         Args:
             interaction (Interaction): The interaction that triggered the button click.
         """
-        view: SelectFormationView = self.view  # type: ignore[assignment]
+        if self.view is None:
+            await interaction.response.send_message("Cette vue n'est plus valide. Merci de réessayer.", ephemeral=True)
+            return
+
+        view = cast("SelectFormationView", self.view)
         await interaction.response.send_message(
             f"Sélection: {self.formation.emoji} {self.formation.name}",
             view=EditFormationView(view.cog, self.formation_index, self.formation),
@@ -379,21 +371,58 @@ class SelectFormationButton(ui.Button):
 class SelectFormationView(ui.View):
     """View to select which formation to edit."""
 
-    def __init__(self, cog: FormationManagement, formations: list[Formation], *args, **kwargs) -> None:
+    def __init__(self, cog: FormationManagement, formations: Sequence[Formation]) -> None:
         """Initialize the SelectFormationView.
 
         Args:
             cog (FormationManagement): FormationManagement cog instance.
             formations (list[Formation]): List of formations to choose from.
-            *args: Additional positional arguments.
-            **kwargs: Additional keyword arguments.
         """
-        super().__init__(*args, **kwargs)
+        super().__init__()
         self.cog = cog
 
-        for i, fm in enumerate(formations[:25], start=1):
-            button = SelectFormationButton(i, fm)
-            self.add_item(button)
+        for idx, fm in enumerate(formations[:MAX_FORMATION_BUTTONS], start=1):
+            self.add_item(SelectFormationButton(idx, fm))
+
+
+class EditEmojiModal(ui.Modal, title="Modifier l'émoji"):
+    """Modal to edit formation emoji."""
+
+    emoji_input: ui.TextInput[EditEmojiModal] = ui.TextInput(
+        label="Émoji",
+        style=TextStyle.short,
+        placeholder="ex: 🔧",
+        required=True,
+        max_length=30,
+    )
+
+    def __init__(self, view: EditFormationView) -> None:
+        super().__init__()
+        self.view_ref = view
+        self.emoji_input.default = view.current_emoji
+
+    async def on_submit(self, interaction: Interaction) -> None:
+        assert interaction.guild is not None
+        candidate_raw = self.emoji_input.value.strip()
+        draft = self.view_ref.cog.get_guild_draft(interaction.guild.id)
+        fms = sorted(draft.fms, key=lambda x: x.start_dt)
+
+        candidate = emojize(candidate_raw, language="alias")
+        if not is_valid_emoji(candidate):
+            logger.warning(f"Guild {interaction.guild.id} tried to edit formation with invalid emoji: {candidate!r}.")
+            await interaction.response.send_message(ErrorMessages.INVALID_EMOJI, ephemeral=True)
+            return
+
+        if any(i != self.view_ref.formation_index - 1 and fm.emoji == candidate for i, fm in enumerate(fms)):
+            logger.warning(f"Guild {interaction.guild.id} tried to reuse emoji {candidate!r} while editing formation.")
+            await interaction.response.send_message(ErrorMessages.EMOJI_ALREADY_USED, ephemeral=True)
+            return
+
+        self.view_ref.current_emoji = candidate
+        edit_emoji_button = self.view_ref.get_button(EDIT_EMOJI_BUTTON_ID)
+        edit_emoji_button.label = f"Modifier émoji : {self.view_ref.current_emoji}"
+
+        await self.view_ref.refresh_main_message(interaction)
 
 
 class EditNameDescriptionModal(ui.Modal, title="Modifier nom et description"):
@@ -404,14 +433,14 @@ class EditNameDescriptionModal(ui.Modal, title="Modifier nom et description"):
         description_input (ui.TextInput): Text input for the description.
     """
 
-    name_input: ui.TextInput = ui.TextInput(
+    name_input: ui.TextInput[EditNameDescriptionModal] = ui.TextInput(
         label="Nom de la formation",
         style=TextStyle.short,
         placeholder="ex: Formation Arduino",
         required=True,
         max_length=100,
     )
-    description_input: ui.TextInput = ui.TextInput(
+    description_input: ui.TextInput[EditNameDescriptionModal] = ui.TextInput(
         label="Description",
         style=TextStyle.paragraph,
         placeholder="Description de la formation...",
@@ -419,15 +448,13 @@ class EditNameDescriptionModal(ui.Modal, title="Modifier nom et description"):
         max_length=500,
     )
 
-    def __init__(self, view: EditFormationView, *args, **kwargs) -> None:
+    def __init__(self, view: EditFormationView) -> None:
         """Initialize the EditNameDescriptionModal.
 
         Args:
             view (EditFormationView): The parent view.
-            *args: Additional positional arguments.
-            **kwargs: Additional keyword arguments.
         """
-        super().__init__(*args, **kwargs)
+        super().__init__()
         self.view_ref = view
 
         self.name_input.default = view.current_name
@@ -442,24 +469,19 @@ class EditNameDescriptionModal(ui.Modal, title="Modifier nom et description"):
         self.view_ref.current_name = self.name_input.value.strip()
         self.view_ref.current_description = self.description_input.value.strip()
 
-        await interaction.response.edit_message(
-            content=f"Modification: {self.view_ref.current_emoji} {self.view_ref.current_name}",
-            view=self.view_ref,
-        )
+        await self.view_ref.refresh_main_message(interaction)
 
 
 class SelectTrainerView(ui.View):
     """View to select a trainer using UserSelect."""
 
-    def __init__(self, edit_formation_view: EditFormationView, *args, **kwargs) -> None:
+    def __init__(self, edit_formation_view: EditFormationView) -> None:
         """Initialize the SelectTrainerView.
 
         Args:
             edit_formation_view (EditFormationView): The parent EditFormationView.
-            *args: Additional positional arguments.
-            **kwargs: Additional keyword arguments.
         """
-        super().__init__(*args, **kwargs)
+        super().__init__()
         self.edit_formation_view = edit_formation_view
 
     @ui.select(cls=ui.UserSelect, placeholder="Sélectionne lae formateur·ice", min_values=1, max_values=1)
@@ -473,30 +495,103 @@ class SelectTrainerView(ui.View):
         selected_user = select.values[0]
         self.edit_formation_view.current_trainer_mention = selected_user.mention
 
-        edit_trainer_button = self.edit_formation_view.find_item(EDIT_TRAINER_BUTTON_ID)
-        assert isinstance(edit_trainer_button, ui.Button)
+        edit_trainer_button = self.edit_formation_view.get_button(EDIT_TRAINER_BUTTON_ID)
         edit_trainer_button.label = f"Modifier lae formateur·ice : {selected_user.display_name}"
 
-        await interaction.response.edit_message(
-            content=f"Modification: {self.edit_formation_view.current_emoji} {self.edit_formation_view.current_name}",
-            view=self.edit_formation_view,
-        )
+        await self.edit_formation_view.refresh_main_message(interaction)
+
+
+class EditDatetimeModal(ui.Modal, title="Modifier date et heure"):
+    """Modal to edit formation datetime."""
+
+    datetime_input: ui.TextInput[EditDatetimeModal] = ui.TextInput(
+        label="Date et heure (DD/MM/YYYY HH:MM)",
+        style=TextStyle.short,
+        placeholder="ex: 15/12/2024 18:30",
+        required=True,
+        max_length=16,
+    )
+
+    def __init__(self, view: EditFormationView) -> None:
+        super().__init__()
+        self.view_ref = view
+        self.datetime_input.default = f"{view.current_start_dt:%d/%m/%Y %H:%M}"
+
+    async def on_submit(self, interaction: Interaction) -> None:
+        assert interaction.guild is not None
+        candidate = self.datetime_input.value.strip()
+
+        try:
+            date_str, hour_str = candidate.split()
+            start_dt = parse_date_time(date_str, hour_str, PARIS_TZ)
+        except Exception:
+            logger.warning(f"Guild {interaction.guild.id} provided invalid datetime format: {candidate!r}.")
+            await interaction.response.send_message(ErrorMessages.INVALID_DATETIME, ephemeral=True)
+            return
+
+        self.view_ref.current_start_dt = start_dt
+        await self.view_ref.refresh_main_message(interaction)
+
+
+class EditDurationSeatsModal(ui.Modal, title="Modifier durée et places"):
+    """Modal to edit formation duration and seats."""
+
+    duration_seats_input: ui.TextInput[EditDurationSeatsModal] = ui.TextInput(
+        label="Durée - Places",
+        style=TextStyle.short,
+        placeholder="ex: 2h - 10",
+        required=True,
+        max_length=20,
+    )
+
+    def __init__(self, view: EditFormationView) -> None:
+        super().__init__()
+        self.view_ref = view
+        self.duration_seats_input.default = f"{view.current_duration} - {view.current_seats}"
+
+    async def on_submit(self, interaction: Interaction) -> None:
+        assert interaction.guild is not None
+        candidate = self.duration_seats_input.value.strip()
+        parts = [part.strip() for part in candidate.split("-")]
+
+        if len(parts) != 2:
+            logger.warning(f"Guild {interaction.guild.id} provided invalid duration/seats format: {candidate!r}.")
+            await interaction.response.send_message(ErrorMessages.INVALID_DURATION_SEATS_FORMAT, ephemeral=True)
+            return
+
+        new_duration, seats_str = parts
+        if not new_duration:
+            logger.warning(f"Guild {interaction.guild.id} provided an empty duration while editing a formation.")
+            await interaction.response.send_message(ErrorMessages.INVALID_DURATION, ephemeral=True)
+            return
+
+        try:
+            new_seats = int(seats_str)
+            if not (MIN_SEATS <= new_seats <= MAX_SEATS):
+                msg = "Seats number out of valid range."
+                raise ValueError(msg)
+        except ValueError:
+            logger.warning(f"Guild {interaction.guild.id} provided out-of-bounds seats number: {seats_str!r}.")
+            await interaction.response.send_message(ErrorMessages.INVALID_SEATS, ephemeral=True)
+            return
+
+        self.view_ref.current_duration = new_duration
+        self.view_ref.current_seats = new_seats
+        await self.view_ref.refresh_main_message(interaction)
 
 
 class EditFormationView(ui.View):
-    """View to edit a formation with selects and an optional modal for name/description."""
+    """View to edit a formation with selects and modals."""
 
-    def __init__(self, cog: FormationManagement, formation_index: int, original: Formation, *args, **kwargs) -> None:
+    def __init__(self, cog: FormationManagement, formation_index: int, original: Formation) -> None:
         """Initialize the EditFormationView.
 
         Args:
             cog (FormationManagement): FormationManagement cog instance.
             formation_index (int): The index of the formation (1-based).
             original (Formation): The original formation being edited.
-            *args: Additional positional arguments.
-            **kwargs: Additional keyword arguments.
         """
-        super().__init__(*args, **kwargs)
+        super().__init__()
         self.cog = cog
         self.formation_index = formation_index
 
@@ -509,61 +604,25 @@ class EditFormationView(ui.View):
         self.current_seats = original.seats
         self.current_excusable = original.excusable
 
-        edit_emoji_button = self.find_item(EDIT_EMOJI_BUTTON_ID)
-        assert isinstance(edit_emoji_button, ui.Button)
+        edit_emoji_button = self.get_button(EDIT_EMOJI_BUTTON_ID)
         edit_emoji_button.label = f"Modifier émoji : {self.current_emoji}"
 
         if self.current_excusable:
-            make_excusable_button = self.find_item(MAKE_EXCUSABLE_BUTTON_ID)
-            assert isinstance(make_excusable_button, ui.Button)
-            make_excusable_button.disabled = True
+            self.get_button(MAKE_EXCUSABLE_BUTTON_ID).disabled = True
         else:
-            make_non_excusable_button = self.find_item(MAKE_NON_EXCUSABLE_BUTTON_ID)
-            assert isinstance(make_non_excusable_button, ui.Button)
-            make_non_excusable_button.disabled = True
+            self.get_button(MAKE_NON_EXCUSABLE_BUTTON_ID).disabled = True
+
+    # region ====== Button callbacks ======
 
     @ui.button(label="Modifier émoji", style=ButtonStyle.secondary, row=0, id=EDIT_EMOJI_BUTTON_ID)
-    async def edit_emoji_button(self, interaction: Interaction, button: ui.Button) -> None:
+    async def edit_emoji_button(self, interaction: Interaction, _button: ui.Button) -> None:
         """Button to edit emoji.
 
         Args:
             interaction (Interaction): The interaction that triggered the button click.
-            button (ui.Button): The button that was clicked.
+            _button (ui.Button): The button that was clicked.
         """
-        modal = ui.Modal(title="Modifier l'émoji")
-        emoji_input: ui.TextInput[Any] = ui.TextInput(
-            label="Émoji",
-            style=TextStyle.short,
-            placeholder="ex: 🔧",
-            default=self.current_emoji,
-            required=True,
-            max_length=30,
-        )
-        modal.add_item(emoji_input)
-
-        async def on_submit_emoji(interaction_modal: Interaction) -> None:
-            assert interaction_modal.guild is not None
-            draft = self.cog.get_guild_draft(interaction_modal.guild.id)
-            fms = sorted(draft.fms, key=lambda x: x.start_dt)
-
-            candidate = emojize(emoji_input.value.strip(), language="alias")
-            if not is_valid_emoji(candidate):
-                logger.warning(f"Guild {interaction_modal.guild.id} tried to edit formation with invalid emoji: {candidate!r}.")
-                await interaction_modal.response.send_message(ErrorMessages.INVALID_EMOJI, ephemeral=True)
-                return
-            if any(i != self.formation_index - 1 and fm.emoji == candidate for i, fm in enumerate(fms)):
-                logger.warning(f"Guild {interaction_modal.guild.id} tried to reuse emoji {candidate} while editing formation.")
-                await interaction_modal.response.send_message(ErrorMessages.EMOJI_ALREADY_USED, ephemeral=True)
-                return
-            self.current_emoji = candidate
-            button.label = f"Modifier émoji : {self.current_emoji}"
-            await interaction_modal.response.edit_message(
-                content=f"Modification: {self.current_emoji} {self.current_name}",
-                view=self,
-            )
-
-        modal.on_submit = on_submit_emoji  # type: ignore[method-assign]
-        await interaction.response.send_modal(modal)
+        await interaction.response.send_modal(EditEmojiModal(self))
 
     @ui.button(label="Modifier nom & description", style=ButtonStyle.secondary, row=0)
     async def edit_name_desc_button(self, interaction: Interaction, _button: ui.Button) -> None:
@@ -591,41 +650,9 @@ class EditFormationView(ui.View):
 
         Args:
             interaction (Interaction): The interaction that triggered the button click.
-            button (ui.Button): The button that was clicked.
+            _button (ui.Button): The button that was clicked.
         """
-        modal = ui.Modal(title="Modifier date et heure")
-        datetime_input: ui.TextInput[Any] = ui.TextInput(
-            label="Date et heure (DD/MM/YYYY HH:MM)",
-            style=TextStyle.short,
-            placeholder="ex: 15/12/2024 18:30",
-            default=f"{self.current_start_dt.strftime('%d/%m/%Y')} {self.current_start_dt.strftime('%H:%M')}",
-            required=True,
-            max_length=16,
-        )
-        modal.add_item(datetime_input)
-
-        async def on_submit_datetime(interaction_modal: Interaction) -> None:
-            assert interaction_modal.guild is not None
-            candidate = datetime_input.value.strip()
-            try:
-                datetime_parts = candidate.split()
-                if len(datetime_parts) != 2:
-                    logger.warning(f"Guild {interaction_modal.guild.id} provided invalid datetime format: {candidate!r}.")
-                    await interaction_modal.response.send_message(ErrorMessages.INVALID_DATETIME, ephemeral=True)
-                    return
-                date_str, hour_str = datetime_parts
-                start_dt = parse_date_time(date_str, hour_str, PARIS_TZ)
-                self.current_start_dt = start_dt
-            except Exception:
-                await interaction_modal.response.send_message(ErrorMessages.INVALID_DATETIME, ephemeral=True)
-                return
-            await interaction_modal.response.edit_message(
-                content=f"Modification: {self.current_emoji} {self.current_name}",
-                view=self,
-            )
-
-        modal.on_submit = on_submit_datetime  # type: ignore[method-assign]
-        await interaction.response.send_modal(modal)
+        await interaction.response.send_modal(EditDatetimeModal(self))
 
     @ui.button(label="Durée & Places", style=ButtonStyle.secondary, row=2)
     async def edit_duration_seats_button(self, interaction: Interaction, _button: ui.Button) -> None:
@@ -633,53 +660,9 @@ class EditFormationView(ui.View):
 
         Args:
             interaction (Interaction): The interaction that triggered the button click.
-            button (ui.Button): The button that was clicked.
+            _button (ui.Button): The button that was clicked.
         """
-        modal = ui.Modal(title="Modifier durée et places")
-        duration_seats_input: ui.TextInput[Any] = ui.TextInput(
-            label="Durée - Places",
-            style=TextStyle.short,
-            placeholder="ex: 2h - 10",
-            default=f"{self.current_duration} - {self.current_seats}",
-            required=True,
-            max_length=20,
-        )
-        modal.add_item(duration_seats_input)
-
-        async def on_submit_duration_seats(interaction_modal: Interaction) -> None:
-            assert interaction_modal.guild is not None
-            candidate = duration_seats_input.value.strip()
-            duration_seats_parts = candidate.split("-")
-            if len(duration_seats_parts) != 2:
-                logger.warning(f"Guild {interaction_modal.guild.id} provided invalid duration/seats format: {candidate!r}.")
-                await interaction_modal.response.send_message(ErrorMessages.INVALID_DURATION_SEATS_FORMAT, ephemeral=True)
-                return
-            new_duration = duration_seats_parts[0].strip()
-            if not new_duration:
-                logger.warning(f"Guild {interaction_modal.guild.id} provided an empty duration while editing a formation.")
-                await interaction_modal.response.send_message(ErrorMessages.INVALID_DURATION, ephemeral=True)
-                return
-            try:
-                new_seats = int(duration_seats_parts[1].strip())
-                if new_seats < 1 or new_seats > 500:
-                    msg = "Seats number out of valid range."
-                    raise ValueError(msg)
-            except ValueError:
-                logger.warning(
-                    f"Guild {interaction_modal.guild.id} provided out-of-bounds "
-                    f"seats number: {duration_seats_parts[1].strip()!r}.",
-                )
-                await interaction_modal.response.send_message(ErrorMessages.INVALID_SEATS, ephemeral=True)
-                return
-            self.current_duration = new_duration
-            self.current_seats = new_seats
-            await interaction_modal.response.edit_message(
-                content=f"Modification: {self.current_emoji} {self.current_name}",
-                view=self,
-            )
-
-        modal.on_submit = on_submit_duration_seats  # type: ignore[method-assign]
-        await interaction.response.send_modal(modal)
+        await interaction.response.send_modal(EditDurationSeatsModal(self))
 
     @ui.button(label="Rendre la formation excusable", style=ButtonStyle.secondary, row=3, id=MAKE_EXCUSABLE_BUTTON_ID)
     async def make_excusable_button(self, interaction: Interaction, button: ui.Button) -> None:
@@ -690,14 +673,9 @@ class EditFormationView(ui.View):
             button (ui.Button): The button that was clicked.
         """
         self.current_excusable = True
-        make_non_excusable_button = self.find_item(MAKE_NON_EXCUSABLE_BUTTON_ID)
-        assert isinstance(make_non_excusable_button, ui.Button)
-        make_non_excusable_button.disabled = False
+        self.get_button(MAKE_NON_EXCUSABLE_BUTTON_ID).disabled = False
         button.disabled = True
-        await interaction.response.edit_message(
-            content=f"Modification: {self.current_emoji} {self.current_name}",
-            view=self,
-        )
+        await self.refresh_main_message(interaction)
 
     @ui.button(label="Rendre la formation non excusable", style=ButtonStyle.secondary, row=3, id=MAKE_NON_EXCUSABLE_BUTTON_ID)
     async def make_non_excusable_button(self, interaction: Interaction, button: ui.Button) -> None:
@@ -708,14 +686,9 @@ class EditFormationView(ui.View):
             button (ui.Button): The button that was clicked.
         """
         self.current_excusable = False
-        make_excusable_button = self.find_item(MAKE_EXCUSABLE_BUTTON_ID)
-        assert isinstance(make_excusable_button, ui.Button)
-        make_excusable_button.disabled = False
+        self.get_button(MAKE_EXCUSABLE_BUTTON_ID).disabled = False
         button.disabled = True
-        await interaction.response.edit_message(
-            content=f"Modification: {self.current_emoji} {self.current_name}",
-            view=self,
-        )
+        await self.refresh_main_message(interaction)
 
     @ui.button(label="Valider les modifications", style=ButtonStyle.success, row=4)
     async def validate_button(self, interaction: Interaction, _button: ui.Button) -> None:
@@ -723,7 +696,7 @@ class EditFormationView(ui.View):
 
         Args:
             interaction (Interaction): The interaction that triggered the button click.
-            button (ui.Button): The button that was clicked.
+            _button (ui.Button): The button that was clicked.
         """
         assert interaction.guild is not None
         draft = self.cog.get_guild_draft(interaction.guild.id)
@@ -784,9 +757,23 @@ class EditFormationView(ui.View):
 
         await interaction.response.send_message(
             f"Mise à jour: {updated.emoji} {updated.name} (position {new_position}).",
-            embed=Embed(
-                title=f"Aperçu brouillon — {len(fms)} formation(s)",
-                description=f"{preview or '_(vide)_'}",
-            ),
+            embed=Embed(title=f"Aperçu brouillon — {len(fms)} formation(s)", description=preview or "_(vide)_"),
             ephemeral=True,
         )
+
+    # endregion Button callbacks
+
+    # region ====== Helpers ======
+
+    def get_button(self, button_id: int) -> ui.Button[EditFormationView]:
+        item = self.find_item(button_id)
+        assert isinstance(item, ui.Button)
+        return item
+
+    async def refresh_main_message(self, interaction: Interaction) -> None:
+        await interaction.response.edit_message(
+            content=f"Modification: {self.current_emoji} {self.current_name}",
+            view=self,
+        )
+
+    # endregion Helpers
