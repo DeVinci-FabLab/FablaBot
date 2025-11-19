@@ -3,23 +3,11 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal
+from typing import Literal
 
-from discord import (
-    ButtonStyle,
-    Interaction,
-    Member,
-    Role,
-    ui,
-)
+from discord import ButtonStyle, Interaction, Member, Role, ui
 
-from fablabot.helpers import (
-    escape_md,
-    format_member_mention,
-    format_role_mention,
-    safe_add_roles,
-    safe_remove_roles,
-)
+from fablabot.helpers import escape_md, format_member_mention, format_role_mention, safe_add_roles, safe_remove_roles
 from fablabot.helpers.utils import get_members_by_role
 
 logger = logging.getLogger(__name__)
@@ -50,37 +38,32 @@ class BulkRoleAssignmentView(ui.View):
         self.followup_id = followup_id
         self.action = action
 
-        async def _on_select(interaction: Interaction) -> None:
-            if not interaction.response.is_done():
-                await interaction.response.defer()
+    @ui.select(cls=ui.UserSelect, placeholder="Sélectionne les membres...", min_values=1, max_values=25)
+    async def select_members(self, interaction: Interaction, _select: ui.UserSelect) -> None:
+        """Called when members are selected from the user select.
 
-        self.select: ui.UserSelect[Any] = ui.UserSelect(
-            placeholder="Sélectionne les membres…",
-            min_values=1,
-            max_values=25,
-        )
-        self.select.callback = _on_select  # type: ignore[method-assign]
+        Args:
+            interaction (Interaction): The interaction that triggered the selection.
+            select (ui.UserSelect): The select component.
+        """
+        if not interaction.response.is_done():
+            await interaction.response.defer()
 
-        self.confirm_button: ui.Button[Any] = ui.Button(label="Confirmer", style=ButtonStyle.primary)
-        self.confirm_button.callback = self.confirm  # type: ignore[method-assign]
-
-        self.add_item(self.select)
-        self.add_item(self.confirm_button)
-
-    async def confirm(self, interaction: Interaction) -> None:
+    @ui.button(label="Confirmer", style=ButtonStyle.primary)
+    async def confirm_button(self, interaction: Interaction, button: ui.Button) -> None:
         """Confirm the bulk role assignment/removal.
 
         Args:
             interaction (Interaction): The Discord interaction triggered by the confirm button.
+            button (ui.Button): The button that was clicked.
         """
-        members: list[Member] = [m for m in self.select.values if isinstance(m, Member)]
+        members: list[Member] = [m for m in self.select_members.values if isinstance(m, Member)]
         if not members:
             await interaction.response.send_message("Aucun membre sélectionné.", ephemeral=True)
             return
 
-        for child in self.children:
-            if isinstance(child, ui.Button | ui.UserSelect):
-                child.disabled = True
+        self.select_members.disabled = True
+        button.disabled = True
         await interaction.response.edit_message(view=self)
 
         modified: list[Member] = []
@@ -148,39 +131,34 @@ class MultiRoleSelectorView(ui.View):
         super().__init__()
         self.followup_id = followup_id
 
-        async def _on_select(interaction: Interaction) -> None:
-            if not interaction.response.is_done():
-                await interaction.response.defer()
+    @ui.select(cls=ui.RoleSelect, placeholder="Sélectionne les rôles...", min_values=1, max_values=25)
+    async def select_roles(self, interaction: Interaction, _select: ui.RoleSelect) -> None:
+        """Called when roles are selected from the role select.
 
-        self.select: ui.RoleSelect[Any] = ui.RoleSelect(
-            placeholder="Sélectionne les rôles…",
-            min_values=1,
-            max_values=25,
-        )
-        self.select.callback = _on_select  # type: ignore[method-assign]
+        Args:
+            interaction (Interaction): The interaction that triggered the selection.
+            select (ui.RoleSelect): The select component.
+        """
+        if not interaction.response.is_done():
+            await interaction.response.defer()
 
-        self.confirm_button: ui.Button[Any] = ui.Button(label="Confirmer", style=ButtonStyle.primary)
-        self.confirm_button.callback = self.confirm  # type: ignore[method-assign]
-
-        self.add_item(self.select)
-        self.add_item(self.confirm_button)
-
-    async def confirm(self, interaction: Interaction) -> None:
-        """Confirm the bulk role assignment/removal.
+    @ui.button(label="Confirmer", style=ButtonStyle.primary)
+    async def confirm_button(self, interaction: Interaction, button: ui.Button) -> None:
+        """Confirm the multi role selection.
 
         Args:
             interaction (Interaction): The Discord interaction triggered by the confirm button.
+            button (ui.Button): The button that was clicked.
         """
-        roles: list[Role] = [r for r in self.select.values if isinstance(r, Role)]
+        roles: list[Role] = [r for r in self.select_roles.values if isinstance(r, Role)]
         if not roles:
             await interaction.response.send_message("Aucun rôle sélectionné.", ephemeral=True)
             return
 
         logger.info(f"Roles selected: {roles}")
 
-        for child in self.children:
-            if isinstance(child, ui.Button | ui.UserSelect):
-                child.disabled = True
+        self.select_roles.disabled = True
+        button.disabled = True
         await interaction.response.edit_message(view=self)
 
         assert interaction.guild is not None
