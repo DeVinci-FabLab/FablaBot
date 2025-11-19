@@ -211,7 +211,7 @@ class FormationManagement(commands.Cog):
         )
         self.set_guild_draft(interaction.guild.id, draft)
 
-        content = render_message(draft.header, draft.role_id, draft.intro, draft.fms, draft.end)
+        content = render_message(draft)
 
         logger.info(f"Guild {interaction.guild.id} updated draft role_id to {role.id}.")
 
@@ -362,7 +362,7 @@ class FormationManagement(commands.Cog):
         )
         self.set_guild_draft(interaction.guild.id, draft)
 
-        preview = render_message(draft.header, draft.role_id, draft.intro, draft.fms, draft.end)
+        preview = render_message(draft)
         logger.info(f"Guild {interaction.guild.id} removed formation {removed.name!r} ({removed.start_iso}) from draft.")
         await interaction.response.send_message(
             f"Supprimé: {removed.emoji} {removed.name}",
@@ -395,7 +395,7 @@ class FormationManagement(commands.Cog):
         )
         self.set_guild_draft(interaction.guild.id, draft)
 
-        content = render_message(draft.header, draft.role_id, draft.intro, draft.fms, draft.end)
+        content = render_message(draft)
         logger.info(f"Guild {interaction.guild.id} cleared the formations draft.")
         await interaction.response.send_message(
             "Brouillon vidé (intro et fin conservées). "
@@ -420,15 +420,8 @@ class FormationManagement(commands.Cog):
         await interaction.response.defer(thinking=True)
         assert interaction.guild is not None
         draft = self.get_guild_draft(interaction.guild.id)
-        fms = sorted(draft.fms, key=lambda x: x.start_dt)
 
-        content = render_message(
-            draft.header,
-            draft.role_id,
-            draft.intro,
-            fms,
-            draft.end,
-        )
+        content = render_message(draft)
         logger.info(f"Guild {interaction.guild.id} previewed the formations draft.")
         await interaction.followup.send(
             content=f"{content or '_(vide)_'}",
@@ -1106,7 +1099,7 @@ class FormationManagement(commands.Cog):
             ),
         )
 
-        content = render_message(header, role_id, intro, fms, end)
+        content = render_message(updated_message_payload)
 
         try:
             await msg.edit(content=content, suppress=True)

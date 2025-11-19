@@ -94,13 +94,7 @@ class StartFmModal(ui.Modal, title="Commencer une annonce de formation"):
         )
         self.cog.set_guild_draft(interaction.guild.id, draft)
 
-        content = render_message(
-            draft.header,
-            draft.role_id,
-            draft.intro,
-            draft.fms,
-            draft.end,
-        )
+        content = render_message(draft)
         logger.info(f"Guild {interaction.guild.id} started a new formations draft.")
         await interaction.response.send_message(
             "Brouillon initialisé.\nUtilise **/fm add** pour ajouter des formations. **/fm preview** pour voir le rendu.",
@@ -193,13 +187,7 @@ class EditTextModal(ui.Modal, title="Modifier le texte de l'annonce de formation
         )
         self.cog.set_guild_draft(interaction.guild.id, draft)
 
-        content = render_message(
-            draft.header,
-            draft.role_id,
-            draft.intro,
-            draft.fms,
-            draft.end,
-        )
+        content = render_message(draft)
 
         role_changed = self.role_id != current_role_id
         intro_changed = updated_intro != current_intro
@@ -316,13 +304,7 @@ class AddFmModal(ui.Modal, title="Ajouter une formation"):
         )
         self.cog.set_guild_draft(interaction.guild.id, draft)
 
-        preview = render_message(
-            draft.header,
-            draft.role_id,
-            draft.intro,
-            draft.fms,
-            draft.end,
-        )
+        preview = render_message(draft)
         logger.info(f"Guild {interaction.guild.id} added formation {fm.name!r} ({fm.start_iso}) to draft.")
         await interaction.response.send_message(
             "Formation ajoutée & brouillon mis à jour (trié). "
@@ -741,13 +723,7 @@ class EditFormationView(ui.View):
         )
         self.cog.set_guild_draft(interaction.guild.id, draft)
 
-        preview = render_message(
-            draft.header,
-            draft.role_id,
-            draft.intro,
-            draft.fms,
-            draft.end,
-        )
+        preview = render_message(draft)
         new_position = fms.index(updated) + 1
 
         logger.info(

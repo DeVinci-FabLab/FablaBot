@@ -15,7 +15,7 @@ from fablabot.helpers.utils import escape_md, get_members_by_role
 if TYPE_CHECKING:
     from discord import Guild
 
-    from fablabot.models.formation import Formation
+    from fablabot.models.formation import FmMessageDraft, Formation
 
 logger = logging.getLogger(__name__)
 
@@ -123,35 +123,26 @@ def humanize_dt(dt: datetime) -> str:
     return f"**{day_name} {date_part} à {time_part}**"
 
 
-def render_message(
-    header: str,
-    role_id: int,
-    intro: str,
-    fms: list[Formation],
-    end: str,
-) -> str:
+def render_message(draft: FmMessageDraft) -> str:
     """Render the message for the formations.
 
     Args:
-        header (str): The header line (e.g. title).
-        role_id (int): The role mention to prepend.
-        intro (str): The introduction text.
-        fms (list[Formation]): The list of formations to include in the message.
-        end (str): The ending text.
+        draft (FmMessageDraft): The draft containing all message parts.
 
     Returns:
         str: The rendered message.
     """
     logger.debug("Rendering formations message.")
     lines: list[str] = []
-    header_text = header.strip()
-    intro_block = intro.strip()
+    header_text = draft.header.strip()
+    intro_block = draft.intro.strip()
     lines.append(header_text)
-    lines.append(f"Hey <@&{role_id}> !")
+    lines.append(f"Hey <@&{draft.role_id}> !")
     if intro_block:
         lines.append(intro_block)
     lines.append("")
 
+    fms = sorted(draft.fms, key=lambda x: x.start_dt)
     for fm in fms:
         line_block = [
             f"{fm.emoji} **{fm.name}** avec {fm.trainer_mention} ({'non ' if not fm.excusable else ''}excusable)",
@@ -173,8 +164,8 @@ def render_message(
     lines.append("\n".join(end_lines))
     lines.append("")
 
-    if end.strip():
-        lines.append(end.strip())
+    if draft.end.strip():
+        lines.append(draft.end.strip())
         lines.append("")
 
     if lines and not lines[-1]:
