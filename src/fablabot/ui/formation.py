@@ -443,7 +443,7 @@ class EditNameDescriptionModal(ui.Modal, title="Modifier nom et description"):
         self.view_ref.current_description = self.description_input.value.strip()
 
         await interaction.response.edit_message(
-            content=f"Modification: {self.view_ref.original.emoji} {self.view_ref.current_name}",
+            content=f"Modification: {self.view_ref.current_emoji} {self.view_ref.current_name}",
             view=self.view_ref,
         )
 
@@ -499,14 +499,14 @@ class EditFormationView(ui.View):
         super().__init__(*args, **kwargs)
         self.cog = cog
         self.formation_index = formation_index
-        self.original = original
 
         self.current_emoji = original.emoji
         self.current_name = original.name
         self.current_description = original.description
         self.current_trainer_mention = original.trainer_mention
-        self.current_datetime = f"{original.start_dt.strftime('%d/%m/%Y')} {original.start_dt.strftime('%H:%M')}"
-        self.current_duration_seats = f"{original.duration} - {original.seats}"
+        self.current_start_dt = original.start_dt
+        self.current_duration = original.duration
+        self.current_seats = original.seats
         self.current_excusable = original.excusable
 
         edit_emoji_button = self.find_item(EDIT_EMOJI_BUTTON_ID)
@@ -537,12 +537,25 @@ class EditFormationView(ui.View):
             placeholder="ex: 🔧",
             default=self.current_emoji,
             required=True,
-            max_length=20,
+            max_length=30,
         )
         modal.add_item(emoji_input)
 
         async def on_submit_emoji(interaction_modal: Interaction) -> None:
-            self.current_emoji = emojize(emoji_input.value.strip(), language="alias")
+            assert interaction_modal.guild is not None
+            draft = self.cog.get_guild_draft(interaction_modal.guild.id)
+            fms = sorted(draft.fms, key=lambda x: x.start_dt)
+
+            candidate = emojize(emoji_input.value.strip(), language="alias")
+            if not is_valid_emoji(candidate):
+                logger.warning(f"Guild {interaction_modal.guild.id} tried to edit formation with invalid emoji: {candidate!r}.")
+                await interaction_modal.response.send_message(ErrorMessages.INVALID_EMOJI, ephemeral=True)
+                return
+            if any(i != self.formation_index - 1 and fm.emoji == candidate for i, fm in enumerate(fms)):
+                logger.warning(f"Guild {interaction_modal.guild.id} tried to reuse emoji {candidate} while editing formation.")
+                await interaction_modal.response.send_message(ErrorMessages.EMOJI_ALREADY_USED, ephemeral=True)
+                return
+            self.current_emoji = candidate
             button.label = f"Modifier émoji : {self.current_emoji}"
             await interaction_modal.response.edit_message(
                 content=f"Modification: {self.current_emoji} {self.current_name}",
@@ -585,14 +598,27 @@ class EditFormationView(ui.View):
             label="Date et heure (DD/MM/YYYY HH:MM)",
             style=TextStyle.short,
             placeholder="ex: 15/12/2024 18:30",
-            default=self.current_datetime,
+            default=f"{self.current_start_dt.strftime('%d/%m/%Y')} {self.current_start_dt.strftime('%H:%M')}",
             required=True,
             max_length=16,
         )
         modal.add_item(datetime_input)
 
         async def on_submit_datetime(interaction_modal: Interaction) -> None:
-            self.current_datetime = datetime_input.value.strip()
+            assert interaction_modal.guild is not None
+            candidate = datetime_input.value.strip()
+            try:
+                datetime_parts = candidate.split()
+                if len(datetime_parts) != 2:
+                    logger.warning(f"Guild {interaction_modal.guild.id} provided invalid datetime format: {candidate!r}.")
+                    await interaction_modal.response.send_message(ErrorMessages.INVALID_DATETIME, ephemeral=True)
+                    return
+                date_str, hour_str = datetime_parts
+                start_dt = parse_date_time(date_str, hour_str, PARIS_TZ)
+                self.current_start_dt = start_dt
+            except Exception:
+                await interaction_modal.response.send_message(ErrorMessages.INVALID_DATETIME, ephemeral=True)
+                return
             await interaction_modal.response.edit_message(
                 content=f"Modification: {self.current_emoji} {self.current_name}",
                 view=self,
@@ -614,14 +640,39 @@ class EditFormationView(ui.View):
             label="Durée - Places",
             style=TextStyle.short,
             placeholder="ex: 2h - 10",
-            default=self.current_duration_seats,
+            default=f"{self.current_duration} - {self.current_seats}",
             required=True,
             max_length=20,
         )
         modal.add_item(duration_seats_input)
 
         async def on_submit_duration_seats(interaction_modal: Interaction) -> None:
-            self.current_duration_seats = duration_seats_input.value.strip()
+            assert interaction_modal.guild is not None
+            candidate = duration_seats_input.value.strip()
+            duration_seats_parts = candidate.split("-")
+            if len(duration_seats_parts) != 2:
+                logger.warning(f"Guild {interaction_modal.guild.id} provided invalid duration/seats format: {candidate!r}.")
+                await interaction_modal.response.send_message(ErrorMessages.INVALID_DURATION_SEATS_FORMAT, ephemeral=True)
+                return
+            new_duration = duration_seats_parts[0].strip()
+            if not new_duration:
+                logger.warning(f"Guild {interaction_modal.guild.id} provided an empty duration while editing a formation.")
+                await interaction_modal.response.send_message(ErrorMessages.INVALID_DURATION, ephemeral=True)
+                return
+            try:
+                new_seats = int(duration_seats_parts[1].strip())
+                if new_seats < 1 or new_seats > 500:
+                    msg = "Seats number out of valid range."
+                    raise ValueError(msg)
+            except ValueError:
+                logger.warning(
+                    f"Guild {interaction_modal.guild.id} provided out-of-bounds "
+                    f"seats number: {duration_seats_parts[1].strip()!r}.",
+                )
+                await interaction_modal.response.send_message(ErrorMessages.INVALID_SEATS, ephemeral=True)
+                return
+            self.current_duration = new_duration
+            self.current_seats = new_seats
             await interaction_modal.response.edit_message(
                 content=f"Modification: {self.current_emoji} {self.current_name}",
                 view=self,
@@ -667,11 +718,75 @@ class EditFormationView(ui.View):
         )
 
     @ui.button(label="Valider les modifications", style=ButtonStyle.success, row=4)
-    async def validate_button(self, interaction: Interaction, button: ui.Button) -> None:
+    async def validate_button(self, interaction: Interaction, _button: ui.Button) -> None:
         """Button to validate and save all modifications.
 
         Args:
             interaction (Interaction): The interaction that triggered the button click.
             button (ui.Button): The button that was clicked.
         """
-        # TODO: à faire
+        assert interaction.guild is not None
+        draft = self.cog.get_guild_draft(interaction.guild.id)
+        fms = sorted(draft.fms, key=lambda x: x.start_dt)
+        original = fms[self.formation_index - 1]
+
+        log_request(
+            logger,
+            "fm.edit",
+            interaction,
+            index=self.formation_index,
+            emoji=self.current_emoji,
+            name=self.current_name,
+            description=self.current_description,
+            trainer=self.current_trainer_mention,
+            datetime=self.current_start_dt,
+            duration=self.current_duration,
+            seats=self.current_seats,
+            excusable=self.current_excusable,
+        )
+
+        updated = Formation(
+            emoji=self.current_emoji,
+            name=self.current_name,
+            trainer_mention=self.current_trainer_mention,
+            start_iso=self.current_start_dt.isoformat(),
+            duration=self.current_duration,
+            seats=self.current_seats,
+            description=self.current_description,
+            excusable=self.current_excusable,
+        )
+
+        fms[self.formation_index - 1] = updated
+        fms.sort(key=lambda x: x.start_dt)
+
+        draft = FmMessageDraft(
+            header=draft.header,
+            role_id=draft.role_id,
+            intro=draft.intro,
+            fms=fms,
+            end=draft.end,
+        )
+        self.cog.set_guild_draft(interaction.guild.id, draft)
+
+        preview = render_message(
+            draft.header,
+            draft.role_id,
+            draft.intro,
+            draft.fms,
+            draft.end,
+        )
+        new_position = fms.index(updated) + 1
+
+        logger.info(
+            f"Guild {interaction.guild.id} edited formation {original.name!r} -> "
+            f"{updated.name!r} (index {self.formation_index} → {new_position}).",
+        )
+
+        await interaction.response.send_message(
+            f"Mise à jour: {updated.emoji} {updated.name} (position {new_position}).",
+            embed=Embed(
+                title=f"Aperçu brouillon — {len(fms)} formation(s)",
+                description=f"{preview or '_(vide)_'}",
+            ),
+            ephemeral=True,
+        )

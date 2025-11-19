@@ -156,10 +156,14 @@ def is_valid_emoji(emoji: str) -> bool:
         bool: True if valid, False otherwise.
     """
     emoji_clean = emoji.strip()
-
-    return emoji_clean is not None and (
-        emoji_clean in EMOJI_DATA or 0x1F1E6 <= ord(emoji_clean) <= 0x1F1FF or _DISCORD_EMOJI_RE.match(emoji_clean) is not None
-    )
+    try:
+        return emoji_clean is not None and (
+            emoji_clean in EMOJI_DATA
+            or _DISCORD_EMOJI_RE.match(emoji_clean) is not None
+            or 0x1F1E6 <= ord(emoji_clean) <= 0x1F1FF
+        )
+    except Exception:
+        return False
 
 
 async def _can_dm_user(user: Member) -> bool:

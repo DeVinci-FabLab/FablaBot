@@ -118,14 +118,17 @@ class ErrorMessages:
     EMOJI_ALREADY_USED = "Cet émoji est déjà utilisé par une autre formation."
     """Emoji already in use by another formation."""
 
-    INVALID_NAME = "Nom invalide."
-    """Invalid name provided."""
+    INVALID_DATETIME = "Date/heure invalides. Format attendu: `DD/MM/YYYY HH:MM` (ex: `15/12/2024 18:30`)."
+    """Invalid date and time provided."""
 
-    INVALID_DURATION = "Durée invalide."
-    """Invalid duration provided."""
+    INVALID_DURATION_SEATS_FORMAT = "Durée/Places invalides. Format attendu: `durée - places` (ex: `2h - 10`)."
+    """Invalid duration and seats provided."""
 
-    INDEX_OUT_OF_BOUNDS = "Index hors limites (il y a {count} FM)."
-    """Formation index out of bounds."""
+    INVALID_DURATION = "Durée invalide. Format attendu: durée en string (ex: `2h30`, `15 minutes`, ...)."
+    """Invalid duration format provided."""
+
+    INVALID_SEATS = "Nombre de places invalide. Veuillez fournir un entier positif compris entre 1 et 500."
+    """Invalid seats number provided."""
 
     DRAFT_EMPTY = "Le brouillon ne contient aucune formation. Utilise `/fm add` pour en ajouter une."
     """Draft contains no formations."""
