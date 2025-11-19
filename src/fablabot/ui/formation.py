@@ -19,8 +19,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 EDIT_EMOJI_BUTTON_ID = 13
-MAKE_EXCUSABLE_BUTTON_ID = 14
-MAKE_NON_EXCUSABLE_BUTTON_ID = 15
+EDIT_TRAINER_BUTTON_ID = 14
+MAKE_EXCUSABLE_BUTTON_ID = 15
+MAKE_NON_EXCUSABLE_BUTTON_ID = 16
 
 
 class StartFmModal(ui.Modal, title="Commencer une annonce de formation"):
@@ -447,6 +448,41 @@ class EditNameDescriptionModal(ui.Modal, title="Modifier nom et description"):
         )
 
 
+class SelectTrainerView(ui.View):
+    """View to select a trainer using UserSelect."""
+
+    def __init__(self, edit_formation_view: EditFormationView, *args, **kwargs) -> None:
+        """Initialize the SelectTrainerView.
+
+        Args:
+            edit_formation_view (EditFormationView): The parent EditFormationView.
+            *args: Additional positional arguments.
+            **kwargs: Additional keyword arguments.
+        """
+        super().__init__(*args, **kwargs)
+        self.edit_formation_view = edit_formation_view
+
+    @ui.select(cls=ui.UserSelect, placeholder="Sélectionne lae formateur·ice", min_values=1, max_values=1)
+    async def select_trainer(self, interaction: Interaction, select: ui.UserSelect) -> None:
+        """Called when a user is selected.
+
+        Args:
+            interaction (Interaction): The interaction that triggered the selection.
+            select (ui.UserSelect): The select component.
+        """
+        selected_user = select.values[0]
+        self.edit_formation_view.current_trainer_mention = selected_user.mention
+
+        edit_trainer_button = self.edit_formation_view.find_item(EDIT_TRAINER_BUTTON_ID)
+        assert isinstance(edit_trainer_button, ui.Button)
+        edit_trainer_button.label = f"Modifier lae formateur·ice : {selected_user.display_name}"
+
+        await interaction.response.edit_message(
+            content=f"Modification: {self.edit_formation_view.current_emoji} {self.edit_formation_view.current_name}",
+            view=self.edit_formation_view,
+        )
+
+
 class EditFormationView(ui.View):
     """View to edit a formation with selects and an optional modal for name/description."""
 
@@ -526,15 +562,15 @@ class EditFormationView(ui.View):
         """
         await interaction.response.send_modal(EditNameDescriptionModal(self))
 
-    @ui.button(label="Modifier lae formateur·ice", style=ButtonStyle.secondary, row=1)
-    async def edit_trainer_button(self, interaction: Interaction, button: ui.Button) -> None:
-        """Button to open modal for editing name and description.
+    @ui.button(label="Modifier lae formateur·ice", style=ButtonStyle.secondary, row=1, id=EDIT_TRAINER_BUTTON_ID)
+    async def edit_trainer_button(self, interaction: Interaction, _button: ui.Button) -> None:
+        """Button to open view for selecting trainer.
 
         Args:
             interaction (Interaction): The interaction that triggered the button click.
             button (ui.Button): The button that was clicked.
         """
-        # TODO: avec view member selector
+        await interaction.response.send_message("Sélectionne lae formateur·ice :", view=SelectTrainerView(self), ephemeral=True)
 
     @ui.button(label="Date & Heure", style=ButtonStyle.secondary, row=2)
     async def edit_datetime_button(self, interaction: Interaction, _button: ui.Button) -> None:
