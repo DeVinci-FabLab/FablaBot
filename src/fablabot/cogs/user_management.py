@@ -60,7 +60,10 @@ class UserManagement(commands.Cog):
 
     user_group = app_commands.Group(name="user", description="Gestion des utilisateurs")
 
-    @user_group.command(name="help", description="Affiche l'aide pour les commandes de gestion des utilisateurs.")
+    @user_group.command(
+        name="help",
+        description="Affiche l'aide pour les commandes de gestion des utilisateurs.",
+    )
     @app_commands.describe(show="Afficher l'aide publiquement ou non")
     async def user_help(self, interaction: Interaction, show: bool = False) -> None:
         """Display help for user management commands.
@@ -115,14 +118,20 @@ class UserManagement(commands.Cog):
         codir_role = get(interaction.guild.roles, name=RoleNames.CODIR)
         if admin_role is None or codir_role is None:
             logger.error(f"Required role not found: {RoleNames.ADMIN_TEMP} or {RoleNames.CODIR}")
-            await interaction.response.send_message("Rôles administratifs manquants sur le serveur.", ephemeral=True)
+            await interaction.response.send_message(
+                "Rôles administratifs manquants sur le serveur.",
+                ephemeral=True,
+            )
             return
         assert isinstance(interaction.user, Member)
         if not self._can_assign_role(interaction.user, admin_role) and RoleNames.DIGITAL_MANAGER not in (
             r.name for r in interaction.user.roles
         ):
             logger.warning(f"Unauthorized op attempt by {interaction.user}")
-            await interaction.response.send_message(ErrorMessages.INSUFFICIENT_PERMISSIONS, ephemeral=True)
+            await interaction.response.send_message(
+                ErrorMessages.INSUFFICIENT_PERMISSIONS,
+                ephemeral=True,
+            )
             return
 
         success, error = await safe_add_roles(
@@ -146,7 +155,10 @@ class UserManagement(commands.Cog):
             f"Raison: {escape_md(reason)}",
         )
 
-    @user_group.command(name="deop", description="Retire les droits admin temporaires d'un utilisateur.")
+    @user_group.command(
+        name="deop",
+        description="Retire les droits admin temporaires d'un utilisateur.",
+    )
     @app_commands.describe(member="L'utilisateur cible")
     async def user_deop(self, interaction: Interaction, member: Member) -> None:
         """Revoke temporary admin privileges from a user.
@@ -174,7 +186,10 @@ class UserManagement(commands.Cog):
             r.name for r in interaction.user.roles
         ):
             logger.warning(f"Unauthorized deop attempt by {interaction.user}")
-            await interaction.response.send_message(ErrorMessages.INSUFFICIENT_PERMISSIONS, ephemeral=True)
+            await interaction.response.send_message(
+                ErrorMessages.INSUFFICIENT_PERMISSIONS,
+                ephemeral=True,
+            )
             return
 
         success, error = await safe_remove_roles(
@@ -197,8 +212,14 @@ class UserManagement(commands.Cog):
 
     # -- Role Management --
 
-    @user_group.command(name="add_role", description="Donne un rôle à un utilisateur.")
-    @app_commands.describe(member="L'utilisateur cible", role="Le rôle à attribuer")
+    @user_group.command(
+        name="add_role",
+        description="Donne un rôle à un utilisateur.",
+    )
+    @app_commands.describe(
+        member="L'utilisateur cible",
+        role="Le rôle à attribuer",
+    )
     async def user_add_role(self, interaction: Interaction, member: Member, role: Role) -> None:
         """Add a role to a single user.
 
@@ -213,7 +234,10 @@ class UserManagement(commands.Cog):
 
         if not self._can_assign_role(interaction.user, role):
             logger.warning(f"Unauthorized add_role by {interaction.user}")
-            await interaction.response.send_message(ErrorMessages.NO_PERMISSION_ADD_ROLE, ephemeral=True)
+            await interaction.response.send_message(
+                ErrorMessages.NO_PERMISSION_ADD_ROLE,
+                ephemeral=True,
+            )
             return
 
         success, error = await safe_add_roles(logger, member, role, reason=f"Add with add_role command by {interaction.user}")
@@ -227,8 +251,14 @@ class UserManagement(commands.Cog):
             content=f"Le rôle {format_role_mention(role)} a été ajouté à {format_member_mention(member)}.",
         )
 
-    @user_group.command(name="remove_role", description="Retire un rôle à un utilisateur.")
-    @app_commands.describe(member="L'utilisateur cible", role="Le rôle à retirer")
+    @user_group.command(
+        name="remove_role",
+        description="Retire un rôle à un utilisateur.",
+    )
+    @app_commands.describe(
+        member="L'utilisateur cible",
+        role="Le rôle à retirer",
+    )
     async def user_remove_role(self, interaction: Interaction, member: Member, role: Role) -> None:
         """Remove a role from a single user.
 
@@ -243,7 +273,10 @@ class UserManagement(commands.Cog):
 
         if not self._can_assign_role(interaction.user, role):
             logger.warning(f"Unauthorized remove_role by {interaction.user}")
-            await interaction.response.send_message(ErrorMessages.NO_PERMISSION_REMOVE_ROLE, ephemeral=True)
+            await interaction.response.send_message(
+                ErrorMessages.NO_PERMISSION_REMOVE_ROLE,
+                ephemeral=True,
+            )
             return
 
         success, error = await safe_remove_roles(
@@ -281,7 +314,10 @@ class UserManagement(commands.Cog):
         assert isinstance(interaction.user, Member)
         if not self._can_assign_role(interaction.user, role):
             logger.warning(f"Unauthorized add_roles by {interaction.user}")
-            await interaction.response.send_message(ErrorMessages.NO_PERMISSION_ADD_ROLE, ephemeral=True)
+            await interaction.response.send_message(
+                ErrorMessages.NO_PERMISSION_ADD_ROLE,
+                ephemeral=True,
+            )
             return
 
         await interaction.response.defer(thinking=True)
@@ -294,7 +330,10 @@ class UserManagement(commands.Cog):
             ephemeral=True,
         )
 
-    @user_group.command(name="remove_roles", description="Retire un rôle à plusieurs utilisateurs via un sélecteur.")
+    @user_group.command(
+        name="remove_roles",
+        description="Retire un rôle à plusieurs utilisateurs via un sélecteur.",
+    )
     @app_commands.describe(role="Le rôle à retirer")
     async def user_remove_roles(self, interaction: Interaction, role: Role) -> None:
         """Open a multi-user selector to remove a role in bulk.
@@ -310,7 +349,10 @@ class UserManagement(commands.Cog):
         assert isinstance(interaction.user, Member)
         if not self._can_assign_role(interaction.user, role):
             logger.warning(f"Unauthorized remove_roles by {interaction.user}")
-            await interaction.response.send_message(ErrorMessages.NO_PERMISSION_REMOVE_ROLE, ephemeral=True)
+            await interaction.response.send_message(
+                ErrorMessages.NO_PERMISSION_REMOVE_ROLE,
+                ephemeral=True,
+            )
             return
 
         await interaction.response.defer(thinking=True)
@@ -323,7 +365,10 @@ class UserManagement(commands.Cog):
             ephemeral=True,
         )
 
-    @user_group.command(name="with_roles", description="Obtenir les membres avec des rôles spécifiques.")
+    @user_group.command(
+        name="with_roles",
+        description="Obtenir les membres avec des rôles spécifiques.",
+    )
     async def user_with_roles(self, interaction: Interaction) -> None:
         """Get members with specific roles.
 

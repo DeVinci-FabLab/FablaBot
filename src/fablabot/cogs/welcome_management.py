@@ -55,7 +55,10 @@ class WelcomeManagement(commands.Cog):
         description="Gestion des messages de bienvenue et des fonctionnalités associées.",
     )
 
-    @welcome_group.command(name="help", description="Affiche l'aide pour les commandes de bienvenue.")
+    @welcome_group.command(
+        name="help",
+        description="Affiche l'aide pour les commandes de bienvenue.",
+    )
     @app_commands.describe(show="Afficher l'aide publiquement ou non")
     async def welcome_help(self, interaction: Interaction, show: bool = False) -> None:
         """Display help for welcome commands.

@@ -5,14 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Literal
 
-from discord import (
-    ButtonStyle,
-    Interaction,
-    Member,
-    SelectOption,
-    TextStyle,
-    ui,
-)
+from discord import ButtonStyle, Interaction, Member, SelectOption, TextStyle, ui
 from discord.utils import get
 
 from fablabot.helpers.utils import format_member_mention, send_dm_to_member
@@ -27,12 +20,7 @@ logger = logging.getLogger(__name__)
 class BulkDMView(ui.View):
     """View for bulk direct message sending."""
 
-    def __init__(
-        self,
-        sender: Member,
-        followup_id: int,
-        message: str,
-    ) -> None:
+    def __init__(self, sender: Member, followup_id: int, message: str) -> None:
         """Initialize the view for bulk direct messages.
 
         Args:
@@ -50,7 +38,7 @@ class BulkDMView(ui.View):
                 await interaction.response.defer()
 
         self.select: ui.UserSelect[Any] = ui.UserSelect(
-            placeholder="Sélectionne les membres…",
+            placeholder="Sélectionne les membres...",
             min_values=1,
             max_values=25,
         )
@@ -264,8 +252,8 @@ class SuggestionModal(ui.Modal, title="Envoyer une suggestion"):
         max_length=2000,
     )
 
-    def __init__(self, cog: SuggestionManagement, recipient_key: str, anonymous_flag: bool, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(self, cog: SuggestionManagement, recipient_key: str, anonymous_flag: bool) -> None:
+        super().__init__()
         self.cog = cog
         self.recipient_key = recipient_key
         self.anonymous_flag = anonymous_flag

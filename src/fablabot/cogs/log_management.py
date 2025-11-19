@@ -41,7 +41,10 @@ class LogManagement(commands.Cog):
     # region ====== Log Slash Commands Group ======
     log_group = app_commands.Group(name="log", description="Configuration des logs du bot")
 
-    @log_group.command(name="help", description="Affiche l'aide pour les commandes de gestion des logs.")
+    @log_group.command(
+        name="help",
+        description="Affiche l'aide pour les commandes de gestion des logs.",
+    )
     @app_commands.describe(show="Afficher l'aide publiquement ou non")
     async def log_help(self, interaction: Interaction, show: bool = False) -> None:
         """Display help for log management commands.
@@ -60,7 +63,10 @@ class LogManagement(commands.Cog):
         )
         await interaction.response.send_message(help_text, ephemeral=not show)
 
-    @log_group.command(name="set", description="Configure le salon recevant les logs du bot en cas d'erreur.")
+    @log_group.command(
+        name="set",
+        description="Configure le salon recevant les logs du bot en cas d'erreur.",
+    )
     @app_commands.describe(channel="Salon textuel qui recevra les logs du bot.")
     async def log_set(self, interaction: Interaction, channel: TextChannel) -> None:
         """Configure the log channel destination for Discord logging.
@@ -107,7 +113,10 @@ class LogManagement(commands.Cog):
             confirmation += f" Ancien salon : {format_channel_mention(previous_channel)}."
         await interaction.response.send_message(confirmation)
 
-    @log_group.command(name="export", description="Exporte les logs récents.")
+    @log_group.command(
+        name="export",
+        description="Exporte les logs récents.",
+    )
     @app_commands.describe(
         date="Date des logs à exporter (format : DD/MM/YYYY). Si non spécifié, les logs d'aujourd'hui seront exportés.",
     )

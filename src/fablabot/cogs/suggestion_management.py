@@ -78,7 +78,10 @@ class SuggestionManagement(commands.Cog):
 
         cleaned_text = suggestion_text.strip()
         if not cleaned_text:
-            await interaction.followup.send("Le texte de la suggestion ne peut pas être vide.", ephemeral=True)
+            await interaction.followup.send(
+                "Le texte de la suggestion ne peut pas être vide.",
+                ephemeral=True,
+            )
             return
 
         assert interaction.guild is not None
