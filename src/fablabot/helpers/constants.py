@@ -127,7 +127,7 @@ class ErrorMessages:
     INDEX_OUT_OF_BOUNDS = "Index hors limites (il y a {count} FM)."
     """Formation index out of bounds."""
 
-    DRAFT_EMPTY = "Le brouillon ne contient aucune formation."
+    DRAFT_EMPTY = "Le brouillon ne contient aucune formation. Utilise `/fm add` pour en ajouter une."
     """Draft contains no formations."""
 
     NO_PUBLISHED_MESSAGE = "Aucun message publié enregistré et aucun ID fourni."

@@ -133,8 +133,7 @@ class FormationManagement(commands.Cog):
             "Modifier le texte d'introduction et/ou de conclusion du brouillon et le rôle à mentionner.\n"
             "- `/fm add <emoji> <trainer> <date> <hour> <duration> <seats>` : "
             "Ajouter une nouvelle formation au brouillon (modal pour nom/description/excusable).\n"
-            "- `/fm edit <index> [emoji] [name] [trainer] [date] [hour] [duration] [seats] [description] [excusable]` :"
-            " Modifier une formation existante dans le brouillon.\n"
+            "- `/fm edit` : Modifier une formation existante dans le brouillon (view et modal).\n"
             "- `/fm remove <index>` : Supprimer une formation du brouillon.\n"
             "- `/fm clear` : Effacer le brouillon actuel.\n"
             "- `/fm preview` : Prévisualiser le brouillon actuel.\n"
@@ -314,63 +313,14 @@ class FormationManagement(commands.Cog):
             fmui.AddFmModal(self, emoji_clean, trainer.mention, start_dt.isoformat(), duration.strip(), int(seats), excusable),
         )
 
-    @fm_group.command(name="edit", description="Modifier une formation existante (champs optionnels).")
-    @app_commands.describe(
-        index="Position de la FM dans l'aperçu trié (1..n)",
-        emoji="Nouvel émoji pour cette formation",
-        name="Nouveau nom de la formation",
-        trainer="Nouveau formateur ou nouvelle formatrice",
-        date="Nouvelle date au format DD/MM/YYYY",
-        hour="Nouvelle heure au format HH:MM (24h)",
-        duration="Nouvelle durée affichée",
-        seats="Nouveau nombre de places",
-        description="Nouvelle description",
-        excusable="Absences excusables ?",
-    )
-    async def fm_edit(
-        self,
-        interaction: Interaction,
-        index: app_commands.Range[int, 1, 1000],
-        emoji: str | None = None,
-        name: str | None = None,
-        trainer: Member | None = None,
-        date: str | None = None,
-        hour: str | None = None,
-        duration: str | None = None,
-        seats: app_commands.Range[int, 1, 500] | None = None,
-        description: str | None = None,
-        excusable: bool | None = None,
-    ) -> None:
-        """Edit a formation in the draft while keeping other entries untouched.
+    @fm_group.command(name="edit", description="Modifier une formation existante.")
+    async def fm_edit(self, interaction: Interaction) -> None:
+        """Edit a formation in the draft using an interactive view system.
 
         Args:
             interaction (Interaction): The Discord interaction context.
-            index (app_commands.Range[int, 1, 1000]): The index of the formation to edit (1-based).
-            emoji (str | None, optional): New emoji for the formation. Defaults to None.
-            name (str | None, optional): New name for the formation. Defaults to None.
-            trainer (Member | None, optional): New trainer for the formation. Defaults to None.
-            date (str | None, optional): New date for the formation. Defaults to None.
-            hour (str | None, optional): New hour for the formation. Defaults to None.
-            duration (str | None, optional): New duration for the formation. Defaults to None.
-            seats (app_commands.Range[int, 1, 500] | None, optional): New number of seats for the formation. Defaults to None.
-            description (str | None, optional): New description for the formation. Defaults to None.
-            excusable (bool | None, optional): Whether absences are excusable for this formation. Defaults to None.
         """
-        log_request(
-            logger,
-            "fm.edit",
-            interaction,
-            index=index,
-            emoji=emoji,
-            name=name,
-            trainer=trainer,
-            date=date,
-            hour=hour,
-            duration=duration,
-            seats=seats,
-            description=description,
-            excusable=excusable,
-        )
+        log_request(logger, "fm.edit", interaction)
         if not await is_in_allowed_channel(logger, interaction):
             return
         if not await check_has_role(logger, interaction, ALLOWED_ROLES):
@@ -380,110 +330,14 @@ class FormationManagement(commands.Cog):
         draft = self.get_guild_draft(interaction.guild.id)
         fms = sorted(draft.fms, key=lambda x: x.start_dt)
 
-        if index > len(fms):
-            logger.warning(
-                f"Guild {interaction.guild.id} tried to edit out-of-bounds formation index {index}.",
-            )
-            await interaction.response.send_message(
-                ErrorMessages.INDEX_OUT_OF_BOUNDS.format(count=len(fms)),
-                ephemeral=True,
-            )
+        if not fms:
+            logger.warning(f"Guild {interaction.guild.id} tried to edit formation but draft is empty.")
+            await interaction.response.send_message(ErrorMessages.DRAFT_EMPTY, ephemeral=True)
             return
-
-        original = fms[index - 1]
-
-        new_emoji = original.emoji
-        if emoji is not None:
-            candidate = emoji.strip()
-            if not is_valid_emoji(candidate):
-                logger.warning(f"Guild {interaction.guild.id} tried to edit formation with invalid emoji: {candidate!r}.")
-                await interaction.response.send_message(ErrorMessages.INVALID_EMOJI, ephemeral=True)
-                return
-            if any(i != index - 1 and fm.emoji == candidate for i, fm in enumerate(fms)):
-                logger.warning(f"Guild {interaction.guild.id} tried to reuse emoji {candidate} while editing formation.")
-                await interaction.response.send_message(ErrorMessages.EMOJI_ALREADY_USED, ephemeral=True)
-                return
-            new_emoji = candidate
-
-        new_name = original.name if name is None else name.strip()
-        if not new_name:
-            logger.warning(f"Guild {interaction.guild.id} provided an empty name while editing a formation.")
-            await interaction.response.send_message(ErrorMessages.INVALID_NAME, ephemeral=True)
-            return
-
-        new_trainer = original.trainer_mention if trainer is None else trainer.mention
-        new_duration = original.duration if duration is None else duration.strip()
-        if not new_duration:
-            logger.warning(f"Guild {interaction.guild.id} provided an empty duration while editing a formation.")
-            await interaction.response.send_message(ErrorMessages.INVALID_DURATION, ephemeral=True)
-            return
-
-        new_seats = original.seats if seats is None else seats
-
-        new_start_iso = original.start_iso
-        if date is not None or hour is not None:
-            date_part = date.strip() if date is not None else original.start_dt.strftime("%d/%m/%Y")
-            hour_part = hour.strip() if hour is not None else original.start_dt.strftime("%H:%M")
-            try:
-                new_start_iso = parse_date_time(date_part, hour_part, PARIS_TZ).isoformat()
-            except Exception:
-                logger.warning(
-                    f"Guild {interaction.guild.id} provided invalid date/hour while"
-                    f" editing formation: {date_part} {hour_part}.",
-                )
-                await interaction.response.send_message(
-                    "Date/heure invalides. Exemples: date `15/09/2025`, heure `18:08`.",
-                    ephemeral=True,
-                )
-                return
-
-        new_description = original.description if description is None else description.strip()
-
-        new_excusable = original.excusable if excusable is None else excusable
-
-        updated = Formation(
-            emoji=new_emoji,
-            name=new_name,
-            trainer_mention=new_trainer,
-            start_iso=new_start_iso,
-            duration=new_duration,
-            seats=new_seats,
-            description=new_description,
-            excusable=new_excusable,
-        )
-
-        fms[index - 1] = updated
-        fms.sort(key=lambda x: x.start_dt)
-
-        draft = FmMessageDraft(
-            header=draft.header,
-            role_id=draft.role_id,
-            intro=draft.intro,
-            fms=fms,
-            end=draft.end,
-        )
-        self.set_guild_draft(interaction.guild.id, draft)
-
-        preview = render_message(
-            draft.header,
-            draft.role_id,
-            draft.intro,
-            draft.fms,
-            draft.end,
-        )
-        new_position = fms.index(updated) + 1
-
-        logger.info(
-            f"Guild {interaction.guild.id} edited formation {original.name!r} -> "
-            f"{updated.name!r} (index {index} → {new_position}).",
-        )
 
         await interaction.response.send_message(
-            f"Mise à jour: {updated.emoji} {updated.name} (position {new_position}).",
-            embed=Embed(
-                title=f"Aperçu brouillon — {len(fms)} formation(s)",
-                description=f"{preview or '_(vide)_'}",
-            ),
+            "Sélectionne la formation à modifier :",
+            view=fmui.SelectFormationView(self, fms),
             ephemeral=True,
         )
 

@@ -154,12 +154,13 @@ def render_message(
 
     for fm in fms:
         line_block = [
-            f"{fm.emoji} **{fm.name}** avec {fm.trainer_mention}{' (excusable)' if fm.excusable else ''}",
+            f"{fm.emoji} **{fm.name}** avec {fm.trainer_mention} ({'non ' if not fm.excusable else ''}excusable)",
             f"> {humanize_dt(fm.start_dt)}  – "  # noqa: RUF001
             f"{Emojis.get_clock_emoji(fm.start_dt)} {fm.duration}  – "  # noqa: RUF001
             f"{Emojis.PEOPLE} {len(fm.registered_users)}/{fm.seats} places",
         ]
-        line_block += [f"> {fm.description}"] if fm.description else []
+        render_description = fm.description.replace("\n", "\n> ")
+        line_block += [f"> {render_description}"] if fm.description else []
         lines.append("\n".join(line_block))
         lines.append("")
 
