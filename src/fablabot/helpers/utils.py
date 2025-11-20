@@ -29,6 +29,8 @@ if TYPE_CHECKING:
 
 _COMMANDS_CHANNEL_NAME = "commandes_bot"
 _DISCORD_EMOJI_RE = re.compile(r"^<a?:\w+:\d+>$")
+_REGIONAL_INDICATOR_START = 0x1F1E6
+_REGIONAL_INDICATOR_END = 0x1F1FF
 
 
 def log_request(logger: Logger, command_name: str, interaction: Interaction, **kwargs: Any) -> None:
@@ -160,7 +162,7 @@ def is_valid_emoji(emoji: str) -> bool:
         return emoji_clean is not None and (
             emoji_clean in EMOJI_DATA
             or _DISCORD_EMOJI_RE.match(emoji_clean) is not None
-            or 0x1F1E6 <= ord(emoji_clean) <= 0x1F1FF
+            or _REGIONAL_INDICATOR_START <= ord(emoji_clean) <= _REGIONAL_INDICATOR_END
         )
     except Exception:
         return False

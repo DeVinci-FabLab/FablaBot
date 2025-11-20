@@ -180,9 +180,9 @@ class ReactionEvent:
     Attributes:
         message_id (int): The Discord message ID.
         user_id (int): The Discord user ID.
-        user_name (str): The Discord user name.
+        user_name (str | None): The Discord user name.
         emoji (str): The emoji used in the reaction.
-        action (str): The action taken ('add' or 'remove').
+        action (Literal["add", "remove"]): The action taken ('add' or 'remove').
         ts_iso (str): The timestamp in ISO format.
     """
 

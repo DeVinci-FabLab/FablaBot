@@ -65,7 +65,7 @@ class UserManagement(commands.Cog):
         description="Affiche l'aide pour les commandes de gestion des utilisateurs.",
     )
     @app_commands.describe(show="Afficher l'aide publiquement ou non")
-    async def user_help(self, interaction: Interaction, show: bool = False) -> None:
+    async def user_help(self, interaction: Interaction, *, show: bool = False) -> None:
         """Display help for user management commands.
 
         Args:
@@ -96,6 +96,7 @@ class UserManagement(commands.Cog):
     async def user_op(
         self,
         interaction: Interaction,
+        *,
         member: Member,
         reason: str,
         time: app_commands.Range[int, 1, 90] = 5,
@@ -160,7 +161,7 @@ class UserManagement(commands.Cog):
         description="Retire les droits admin temporaires d'un utilisateur.",
     )
     @app_commands.describe(member="L'utilisateur cible")
-    async def user_deop(self, interaction: Interaction, member: Member) -> None:
+    async def user_deop(self, interaction: Interaction, *, member: Member) -> None:
         """Revoke temporary admin privileges from a user.
 
         Args:
@@ -220,7 +221,7 @@ class UserManagement(commands.Cog):
         member="L'utilisateur cible",
         role="Le rôle à attribuer",
     )
-    async def user_add_role(self, interaction: Interaction, member: Member, role: Role) -> None:
+    async def user_add_role(self, interaction: Interaction, *, member: Member, role: Role) -> None:
         """Add a role to a single user.
 
         Args:
@@ -259,7 +260,7 @@ class UserManagement(commands.Cog):
         member="L'utilisateur cible",
         role="Le rôle à retirer",
     )
-    async def user_remove_role(self, interaction: Interaction, member: Member, role: Role) -> None:
+    async def user_remove_role(self, interaction: Interaction, *, member: Member, role: Role) -> None:
         """Remove a role from a single user.
 
         Args:
@@ -300,7 +301,7 @@ class UserManagement(commands.Cog):
         description="Donne un rôle à plusieurs utilisateurs via un sélecteur.",
     )
     @app_commands.describe(role="Le rôle à attribuer")
-    async def user_add_roles(self, interaction: Interaction, role: Role) -> None:
+    async def user_add_roles(self, interaction: Interaction, *, role: Role) -> None:
         """Open a multi-user selector to add a role in bulk.
 
         Args:
@@ -335,7 +336,7 @@ class UserManagement(commands.Cog):
         description="Retire un rôle à plusieurs utilisateurs via un sélecteur.",
     )
     @app_commands.describe(role="Le rôle à retirer")
-    async def user_remove_roles(self, interaction: Interaction, role: Role) -> None:
+    async def user_remove_roles(self, interaction: Interaction, *, role: Role) -> None:
         """Open a multi-user selector to remove a role in bulk.
 
         Args:

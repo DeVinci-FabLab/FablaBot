@@ -119,7 +119,7 @@ class FormationManagement(commands.Cog):
 
     @fm_group.command(name="help", description="Afficher l'aide pour les commandes de gestion des formations.")
     @app_commands.describe(show="Afficher l'aide publiquement ou non")
-    async def fm_help(self, interaction: Interaction, show: bool = False) -> None:
+    async def fm_help(self, interaction: Interaction, *, show: bool = False) -> None:
         """Display help information for the formation management commands.
 
         Args:
@@ -147,7 +147,7 @@ class FormationManagement(commands.Cog):
 
     @fm_group.command(name="start", description="Démarrer/écraser un brouillon avec une introduction.")
     @app_commands.describe(role="Rôle à mentionner")
-    async def fm_start(self, interaction: Interaction, role: Role) -> None:
+    async def fm_start(self, interaction: Interaction, *, role: Role) -> None:
         """Start a new draft with an introduction.
 
         Args:
@@ -167,7 +167,7 @@ class FormationManagement(commands.Cog):
         role="Nouveau rôle à mentionner (laisser vide pour conserver)",
         text="Modifier l'introduction ou la conclusion",
     )
-    async def fm_edit_text(self, interaction: Interaction, role: Role | None = None, text: bool = False) -> None:
+    async def fm_edit_text(self, interaction: Interaction, *, role: Role | None = None, text: bool = False) -> None:
         """Edit the draft introduction and/or ending.
 
         Args:
@@ -202,13 +202,7 @@ class FormationManagement(commands.Cog):
             await interaction.response.send_message("Aucune modification détectée.", ephemeral=True)
             return
 
-        draft = FmMessageDraft(
-            header=draft.header,
-            role_id=role.id,
-            intro=draft.intro,
-            fms=draft.fms,
-            end=draft.end,
-        )
+        draft.role_id = role.id
         self.set_guild_draft(interaction.guild.id, draft)
 
         content = render_message(draft)
@@ -234,6 +228,7 @@ class FormationManagement(commands.Cog):
     async def fm_add(
         self,
         interaction: Interaction,
+        *,
         emoji: str,
         trainer: Member,
         date: str,
@@ -251,7 +246,7 @@ class FormationManagement(commands.Cog):
             date (str): Date in DD/MM/YYYY format.
             hour (str): Time in HH:MM (24h) format.
             duration (str): Duration as text, displayed as is.
-            seats (int): Number of seats.
+            seats (app_commands.Range[int, 1, 500]): Number of seats.
             excusable (bool, optional): Whether absences are excusable for this formation. Defaults to True.
         """
         log_request(
@@ -314,22 +309,21 @@ class FormationManagement(commands.Cog):
 
         assert interaction.guild is not None
         draft = self.get_guild_draft(interaction.guild.id)
-        fms = sorted(draft.fms, key=lambda x: x.start_dt)
 
-        if not fms:
+        if not draft.fms:
             logger.warning(f"Guild {interaction.guild.id} tried to edit formation but draft is empty.")
             await interaction.response.send_message(ErrorMessages.DRAFT_EMPTY, ephemeral=True)
             return
 
         await interaction.response.send_message(
             "Sélectionne la formation à modifier :",
-            view=fmui.SelectFormationView(self, fms),
+            view=fmui.SelectFormationView(self, draft.fms),
             ephemeral=True,
         )
 
     @fm_group.command(name="remove", description="Retirer une formation du brouillon par son index (1..n).")
     @app_commands.describe(index="Position de la FM dans l'aperçu trié (1..n)")
-    async def fm_remove(self, interaction: Interaction, index: app_commands.Range[int, 1, 1000]) -> None:
+    async def fm_remove(self, interaction: Interaction, *, index: app_commands.Range[int, 1, 1000]) -> None:
         """Remove a formation from the draft by its index (1..n).
 
         Args:
@@ -430,7 +424,7 @@ class FormationManagement(commands.Cog):
 
     @fm_group.command(name="publish", description="Publier le message dans un salon d'annonces (réactions auto-ajoutées).")
     @app_commands.describe(channel="Salon d'annonces cible")
-    async def fm_publish(self, interaction: Interaction, channel: TextChannel) -> None:
+    async def fm_publish(self, interaction: Interaction, *, channel: TextChannel) -> None:
         """Publish the message in an announcement channel (auto-added reactions).
 
         Args:
@@ -452,8 +446,7 @@ class FormationManagement(commands.Cog):
 
         await interaction.response.defer(thinking=True)
 
-        fms = sorted(draft.fms, key=lambda x: x.start_dt)
-        content = render_message(draft.header, draft.role_id, draft.intro, fms, draft.end)
+        content = render_message(draft)
 
         try:
             msg = await channel.send(content, suppress_embeds=True)
@@ -463,7 +456,7 @@ class FormationManagement(commands.Cog):
             return
 
         success_reactions = 0
-        for fm in fms:
+        for fm in draft.fms:
             try:
                 await msg.add_reaction(fm.emoji)
                 success_reactions += 1
@@ -473,27 +466,19 @@ class FormationManagement(commands.Cog):
                     f"for formation {fm.name!r} in published message.",
                 )
 
-        pub_msg = FmMessageDraft(
-            header=draft.header,
-            role_id=draft.role_id,
-            intro=draft.intro,
-            fms=fms,
-            end=draft.end,
-        )
-
         self._set_last_published_in_guild(
             interaction.guild.id,
             PublishedMessage(
                 message_id=msg.id,
                 channel_id=channel.id,
-                message=pub_msg,
+                message=draft,
             ),
         )
 
         logger.info(f"Guild {interaction.guild.id} published the formations draft in {channel}.")
         await interaction.followup.send(
             f"Message publié dans {channel.mention} (ID: `{msg.id}`) avec "
-            f"{success_reactions}/{len(fms)} réaction(s) ajoutée(s).",
+            f"{success_reactions}/{len(draft.fms)} réaction(s) ajoutée(s).",
         )
 
         await asyncio.sleep(24 * 60 * 60)
@@ -505,7 +490,7 @@ class FormationManagement(commands.Cog):
 
     @fm_group.command(name="export", description="Exporter la liste des membres ayant (dé)réagi aux émojis des FMs.")
     @app_commands.describe(message_id="ID du message publié (optionnel si dernière publication)")
-    async def fm_export(self, interaction: Interaction, message_id: str | None = None) -> None:
+    async def fm_export(self, interaction: Interaction, *, message_id: str | None = None) -> None:
         """Export the list of members who reacted (added/removed) to the formation emojis.
 
         Args:
@@ -672,15 +657,13 @@ class FormationManagement(commands.Cog):
             if not fms:
                 continue
 
-            send_contacts: str | None = None
+            send_contacts: str = format_respo_contacts(guild)
 
             for fm in fms:
                 if fm.notified_at_start:
                     continue
 
                 if not fm.notified_hour_before and notification_window_start <= fm.start_dt <= notification_window_end:
-                    if send_contacts is None:
-                        send_contacts = format_respo_contacts(guild)
                     await notify_trainer_before_formation(guild, fm, send_contacts, moment="hour_before")
                     await notify_responsible_before_formation(guild, fm, moment="hour_before")
                     await notify_participants_before_formation(guild, fm, send_contacts)
@@ -689,8 +672,6 @@ class FormationManagement(commands.Cog):
                     continue
 
                 if start_window_start <= fm.start_dt <= start_window_end:
-                    if send_contacts is None:
-                        send_contacts = format_respo_contacts(guild)
                     await notify_trainer_before_formation(guild, fm, send_contacts, moment="start")
                     await notify_responsible_before_formation(guild, fm, moment="start")
 

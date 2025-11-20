@@ -85,7 +85,7 @@ class ChannelManagement(commands.Cog):
         description="Affiche l'aide pour les commandes de gestion des salons textuels.",
     )
     @app_commands.describe(show="Afficher l'aide publiquement ou non")
-    async def text_help(self, interaction: Interaction, show: bool = False) -> None:
+    async def text_help(self, interaction: Interaction, *, show: bool = False) -> None:
         """Display help for text channel management commands.
 
         Args:
@@ -111,7 +111,7 @@ class ChannelManagement(commands.Cog):
         channel="Le nom du salon à créer",
         category="La catégorie dans laquelle créer le salon",
     )
-    async def text_create(self, interaction: Interaction, channel: str, category: CategoryChannel) -> None:
+    async def text_create(self, interaction: Interaction, *, channel: str, category: CategoryChannel) -> None:
         """Create a text channel in the passed category.
 
         Args:
@@ -155,7 +155,7 @@ class ChannelManagement(commands.Cog):
         channel="Salon à renommer",
         new_name="Nouveau nom du salon",
     )
-    async def text_rename(self, interaction: Interaction, channel: TextChannel, new_name: str) -> None:
+    async def text_rename(self, interaction: Interaction, *, channel: TextChannel, new_name: str) -> None:
         """Rename a text channel.
 
         Args:
@@ -190,7 +190,7 @@ class ChannelManagement(commands.Cog):
         description="Supprime un salon textuel.",
     )
     @app_commands.describe(channel="Le salon à supprimer")
-    async def text_delete(self, interaction: Interaction, channel: TextChannel) -> None:
+    async def text_delete(self, interaction: Interaction, *, channel: TextChannel) -> None:
         """Delete a text channel.
 
         Args:
@@ -222,7 +222,7 @@ class ChannelManagement(commands.Cog):
         description="Affiche l'aide pour les commandes de gestion des salons vocaux.",
     )
     @app_commands.describe(show="Afficher l'aide publiquement ou non")
-    async def vocal_help(self, interaction: Interaction, show: bool = False) -> None:
+    async def vocal_help(self, interaction: Interaction, *, show: bool = False) -> None:
         """Display help for vocal channel management commands.
 
         Args:
@@ -254,6 +254,7 @@ class ChannelManagement(commands.Cog):
     async def vocal_create(
         self,
         interaction: Interaction,
+        *,
         name: str,
         category: CategoryChannel,
         is_temporary: bool = True,
@@ -320,7 +321,7 @@ class ChannelManagement(commands.Cog):
         channel="Le salon vocal à renommer",
         new_name="Nouveau nom du salon",
     )
-    async def vocal_rename(self, interaction: Interaction, channel: VoiceChannel, new_name: str) -> None:
+    async def vocal_rename(self, interaction: Interaction, *, channel: VoiceChannel, new_name: str) -> None:
         """Rename a voice channel.
 
         Args:
@@ -381,7 +382,7 @@ class ChannelManagement(commands.Cog):
         description="Supprime un salon vocal.",
     )
     @app_commands.describe(channel="Le salon vocal à supprimer")
-    async def vocal_delete(self, interaction: Interaction, channel: VoiceChannel) -> None:
+    async def vocal_delete(self, interaction: Interaction, *, channel: VoiceChannel) -> None:
         """Delete a voice channel.
 
         Args:

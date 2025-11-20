@@ -22,9 +22,6 @@ class SuggestionManagement(commands.Cog):
 
     Commands:
         - /suggest: Send a suggestion to a chosen recipient.
-
-    Attributes:
-        suggest_group (app_commands.Group): Command group for feature suggestion commands.
     """
 
     def __init__(self, bot: commands.Bot) -> None:
@@ -43,6 +40,9 @@ class SuggestionManagement(commands.Cog):
         """Single command entrypoint for sending suggestions via a small interactive flow.
 
         The flow collects the recipient and anonymity via components, then opens a modal to input the suggestion text.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
         """
         view = mui.InitialView(self)
         await interaction.response.send_message(
@@ -66,10 +66,10 @@ class SuggestionManagement(commands.Cog):
         """Handle a suggestion command.
 
         Args:
-            interaction: The Discord interaction context.
-            suggestion_text: The raw suggestion text.
-            config: The suggestion configuration.
-            anonymous: Whether the suggestion is anonymous or not.
+            interaction (Interaction): The Discord interaction context.
+            suggestion_text (str): The raw suggestion text.
+            config (SuggestionConfig): The suggestion configuration.
+            anonymous (bool): Whether the suggestion is anonymous or not.
         """
         logger.info(
             f"[{config.command_name}]: user={interaction.user if not anonymous else 'Anonymous'!r} "
@@ -131,7 +131,7 @@ class SuggestionManagement(commands.Cog):
             user_id (int | None): The ID of the user making the suggestion.
 
         Returns:
-            True if at least one recipient received the suggestion, False otherwise.
+            bool: True if at least one recipient received the suggestion, False otherwise.
         """
         responsibles: set[Member] = get_members_by_role(logger, guild, role=config.role_name) if config.role_name else set()
         channel = get(guild.text_channels, name=config.channel_name) if config.channel_name else None

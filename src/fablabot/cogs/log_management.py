@@ -46,7 +46,7 @@ class LogManagement(commands.Cog):
         description="Affiche l'aide pour les commandes de gestion des logs.",
     )
     @app_commands.describe(show="Afficher l'aide publiquement ou non")
-    async def log_help(self, interaction: Interaction, show: bool = False) -> None:
+    async def log_help(self, interaction: Interaction, *, show: bool = False) -> None:
         """Display help for log management commands.
 
         Args:
@@ -68,7 +68,7 @@ class LogManagement(commands.Cog):
         description="Configure le salon recevant les logs du bot en cas d'erreur.",
     )
     @app_commands.describe(channel="Salon textuel qui recevra les logs du bot.")
-    async def log_set(self, interaction: Interaction, channel: TextChannel) -> None:
+    async def log_set(self, interaction: Interaction, *, channel: TextChannel) -> None:
         """Configure the log channel destination for Discord logging.
 
         Args:
@@ -120,7 +120,7 @@ class LogManagement(commands.Cog):
     @app_commands.describe(
         date="Date des logs à exporter (format : DD/MM/YYYY). Si non spécifié, les logs d'aujourd'hui seront exportés.",
     )
-    async def log_export(self, interaction: Interaction, date: str | None = None) -> None:
+    async def log_export(self, interaction: Interaction, *, date: str | None = None) -> None:
         """Export recent logs.
 
         Args:

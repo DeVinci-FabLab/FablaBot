@@ -14,8 +14,6 @@ from fablabot.helpers.utils import is_valid_emoji, log_request
 from fablabot.models.formation import FmMessageDraft, Formation
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from fablabot.cogs import FormationManagement
 
 logger = logging.getLogger(__name__)
@@ -353,7 +351,7 @@ class SelectFormationButton(ui.Button["SelectFormationView"]):
 class SelectFormationView(ui.View):
     """View to select which formation to edit."""
 
-    def __init__(self, cog: FormationManagement, formations: Sequence[Formation]) -> None:
+    def __init__(self, cog: FormationManagement, formations: list[Formation]) -> None:
         """Initialize the SelectFormationView.
 
         Args:
@@ -368,7 +366,11 @@ class SelectFormationView(ui.View):
 
 
 class EditEmojiModal(ui.Modal, title="Modifier l'émoji"):
-    """Modal to edit formation emoji."""
+    """Modal to edit formation emoji.
+
+    Attributes:
+        emoji_input (ui.TextInput): Text input for the formation emoji.
+    """
 
     emoji_input: ui.TextInput[EditEmojiModal] = ui.TextInput(
         label="Émoji",
@@ -379,11 +381,21 @@ class EditEmojiModal(ui.Modal, title="Modifier l'émoji"):
     )
 
     def __init__(self, view: EditFormationView) -> None:
+        """Initialize the EditEmojiModal.
+
+        Args:
+            view (EditFormationView): The parent view.
+        """
         super().__init__()
         self.view_ref = view
         self.emoji_input.default = view.current_emoji
 
     async def on_submit(self, interaction: Interaction) -> None:
+        """Called when the modal is submitted.
+
+        Args:
+            interaction (Interaction): The interaction that triggered the modal submission.
+        """
         assert interaction.guild is not None
         candidate_raw = self.emoji_input.value.strip()
         draft = self.view_ref.cog.get_guild_draft(interaction.guild.id)
@@ -484,7 +496,11 @@ class SelectTrainerView(ui.View):
 
 
 class EditDatetimeModal(ui.Modal, title="Modifier date et heure"):
-    """Modal to edit formation datetime."""
+    """Modal to edit formation datetime.
+
+    Attributes:
+        datetime_input (ui.TextInput): Text input for the formation datetime.
+    """
 
     datetime_input: ui.TextInput[EditDatetimeModal] = ui.TextInput(
         label="Date et heure (DD/MM/YYYY HH:MM)",
@@ -495,11 +511,21 @@ class EditDatetimeModal(ui.Modal, title="Modifier date et heure"):
     )
 
     def __init__(self, view: EditFormationView) -> None:
+        """Initialize the EditDatetimeModal.
+
+        Args:
+            view (EditFormationView): The parent view.
+        """
         super().__init__()
         self.view_ref = view
         self.datetime_input.default = f"{view.current_start_dt:%d/%m/%Y %H:%M}"
 
     async def on_submit(self, interaction: Interaction) -> None:
+        """Called when the modal is submitted.
+
+        Args:
+            interaction (Interaction): The interaction that triggered the modal submission.
+        """
         assert interaction.guild is not None
         candidate = self.datetime_input.value.strip()
 
@@ -516,7 +542,11 @@ class EditDatetimeModal(ui.Modal, title="Modifier date et heure"):
 
 
 class EditDurationSeatsModal(ui.Modal, title="Modifier durée et places"):
-    """Modal to edit formation duration and seats."""
+    """Modal to edit formation duration and seats.
+
+    Attributes:
+        duration_seats_input (ui.TextInput): Text input for the formation duration and seats.
+    """
 
     duration_seats_input: ui.TextInput[EditDurationSeatsModal] = ui.TextInput(
         label="Durée - Places",
@@ -527,11 +557,24 @@ class EditDurationSeatsModal(ui.Modal, title="Modifier durée et places"):
     )
 
     def __init__(self, view: EditFormationView) -> None:
+        """Initialize the EditDurationSeatsModal.
+
+        Args:
+            view (EditFormationView): The parent view.
+        """
         super().__init__()
         self.view_ref = view
         self.duration_seats_input.default = f"{view.current_duration} - {view.current_seats}"
 
     async def on_submit(self, interaction: Interaction) -> None:
+        """Called when the modal is submitted.
+
+        Args:
+            interaction (Interaction): The interaction that triggered the modal submission.
+
+        Raises:
+            ValueError: If the seats number is not an integer or out of bounds.
+        """
         assert interaction.guild is not None
         candidate = self.duration_seats_input.value.strip()
         parts = [part.strip() for part in candidate.split("-")]
@@ -612,7 +655,7 @@ class EditFormationView(ui.View):
 
         Args:
             interaction (Interaction): The interaction that triggered the button click.
-            button (ui.Button): The button that was clicked.
+            _button (ui.Button): The button that was clicked.
         """
         await interaction.response.send_modal(EditNameDescriptionModal(self))
 
@@ -622,7 +665,7 @@ class EditFormationView(ui.View):
 
         Args:
             interaction (Interaction): The interaction that triggered the button click.
-            button (ui.Button): The button that was clicked.
+            _button (ui.Button): The button that was clicked.
         """
         await interaction.response.send_message("Sélectionne lae formateur·ice :", view=SelectTrainerView(self), ephemeral=True)
 
@@ -742,11 +785,24 @@ class EditFormationView(ui.View):
     # region ====== Helpers ======
 
     def get_button(self, button_id: int) -> ui.Button[EditFormationView]:
+        """Get a button by its ID.
+
+        Args:
+            button_id (int): The ID of the button.
+
+        Returns:
+            ui.Button[EditFormationView]: The button with the given ID.
+        """
         item = self.find_item(button_id)
         assert isinstance(item, ui.Button)
         return item
 
     async def refresh_main_message(self, interaction: Interaction) -> None:
+        """Refresh the main edit message with current formation data.
+
+        Args:
+            interaction (Interaction): The interaction to respond to.
+        """
         await interaction.response.edit_message(
             content=f"Modification: {self.current_emoji} {self.current_name}",
             view=self,

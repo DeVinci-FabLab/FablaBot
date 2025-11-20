@@ -44,7 +44,7 @@ class BulkRoleAssignmentView(ui.View):
 
         Args:
             interaction (Interaction): The interaction that triggered the selection.
-            select (ui.UserSelect): The select component.
+            _select (ui.UserSelect): The select component.
         """
         if not interaction.response.is_done():
             await interaction.response.defer()
@@ -137,7 +137,7 @@ class MultiRoleSelectorView(ui.View):
 
         Args:
             interaction (Interaction): The interaction that triggered the selection.
-            select (ui.RoleSelect): The select component.
+            _select (ui.RoleSelect): The select component.
         """
         if not interaction.response.is_done():
             await interaction.response.defer()

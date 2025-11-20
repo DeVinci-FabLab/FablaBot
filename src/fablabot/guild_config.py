@@ -51,12 +51,12 @@ def _save_all(data: dict[str, dict[str, Any]]) -> None:
     tmp_path.replace(CONFIG_FILE)
 
 
-def _update_entry(guild_id: int | None, **updates: Any) -> None:
+def _update_entry(guild_id: int | None, **updates: int | bool | None) -> None:
     """Update the configuration entry for a specific guild or the global section.
 
     Args:
         guild_id (int | None): The ID of the guild to update.
-        **updates (Any): Key-value pairs to update in the guild's configuration.
+        **updates (int | bool | None): Key-value pairs to update in the guild's configuration.
     """
     key = _GLOBAL_SECTION if guild_id is None else str(guild_id)
     data = _load_all()
@@ -150,7 +150,7 @@ def is_welcome_verify_enabled(guild_id: int) -> bool:
     return bool(value) if isinstance(value, bool) else False
 
 
-def set_welcome_verify_enabled(guild_id: int, enabled: bool) -> None:
+def set_welcome_verify_enabled(guild_id: int, *, enabled: bool) -> None:
     """Set the welcome verification status for a specific guild.
 
     Args:

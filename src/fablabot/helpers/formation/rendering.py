@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _FM_REQUEST_FORMS = "https://forms.office.com/e/MqVdQujzjf"
+_THREE_QUARTERS_HOUR = 45
+_ONE_QUARTER_HOUR = 15
 
 
 class Emojis:
@@ -79,10 +81,10 @@ class Emojis:
         Returns:
             datetime: The rounded datetime.
         """
-        if dt.minute >= 45:
+        if dt.minute >= _THREE_QUARTERS_HOUR:
             dt += timedelta(hours=1)
             dt = dt.replace(minute=0, second=0, microsecond=0)
-        elif dt.minute < 15:
+        elif dt.minute < _ONE_QUARTER_HOUR:
             dt = dt.replace(minute=0, second=0, microsecond=0)
         else:
             dt = dt.replace(minute=30, second=0, microsecond=0)

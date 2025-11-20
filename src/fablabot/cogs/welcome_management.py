@@ -60,7 +60,7 @@ class WelcomeManagement(commands.Cog):
         description="Affiche l'aide pour les commandes de bienvenue.",
     )
     @app_commands.describe(show="Afficher l'aide publiquement ou non")
-    async def welcome_help(self, interaction: Interaction, show: bool = False) -> None:
+    async def welcome_help(self, interaction: Interaction, *, show: bool = False) -> None:
         """Display help for welcome commands.
 
         Args:
@@ -82,7 +82,7 @@ class WelcomeManagement(commands.Cog):
         description="Active ou désactive la création automatique de salons de bienvenue.",
     )
     @app_commands.describe(enable="Activer ou désactiver la fonctionnalité")
-    async def welcome_verify(self, interaction: Interaction, enable: bool) -> None:
+    async def welcome_verify(self, interaction: Interaction, *, enable: bool) -> None:
         """Toggle automatic welcome channel creation and role assignment for new members.
 
         Args:
@@ -106,7 +106,7 @@ class WelcomeManagement(commands.Cog):
             )
             return
 
-        set_welcome_verify_enabled(interaction.guild.id, enable)
+        set_welcome_verify_enabled(interaction.guild.id, enabled=enable)
 
         await interaction.response.send_message(f"Fonctionnalité de bienvenue automatique : {status}.")
 
@@ -115,12 +115,12 @@ class WelcomeManagement(commands.Cog):
         description="Valide un nouveau membre en lui attribuant les rôles appropriés.",
     )
     @app_commands.describe(city="La ville de l'utilisateur (Paris, Nantes, Montpellier)")
-    async def welcome_approve(self, interaction: Interaction, city: Literal["Paris", "Nantes", "Montpellier"]) -> None:
+    async def welcome_approve(self, interaction: Interaction, *, city: Literal["Paris", "Nantes", "Montpellier"]) -> None:
         """Approve a new member by assigning appropriate roles.
 
         Args:
             interaction (Interaction): The Discord interaction context.
-            city (Literal[&quot;Paris&quot;, &quot;Nantes&quot;, &quot;Montpellier&quot;]): The user's city.
+            city (Literal["Paris", "Nantes", "Montpellier"]): The user's city.
         """
         log_request(logger, "welcome.approve", interaction, city=city)
         if not await check_has_role(logger, interaction, ADMIN_ROLES):
