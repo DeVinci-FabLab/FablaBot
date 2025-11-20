@@ -30,7 +30,7 @@ from fablabot.helpers.formation import (
     send_waitlist_dm,
 )
 from fablabot.helpers.utils import check_has_role, is_in_allowed_channel, is_valid_emoji, log_request
-from fablabot.models import FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
+from fablabot.models import FmCommand, FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
 from fablabot.ui import fmui
 
 logger = logging.getLogger(__name__)
@@ -317,20 +317,18 @@ class FormationManagement(commands.Cog):
 
         await interaction.response.send_message(
             "Sélectionne la formation à modifier :",
-            view=fmui.SelectFormationView(self, draft.fms),
+            view=fmui.SelectFormationView(self, draft.fms, FmCommand.EDIT),
             ephemeral=True,
         )
 
     @fm_group.command(name="remove", description="Retirer une formation du brouillon par son index (1..n).")
-    @app_commands.describe(index="Position de la FM dans l'aperçu trié (1..n)")
-    async def fm_remove(self, interaction: Interaction, *, index: app_commands.Range[int, 1, 1000]) -> None:
+    async def fm_remove(self, interaction: Interaction) -> None:
         """Remove a formation from the draft by its index (1..n).
 
         Args:
             interaction (Interaction): The Discord interaction context.
-            index (app_commands.Range[int, 1, 1000]): The index of the formation to remove (1-based).
         """
-        log_request(logger, "fm.remove", interaction, index=index)
+        log_request(logger, "fm.remove", interaction)
         if not await is_in_allowed_channel(logger, interaction):
             return
         if not await check_has_role(logger, interaction, ALLOWED_ROLES):
@@ -338,11 +336,10 @@ class FormationManagement(commands.Cog):
 
         assert interaction.guild is not None
         draft = self.get_guild_draft(interaction.guild.id)
-        fms = sorted(draft.fms, key=lambda x: x.start_dt)
 
-        if index > len(fms):
-            logger.warning(f"Guild {interaction.guild.id} tried to remove out-of-bounds formation index {index}.")
-            await interaction.response.send_message(ErrorMessages.INDEX_OUT_OF_BOUNDS.format(count=len(fms)), ephemeral=True)
+        if not draft.fms:
+            logger.warning(f"Guild {interaction.guild.id} tried to remove formation but draft is empty.")
+            await interaction.response.send_message(ErrorMessages.DRAFT_EMPTY, ephemeral=True)
             return
 
         removed = fms.pop(index - 1)
@@ -359,8 +356,8 @@ class FormationManagement(commands.Cog):
         preview = render_message(draft)
         logger.info(f"Guild {interaction.guild.id} removed formation {removed.name!r} ({removed.start_iso}) from draft.")
         await interaction.response.send_message(
-            f"Supprimé: {removed.emoji} {removed.name}",
-            embed=Embed(title=f"Aperçu brouillon — {len(fms)} formation(s)", description=preview or "_(vide)_"),
+            "Sélectionne la formation à supprimer :",
+            view=fmui.SelectFormationView(self, draft.fms, FmCommand.REMOVE),
             ephemeral=True,
         )
 

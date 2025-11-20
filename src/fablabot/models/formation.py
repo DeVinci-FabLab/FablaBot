@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from enum import Enum, auto
 from typing import Any
 
 from fablabot.helpers.constants import PARIS_TZ
@@ -171,3 +172,32 @@ class PublishedMessage:
             channel_id=data.get("channel_id", 0),
             message=FmMessageDraft.from_dict(data.get("message", {})),
         )
+
+
+class FmCommand(Enum):
+    """Enumeration of formation management commands.
+
+    Attributes:
+        START (FmCommand): Start the formation management process.
+        EDIT_TEXT (FmCommand): Edit the introduction and/or conclusion text of the draft.
+        EDIT (FmCommand): Edit an existing formation in the draft.
+        REMOVE (FmCommand): Remove a formation from the draft.
+        PREVIEW (FmCommand): Preview the current draft message.
+        PUBLISH (FmCommand): Publish the draft message.
+        EXPORT (FmCommand): Export the registration data to a CSV file.
+    """
+
+    START = auto()
+    """Start the formation management process."""
+    EDIT_TEXT = auto()
+    """Edit the introduction and/or conclusion text of the draft."""
+    EDIT = auto()
+    """Edit an existing formation in the draft."""
+    REMOVE = auto()
+    """Remove a formation from the draft."""
+    PREVIEW = auto()
+    """Preview the current draft message."""
+    PUBLISH = auto()
+    """Publish the draft message."""
+    EXPORT = auto()
+    """Export the registration data to a CSV file."""
