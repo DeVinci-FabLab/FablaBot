@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any
 
 from fablabot.helpers.constants import PARIS_TZ
 
@@ -170,58 +170,4 @@ class PublishedMessage:
             message_id=data.get("message_id", 0),
             channel_id=data.get("channel_id", 0),
             message=FmMessageDraft.from_dict(data.get("message", {})),
-        )
-
-
-@dataclass
-class ReactionEvent:
-    """A single reaction event log entry.
-
-    Attributes:
-        message_id (int): The Discord message ID.
-        user_id (int): The Discord user ID.
-        user_name (str | None): The Discord user name.
-        emoji (str): The emoji used in the reaction.
-        action (Literal["add", "remove"]): The action taken ('add' or 'remove').
-        ts_iso (str): The timestamp in ISO format.
-    """
-
-    message_id: int
-    """The Discord message ID."""
-    user_id: int
-    """The Discord user ID."""
-    user_name: str | None
-    """The Discord user name."""
-    emoji: str
-    """The emoji used in the reaction."""
-    action: Literal["add", "remove"]
-    """The action taken ('add' or 'remove')."""
-    ts_iso: str
-    """The timestamp in ISO format."""
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert the ReactionEvent instance to a dictionary.
-
-        Returns:
-            dict[str, Any]: The dictionary representation of the ReactionEvent.
-        """
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> ReactionEvent:
-        """Create a ReactionEvent instance from a dictionary.
-
-        Args:
-            data (dict[str, Any]): Dictionary containing reaction event data.
-
-        Returns:
-            ReactionEvent: The ReactionEvent instance.
-        """
-        return cls(
-            message_id=data.get("message_id", 0),
-            user_id=data.get("user_id", 0),
-            user_name=data.get("user_name"),
-            emoji=data.get("emoji", ""),
-            action=data.get("action", "add"),
-            ts_iso=data.get("ts_iso", ""),
         )

@@ -10,7 +10,7 @@ import io
 import json
 import logging
 from pathlib import Path
-from typing import Any, Literal, cast, override
+from typing import Any, override
 from warnings import deprecated
 
 from discord import Embed, File, Interaction, Member, RawReactionActionEvent, Role, TextChannel, app_commands
@@ -30,7 +30,7 @@ from fablabot.helpers.formation import (
     send_waitlist_dm,
 )
 from fablabot.helpers.utils import check_has_role, is_in_allowed_channel, is_valid_emoji, log_request
-from fablabot.models.formation import FmMessageDraft, Formation, PublishedMessage, ReactionEvent
+from fablabot.models import FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
 from fablabot.ui import fmui
 
 logger = logging.getLogger(__name__)
@@ -620,7 +620,7 @@ class FormationManagement(commands.Cog):
                 user_id=payload.user_id,
                 user_name=member_name,
                 emoji=emoji_str,
-                action=cast("Literal['add', 'remove']", payload.event_type.removeprefix("REACTION_").lower()),
+                action=ReactionAction[payload.event_type.removeprefix("REACTION_")],
                 ts_iso=datetime.now(PARIS_TZ).isoformat(timespec="seconds"),
             )
 
@@ -1001,7 +1001,7 @@ class FormationManagement(commands.Cog):
 
         last_add: dict[tuple[str, int], datetime] = {}
         for event in history:
-            if event.action != "add":
+            if event.action != ReactionAction.ADD:
                 continue
             emoji = str(event.emoji)
             user_id = event.user_id
