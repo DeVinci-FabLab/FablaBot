@@ -52,7 +52,7 @@ EASTER_EGGS: list[EasterEggTrigger] = [
 
 
 @dataclass
-class ReactionAction:
+class MsgReactionEvent:
     """Configuration for a reaction-based action.
 
     Attributes:
@@ -80,7 +80,7 @@ class ReactionAction:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> ReactionAction:
+    def from_dict(cls, data: dict[str, Any]) -> MsgReactionEvent:
         """Create from dictionary."""
         return cls(
             emoji=data["emoji"],
@@ -101,7 +101,7 @@ class MessageDraft:
     """
 
     content: str
-    reactions: list[ReactionAction]
+    reactions: list[MsgReactionEvent]
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -115,7 +115,7 @@ class MessageDraft:
         """Create from dictionary."""
         return cls(
             content=data["content"],
-            reactions=[ReactionAction.from_dict(r) for r in data.get("reactions", [])],
+            reactions=[MsgReactionEvent.from_dict(r) for r in data.get("reactions", [])],
         )
 
 

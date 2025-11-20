@@ -431,9 +431,8 @@ class UserManagement(commands.Cog):
             self.deop_tasks.pop(member.id, None)
         except asyncio.CancelledError:
             logger.info(f"Deop timer cancelled for {member}")
-        except Exception as e:
-            logger.exception(f"Error in deop task for {member}: {e}")  # TODO: redondant
-            # FIXME: exception quand deop est appelé manuellement avant la fin du timer
+        except Exception:
+            logger.exception(f"Error in deop task for {member}:")
 
     # -- Permission Checks --
 

@@ -164,13 +164,18 @@ class MultiRoleSelectorView(ui.View):
         assert interaction.guild is not None
         members: set[Member] = set(interaction.guild.members)
 
-        lines: list[str] = ["Rôles sélectionnés :"]
+        multi_string = "s" if len(roles) > 1 else ""
+
+        lines: list[str] = [f"Rôle{multi_string} sélectionné{multi_string} :"]
         for role in roles:
             role_members = get_members_by_role(role=role)
             lines.append(f"- {format_role_mention(role)} : {len(role_members)} membre{'s' if len(role_members) != 1 else ''}")
             members &= role_members
 
-        lines.append(f"\nMembre(s) avec tous les rôles sélectionnés ({len(members)}) :")
+        lines.append(
+            f"\nMembre(s) avec{' tous' if multi_string else ''} le{multi_string}"
+            f" rôle{multi_string} sélectionné{multi_string} ({len(members)}) :",
+        )
         if not members:
             lines.append("_(Aucun membre)_")
         lines.extend(f"- {format_member_mention(m)}" for m in members)

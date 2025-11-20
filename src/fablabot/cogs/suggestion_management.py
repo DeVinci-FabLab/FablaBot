@@ -113,7 +113,7 @@ class SuggestionManagement(commands.Cog):
             f"Guild {interaction.guild.id} user "
             f"{interaction.user.id if not anonymous else 'Anonymous'} made a suggestion via {config.command_name}.",
         )
-        await interaction.response.send_message(config.success_message, ephemeral=True)
+        await interaction.response.defer()
 
     async def _send_suggestion(
         self,

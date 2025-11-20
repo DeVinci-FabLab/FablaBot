@@ -9,7 +9,7 @@ from discord import ButtonStyle, Interaction, Member, SelectOption, TextStyle, u
 from discord.utils import get
 
 from fablabot.helpers.utils import format_member_mention, send_dm_to_member
-from fablabot.models.message import SUGGESTION_OPTIONS, ReactionAction
+from fablabot.models.message import SUGGESTION_OPTIONS, MsgReactionEvent
 
 if TYPE_CHECKING:
     from fablabot.cogs import MessageManagement, SuggestionManagement
@@ -196,7 +196,7 @@ class ReactionTargetModal(ui.Modal):
             )
             return
 
-        reaction = ReactionAction(
+        reaction = MsgReactionEvent(
             emoji=self.emoji,
             action_type=self.action_type,
             message_content=self.message_content,
@@ -252,30 +252,67 @@ class SuggestionModal(ui.Modal, title="Envoyer une suggestion"):
         max_length=2000,
     )
 
-    def __init__(self, cog: SuggestionManagement, recipient_key: str, anonymous_flag: bool) -> None:
+    def __init__(
+        self,
+        cog: SuggestionManagement,
+        initial_view_followup_id: int,
+        recipient_key: str,
+        *,
+        anonymous_flag: bool,
+    ) -> None:
+        """Initialize the SuggestionModal.
+
+        Args:
+            cog (SuggestionManagement): The SuggestionManagement cog instance.
+            initial_view_followup_id (int): The ID of the initial view message to update.
+            recipient_key (str): The key of the recipient configuration.
+            anonymous_flag (bool): Whether the suggestion is anonymous.
+        """
         super().__init__()
         self.cog = cog
+        self.initial_view_followup_id = initial_view_followup_id
         self.recipient_key = recipient_key
         self.anonymous_flag = anonymous_flag
 
     async def on_submit(self, interaction: Interaction) -> None:
+        """Handle modal submission.
+
+        Args:
+            interaction (Interaction): The interaction context.
+        """
         config = SUGGESTION_OPTIONS[self.recipient_key]
         await self.cog.handle_suggestion(interaction, self.suggestion_input.value, config, anonymous=self.anonymous_flag)
+
+        await interaction.followup.edit_message(self.initial_view_followup_id, content=config.success_message, view=None)
 
 
 class OpenModalButton(ui.Button):
     def __init__(self, view: InitialView, cog: SuggestionManagement) -> None:
+        """Initialize the OpenModalButton.
+
+        Args:
+            view (InitialView): The parent view.
+            cog (SuggestionManagement): The SuggestionManagement cog instance.
+        """
         super().__init__(label="Rédiger la suggestion", style=ButtonStyle.primary)
         self.view_ref = view
         self.cog = cog
 
     async def callback(self, interaction: Interaction) -> None:
+        """Handle button click.
+
+        Args:
+            interaction (Interaction): The interaction context.
+        """
         recipient = getattr(self.view_ref, "selected_recipient", None)
         if recipient is None:
             await interaction.response.send_message("Veuillez d'abord choisir le destinataire.", ephemeral=True)
             return
 
-        modal = SuggestionModal(self.cog, recipient, getattr(self.view_ref, "anonymous", False))
+        assert interaction.message is not None
+        followup_id = interaction.message.id
+
+        modal = SuggestionModal(self.cog, followup_id, recipient, anonymous_flag=getattr(self.view_ref, "anonymous", False))
         await interaction.response.send_modal(modal)
 
 

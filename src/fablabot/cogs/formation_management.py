@@ -315,11 +315,11 @@ class FormationManagement(commands.Cog):
             await interaction.response.send_message(ErrorMessages.DRAFT_EMPTY, ephemeral=True)
             return
 
-        await interaction.response.send_message(
-            "Sélectionne la formation à modifier :",
-            view=fmui.SelectFormationView(self, draft.fms, FmCommand.EDIT),
-            ephemeral=True,
-        )
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        followup_mes = await interaction.followup.send("Modification de formations en cours...", wait=True)
+
+        view = fmui.SelectFormationView(self, followup_mes.id, draft.fms, FmCommand.EDIT)
+        await interaction.followup.send("Sélectionne la formation à modifier :", view=view, ephemeral=True)
 
     @fm_group.command(name="remove", description="Retirer une formation du brouillon par son index (1..n).")
     async def fm_remove(self, interaction: Interaction) -> None:
@@ -342,24 +342,11 @@ class FormationManagement(commands.Cog):
             await interaction.response.send_message(ErrorMessages.DRAFT_EMPTY, ephemeral=True)
             return
 
-        removed = fms.pop(index - 1)
+        await interaction.response.defer(thinking=True, ephemeral=True)
+        followup_mes = await interaction.followup.send("Suppression de formations en cours...", wait=True)
 
-        draft = FmMessageDraft(
-            header=draft.header,
-            role_id=draft.role_id,
-            intro=draft.intro,
-            fms=fms,
-            end=draft.end,
-        )
-        self.set_guild_draft(interaction.guild.id, draft)
-
-        preview = render_message(draft)
-        logger.info(f"Guild {interaction.guild.id} removed formation {removed.name!r} ({removed.start_iso}) from draft.")
-        await interaction.response.send_message(
-            "Sélectionne la formation à supprimer :",
-            view=fmui.SelectFormationView(self, draft.fms, FmCommand.REMOVE),
-            ephemeral=True,
-        )
+        view = fmui.SelectFormationView(self, followup_mes.id, draft.fms, FmCommand.REMOVE)
+        await interaction.followup.send("Sélectionne la formation à supprimer :", view=view, ephemeral=True)
 
     @fm_group.command(name="clear", description="Vider le brouillon courant (intro et fin conservées).")
     async def fm_clear(self, interaction: Interaction) -> None:
