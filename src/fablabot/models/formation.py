@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum, auto
@@ -70,6 +71,40 @@ class Formation:
             dict[str, Any]: The dictionary representation of the Formation.
         """
         return asdict(self)
+
+    def __copy__(self) -> Formation:
+        """Create a shallow copy of the Formation instance.
+
+        Returns:
+            Formation: A shallow copy of the Formation instance.
+        """
+        return Formation(**self.to_dict())
+
+    def __deepcopy__(self, memo: dict[int, Any] | None = None) -> Formation:
+        """Create a deep copy of the Formation instance.
+
+        Args:
+            memo (dict[int, Any] | None): Memoization dictionary for deep copy.
+
+        Returns:
+            Formation: A deep copy of the Formation instance.
+        """
+        if memo is None:
+            memo = {}
+        return Formation(
+            emoji=self.emoji,
+            name=self.name,
+            trainer_mention=self.trainer_mention,
+            start_iso=self.start_iso,
+            duration=self.duration,
+            seats=self.seats,
+            description=self.description,
+            excusable=self.excusable,
+            registered_users=deepcopy(self.registered_users, memo),
+            waitlisted_users=deepcopy(self.waitlisted_users, memo),
+            notified_hour_before=self.notified_hour_before,
+            notified_at_start=self.notified_at_start,
+        )
 
 
 @dataclass

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import logging
 from typing import TYPE_CHECKING, cast
 
@@ -422,7 +423,7 @@ class _EditEmojiModal(ui.Modal, title="Modifier l'émoji"):
         """
         super().__init__()
         self.view_ref = view
-        self.emoji_input.default = view.current_emoji
+        self.emoji_input.default = view.updated_formation.emoji
 
     async def on_submit(self, interaction: Interaction) -> None:
         """Called when the modal is submitted.
@@ -446,9 +447,9 @@ class _EditEmojiModal(ui.Modal, title="Modifier l'émoji"):
             await interaction.response.send_message(ErrorMessages.EMOJI_ALREADY_USED, ephemeral=True)
             return
 
-        self.view_ref.current_emoji = candidate
+        self.view_ref.updated_formation.emoji = candidate
         edit_emoji_button = self.view_ref.get_button(EDIT_EMOJI_BUTTON_ID)
-        edit_emoji_button.label = f"Modifier émoji : {self.view_ref.current_emoji}"
+        edit_emoji_button.label = f"Modifier émoji : {self.view_ref.updated_formation.emoji}"
 
         await self.view_ref.refresh_main_message(interaction)
 
@@ -485,8 +486,8 @@ class _EditNameDescriptionModal(ui.Modal, title="Modifier nom et description"):
         super().__init__()
         self.view_ref = view
 
-        self.name_input.default = view.current_name
-        self.description_input.default = view.current_description
+        self.name_input.default = view.updated_formation.name
+        self.description_input.default = view.updated_formation.description
 
     async def on_submit(self, interaction: Interaction) -> None:
         """Called when the modal is submitted.
@@ -494,8 +495,8 @@ class _EditNameDescriptionModal(ui.Modal, title="Modifier nom et description"):
         Args:
             interaction (Interaction): The interaction that triggered the modal submission.
         """
-        self.view_ref.current_name = self.name_input.value.strip()
-        self.view_ref.current_description = self.description_input.value.strip()
+        self.view_ref.updated_formation.name = self.name_input.value.strip()
+        self.view_ref.updated_formation.description = self.description_input.value.strip()
 
         await self.view_ref.refresh_main_message(interaction)
 
@@ -523,7 +524,7 @@ class _SelectTrainerView(ui.View):
             select (ui.UserSelect): The select component.
         """
         selected_user = select.values[0]
-        self.edit_formation_view.current_trainer_mention = selected_user.mention
+        self.edit_formation_view.updated_formation.trainer_mention = selected_user.mention
 
         edit_trainer_button = self.edit_formation_view.get_button(EDIT_TRAINER_BUTTON_ID)
         edit_trainer_button.label = f"Modifier lae formateur·ice : {selected_user.display_name}"
@@ -533,7 +534,8 @@ class _SelectTrainerView(ui.View):
 
         await interaction.followup.edit_message(
             self.original_message_id,
-            content=f"Modification : {self.edit_formation_view.current_emoji} {self.edit_formation_view.current_name}",
+            content=f"Modification : {self.edit_formation_view.updated_formation.emoji}"
+            f" {self.edit_formation_view.updated_formation.name}",
             view=self.edit_formation_view,
         )
         await interaction.delete_original_response()
@@ -562,7 +564,7 @@ class _EditDatetimeModal(ui.Modal, title="Modifier date et heure"):
         """
         super().__init__()
         self.view_ref = view
-        self.datetime_input.default = f"{view.current_start_dt:%d/%m/%Y %H:%M}"
+        self.datetime_input.default = f"{view.updated_formation.start_dt:%d/%m/%Y %H:%M}"
 
     async def on_submit(self, interaction: Interaction) -> None:
         """Called when the modal is submitted.
@@ -581,7 +583,7 @@ class _EditDatetimeModal(ui.Modal, title="Modifier date et heure"):
             await interaction.response.send_message(ErrorMessages.INVALID_DATETIME, ephemeral=True)
             return
 
-        self.view_ref.current_start_dt = start_dt
+        self.view_ref.updated_formation.start_iso = start_dt.isoformat()
         await self.view_ref.refresh_main_message(interaction)
 
 
@@ -608,7 +610,7 @@ class _EditDurationSeatsModal(ui.Modal, title="Modifier durée et places"):
         """
         super().__init__()
         self.view_ref = view
-        self.duration_seats_input.default = f"{view.current_duration} - {view.current_seats}"
+        self.duration_seats_input.default = f"{view.updated_formation.duration} - {view.updated_formation.seats}"
 
     async def on_submit(self, interaction: Interaction) -> None:
         """Called when the modal is submitted.
@@ -644,8 +646,8 @@ class _EditDurationSeatsModal(ui.Modal, title="Modifier durée et places"):
             await interaction.response.send_message(ErrorMessages.INVALID_SEATS, ephemeral=True)
             return
 
-        self.view_ref.current_duration = new_duration
-        self.view_ref.current_seats = new_seats
+        self.view_ref.updated_formation.duration = new_duration
+        self.view_ref.updated_formation.seats = new_seats
         await self.view_ref.refresh_main_message(interaction)
 
 
@@ -666,24 +668,15 @@ class _EditFormationView(ui.View):
         self.followup_id = followup_id
         self.formation_index = formation_index
 
-        self.current_emoji = original.emoji
-        self.current_name = original.name
-        self.current_description = original.description
-        self.current_trainer_mention = original.trainer_mention
-        self.current_start_dt = original.start_dt
-        self.current_duration = original.duration
-        self.current_seats = original.seats
-        self.current_excusable = original.excusable
+        self.updated_formation = deepcopy(original)
 
         edit_emoji_button = self.get_button(EDIT_EMOJI_BUTTON_ID)
-        edit_emoji_button.label = f"Modifier émoji : {self.current_emoji}"
+        edit_emoji_button.label = f"Modifier émoji : {self.updated_formation.emoji}"
 
-        if self.current_excusable:
+        if self.updated_formation.excusable:
             self.get_button(MAKE_EXCUSABLE_BUTTON_ID).disabled = True
         else:
             self.get_button(MAKE_NON_EXCUSABLE_BUTTON_ID).disabled = True
-
-    # region ====== Button callbacks ======
 
     @ui.button(label="Modifier émoji", style=ButtonStyle.secondary, row=0, id=EDIT_EMOJI_BUTTON_ID)
     async def edit_emoji_button(self, interaction: Interaction, _button: ui.Button) -> None:
@@ -749,7 +742,7 @@ class _EditFormationView(ui.View):
             interaction (Interaction): The interaction that triggered the button click.
             button (ui.Button): The button that was clicked.
         """
-        self.current_excusable = True
+        self.updated_formation.excusable = True
         self.get_button(MAKE_NON_EXCUSABLE_BUTTON_ID).disabled = False
         button.disabled = True
         await self.refresh_main_message(interaction)
@@ -762,7 +755,7 @@ class _EditFormationView(ui.View):
             interaction (Interaction): The interaction that triggered the button click.
             button (ui.Button): The button that was clicked.
         """
-        self.current_excusable = False
+        self.updated_formation.excusable = False
         self.get_button(MAKE_EXCUSABLE_BUTTON_ID).disabled = False
         button.disabled = True
         await self.refresh_main_message(interaction)
@@ -785,33 +778,9 @@ class _EditFormationView(ui.View):
         fms = sorted(draft.fms, key=lambda x: x.start_dt)
         original = fms[self.formation_index - 1]
 
-        log_request(
-            logger,
-            "fm.edit",
-            interaction,
-            index=self.formation_index,
-            emoji=self.current_emoji,
-            name=self.current_name,
-            description=self.current_description,
-            trainer=self.current_trainer_mention,
-            datetime=self.current_start_dt,
-            duration=self.current_duration,
-            seats=self.current_seats,
-            excusable=self.current_excusable,
-        )
+        log_request(logger, "fm.edit", interaction, index=self.formation_index, updated_formation=self.updated_formation)
 
-        updated = Formation(
-            emoji=self.current_emoji,
-            name=self.current_name,
-            trainer_mention=self.current_trainer_mention,
-            start_iso=self.current_start_dt.isoformat(),
-            duration=self.current_duration,
-            seats=self.current_seats,
-            description=self.current_description,
-            excusable=self.current_excusable,
-        )
-
-        fms[self.formation_index - 1] = updated
+        fms[self.formation_index - 1] = self.updated_formation
         fms.sort(key=lambda x: x.start_dt)
 
         draft = FmMessageDraft(
@@ -824,22 +793,18 @@ class _EditFormationView(ui.View):
         self.cog.set_guild_draft(interaction.guild.id, draft)
 
         preview = render_message(draft)
-        new_position = fms.index(updated) + 1
+        new_position = fms.index(self.updated_formation) + 1
 
         logger.info(
             f"Guild {interaction.guild.id} edited formation {original.name!r} -> "
-            f"{updated.name!r} (index {self.formation_index} → {new_position}).",
+            f"{self.updated_formation.name!r} (index {self.formation_index} → {new_position}).",
         )
         await interaction.followup.edit_message(
             self.followup_id,
-            content=f"Mise à jour: {updated.emoji} {updated.name} (position {new_position}).",
+            content=f"Mise à jour: {self.updated_formation.emoji} {self.updated_formation.name} (position {new_position}).",
             view=None,
             embed=Embed(title=f"Aperçu brouillon — {len(fms)} formation(s)", description=preview or "_(vide)_"),
         )
-
-    # endregion Button callbacks
-
-    # region ====== Helpers ======
 
     def get_button(self, button_id: int) -> ui.Button[_EditFormationView]:
         """Get a button by its ID.
@@ -861,11 +826,9 @@ class _EditFormationView(ui.View):
             interaction (Interaction): The interaction to respond to.
         """
         await interaction.response.edit_message(
-            content=f"Modification : {self.current_emoji} {self.current_name}",
+            content=f"Modification : {self.updated_formation.emoji} {self.updated_formation.name}",
             view=self,
         )
-
-    # endregion Helpers
 
 
 # endregion EditFormationView and its modals
