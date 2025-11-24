@@ -26,10 +26,13 @@ def load_json_state(logger: Logger, path: Path) -> dict[str, Any]:
 
     try:
         with path.open("r", encoding="utf-8") as handle:
-            return json.load(handle)
+            state = json.load(handle)
     except Exception:
         logger.exception(f"Failed to load state from {path}")
         return {}
+
+    logger.debug(f"Loaded state from {path}")
+    return state
 
 
 def save_json_state(logger: Logger, path: Path, state: dict[str, Any]) -> None:
@@ -48,3 +51,5 @@ def save_json_state(logger: Logger, path: Path, state: dict[str, Any]) -> None:
         tmp_path.replace(path)
     except Exception:
         logger.exception(f"Failed to persist state to {path}")
+    else:
+        logger.debug(f"Saved state to {path}")

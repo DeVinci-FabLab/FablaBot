@@ -41,6 +41,9 @@ class ReactionLogManager:
         """Purge all guild reaction logs according to retention."""
         if self._purge_all_internal():
             self._save_state(self.state)
+            self.logger.debug("Purged reaction logs and persisted state.")
+        else:
+            self.logger.debug("No reaction log entries required purging.")
 
     def append(self, guild_id: int, event: ReactionEvent) -> None:
         """Append a reaction entry for a guild and persist.

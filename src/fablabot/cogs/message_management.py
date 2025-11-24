@@ -63,18 +63,15 @@ class MessageManagement(commands.Cog):
 
     Commands:
         - /msg help: Display help for message management commands.
-        - /msg start: Créer/écraser un brouillon de message (modal).
-        - /msg follow: Commencer le suivi d'un message déjà publié.
-        - /msg link_reaction: Associer une action (DM / salon / rôle) à une réaction.
-        - /msg unlink_reaction: Retirer une action liée à une réaction.
-        - /msg list: Lister les suivis actifs.
-        - /msg stop: Arrêter un suivi.
-        - /msg preview: Prévisualiser le brouillon.
-        - /msg publish: Publier le brouillon.
-        - /msg export: Exporter l'historique des réactions.
-        - /msg preview: Prévisualiser le brouillon courant.
-        - /msg publish: Publier le brouillon dans un salon.
-        - /msg export: Exporter l'historique des réactions d'un message suivi.
+        - /msg start: Create or overwrite a message draft via a modal.
+        - /msg follow: Start tracking an already published message.
+        - /msg link_reaction: Link an action (DM / channel / role) to a reaction.
+        - /msg unlink_reaction: Unlink an action linked to a reaction.
+        - /msg list: List active trackings.
+        - /msg stop: Stop tracking.
+        - /msg preview: Preview the current draft.
+        - /msg publish: Publish the draft to a channel.
+        - /msg export: Export reaction history of a tracked message.
 
     Listeners:
         - on_message: Easter egg listener for specific message content.
@@ -196,7 +193,7 @@ class MessageManagement(commands.Cog):
         role_names = {role.name for role in interaction.user.roles}
         if RoleNames.BUREAU not in role_names:
             logger.warning(f"Unauthorized dm by {interaction.user}")
-            await interaction.response.send_message("Permissions insuffisantes.", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.INSUFFICIENT_PERMISSIONS, ephemeral=True)
             return
 
         await interaction.response.defer(thinking=True)
@@ -250,7 +247,8 @@ class MessageManagement(commands.Cog):
 
         message_id = self._parse_message_id(message)
         if message_id is None:
-            await interaction.response.send_message("ID ou lien de message invalide.", ephemeral=True)
+            logger.warning(f"Invalid message id provided to /msg follow by {interaction.user}")
+            await interaction.response.send_message(ErrorMessages.INVALID_MESSAGE_ID, ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -258,7 +256,7 @@ class MessageManagement(commands.Cog):
             fetched = await channel.fetch_message(message_id)
         except Exception:
             logger.exception(f"Failed to fetch message {message_id} in {channel}")
-            await interaction.followup.send("Impossible de récupérer ce message.", ephemeral=True)
+            await interaction.followup.send(ErrorMessages.INVALID_MESSAGE_ID, ephemeral=True)
             return
 
         assert interaction.guild is not None
@@ -271,6 +269,11 @@ class MessageManagement(commands.Cog):
             created_at_iso=datetime.now(PARIS_TZ).isoformat(),
         )
         self._set_tracked_message(interaction.guild.id, tracked)
+
+        logger.info(
+            f"Started tracking message {fetched.id} in guild {interaction.guild.id} "
+            f"(reactions preserved: {len(tracked.reactions)})",
+        )
         await interaction.followup.send(
             f"Suivi démarré sur le message `{fetched.id}` dans {channel.mention}.\n"
             "Ajoute des actions avec `/msg link_reaction`.",
@@ -316,22 +319,17 @@ class MessageManagement(commands.Cog):
         if message:
             target_message_id = self._parse_message_id(message)
             if target_message_id is None:
-                await interaction.response.send_message("ID ou lien de message invalide.", ephemeral=True)
+                logger.warning(f"Invalid message id for link_reaction by {interaction.user}")
+                await interaction.response.send_message(ErrorMessages.INVALID_MESSAGE_ID, ephemeral=True)
                 return
             tracked = self._get_tracked_message(interaction.guild.id, target_message_id)
             if tracked is None:
-                await interaction.response.send_message(
-                    "Aucun suivi pour ce message. Lance `/msg follow` d'abord.",
-                    ephemeral=True,
-                )
+                await interaction.response.send_message(ErrorMessages.MSG_NO_TRACKED, ephemeral=True)
                 return
         else:
             draft = self.get_draft(interaction.guild.id)
             if draft is None:
-                await interaction.response.send_message(
-                    "Aucun brouillon trouvé. Utilise `/msg start` pour en créer un.",
-                    ephemeral=True,
-                )
+                await interaction.response.send_message(ErrorMessages.MSG_NO_DRAFT, ephemeral=True)
                 return
 
         view = mui.ReactionTargetView(self, interaction.guild.id, target_message_id, emoji, action_type, 0)
@@ -380,20 +378,20 @@ class MessageManagement(commands.Cog):
 
         message_id = self._parse_message_id(message)
         if message_id is None:
-            await interaction.response.send_message("ID ou lien de message invalide.", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.INVALID_MESSAGE_ID, ephemeral=True)
             return
 
         assert interaction.guild is not None
         tracked = self._get_tracked_message(interaction.guild.id, message_id)
         if tracked is None:
-            await interaction.response.send_message("Aucun suivi trouvé pour ce message.", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.MSG_NO_TRACKED, ephemeral=True)
             return
 
         matches: list[tuple[int, MsgReactionEvent]] = [
             (idx, r) for idx, r in enumerate(tracked.reactions) if r.emoji == emoji and r.action_type == action_type
         ]
         if not matches:
-            await interaction.response.send_message("Aucune action trouvée pour cet émoji et type.", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.MSG_NO_ACTION_FOR_EMOJI, ephemeral=True)
             return
 
         if occurrence > len(matches):
@@ -407,6 +405,10 @@ class MessageManagement(commands.Cog):
         del tracked.reactions[target_idx]
         self._set_tracked_message(interaction.guild.id, tracked)
 
+        logger.info(
+            f"Removed reaction action {emoji} ({action_type}) occurrence {occurrence} "
+            f"on message {message_id} in guild {interaction.guild.id}",
+        )
         await interaction.response.send_message(
             f"Action retirée : {emoji} → {self._format_reaction_action(target_reaction)}",
             ephemeral=True,
@@ -432,7 +434,7 @@ class MessageManagement(commands.Cog):
         assert interaction.guild is not None
         tracked_map = self._get_tracked_messages(interaction.guild.id)
         if not tracked_map:
-            await interaction.response.send_message("Aucun suivi actif pour ce serveur.", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.MSG_NO_TRACKED_AVAILABLE, ephemeral=True)
             return
 
         lines: list[str] = ["**Suivis de messages actifs**", ""]
@@ -470,7 +472,7 @@ class MessageManagement(commands.Cog):
         assert interaction.guild is not None
         draft = self.get_draft(interaction.guild.id)
         if draft is None:
-            await interaction.response.send_message("Aucun brouillon n'est enregistré.", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.MSG_NO_DRAFT, ephemeral=True)
             return
 
         embed = Embed(title="Réactions préliées")
@@ -481,6 +483,7 @@ class MessageManagement(commands.Cog):
                 inline=False,
             )
 
+        logger.debug(f"Previewed message draft for guild {interaction.guild.id} with {len(draft.reactions)} reactions")
         await interaction.response.send_message(draft.content or "_(vide)_", embed=embed)
 
     @msg_group.command(
@@ -505,7 +508,7 @@ class MessageManagement(commands.Cog):
         assert interaction.guild is not None
         draft = self.get_draft(interaction.guild.id)
         if draft is None or not draft.content.strip():
-            await interaction.response.send_message("Aucun brouillon ou contenu vide.", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.MSG_DRAFT_EMPTY, ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -537,6 +540,9 @@ class MessageManagement(commands.Cog):
         await self._sync_reactions_on_message(interaction.guild.id, tracked)
         self._clear_draft(interaction.guild.id)
 
+        logger.info(
+            f"Published message {msg.id} in guild {interaction.guild.id} with {len(updated_reactions)} reaction actions",
+        )
         await interaction.followup.send(
             f"Message publié dans {channel.mention} (ID `{msg.id}`) avec {len(updated_reactions)} réaction(s) configurée(s).",
         )
@@ -562,14 +568,20 @@ class MessageManagement(commands.Cog):
 
         assert interaction.guild is not None
 
-        message_id: int | None = self._parse_message_id(message) if message else self._latest_tracked_id(interaction.guild.id)
-        if message_id is None:
-            await interaction.response.send_message("Aucun message suivi trouvé.", ephemeral=True)
-            return
+        if message is not None:
+            message_id = self._parse_message_id(message)
+            if message_id is None:
+                await interaction.response.send_message(ErrorMessages.INVALID_MESSAGE_ID, ephemeral=True)
+                return
+        else:
+            message_id = self._latest_tracked_id(interaction.guild.id)
+            if message_id is None:
+                await interaction.response.send_message(ErrorMessages.MSG_NO_TRACKED_AVAILABLE, ephemeral=True)
+                return
 
         history = self._reaction_logs.history(interaction.guild.id, message_id)
         if not history:
-            await interaction.response.send_message("Aucune réaction enregistrée pour ce message.", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.MSG_NO_REACTION_HISTORY, ephemeral=True)
             return
 
         buffer = io.StringIO()
@@ -578,6 +590,7 @@ class MessageManagement(commands.Cog):
         for ev in history:
             writer.writerow([ev.ts_iso, ev.action, ev.emoji, ev.user_name or "", ev.user_id])
 
+        logger.info(f"Exported {len(history)} reaction events for message {message_id} in guild {interaction.guild.id}")
         await interaction.response.send_message(
             content=f"Export des réactions pour le message `{message_id}`.",
             file=File(fp=io.BytesIO(buffer.getvalue().encode("utf-8")), filename="message_reactions_log.csv"),
@@ -604,14 +617,15 @@ class MessageManagement(commands.Cog):
 
         message_id = self._parse_message_id(message)
         if message_id is None:
-            await interaction.response.send_message("ID ou lien de message invalide.", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.INVALID_MESSAGE_ID, ephemeral=True)
             return
 
         assert interaction.guild is not None
         if not self._remove_tracked_message(interaction.guild.id, message_id):
-            await interaction.response.send_message("Aucun suivi trouvé pour ce message.", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.MSG_NO_TRACKED, ephemeral=True)
             return
 
+        logger.info(f"Stopped tracking message {message_id} in guild {interaction.guild.id}")
         await interaction.response.send_message(
             f"Suivi arrêté pour le message `{message_id}`.",
             ephemeral=True,
@@ -794,36 +808,42 @@ class MessageManagement(commands.Cog):
         guild_state = self._get_guild_state(guild_id)
         guild_state["draft"] = draft.to_dict()
         self._set_guild_state(guild_id, guild_state)
+        logger.debug(f"Draft updated for guild {guild_id} with {len(draft.reactions)} reactions")
 
     def _clear_draft(self, guild_id: int) -> None:
         guild_state = self._get_guild_state(guild_id)
         if "draft" in guild_state:
             guild_state.pop("draft", None)
             self._set_guild_state(guild_id, guild_state)
+            logger.debug(f"Draft cleared for guild {guild_id}")
 
     async def register_reaction_action(self, guild_id: int, reaction: MsgReactionEvent) -> str:
         """Register a reaction action for a tracked message or draft.
 
         Args:
             guild_id (int): The ID of the guild.
-            message_id (int | None): The ID of the tracked message, or None for draft.
             reaction (MsgReactionEvent): The reaction event to register.
         """
         if reaction.message_id is None:
             draft = self.get_draft(guild_id)
             if draft is None:
-                return "Aucun brouillon trouvé."
+                return ErrorMessages.MSG_NO_DRAFT
             draft.reactions.append(reaction)
             self.set_draft(guild_id, draft)
+            logger.info(f"Added reaction {reaction.emoji} to draft in guild {guild_id}")
             return f"Réaction {reaction.emoji} ajoutée au brouillon."
 
         tracked = self._get_tracked_message(guild_id, reaction.message_id)
         if tracked is None:
-            return "Le suivi est introuvable pour ce message."
+            return ErrorMessages.MSG_NO_TRACKED
 
         tracked.reactions.append(reaction)
         self._set_tracked_message(guild_id, tracked)
 
+        logger.info(
+            f"Registered reaction {reaction.emoji} ({reaction.action_type}) "
+            f"for message {tracked.message_id} in guild {guild_id}",
+        )
         await self._ensure_reaction_on_message(guild_id, tracked, reaction.emoji)
 
         action_desc = {

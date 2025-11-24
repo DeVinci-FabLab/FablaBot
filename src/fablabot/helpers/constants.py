@@ -124,6 +124,9 @@ class ErrorMessages:
     INVALID_DURATION_SEATS_FORMAT = "Durée/Places invalides. Format attendu: `durée - places` (ex: `2h - 10`)."
     """Invalid duration and seats provided."""
 
+    INVALID_MESSAGE_ID = "ID ou lien de message invalide."
+    """Invalid message id or link provided."""
+
     INVALID_DURATION = "Durée invalide. Format attendu: durée en string (ex: `2h30`, `15 minutes`, ...)."
     """Invalid duration format provided."""
 
@@ -132,6 +135,27 @@ class ErrorMessages:
 
     DRAFT_EMPTY = "Le brouillon ne contient aucune formation. Utilise `/fm add` pour en ajouter une."
     """Draft contains no formations."""
+
+    MSG_NO_DRAFT = "Aucun brouillon n'est enregistré."
+    """No message draft present."""
+
+    MSG_DRAFT_EMPTY = "Aucun brouillon ou contenu vide."
+    """Draft is empty or missing content."""
+
+    MSG_NO_TRACKED = "Aucun suivi trouvé pour ce message."
+    """Tracked message not found."""
+
+    MSG_NO_REACTIONS_SOURCE = "Aucune réaction préliée trouvée sur le message source fourni."
+    """No reactions found to copy from source message."""
+
+    MSG_NO_TRACKED_AVAILABLE = "Aucun message suivi trouvé."
+    """No tracked message available."""
+
+    MSG_NO_REACTION_HISTORY = "Aucune réaction enregistrée pour ce message."
+    """No reaction history for message."""
+
+    MSG_NO_ACTION_FOR_EMOJI = "Aucune action trouvée pour cet émoji et type."
+    """No action matched for emoji and action type."""
 
     NO_PUBLISHED_MESSAGE = "Aucun message publié enregistré et aucun ID fourni."
     """No published message recorded and no ID provided."""
