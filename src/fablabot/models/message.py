@@ -57,6 +57,10 @@ EASTER_EGGS: list[EasterEggTrigger] = [
 ]
 
 
+MsgActionType = Literal["channel", "user_dm", "role_dm"]
+"""Supported reaction action types for message management."""
+
+
 @dataclass
 class MsgReactionEvent:
     """Configuration for a reaction-based action.
@@ -70,7 +74,7 @@ class MsgReactionEvent:
     """
 
     emoji: str
-    action_type: Literal["channel", "user_dm", "role_dm"]
+    action_type: MsgActionType
     message_content: str
     target_id: int | None = None
     target_name: str | None = None
@@ -98,30 +102,50 @@ class MsgReactionEvent:
 
 
 @dataclass
-class MessageDraft:
-    """A draft message with reaction-based actions.
+class TrackedMessage:
+    """Tracked message with optional reaction actions and metadata.
 
     Attributes:
-        content (str): The message content.
-        reactions (list[ReactionAction]): List of reaction actions configured for this message.
+        message_id (int): The ID of the tracked message.
+        channel_id (int): The ID of the channel containing the message.
+        content (str): The content of the tracked message.
+        reactions (list[MsgReactionEvent]): List of reaction-based actions.
+        active (bool): Whether the tracking is active. Defaults to True.
+        created_by (int | None): ID of the user who created the tracked message.
+        created_at_iso (str | None): ISO timestamp of when the tracked message was created.
     """
 
+    message_id: int
+    channel_id: int
     content: str
     reactions: list[MsgReactionEvent]
+    active: bool = True
+    created_by: int | None = None
+    created_at_iso: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
+            "message_id": self.message_id,
+            "channel_id": self.channel_id,
             "content": self.content,
             "reactions": [r.to_dict() for r in self.reactions],
+            "active": self.active,
+            "created_by": self.created_by,
+            "created_at_iso": self.created_at_iso,
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> MessageDraft:
+    def from_dict(cls, data: dict[str, Any]) -> TrackedMessage:
         """Create from dictionary."""
         return cls(
-            content=data["content"],
+            message_id=int(data["message_id"]),
+            channel_id=int(data["channel_id"]),
+            content=data.get("content", ""),
             reactions=[MsgReactionEvent.from_dict(r) for r in data.get("reactions", [])],
+            active=bool(data.get("active", True)),
+            created_by=data.get("created_by"),
+            created_at_iso=data.get("created_at_iso"),
         )
 
 

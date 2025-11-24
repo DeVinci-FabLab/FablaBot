@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from discord import ButtonStyle, ChannelType, Embed, Interaction, Member, SelectOption, TextStyle, ui
 
-from fablabot.helpers.utils import format_member_mention, log_request, send_dm_to_member
-from fablabot.models.message import SUGGESTION_OPTIONS, MessageDraft, MsgReactionEvent
+from fablabot.helpers.utils import format_member_mention, send_dm_to_member
+from fablabot.models.message import SUGGESTION_OPTIONS, MsgActionType, MsgReactionEvent
 
 if TYPE_CHECKING:
     from fablabot.cogs import MessageManagement, SuggestionManagement
@@ -138,15 +138,13 @@ class StartMessageModal(ui.Modal, title="Commencer une annonce"):
             ),
             ephemeral=True,
         )
-
-
-class _ReactionMessageInputModal(ui.Modal, title="Détails de la réaction"):
+class _ReactionMessageInputModal(ui.Modal, title="Message à envoyer"):
     """Modal for inputting the content of the message to send for a reaction action."""
 
     message_input: ui.TextInput = ui.TextInput(
-        label="Message à envoyer.",
+        label="Utilise {username} et {user} pour le nom du réacteur.",
         style=TextStyle.long,
-        placeholder="Entrez le message à envoyer... Utilisez {username} pour les mentions.",
+        placeholder="Entrez le message à envoyer...",
         required=True,
         max_length=2000,
     )
@@ -154,8 +152,10 @@ class _ReactionMessageInputModal(ui.Modal, title="Détails de la réaction"):
     def __init__(
         self,
         cog: MessageManagement,
+        guild_id: int,
+        message_id: int,
         emoji: str,
-        action_type: Literal["channel", "user_dm", "role_dm"],
+        action_type: MsgActionType,
         target_id: int,
         target_value: str,
         followup_id: int,
@@ -164,16 +164,20 @@ class _ReactionMessageInputModal(ui.Modal, title="Détails de la réaction"):
 
         Args:
             cog (MessageManagement): The MessageManagement cog instance.
+            guild_id (int): The guild identifier.
+            message_id (int): The message identifier.
             emoji (str): The emoji for this reaction.
-            action_type (Literal["channel", "user_dm", "role_dm"]): The type of action.
+            action_type (MsgActionType): The type of action.
             target_id (int): The pre-filled target ID.
             target_value (str): The pre-filled target value.
             followup_id (int): The ID of the follow-up message to edit with results.
         """
         super().__init__()
         self.cog = cog
+        self.guild_id = guild_id
+        self.message_id = message_id
         self.emoji = emoji
-        self.action_type: Literal["channel", "user_dm", "role_dm"] = action_type
+        self.action_type: MsgActionType = action_type
         self.target_id = target_id
         self.target_value = target_value
         self.followup_id = followup_id
@@ -184,42 +188,18 @@ class _ReactionMessageInputModal(ui.Modal, title="Détails de la réaction"):
         Args:
             interaction (Interaction): The interaction context.
         """
-        assert interaction.guild is not None
         message_content = self.message_input.value.strip()
-
-        target_id: int = self.target_id
-        target_name: str = self.target_value
-
-        draft = self.cog.get_draft(str(interaction.guild.id))
-        assert draft is not None
-
         reaction = MsgReactionEvent(
             emoji=self.emoji,
             action_type=self.action_type,
             message_content=message_content,
-            target_id=target_id,
-            target_name=target_name,
+            target_id=self.target_id,
+            target_name=self.target_value,
         )
-        draft.reactions.append(reaction)
-        self.cog.set_draft(str(interaction.guild.id), draft)
-
-        action_desc = {
-            "channel": f"message dans <#{target_id}>",
-            "user_dm": "MP au membre qui réagit",
-            "role_dm": f"MP aux membres du rôle <@&{target_id}>",
-        }
 
         await interaction.response.defer()
-        await interaction.followup.edit_message(
-            self.followup_id,
-            content=f"Réaction {self.emoji} ajoutée avec succès\n"
-            f"Action : {action_desc.get(self.action_type, self.action_type)}\n"
-            "Message :\n"
-            f"{message_content}\n\n"
-            f"Utilisez `/message preview` pour voir le brouillon complet.",
-            view=None,
-        )
-        await interaction.delete_original_response()
+        feedback = await self.cog.register_reaction_action(self.guild_id, self.message_id, reaction)
+        await interaction.followup.edit_message(self.followup_id, content=feedback, view=None)
 
 
 class ReactionTargetView(ui.View):
@@ -228,22 +208,28 @@ class ReactionTargetView(ui.View):
     def __init__(
         self,
         cog: MessageManagement,
+        guild_id: int,
+        message_id: int,
         emoji: str,
-        action_type: Literal["channel", "user_dm", "role_dm"],
+        action_type: MsgActionType,
         followup_id: int,
     ) -> None:
         """Initialize the modal.
 
         Args:
             cog (MessageManagement): The MessageManagement cog instance.
+            guild_id (int): The guild identifier.
+            message_id (int): The message identifier.
             emoji (str): The emoji for this reaction.
-            action_type (Literal["channel", "user_dm", "role_dm"]): The type of action.
+            action_type (MsgActionType): The type of action.
             followup_id (int): The ID of the follow-up message to edit with results.
         """
         super().__init__(timeout=None)
         self.cog = cog
+        self.guild_id = guild_id
+        self.message_id = message_id
         self.emoji = emoji
-        self.action_type: Literal["channel", "user_dm", "role_dm"] = action_type
+        self.action_type: MsgActionType = action_type
         self.followup_id = followup_id
 
         async def _on_select(interaction: Interaction) -> None:
@@ -261,6 +247,8 @@ class ReactionTargetView(ui.View):
             await interaction.response.send_modal(
                 _ReactionMessageInputModal(
                     self.cog,
+                    self.guild_id,
+                    self.message_id,
                     self.emoji,
                     self.action_type,
                     target_id,

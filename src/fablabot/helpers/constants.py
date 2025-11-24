@@ -61,8 +61,8 @@ class RoleNames:
 
 
 ADMIN_ROLES = {
-    RoleNames.ADMIN_TEMP,
     RoleNames.ADMIN,
+    RoleNames.ADMIN_TEMP,
     RoleNames.PRESIDENT,
     RoleNames.VICE_PRESIDENT,
     RoleNames.SECRETARY,
@@ -112,7 +112,7 @@ class ErrorMessages:
     """Failed to clear channel messages."""
 
     # Formation management errors
-    INVALID_EMOJI = "Émoji invalide."
+    INVALID_EMOJI = "Émoji invalide. Utilise un émoji standard ou custom."
     """Invalid emoji provided."""
 
     EMOJI_ALREADY_USED = "Cet émoji est déjà utilisé par une autre formation."

@@ -7,7 +7,6 @@ import contextlib
 import csv
 from datetime import datetime, timedelta
 import io
-import json
 import logging
 from pathlib import Path
 from typing import Any, override
@@ -29,6 +28,8 @@ from fablabot.helpers.formation import (
     send_registration_dm,
     send_waitlist_dm,
 )
+from fablabot.helpers.reaction_log import ReactionLogManager
+from fablabot.helpers.state_store import load_json_state, save_json_state
 from fablabot.helpers.utils import check_has_role, is_in_allowed_channel, is_valid_emoji, log_request
 from fablabot.models import FmCommand, FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
 from fablabot.ui import fmui
@@ -37,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 
 ALLOWED_ROLES = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN_TEMP, RoleNames.ADMIN}
-FM_STATE_FILE = "data/formations_state.json"
+FM_STATE_FILE = Path("data/formations_state.json")
 TRAINER_NOTIFICATION_ADVANCE = timedelta(hours=1)
 REACTION_LOG_RETENTION = timedelta(days=30)
 
@@ -72,6 +73,12 @@ class FormationManagement(commands.Cog):
         """
         self.bot = bot
         self.state: dict[str, dict[str, Any]] = self._load_state()
+        self._reaction_logs = ReactionLogManager(
+            self.state,
+            save_state=self._save_state,
+            retention=REACTION_LOG_RETENTION,
+            logger=logger,
+        )
         """state structure (par guild):
         ```
         {
@@ -98,7 +105,7 @@ class FormationManagement(commands.Cog):
         """
         self._reaction_lock = asyncio.Lock()
         self._pending_update_tasks: dict[int, asyncio.Task] = {}
-        self._purge_all_reaction_logs()
+        self._reaction_logs.purge_all()
         self._check_upcoming_formations.start()
         logger.info("FormationManagement initialized")
 
@@ -505,7 +512,7 @@ class FormationManagement(commands.Cog):
             for fm in pub.message.fms:
                 fm_by_emoji[fm.emoji] = {"name": fm.name, "seats": fm.seats}
 
-        history = self._get_reaction_history(interaction.guild.id, target_message_id)
+        history = self._reaction_logs.history(interaction.guild.id, target_message_id)
         history_csv = io.StringIO()
         hist_writer = csv.writer(history_csv, lineterminator="\n")
         hist_writer.writerow(["timestamp_iso", "action", "emoji", "formation_name", "user_name", "user_id", "formation_seats"])
@@ -695,18 +702,7 @@ class FormationManagement(commands.Cog):
         Returns:
             dict[str, dict[str, Any]]: The loaded state, or an empty dictionary if the file does not exist or an error occurs.
         """
-        try:
-            with open(FM_STATE_FILE, encoding="utf-8") as f:
-                state = json.load(f)
-        except FileNotFoundError:
-            logger.debug(f"Formations state file {FM_STATE_FILE} not found; starting with empty state.")
-            return {}
-        except json.JSONDecodeError:
-            logger.exception(f"Failed to decode formations state from {FM_STATE_FILE}.")
-            return {}
-        except Exception:
-            logger.exception(f"Unexpected error while loading formations state from {FM_STATE_FILE}.")
-            return {}
+        state = load_json_state(logger, FM_STATE_FILE)
         logger.debug("Loaded formations state.")
         return state
 
@@ -717,18 +713,7 @@ class FormationManagement(commands.Cog):
         Args:
             state (dict[str, dict[str, Any]]): The state to save.
         """
-        try:
-            Path(Path(FM_STATE_FILE).parent).mkdir(parents=True, exist_ok=True)
-            with open(FM_STATE_FILE, "w", encoding="utf-8") as f:
-                json.dump(state, f, ensure_ascii=False, indent=2)
-        except OSError:
-            logger.exception(f"Failed to persist formations state to {FM_STATE_FILE}")
-        except TypeError:
-            logger.exception("Invalid data encountered while serializing formations state.")
-        except Exception:
-            logger.exception(f"Unexpected error while saving formations state to {FM_STATE_FILE}.")
-        else:
-            logger.debug(f"Saved formations state to {FM_STATE_FILE}.")
+        save_json_state(logger, FM_STATE_FILE, state)
 
     def _get_guild_state(self, guild_id: int) -> dict[str, Any]:
         """Get state for a specific guild.
@@ -819,95 +804,7 @@ class FormationManagement(commands.Cog):
             guild_id (int): The ID of the guild.
             reaction_event (ReactionEvent): The event to log.
         """
-        self._purge_all_reaction_logs()
-        guild_state = self._get_guild_state(guild_id)
-        log = [ReactionEvent.from_dict(entry) for entry in guild_state.get("reactions_log") or []]
-        if reaction_event.user_name is None:
-            reaction_event.user_name = self._get_last_known_user_name(log, reaction_event.user_id)
-        log.append(reaction_event)
-        guild_state["reactions_log"] = [event.to_dict() for event in log]
-        logger.debug(
-            f"Logged {reaction_event.action} reaction for guild {guild_id} message {reaction_event.message_id} "
-            f"user {reaction_event.user_id} with emoji {reaction_event.emoji} (Paris time: {reaction_event.ts_iso}).",
-        )
-        self._set_guild_state(guild_id, guild_state)
-
-    def _purge_all_reaction_logs(self) -> None:
-        """Apply retention to all guild reaction logs and persist changes."""
-        changed = False
-        removed_total = 0
-        for guild_state in self.state.values():
-            raw_log = guild_state.get("reactions_log")
-            if not raw_log:
-                continue
-            log = [ReactionEvent.from_dict(entry) for entry in raw_log]
-            filtered = self._purge_reaction_log(list(log))
-            if len(filtered) != len(log):
-                removed_total += len(log) - len(filtered)
-                guild_state["reactions_log"] = [event.to_dict() for event in filtered]
-                changed = True
-        if changed:
-            logger.debug(f"Purged {removed_total} reaction log entries across guilds.")
-            self._save_state(self.state)
-
-    @staticmethod
-    def _purge_reaction_log(log: list[ReactionEvent]) -> list[ReactionEvent]:
-        """Remove reaction log entries older than the retention window (Paris timezone).
-
-        Args:
-            log (list[ReactionEvent]): The reaction log to purge.
-
-        Returns:
-            list[ReactionEvent]: The filtered reaction log.
-        """
-        cutoff = datetime.now(PARIS_TZ) - REACTION_LOG_RETENTION
-        filtered: list[ReactionEvent] = []
-        for entry in log:
-            ts_iso = entry.ts_iso
-            if not ts_iso:
-                filtered.append(entry)
-                continue
-            try:
-                ts = datetime.fromisoformat(ts_iso).astimezone(PARIS_TZ)
-            except Exception:
-                filtered.append(entry)
-                continue
-            if ts >= cutoff:
-                filtered.append(entry)
-        return filtered
-
-    @staticmethod
-    def _get_last_known_user_name(log: list[ReactionEvent], user_id: int) -> str | None:
-        """Get the last known user name from the log.
-
-        Args:
-            log (list[ReactionEvent]): The reaction log.
-            user_id (int): The ID of the user.
-
-        Returns:
-            str | None: The last known user name, or None if not found.
-        """
-        for entry in reversed(log):
-            if entry.user_id == user_id and entry.user_name:
-                return entry.user_name
-        return None
-
-    def _get_reaction_history(self, guild_id: int, message_id: int) -> list[ReactionEvent]:
-        """Get the reaction history for a specific message in a guild.
-
-        Args:
-            guild_id (int): The ID of the guild.
-            message_id (int): The ID of the message.
-
-        Returns:
-            list[ReactionEvent]: The reaction history for the message.
-        """
-        guild_state = self._get_guild_state(guild_id)
-        raw_log = guild_state.get("reactions_log", []) or []
-        history = [ev for entry in raw_log if (ev := ReactionEvent.from_dict(entry)).message_id == message_id]
-        history.sort(key=lambda ev: ev.ts_iso or "")
-        logger.debug(f"Loaded {len(history)} reaction events for guild {guild_id} message {message_id}.")
-        return history
+        self._reaction_logs.append(guild_id, reaction_event)
 
     def _schedule_update(self, guild_id: int, delay: float = 2.0) -> None:
         """Schedule a debounced update for a guild's published message.
@@ -981,7 +878,7 @@ class FormationManagement(commands.Cog):
             )
             return
 
-        history = self._get_reaction_history(guild_id, message_id)
+        history = self._reaction_logs.history(guild_id, message_id)
 
         last_add: dict[tuple[str, int], datetime] = {}
         for event in history:
