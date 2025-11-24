@@ -71,6 +71,7 @@ class MsgReactionEvent:
         message_content (str): The message to send when the reaction is triggered.
         target_id (int | None): The ID of the target (channel_id, user_id, or role_id).
         target_name (str | None): Human-readable name of the target for display purposes.
+        message_id (int | None): The ID of the message this reaction is associated with.
     """
 
     emoji: str
@@ -78,6 +79,7 @@ class MsgReactionEvent:
     message_content: str
     target_id: int | None = None
     target_name: str | None = None
+    message_id: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -87,6 +89,7 @@ class MsgReactionEvent:
             "message_content": self.message_content,
             "target_id": self.target_id,
             "target_name": self.target_name,
+            "message_id": self.message_id,
         }
 
     @classmethod
@@ -98,6 +101,57 @@ class MsgReactionEvent:
             message_content=data["message_content"],
             target_id=data.get("target_id"),
             target_name=data.get("target_name"),
+            message_id=data.get("message_id"),
+        )
+
+    def __copy__(self) -> MsgReactionEvent:
+        """Create a shallow copy of the MsgReactionEvent."""
+        return MsgReactionEvent(
+            emoji=self.emoji,
+            action_type=self.action_type,
+            message_content=self.message_content,
+            target_id=self.target_id,
+            target_name=self.target_name,
+            message_id=self.message_id,
+        )
+
+
+@dataclass
+class MessageDraft:
+    """A draft message with reaction-based actions (pre-publication).
+
+    Attributes:
+        content (str): The content of the draft message.
+        reactions (list[MsgReactionEvent]): List of reaction-based actions.
+    """
+
+    content: str
+    reactions: list[MsgReactionEvent]
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for JSON serialization.
+
+        Returns:
+            dict[str, Any]: Dictionary representation of the MessageDraft.
+        """
+        return {
+            "content": self.content,
+            "reactions": [r.to_dict() for r in self.reactions],
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> MessageDraft:
+        """Create from dictionary.
+
+        Args:
+            data (dict[str, Any]): Dictionary representation of a MessageDraft.
+
+        Returns:
+            MessageDraft: The created MessageDraft instance.
+        """
+        return cls(
+            content=data.get("content", ""),
+            reactions=[MsgReactionEvent.from_dict(r) for r in data.get("reactions", [])],
         )
 
 
@@ -110,7 +164,6 @@ class TrackedMessage:
         channel_id (int): The ID of the channel containing the message.
         content (str): The content of the tracked message.
         reactions (list[MsgReactionEvent]): List of reaction-based actions.
-        active (bool): Whether the tracking is active. Defaults to True.
         created_by (int | None): ID of the user who created the tracked message.
         created_at_iso (str | None): ISO timestamp of when the tracked message was created.
     """
@@ -119,7 +172,6 @@ class TrackedMessage:
     channel_id: int
     content: str
     reactions: list[MsgReactionEvent]
-    active: bool = True
     created_by: int | None = None
     created_at_iso: str | None = None
 
@@ -130,7 +182,6 @@ class TrackedMessage:
             "channel_id": self.channel_id,
             "content": self.content,
             "reactions": [r.to_dict() for r in self.reactions],
-            "active": self.active,
             "created_by": self.created_by,
             "created_at_iso": self.created_at_iso,
         }
@@ -143,7 +194,6 @@ class TrackedMessage:
             channel_id=int(data["channel_id"]),
             content=data.get("content", ""),
             reactions=[MsgReactionEvent.from_dict(r) for r in data.get("reactions", [])],
-            active=bool(data.get("active", True)),
             created_by=data.get("created_by"),
             created_at_iso=data.get("created_at_iso"),
         )

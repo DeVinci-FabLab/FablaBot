@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from discord import ButtonStyle, ChannelType, Embed, Interaction, Member, SelectOption, TextStyle, ui
 
 from fablabot.helpers.utils import format_member_mention, send_dm_to_member
-from fablabot.models.message import SUGGESTION_OPTIONS, MsgActionType, MsgReactionEvent
+from fablabot.models.message import SUGGESTION_OPTIONS, MessageDraft, MsgActionType, MsgReactionEvent
 
 if TYPE_CHECKING:
     from fablabot.cogs import MessageManagement, SuggestionManagement
@@ -89,17 +89,17 @@ class BulkDMView(ui.View):
         await interaction.delete_original_response()
 
 
-class StartMessageModal(ui.Modal, title="Commencer une annonce"):
+class StartMessageModal(ui.Modal, title="Préparer un message"):
     """Modal to start a new message draft.
 
     Attributes:
-        text_input (ui.TextInput): Text input for the message content.
+        content_input (ui.TextInput): Input field for the message content.
     """
 
-    text_input: ui.TextInput = ui.TextInput(
-        label="Message",
+    content_input: ui.TextInput = ui.TextInput(
+        label="Contenu du message",
         style=TextStyle.long,
-        placeholder="Entrez le message...",
+        placeholder="Saisis le message à publier",
         required=True,
         max_length=2000,
     )
@@ -114,35 +114,30 @@ class StartMessageModal(ui.Modal, title="Commencer une annonce"):
         self.cog = cog
 
     async def on_submit(self, interaction: Interaction) -> None:
-        """Called when the modal is submitted.
+        """Handle modal submission.
 
         Args:
-            interaction (Interaction): The interaction that triggered the modal submission.
+            interaction (Interaction): The interaction context.
         """
-        log_request(logger, "message.start", interaction, text_input=self.text_input.value)
-
-        content = self.text_input.value.strip()
-
         assert interaction.guild is not None
-        guild_id = str(interaction.guild.id)
-
-        draft = MessageDraft(content=content, reactions=[])
-        self.cog.set_draft(guild_id, draft)
+        draft = MessageDraft(content=self.content_input.value.strip(), reactions=[])
+        self.cog.set_draft(interaction.guild.id, draft)
 
         await interaction.response.send_message(
-            "Brouillon initialisé.\nUtilise **/message link_reaction** pour lier des réactions à des actions. "
-            "**/message preview** pour voir le rendu.",
+            "Brouillon enregistré. Ajoute des réactions avec `/msg link_reaction` puis `/msg preview` et `/msg publish`.",
             embed=Embed(
                 title="Aperçu brouillon",
-                description=f"{content or '_(vide)_'}",
+                description=f"{draft.content or '_(vide)_'}",
             ),
             ephemeral=True,
         )
+
+
 class _ReactionMessageInputModal(ui.Modal, title="Message à envoyer"):
     """Modal for inputting the content of the message to send for a reaction action."""
 
     message_input: ui.TextInput = ui.TextInput(
-        label="Utilise {username} et {user} pour le nom du réacteur.",
+        label="Utilise {username} pour le nom du réacteur.",
         style=TextStyle.long,
         placeholder="Entrez le message à envoyer...",
         required=True,
@@ -153,7 +148,7 @@ class _ReactionMessageInputModal(ui.Modal, title="Message à envoyer"):
         self,
         cog: MessageManagement,
         guild_id: int,
-        message_id: int,
+        message_id: int | None,
         emoji: str,
         action_type: MsgActionType,
         target_id: int,
@@ -165,7 +160,7 @@ class _ReactionMessageInputModal(ui.Modal, title="Message à envoyer"):
         Args:
             cog (MessageManagement): The MessageManagement cog instance.
             guild_id (int): The guild identifier.
-            message_id (int): The message identifier.
+            message_id (int | None): The message identifier (None = brouillon).
             emoji (str): The emoji for this reaction.
             action_type (MsgActionType): The type of action.
             target_id (int): The pre-filled target ID.
@@ -195,10 +190,11 @@ class _ReactionMessageInputModal(ui.Modal, title="Message à envoyer"):
             message_content=message_content,
             target_id=self.target_id,
             target_name=self.target_value,
+            message_id=self.message_id,
         )
 
         await interaction.response.defer()
-        feedback = await self.cog.register_reaction_action(self.guild_id, self.message_id, reaction)
+        feedback = await self.cog.register_reaction_action(self.guild_id, reaction)
         await interaction.followup.edit_message(self.followup_id, content=feedback, view=None)
 
 
@@ -209,7 +205,7 @@ class ReactionTargetView(ui.View):
         self,
         cog: MessageManagement,
         guild_id: int,
-        message_id: int,
+        message_id: int | None,
         emoji: str,
         action_type: MsgActionType,
         followup_id: int,

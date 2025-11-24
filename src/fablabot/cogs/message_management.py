@@ -3,17 +3,22 @@
 from __future__ import annotations
 
 import contextlib
+from copy import copy
+import csv
 from datetime import datetime, timedelta
+import io
 import logging
 from pathlib import Path
 import random
 import re
-from typing import Any, override
+from typing import Any
 from warnings import deprecated
 
 from discord import (
     CategoryChannel,
     DMChannel,
+    Embed,
+    File,
     ForumChannel,
     GroupChannel,
     Guild,
@@ -43,7 +48,7 @@ from fablabot.helpers.utils import (
     send_dm_to_member,
 )
 from fablabot.models.common import ReactionAction, ReactionEvent
-from fablabot.models.message import EASTER_EGGS, MsgActionType, MsgReactionEvent, TrackedMessage
+from fablabot.models.message import EASTER_EGGS, MessageDraft, MsgActionType, MsgReactionEvent, TrackedMessage
 from fablabot.ui import mui
 
 logger = logging.getLogger(__name__)
@@ -57,14 +62,19 @@ class MessageManagement(commands.Cog):
     """Cog handling message tracking, reaction automation, and quick messaging workflows.
 
     Commands:
-        - /message help: Display help for message management commands.
-        - /message clear: Clear the current text channel of its last messages.
-        - /message dm: Send a direct message to multiple users.
-        - /message create: Create a new message draft.
-        - /message add_reaction: Add a reaction-based action to the draft.
-        - /message preview: Preview the current draft.
-        - /message publish: Publish the draft message.
-        - /message list: List all published messages with reactions.
+        - /msg help: Display help for message management commands.
+        - /msg start: Créer/écraser un brouillon de message (modal).
+        - /msg follow: Commencer le suivi d'un message déjà publié.
+        - /msg link_reaction: Associer une action (DM / salon / rôle) à une réaction.
+        - /msg unlink_reaction: Retirer une action liée à une réaction.
+        - /msg list: Lister les suivis actifs.
+        - /msg stop: Arrêter un suivi.
+        - /msg preview: Prévisualiser le brouillon.
+        - /msg publish: Publier le brouillon.
+        - /msg export: Exporter l'historique des réactions.
+        - /msg preview: Prévisualiser le brouillon courant.
+        - /msg publish: Publier le brouillon dans un salon.
+        - /msg export: Exporter l'historique des réactions d'un message suivi.
 
     Listeners:
         - on_message: Easter egg listener for specific message content.
@@ -97,7 +107,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="help",
-        description="Affiche l'aide pour les commandes de gestion des messages.",
+        description="Afficher l'aide sur les commandes message.",
     )
     @app_commands.describe(show="Afficher l'aide publiquement ou non")
     async def msg_help(self, interaction: Interaction, *, show: bool = False) -> None:
@@ -109,17 +119,20 @@ class MessageManagement(commands.Cog):
         """
         help_text = (
             "**Commandes de gestion des messages :**\n"
-            "- `/msg clear [messages]`: Nettoie le salon actuel de ses derniers messages.\n"
-            "- `/msg dm`: Envoie un message privé à plusieurs utilisateurs via un sélecteur.\n"
-            "- `/msg start <content>`: Crée un nouveau brouillon de message.\n"
-            "- `/msg link <emoji> <action_type> <message>`: Ajoute une action liée à une réaction.\n"
-            "  • Types d'actions : `channel` (message dans un salon), `user_dm` (MP à un utilisateur), `role_dm` (MP aux membres d'un rôle)\n"
-            "- `/msg preview`: Prévisualise le brouillon actuel.\n"
-            "- `/msg publish <channel>`: Publie le brouillon dans un salon.\n"
-            "- `/msg list`: Liste tous les messages publiés avec réactions automatiques.\n"
-            "- `/msg help [show]`: Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
+            "- `/msg start` : Crée ou remplace le brouillon via un modal.\n"
+            "- `/msg follow <channel> <message>` : Ajoute le suivi sur un message existant (ID ou lien).\n"
+            "- `/msg link_reaction <message> <emoji> <action>` : Associe un emoji à une action (channel | user_dm | role_dm).\n"
+            "- `/msg unlink_reaction <message> <emoji> <action>` : Retire une action liée à une réaction (occurrence ciblée).\n"
+            "- `/msg list` : Liste les messages suivis et leurs réactions.\n"
+            "- `/msg preview` : Prévisualise le brouillon en cours.\n"
+            "- `/msg publish <channel>` : Publie le brouillon et active le suivi.\n"
+            "- `/msg export [message]` : Export CSV des réactions d'un message suivi.\n"
+            "- `/msg stop <message>` : Arrête le suivi d'un message.\n"
             "\n"
-            "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
+            "Les actions supportées :\n"
+            "• `user_dm` : DM à la personne qui a réagi ({username} / {user} disponibles).\n"
+            "• `role_dm` : DM à tous les membres d'un rôle.\n"
+            "• `channel` : Message dans un salon spécifique."
         )
         await interaction.response.send_message(help_text, ephemeral=not show)
 
@@ -204,59 +217,24 @@ class MessageManagement(commands.Cog):
             ephemeral=True,
         )
 
-    @msg_group.command(name="send", description="Envoyer un message et démarrer son suivi.")
-    @app_commands.describe(
-        channel="Salon cible",
-        content="Contenu du message à envoyer",
-        track="Activer immédiatement le suivi des réactions",
+    @msg_group.command(
+        name="start",
+        description="Démarrer/écraser un brouillon de message (modal).",
     )
-    async def msg_send(
-        self,
-        interaction: Interaction,
-        *,
-        channel: TextChannel,
-        content: str,
-        track: bool = True,
-    ) -> None:
-        """Send a message and start tracking it.
+    async def msg_start(self, interaction: Interaction) -> None:
+        """Create or overwrite a message draft via a modal.
 
         Args:
             interaction (Interaction): The Discord interaction context.
-            channel (TextChannel): The target text channel.
-            content (str): The content of the message to send.
-            track (bool, optional): Whether to start tracking the message immediately. Defaults to True.
         """
-        log_request(logger, "msg.send", interaction, channel=channel.name, track=track)
+        log_request(logger, "msg.start", interaction)
         if not await is_in_allowed_channel(logger, interaction):
             return
 
         if not await check_has_role(logger, interaction, ALLOWED_ROLES):
             return
 
-        await interaction.response.defer(thinking=True)
-        try:
-            sent_msg = await channel.send(content)
-        except Exception:
-            logger.exception(f"Failed to send message in {channel}")
-            await interaction.followup.send(ErrorMessages.HTTP_ERROR.format(operation="l'envoi du message"), ephemeral=True)
-            return
-
-        assert interaction.guild is not None
-        if track:
-            tracked = TrackedMessage(
-                message_id=sent_msg.id,
-                channel_id=channel.id,
-                content=content,
-                reactions=[],
-                active=True,
-                created_by=interaction.user.id,
-                created_at_iso=datetime.now(PARIS_TZ).isoformat(),
-            )
-            self._set_tracked_message(interaction.guild.id, tracked)
-
-        footer = f"{'Suivi activé.' if track else 'Suivi désactivé (active-le avec /msg follow).'}"
-
-        await interaction.followup.send(f"Message envoyé dans {channel.mention} (ID `{sent_msg.id}`).\n{footer}")
+        await interaction.response.send_modal(mui.StartMessageModal(self))
 
     @msg_group.command(name="follow", description="Démarrer le suivi sur un message déjà envoyé.")
     @app_commands.describe(
@@ -289,7 +267,6 @@ class MessageManagement(commands.Cog):
             channel_id=channel.id,
             content=fetched.content or "(contenu vide ou embed)",
             reactions=[],
-            active=True,
             created_by=interaction.user.id,
             created_at_iso=datetime.now(PARIS_TZ).isoformat(),
         )
@@ -302,24 +279,24 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(name="link_reaction", description="Associer une réaction à une action automatisée.")
     @app_commands.describe(
-        message="ID ou lien du message suivi",
         emoji="Emoji déclencheur",
+        message="ID ou lien du message suivi (laisser vide pour ajouter au brouillon)",
         action_type="Action: channel (salon), user_dm (MP réacteur), role_dm (MP rôle)",
     )
     async def msg_link_reaction(
         self,
         interaction: Interaction,
         *,
-        message: str,
         emoji: str,
+        message: str | None = None,
         action_type: MsgActionType,
     ) -> None:
         """Link a reaction to an automated action.
 
         Args:
             interaction (Interaction): The Discord interaction context.
-            message (str): The ID or link of the tracked message.
             emoji (str): The emoji that triggers the action.
+            message (str): The ID or link of the tracked message.
             action_type (MsgActionType): The type of action to perform.
         """
         log_request(logger, "msg.link_reaction", interaction, message=message, emoji=emoji, action_type=action_type)
@@ -335,23 +312,29 @@ class MessageManagement(commands.Cog):
 
         assert interaction.guild is not None
 
-        message_id = self._parse_message_id(message)
-        if message_id is None:
-            await interaction.response.send_message("ID ou lien de message invalide.", ephemeral=True)
-            return
+        target_message_id: int | None = None
+        if message:
+            target_message_id = self._parse_message_id(message)
+            if target_message_id is None:
+                await interaction.response.send_message("ID ou lien de message invalide.", ephemeral=True)
+                return
+            tracked = self._get_tracked_message(interaction.guild.id, target_message_id)
+            if tracked is None:
+                await interaction.response.send_message(
+                    "Aucun suivi pour ce message. Lance `/msg follow` d'abord.",
+                    ephemeral=True,
+                )
+                return
+        else:
+            draft = self.get_draft(interaction.guild.id)
+            if draft is None:
+                await interaction.response.send_message(
+                    "Aucun brouillon trouvé. Utilise `/msg start` pour en créer un.",
+                    ephemeral=True,
+                )
+                return
 
-        tracked = self._get_tracked_message(interaction.guild.id, message_id)
-        if tracked is None:
-            await interaction.response.send_message("Aucun suivi pour ce message. Lance `/msg follow` d'abord.", ephemeral=True)
-            return
-        if not tracked.active:
-            await interaction.response.send_message(
-                "Ce suivi est inactif. Relance `/msg follow` pour le réactiver.",
-                ephemeral=True,
-            )
-            return
-
-        view = mui.ReactionTargetView(self, interaction.guild.id, message_id, emoji, action_type, 0)
+        view = mui.ReactionTargetView(self, interaction.guild.id, target_message_id, emoji, action_type, 0)
         await interaction.response.send_message(
             "Choisis la cible puis rédige le message envoyé lors de la réaction.",
             view=view,
@@ -454,8 +437,6 @@ class MessageManagement(commands.Cog):
 
         lines: list[str] = ["**Suivis de messages actifs**", ""]
         for tracked in tracked_map.values():
-            if not tracked.active:
-                continue
             link = f"https://discord.com/channels/{interaction.guild.id}/{tracked.channel_id}/{tracked.message_id}"
             lines.append(f"- ID `{tracked.message_id}` : {link}")
             if tracked.reactions:
@@ -468,6 +449,139 @@ class MessageManagement(commands.Cog):
             else:
                 lines.append("   (aucune action liée)")
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+    @msg_group.command(
+        name="preview",
+        description="Prévisualiser le brouillon courant.",
+    )
+    async def msg_preview(self, interaction: Interaction) -> None:
+        """Preview the current draft message.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+        """
+        log_request(logger, "msg.preview", interaction)
+        if not await is_in_allowed_channel(logger, interaction):
+            return
+
+        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+            return
+
+        assert interaction.guild is not None
+        draft = self.get_draft(interaction.guild.id)
+        if draft is None:
+            await interaction.response.send_message("Aucun brouillon n'est enregistré.", ephemeral=True)
+            return
+
+        embed = Embed(title="Réactions préliées")
+        for idx, reaction in enumerate(draft.reactions, start=1):
+            embed.add_field(
+                name=f"{idx}. {reaction.emoji} :",
+                value=f"**{self._format_reaction_action(reaction)}**\n{reaction.message_content or '_(vide)_'}",
+                inline=False,
+            )
+
+        await interaction.response.send_message(draft.content or "_(vide)_", embed=embed)
+
+    @msg_group.command(
+        name="publish",
+        description="Publier le brouillon dans un salon et activer le suivi.",
+    )
+    @app_commands.describe(channel="Salon cible pour la publication")
+    async def msg_publish(self, interaction: Interaction, *, channel: TextChannel) -> None:
+        """Publier le brouillon dans un salon et activer le suivi.
+
+        Args:
+            interaction (Interaction): Le contexte d'interaction Discord.
+            channel (TextChannel): Le salon cible pour la publication.
+        """
+        log_request(logger, "msg.publish", interaction, channel=channel.name)
+        if not await is_in_allowed_channel(logger, interaction):
+            return
+
+        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+            return
+
+        assert interaction.guild is not None
+        draft = self.get_draft(interaction.guild.id)
+        if draft is None or not draft.content.strip():
+            await interaction.response.send_message("Aucun brouillon ou contenu vide.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            msg = await channel.send(draft.content)
+        except Exception:
+            logger.exception(f"Failed to publish draft in {channel}")
+            await interaction.followup.send(
+                ErrorMessages.HTTP_ERROR.format(operation="la publication du message"),
+                ephemeral=True,
+            )
+            return
+
+        updated_reactions: list[MsgReactionEvent] = []
+        for reaction in draft.reactions:
+            cloned = copy(reaction)
+            cloned.message_id = msg.id
+            updated_reactions.append(cloned)
+        tracked = TrackedMessage(
+            message_id=msg.id,
+            channel_id=channel.id,
+            content=draft.content,
+            reactions=updated_reactions,
+            created_by=interaction.user.id,
+            created_at_iso=datetime.now(PARIS_TZ).isoformat(),
+        )
+        self._set_tracked_message(interaction.guild.id, tracked)
+
+        await self._sync_reactions_on_message(interaction.guild.id, tracked)
+        self._clear_draft(interaction.guild.id)
+
+        await interaction.followup.send(
+            f"Message publié dans {channel.mention} (ID `{msg.id}`) avec {len(updated_reactions)} réaction(s) configurée(s).",
+        )
+
+    @msg_group.command(
+        name="export",
+        description="Exporter l'historique des réactions d'un message suivi.",
+    )
+    @app_commands.describe(message="ID ou lien du message (optionnel : dernier suivi actif par défaut)")
+    async def msg_export(self, interaction: Interaction, *, message: str | None = None) -> None:
+        """Export the reaction history of a tracked message.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            message (str | None, optional): The ID or link of the tracked message. Defaults to None.
+        """
+        log_request(logger, "msg.export", interaction, message=message)
+        if not await is_in_allowed_channel(logger, interaction):
+            return
+
+        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+            return
+
+        assert interaction.guild is not None
+
+        message_id: int | None = self._parse_message_id(message) if message else self._latest_tracked_id(interaction.guild.id)
+        if message_id is None:
+            await interaction.response.send_message("Aucun message suivi trouvé.", ephemeral=True)
+            return
+
+        history = self._reaction_logs.history(interaction.guild.id, message_id)
+        if not history:
+            await interaction.response.send_message("Aucune réaction enregistrée pour ce message.", ephemeral=True)
+            return
+
+        buffer = io.StringIO()
+        writer = csv.writer(buffer, lineterminator="\n")
+        writer.writerow(["timestamp_iso", "action", "emoji", "user_name", "user_id"])
+        for ev in history:
+            writer.writerow([ev.ts_iso, ev.action, ev.emoji, ev.user_name or "", ev.user_id])
+
+        await interaction.response.send_message(
+            content=f"Export des réactions pour le message `{message_id}`.",
+            file=File(fp=io.BytesIO(buffer.getvalue().encode("utf-8")), filename="message_reactions_log.csv"),
+        )
 
     @msg_group.command(
         name="stop",
@@ -546,7 +660,7 @@ class MessageManagement(commands.Cog):
             return
 
         tracked = self._get_tracked_message(payload.guild_id, payload.message_id)
-        if tracked is None or not tracked.active:
+        if tracked is None:
             return
 
         emoji_str = str(payload.emoji)
@@ -630,6 +744,17 @@ class MessageManagement(commands.Cog):
     def _get_tracked_message(self, guild_id: int, message_id: int) -> TrackedMessage | None:
         return self._get_tracked_messages(guild_id).get(message_id)
 
+    def _latest_tracked_id(self, guild_id: int) -> int | None:
+        tracked = self._get_tracked_messages(guild_id)
+        if not tracked:
+            return None
+        sorted_msgs = sorted(
+            (t for t in tracked.values()),
+            key=lambda t: t.created_at_iso or "",
+            reverse=True,
+        )
+        return sorted_msgs[0].message_id if sorted_msgs else None
+
     def _set_tracked_message(self, guild_id: int, tracked: TrackedMessage) -> None:
         guild_state = self._get_guild_state(guild_id)
         tracked_map = guild_state.setdefault("tracked", {})
@@ -646,20 +771,55 @@ class MessageManagement(commands.Cog):
         self._set_guild_state(guild_id, guild_state)
         return True
 
-    async def register_reaction_action(self, guild_id: int, message_id: int, reaction: MsgReactionEvent) -> str:
-        """Register a reaction action for a tracked message.
+    def get_draft(self, guild_id: int) -> MessageDraft | None:
+        """Retrieve the message draft for a guild.
 
         Args:
-            guild_id (int): The guild identifier.
-            message_id (int): The message identifier.
-            reaction (MsgReactionEvent): The reaction event to register.
+            guild_id (int): The ID of the guild.
 
         Returns:
-            str: A confirmation message about the registered reaction action.
+            MessageDraft | None: The message draft for the guild, or None if not found.
         """
-        tracked = self._get_tracked_message(guild_id, message_id)
-        if tracked is None or not tracked.active:
-            return "Le suivi est inactif ou introuvable pour ce message."
+        guild_state = self._get_guild_state(guild_id)
+        draft_raw = guild_state.get("draft")
+        return MessageDraft.from_dict(draft_raw) if draft_raw else None
+
+    def set_draft(self, guild_id: int, draft: MessageDraft) -> None:
+        """Set the message draft for a guild.
+
+        Args:
+            guild_id (int): The ID of the guild.
+            draft (MessageDraft): The message draft to set.
+        """
+        guild_state = self._get_guild_state(guild_id)
+        guild_state["draft"] = draft.to_dict()
+        self._set_guild_state(guild_id, guild_state)
+
+    def _clear_draft(self, guild_id: int) -> None:
+        guild_state = self._get_guild_state(guild_id)
+        if "draft" in guild_state:
+            guild_state.pop("draft", None)
+            self._set_guild_state(guild_id, guild_state)
+
+    async def register_reaction_action(self, guild_id: int, reaction: MsgReactionEvent) -> str:
+        """Register a reaction action for a tracked message or draft.
+
+        Args:
+            guild_id (int): The ID of the guild.
+            message_id (int | None): The ID of the tracked message, or None for draft.
+            reaction (MsgReactionEvent): The reaction event to register.
+        """
+        if reaction.message_id is None:
+            draft = self.get_draft(guild_id)
+            if draft is None:
+                return "Aucun brouillon trouvé."
+            draft.reactions.append(reaction)
+            self.set_draft(guild_id, draft)
+            return f"Réaction {reaction.emoji} ajoutée au brouillon."
+
+        tracked = self._get_tracked_message(guild_id, reaction.message_id)
+        if tracked is None:
+            return "Le suivi est introuvable pour ce message."
 
         tracked.reactions.append(reaction)
         self._set_tracked_message(guild_id, tracked)
