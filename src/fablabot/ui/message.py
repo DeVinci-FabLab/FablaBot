@@ -5,11 +5,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Literal
 
-from discord import ButtonStyle, Interaction, Member, SelectOption, TextStyle, ui
-from discord.utils import get
+from discord import ButtonStyle, ChannelType, Embed, Interaction, Member, SelectOption, TextStyle, ui
 
-from fablabot.helpers.utils import format_member_mention, send_dm_to_member
-from fablabot.models.message import SUGGESTION_OPTIONS, MsgReactionEvent
+from fablabot.helpers.utils import format_member_mention, log_request, send_dm_to_member
+from fablabot.models.message import SUGGESTION_OPTIONS, MessageDraft, MsgReactionEvent
 
 if TYPE_CHECKING:
     from fablabot.cogs import MessageManagement, SuggestionManagement
@@ -90,50 +89,94 @@ class BulkDMView(ui.View):
         await interaction.delete_original_response()
 
 
-class ReactionTargetModal(ui.Modal):
-    """Modal for selecting the target of a reaction action."""
+class StartMessageModal(ui.Modal, title="Commencer une annonce"):
+    """Modal to start a new message draft.
+
+    Attributes:
+        text_input (ui.TextInput): Text input for the message content.
+    """
+
+    text_input: ui.TextInput = ui.TextInput(
+        label="Message",
+        style=TextStyle.long,
+        placeholder="Entrez le message...",
+        required=True,
+        max_length=2000,
+    )
+
+    def __init__(self, cog: MessageManagement) -> None:
+        """Initialize the StartMessageModal.
+
+        Args:
+            cog (MessageManagement): MessageManagement cog instance.
+        """
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: Interaction) -> None:
+        """Called when the modal is submitted.
+
+        Args:
+            interaction (Interaction): The interaction that triggered the modal submission.
+        """
+        log_request(logger, "message.start", interaction, text_input=self.text_input.value)
+
+        content = self.text_input.value.strip()
+
+        assert interaction.guild is not None
+        guild_id = str(interaction.guild.id)
+
+        draft = MessageDraft(content=content, reactions=[])
+        self.cog.set_draft(guild_id, draft)
+
+        await interaction.response.send_message(
+            "Brouillon initialisé.\nUtilise **/message link_reaction** pour lier des réactions à des actions. "
+            "**/message preview** pour voir le rendu.",
+            embed=Embed(
+                title="Aperçu brouillon",
+                description=f"{content or '_(vide)_'}",
+            ),
+            ephemeral=True,
+        )
+
+
+class _ReactionMessageInputModal(ui.Modal, title="Détails de la réaction"):
+    """Modal for inputting the content of the message to send for a reaction action."""
+
+    message_input: ui.TextInput = ui.TextInput(
+        label="Message à envoyer.",
+        style=TextStyle.long,
+        placeholder="Entrez le message à envoyer... Utilisez {username} pour les mentions.",
+        required=True,
+        max_length=2000,
+    )
 
     def __init__(
         self,
         cog: MessageManagement,
-        guild_id: str,
         emoji: str,
         action_type: Literal["channel", "user_dm", "role_dm"],
-        message_content: str,
+        target_id: int,
+        target_value: str,
+        followup_id: int,
     ) -> None:
         """Initialize the modal.
 
         Args:
             cog (MessageManagement): The MessageManagement cog instance.
-            guild_id (str): The guild ID.
             emoji (str): The emoji for this reaction.
             action_type (Literal["channel", "user_dm", "role_dm"]): The type of action.
-            message_content (str): The message to send.
+            target_id (int): The pre-filled target ID.
+            target_value (str): The pre-filled target value.
+            followup_id (int): The ID of the follow-up message to edit with results.
         """
-        super().__init__(title=f"Configuration de la réaction {emoji}")
+        super().__init__()
         self.cog = cog
-        self.guild_id = guild_id
         self.emoji = emoji
         self.action_type: Literal["channel", "user_dm", "role_dm"] = action_type
-        self.message_content = message_content
-
-        target_label = {
-            "channel": "Nom du salon (ex: général)",
-            "user_dm": "ID de l'utilisateur",
-            "role_dm": "Nom du rôle",
-        }
-
-        self.target_input: ui.TextInput[Any] = ui.TextInput(
-            label=target_label.get(action_type, "Cible"),
-            placeholder={
-                "channel": "général",
-                "user_dm": "123456789012345678",
-                "role_dm": "Membre",
-            }.get(action_type, ""),
-            required=True,
-            max_length=100,
-        )
-        self.add_item(self.target_input)
+        self.target_id = target_id
+        self.target_value = target_value
+        self.followup_id = followup_id
 
     async def on_submit(self, interaction: Interaction) -> None:
         """Handle modal submission.
@@ -142,83 +185,109 @@ class ReactionTargetModal(ui.Modal):
             interaction (Interaction): The interaction context.
         """
         assert interaction.guild is not None
-        target_value = self.target_input.value.strip()
+        message_content = self.message_input.value.strip()
 
-        target_id: int | None = None
-        target_name: str | None = None
+        target_id: int = self.target_id
+        target_name: str = self.target_value
 
-        if self.action_type == "channel":
-            channel = get(interaction.guild.text_channels, name=target_value)
-            if not channel:
-                await interaction.response.send_message(
-                    f"❌ Salon `{target_value}` introuvable.",
-                    ephemeral=True,
-                )
-                return
-            target_id = channel.id
-            target_name = channel.name
-
-        elif self.action_type == "user_dm":
-            try:
-                user_id = int(target_value)
-                member = interaction.guild.get_member(user_id)
-                if not member:
-                    await interaction.response.send_message(
-                        f"❌ Utilisateur avec ID `{target_value}` introuvable.",
-                        ephemeral=True,
-                    )
-                    return
-                target_id = user_id
-                target_name = member.display_name
-            except ValueError:
-                await interaction.response.send_message(
-                    f"❌ ID utilisateur invalide : `{target_value}`",
-                    ephemeral=True,
-                )
-                return
-
-        elif self.action_type == "role_dm":
-            role = get(interaction.guild.roles, name=target_value)
-            if not role:
-                await interaction.response.send_message(
-                    f"❌ Rôle `{target_value}` introuvable.",
-                    ephemeral=True,
-                )
-                return
-            target_id = role.id
-            target_name = role.name
-
-        draft = self.cog.get_draft(self.guild_id)
-        if draft is None:
-            await interaction.response.send_message(
-                "❌ Le brouillon a été supprimé.",
-                ephemeral=True,
-            )
-            return
+        draft = self.cog.get_draft(str(interaction.guild.id))
+        assert draft is not None
 
         reaction = MsgReactionEvent(
             emoji=self.emoji,
             action_type=self.action_type,
-            message_content=self.message_content,
+            message_content=message_content,
             target_id=target_id,
             target_name=target_name,
         )
         draft.reactions.append(reaction)
-        self.cog.set_draft(self.guild_id, draft)
+        self.cog.set_draft(str(interaction.guild.id), draft)
 
         action_desc = {
-            "channel": f"message dans #{target_name}",
-            "user_dm": f"MP à {target_name}",
-            "role_dm": f"MP aux membres du rôle @{target_name}",
+            "channel": f"message dans <#{target_id}>",
+            "user_dm": "MP au membre qui réagit",
+            "role_dm": f"MP aux membres du rôle <@&{target_id}>",
         }
 
-        await interaction.response.send_message(
-            f"✅ Réaction {self.emoji} ajoutée avec succès !\n"
+        await interaction.response.defer()
+        await interaction.followup.edit_message(
+            self.followup_id,
+            content=f"Réaction {self.emoji} ajoutée avec succès\n"
             f"Action : {action_desc.get(self.action_type, self.action_type)}\n"
-            f"Message : `{self.message_content[:100]}{'...' if len(self.message_content) > 100 else ''}`\n\n"
+            "Message :\n"
+            f"{message_content}\n\n"
             f"Utilisez `/message preview` pour voir le brouillon complet.",
-            ephemeral=True,
+            view=None,
         )
+        await interaction.delete_original_response()
+
+
+class ReactionTargetView(ui.View):
+    """View for selecting the target of a reaction action if it's necessary and the content of the message."""
+
+    def __init__(
+        self,
+        cog: MessageManagement,
+        emoji: str,
+        action_type: Literal["channel", "user_dm", "role_dm"],
+        followup_id: int,
+    ) -> None:
+        """Initialize the modal.
+
+        Args:
+            cog (MessageManagement): The MessageManagement cog instance.
+            emoji (str): The emoji for this reaction.
+            action_type (Literal["channel", "user_dm", "role_dm"]): The type of action.
+            followup_id (int): The ID of the follow-up message to edit with results.
+        """
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.emoji = emoji
+        self.action_type: Literal["channel", "user_dm", "role_dm"] = action_type
+        self.followup_id = followup_id
+
+        async def _on_select(interaction: Interaction) -> None:
+            match action_type:
+                case "channel":
+                    target_id = self.channel_select.values[0].id
+                    target_value = self.channel_select.values[0].name
+                case "role_dm":
+                    target_id = self.role_select.values[0].id
+                    target_value = self.role_select.values[0].name
+                case _:
+                    target_id = 0
+                    target_value = ""
+
+            await interaction.response.send_modal(
+                _ReactionMessageInputModal(
+                    self.cog,
+                    self.emoji,
+                    self.action_type,
+                    target_id,
+                    target_value,
+                    self.followup_id,
+                ),
+            )
+
+        match action_type:
+            case "channel":
+                self.channel_select: ui.ChannelSelect[Any] = ui.ChannelSelect(
+                    placeholder="Sélectionne le canal...",
+                    channel_types=[ChannelType.text],
+                )
+                self.channel_select.callback = _on_select  # type: ignore[method-assign]
+                self.add_item(self.channel_select)
+            case "role_dm":
+                self.role_select: ui.RoleSelect[Any] = ui.RoleSelect(placeholder="Sélectionne le rôle...")
+                self.role_select.callback = _on_select  # type: ignore[method-assign]
+                self.add_item(self.role_select)
+            case "user_dm":
+                self.continue_button: ui.Button[Any] = ui.Button(label="Écrire le message à envoyer", style=ButtonStyle.primary)
+                self.continue_button.callback = _on_select  # type: ignore[method-assign]
+                self.add_item(self.continue_button)
+
+
+# region ====== Suggestion UI Components ======
 
 
 class RecipientSelect(ui.Select):
@@ -324,3 +393,6 @@ class InitialView(ui.View):
         self.add_item(RecipientSelect(self))
         self.add_item(AnonymitySelect(self))
         self.add_item(OpenModalButton(self, cog))
+
+
+# endregion Suggestion UI Components

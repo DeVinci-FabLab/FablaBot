@@ -22,9 +22,10 @@ class EasterEggTrigger:
     """Probability of triggering the Easter egg when keywords are found."""
 
 
+# TODO regex pour trivial sauf si c'est le gif, pour feu avec espace ou rien derrière mais pas lettre
 EASTER_EGGS: list[EasterEggTrigger] = [
     EasterEggTrigger(
-        ["c'est pas sorcier"],
+        ["est pas sorcier"],
         "https://tenor.com/view/c-est-pas-sorcier-c%27est-pas-sorcier-jamy-fred-sabine-gif-499752155684427888",
         1.0,
     ),
@@ -34,7 +35,7 @@ EASTER_EGGS: list[EasterEggTrigger] = [
         1 / 3,
     ),
     EasterEggTrigger(
-        ["contre nature", "c'est bizarre"],
+        ["contre nature"],
         "https://tenor.com/view/lpj-gif-7210529",
         1.0,
     ),
@@ -44,9 +45,14 @@ EASTER_EGGS: list[EasterEggTrigger] = [
         1.0,
     ),
     EasterEggTrigger(
-        ["feu ", "brûl", "brul"],
-        "https://tenor.com/view/elmo-fire-burn-flame-gif-5042503",
-        1 / 4,
+        ["feu", "brûl", "brul"],
+        "https://tenor.com/view/elmo-hello-elmo-rise-elmo-hell-gif-3989603362345473118",
+        1 / 3,
+    ),
+    EasterEggTrigger(
+        ["trivial"],
+        "https://tenor.com/view/didier-gossard-didier-gossard-cest-trivial-gif-18897720",
+        1.0,
     ),
 ]
 
@@ -119,6 +125,9 @@ class MessageDraft:
         )
 
 
+# region ====== Suggestion Configurations ======
+
+
 @dataclass
 class SuggestionConfig:
     """Configuration for a suggestion type.
@@ -185,17 +194,17 @@ _COMMUNICATION_SUGGESTION_CONFIG = SuggestionConfig(
 _EVENTS_SUGGESTION_CONFIG = SuggestionConfig(
     label="Pôle Event",
     command_name="suggest.to_events",
-    embed_title="Nouvelle suggestion pour le Pôle Événements",
+    embed_title="Nouvelle suggestion pour le Pôle Event",
     role_name=RoleNames.EVENTS_MANAGER,
     channel_name="pole-event",
-    success_message="Suggestion envoyée au Pôle Events. Merci !",
-    error_message="Aucun·e Respo Events et aucun salon 'pole-events' ne sont configurés pour recevoir les suggestions.",
+    success_message="Suggestion envoyée au Pôle Event. Merci !",
+    error_message="Aucun·e Respo Event et aucun salon 'pole-event' ne sont configurés pour recevoir les suggestions.",
 )
 
 _TRAINING_SUGGESTION_CONFIG = SuggestionConfig(
     label="Pôle Formation",
     command_name="suggest.to_trainings",
-    embed_title="Nouvelle suggestion de formation",
+    embed_title="Nouvelle suggestion pour le Pôle Formation",
     role_name=RoleNames.TRAININGS_MANAGER,
     channel_name="pole-formation",
     success_message="Suggestion envoyée au Pôle Formation. Merci !",
@@ -226,11 +235,11 @@ _PARTNERSHIPS_SUGGESTION_CONFIG = SuggestionConfig(
 _PROJECTS_SUGGESTION_CONFIG = SuggestionConfig(
     label="Pôle Projet",
     command_name="suggest.to_projects",
-    embed_title="Nouvelle suggestion pour le Pôle Projets",
+    embed_title="Nouvelle suggestion pour le Pôle Projet",
     role_name=RoleNames.PROJECTS_MANAGER,
     channel_name=None,
-    success_message="Suggestion envoyée au Pôle Projets. Merci !",
-    error_message="Aucun·e Respo Projets n'est configuré·e pour recevoir les suggestions.",
+    success_message="Suggestion envoyée au Pôle Projet. Merci !",
+    error_message="Aucun·e Respo Projet n'est configuré·e pour recevoir les suggestions.",
 )
 
 SUGGESTION_OPTIONS: dict[str, SuggestionConfig] = {
@@ -243,3 +252,5 @@ SUGGESTION_OPTIONS: dict[str, SuggestionConfig] = {
     "partenariat": _PARTNERSHIPS_SUGGESTION_CONFIG,
     "projet": _PROJECTS_SUGGESTION_CONFIG,
 }
+
+# endregion ====== Suggestion Configurations ======
