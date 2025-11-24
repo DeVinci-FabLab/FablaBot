@@ -210,7 +210,7 @@ class MessageManagement(commands.Cog):
         content="Contenu du message à envoyer",
         track="Activer immédiatement le suivi des réactions",
     )
-    async def msg_send(  # TODO: review
+    async def msg_send(
         self,
         interaction: Interaction,
         *,
@@ -218,6 +218,14 @@ class MessageManagement(commands.Cog):
         content: str,
         track: bool = True,
     ) -> None:
+        """Send a message and start tracking it.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            channel (TextChannel): The target text channel.
+            content (str): The content of the message to send.
+            track (bool, optional): Whether to start tracking the message immediately. Defaults to True.
+        """
         log_request(logger, "msg.send", interaction, channel=channel.name, track=track)
         if not await is_in_allowed_channel(logger, interaction):
             return
@@ -225,7 +233,7 @@ class MessageManagement(commands.Cog):
         if not await check_has_role(logger, interaction, ALLOWED_ROLES):
             return
 
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        await interaction.response.defer(thinking=True)
         try:
             sent_msg = await channel.send(content)
         except Exception:
@@ -246,11 +254,9 @@ class MessageManagement(commands.Cog):
             )
             self._set_tracked_message(interaction.guild.id, tracked)
 
-        await interaction.followup.send(
-            f"Message envoyé dans {channel.mention} (ID `{sent_msg.id}`). "
-            f"{'Suivi activé.' if track else 'Suivi désactivé (active-le avec /msg follow).'}",
-            ephemeral=True,
-        )
+        footer = f"{'Suivi activé.' if track else 'Suivi désactivé (active-le avec /msg follow).'}"
+
+        await interaction.followup.send(f"Message envoyé dans {channel.mention} (ID `{sent_msg.id}`).\n{footer}")
 
     @msg_group.command(name="follow", description="Démarrer le suivi sur un message déjà envoyé.")
     @app_commands.describe(
@@ -355,6 +361,75 @@ class MessageManagement(commands.Cog):
         view.followup_id = followup_message.id
 
     @msg_group.command(
+        name="unlink_reaction",
+        description="Retirer une action associée à une réaction sur un message suivi.",
+    )
+    @app_commands.describe(
+        message="ID ou lien du message suivi",
+        emoji="Emoji ciblé",
+        action_type="Action ciblée (channel, user_dm, role_dm)",
+        occurrence="Occurrence à retirer (1 = première correspondance)",
+    )
+    async def msg_unlink_reaction(  # TODO: review
+        self,
+        interaction: Interaction,
+        *,
+        message: str,
+        emoji: str,
+        action_type: MsgActionType,
+        occurrence: app_commands.Range[int, 1, 50] = 1,
+    ) -> None:
+        """Remove one reaction action from a tracked message."""
+        log_request(
+            logger,
+            "msg.unlink_reaction",
+            interaction,
+            message=message,
+            emoji=emoji,
+            action_type=action_type,
+            occurrence=occurrence,
+        )
+        if not await is_in_allowed_channel(logger, interaction):
+            return
+
+        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+            return
+
+        message_id = self._parse_message_id(message)
+        if message_id is None:
+            await interaction.response.send_message("ID ou lien de message invalide.", ephemeral=True)
+            return
+
+        assert interaction.guild is not None
+        tracked = self._get_tracked_message(interaction.guild.id, message_id)
+        if tracked is None:
+            await interaction.response.send_message("Aucun suivi trouvé pour ce message.", ephemeral=True)
+            return
+
+        matches: list[tuple[int, MsgReactionEvent]] = [
+            (idx, r) for idx, r in enumerate(tracked.reactions) if r.emoji == emoji and r.action_type == action_type
+        ]
+        if not matches:
+            await interaction.response.send_message("Aucune action trouvée pour cet émoji et type.", ephemeral=True)
+            return
+
+        if occurrence > len(matches):
+            await interaction.response.send_message(
+                f"Il n'existe que {len(matches)} action(s) correspondante(s) pour cet émoji.",
+                ephemeral=True,
+            )
+            return
+
+        target_idx, target_reaction = matches[occurrence - 1]
+        del tracked.reactions[target_idx]
+        self._set_tracked_message(interaction.guild.id, tracked)
+
+        await interaction.response.send_message(
+            f"Action retirée : {emoji} → {self._format_reaction_action(target_reaction)}",
+            ephemeral=True,
+        )
+
+    @msg_group.command(
         name="list",
         description="Lister les messages actuellement suivis.",
     )
@@ -384,17 +459,12 @@ class MessageManagement(commands.Cog):
             link = f"https://discord.com/channels/{interaction.guild.id}/{tracked.channel_id}/{tracked.message_id}"
             lines.append(f"- ID `{tracked.message_id}` : {link}")
             if tracked.reactions:
-                for reaction in tracked.reactions:
-                    target = reaction.target_id or reaction.target_name or ""
-                    action_label = {
-                        "channel": f"Message salon <#{target}>",
-                        "user_dm": "DM réacteur",
-                        "role_dm": f"DM rôle <@&{target}>",
-                    }.get(reaction.action_type, reaction.action_type)
+                for idx, reaction in enumerate(tracked.reactions, start=1):
+                    action_label = self._format_reaction_action(reaction)
                     preview = reaction.message_content
                     if len(preview) > 120:
                         preview = f"{preview[:117]}..."
-                    lines.append(f"   {reaction.emoji} : {action_label} | {preview}")
+                    lines.append(f"   {idx}. {reaction.emoji} : {action_label} | {preview}")
             else:
                 lines.append("   (aucune action liée)")
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
@@ -518,6 +588,15 @@ class MessageManagement(commands.Cog):
         except ValueError:
             return None
 
+    @staticmethod
+    def _format_reaction_action(reaction: MsgReactionEvent) -> str:
+        target = reaction.target_id or reaction.target_name or ""
+        return {
+            "channel": f"message salon <#{target}>",
+            "user_dm": "DM réacteur",
+            "role_dm": f"DM rôle <@&{target}>",
+        }.get(reaction.action_type, reaction.action_type)
+
     def _load_state(self) -> dict[str, dict[str, Any]]:
         state = load_json_state(logger, MESSAGES_STATE_FILE)
         logger.debug("Loaded message state.")
@@ -582,7 +661,6 @@ class MessageManagement(commands.Cog):
         if tracked is None or not tracked.active:
             return "Le suivi est inactif ou introuvable pour ce message."
 
-        tracked.reactions = [r for r in tracked.reactions if r.emoji != reaction.emoji]
         tracked.reactions.append(reaction)
         self._set_tracked_message(guild_id, tracked)
 
@@ -596,6 +674,29 @@ class MessageManagement(commands.Cog):
 
         return f"Réaction {reaction.emoji} ajoutée.\nAction : {action_desc}\nMessage envoyé :\n{reaction.message_content}"
 
+    async def _sync_reactions_on_message(self, guild_id: int, tracked: TrackedMessage) -> None:
+        """Ensure all configured reaction emojis are present on the tracked message."""
+        if not tracked.reactions:
+            return
+        unique_emojis = {r.emoji for r in tracked.reactions}
+        guild = self.bot.get_guild(guild_id)
+        channel = guild.get_channel(tracked.channel_id) if guild else self.bot.get_channel(tracked.channel_id)
+        if channel is None and guild:
+            with contextlib.suppress(Exception):
+                channel = await guild.fetch_channel(tracked.channel_id)
+        if not isinstance(channel, TextChannel):
+            return
+        try:
+            msg = await channel.fetch_message(tracked.message_id)
+        except Exception:
+            logger.exception(f"Tracked message {tracked.message_id} no longer accessible.")
+            return
+        for emoji in unique_emojis:
+            try:
+                await msg.add_reaction(emoji)
+            except Exception:
+                logger.exception(f"Could not add reaction {emoji} on message {tracked.message_id}")
+
     async def _ensure_reaction_on_message(self, guild_id: int, tracked: TrackedMessage, emoji: str) -> None:
         guild = self.bot.get_guild(guild_id)
         channel = guild.get_channel(tracked.channel_id) if guild else self.bot.get_channel(tracked.channel_id)
@@ -608,6 +709,9 @@ class MessageManagement(commands.Cog):
             msg = await channel.fetch_message(tracked.message_id)
         except Exception:
             logger.exception(f"Tracked message {tracked.message_id} no longer accessible.")
+            return
+        if any(reaction.me for reaction in msg.reactions if str(reaction.emoji) == emoji):
+            logger.debug(f"Message {tracked.message_id} already has reaction {emoji}")
             return
         try:
             await msg.add_reaction(emoji)
