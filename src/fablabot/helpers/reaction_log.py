@@ -9,8 +9,9 @@ from fablabot.helpers.constants import PARIS_TZ
 from fablabot.models.common import ReactionEvent
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from logging import Logger
+
+    from fablabot.helpers.state_store import JsonStateStore
 
 
 class ReactionLogManager:
@@ -18,29 +19,26 @@ class ReactionLogManager:
 
     def __init__(
         self,
-        state: dict[str, dict],
-        *,
-        save_state: Callable[[dict[str, dict]], None],
+        state_store: JsonStateStore,
         retention: timedelta,
         logger: Logger,
     ) -> None:
         """Initialize the manager.
 
         Args:
-            state (dict[str, dict]): The mutable state dictionary (per guild entries).
-            save_state (Callable[[dict[str, dict]], None]): Callback used to persist the state.
+            state_store (JsonStateStore): Shared JSON-backed state store.
             retention (timedelta): Duration to retain reaction events.
             logger (Logger): Logger used for diagnostics.
         """
-        self.state = state
-        self._save_state = save_state
+        self.state_store = state_store
+        self.state = state_store.state
         self._retention = retention
         self.logger = logger
 
     def purge_all(self) -> None:
         """Purge all guild reaction logs according to retention."""
         if self._purge_all_internal():
-            self._save_state(self.state)
+            self.state_store.save()
             self.logger.debug("Purged reaction logs and persisted state.")
         else:
             self.logger.debug("No reaction log entries required purging.")
@@ -60,7 +58,7 @@ class ReactionLogManager:
             event.user_name = self._last_known_name(log, event.user_id)
         log.append(event)
         guild_state["reactions_log"] = [ev.to_dict() for ev in log]
-        self._save_state(self.state)
+        self.state_store.save()
         self.logger.debug(
             f"Logged reaction {event.action} on message {event.message_id} in guild {guild_id} "
             f"for user {event.user_id} with emoji {event.emoji}.",
@@ -84,15 +82,12 @@ class ReactionLogManager:
         return history
 
     def _get_guild_state(self, guild_id: int) -> dict:
-        key = str(guild_id)
-        if key not in self.state:
-            self.state[key] = {}
-        return self.state[key]
+        return self.state_store.ensure_guild(guild_id)
 
     def _purge_all_internal(self) -> bool:
         changed = False
         removed_total = 0
-        for guild_state in self.state.values():
+        for _, guild_state in self.state_store.guild_items():
             raw_log = guild_state.get("reactions_log")
             if not raw_log:
                 continue

@@ -38,7 +38,7 @@ from discord.ext import commands
 
 from fablabot.helpers.constants import ADMIN_ROLES, PARIS_TZ, ErrorMessages, RoleNames
 from fablabot.helpers.reaction_log import ReactionLogManager
-from fablabot.helpers.state_store import load_json_state, save_json_state
+from fablabot.helpers.state_store import JsonStateStore
 from fablabot.helpers.utils import (
     check_has_role,
     get_members_by_role,
@@ -88,10 +88,9 @@ class MessageManagement(commands.Cog):
             bot (commands.Bot): The bot instance.
         """
         self.bot = bot
-        self.state: dict[str, dict[str, Any]] = self._load_state()
+        self._state_store = JsonStateStore(logger, MESSAGES_STATE_FILE)
         self._reaction_logs = ReactionLogManager(
-            self.state,
-            save_state=self._save_state,
+            self._state_store,
             retention=REACTION_LOG_RETENTION,
             logger=logger,
         )
@@ -725,24 +724,11 @@ class MessageManagement(commands.Cog):
             "role_dm": f"DM rôle <@&{target}>",
         }.get(reaction.action_type, reaction.action_type)
 
-    def _load_state(self) -> dict[str, dict[str, Any]]:
-        state = load_json_state(logger, MESSAGES_STATE_FILE)
-        logger.debug("Loaded message state.")
-        return state
-
-    @staticmethod
-    def _save_state(state: dict[str, dict[str, Any]]) -> None:
-        save_json_state(logger, MESSAGES_STATE_FILE, state)
-
     def _get_guild_state(self, guild_id: int) -> dict[str, Any]:
-        key = str(guild_id)
-        if key not in self.state:
-            self.state[key] = {}
-        return self.state[key]
+        return self._state_store.ensure_guild(guild_id)
 
     def _set_guild_state(self, guild_id: int, payload: dict[str, Any]) -> None:
-        self.state[str(guild_id)] = payload
-        self._save_state(self.state)
+        self._state_store.set_guild(guild_id, payload)
 
     def _get_tracked_messages(self, guild_id: int) -> dict[int, TrackedMessage]:
         guild_state = self._get_guild_state(guild_id)

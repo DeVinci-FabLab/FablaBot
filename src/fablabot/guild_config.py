@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import Any
+
+from fablabot.helpers.state_store import JsonStateStore
 
 logger = logging.getLogger(__name__)
 
@@ -15,40 +16,31 @@ _KEY_LOG = "log_channel_id"
 _GUILD_KEY_WELCOME = "welcome_verify_enabled"
 _GLOBAL_SECTION = "__global__"
 
+_config_store = JsonStateStore(logger, CONFIG_FILE)
+
 
 def _load_all() -> dict[str, dict[str, Any]]:
     """Load all guild configuration data from the JSON file.
 
     Returns:
-        dict[str, dict[str, Any]]: The loaded configuration data, keyed by guild ID.
+        dict[str, dict[str, Any]]: Mapping of guild IDs to their configuration entries.
     """
-    if not CONFIG_FILE.exists():
+    state = _config_store.state
+    if not isinstance(state, dict):
+        logger.warning("Guild configuration store is not a mapping; resetting.")
         return {}
-    try:
-        with CONFIG_FILE.open("r", encoding="utf-8") as stream:
-            data = json.load(stream)
-    except json.JSONDecodeError:
-        logger.exception("Failed to decode guild configuration JSON; ignoring contents.")
-        return {}
-    if not isinstance(data, dict):
-        logger.warning("Guild configuration file does not contain an object; ignoring contents.")
-        return {}
-
-    return {guild_id: payload for guild_id, payload in data.items() if isinstance(payload, dict)}
+    return {k: v for k, v in state.items() if isinstance(v, dict)}
 
 
 def _save_all(data: dict[str, dict[str, Any]]) -> None:
-    """Save all guild configuration data to the JSON file.
+    """Persist all guild configuration data through the shared state store.
 
     Args:
-        data (dict[str, dict[str, Any]]): The configuration data to save, keyed by guild ID.
+        data (dict[str, dict[str, Any]]): Mapping of guild IDs to their configuration entries.
     """
-    CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = CONFIG_FILE.with_suffix(".tmp")
-    with tmp_path.open("w", encoding="utf-8") as stream:
-        json.dump(data, stream, indent=2, sort_keys=True)
-        stream.write("\n")
-    tmp_path.replace(CONFIG_FILE)
+    _config_store.state.clear()
+    _config_store.state.update({k: v for k, v in data.items() if isinstance(v, dict)})
+    _config_store.save()
 
 
 def _update_entry(guild_id: int | None, **updates: int | bool | None) -> None:
@@ -123,17 +115,7 @@ def set_log_channel_id(channel_id: int) -> None:
     Args:
         channel_id (int): The channel ID to set.
     """
-    data = _load_all()
-    updated = False
-
-    current_global = dict(data.get(_GLOBAL_SECTION, {}))
-    if current_global.get(_KEY_LOG) != channel_id:
-        current_global[_KEY_LOG] = channel_id
-        data[_GLOBAL_SECTION] = current_global
-        updated = True
-
-    if updated:
-        _save_all(data)
+    _update_entry(None, **{_KEY_LOG: channel_id})
 
 
 def is_welcome_verify_enabled(guild_id: int) -> bool:

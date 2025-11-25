@@ -29,7 +29,7 @@ from fablabot.helpers.formation import (
     send_waitlist_dm,
 )
 from fablabot.helpers.reaction_log import ReactionLogManager
-from fablabot.helpers.state_store import load_json_state, save_json_state
+from fablabot.helpers.state_store import JsonStateStore
 from fablabot.helpers.utils import check_has_role, is_in_allowed_channel, is_valid_emoji, log_request
 from fablabot.models import FmCommand, FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
 from fablabot.ui import fmui
@@ -72,10 +72,9 @@ class FormationManagement(commands.Cog):
             bot (commands.Bot): The bot instance.
         """
         self.bot = bot
-        self.state: dict[str, dict[str, Any]] = self._load_state()
+        self._state_store = JsonStateStore(logger, FM_STATE_FILE)
         self._reaction_logs = ReactionLogManager(
-            self.state,
-            save_state=self._save_state,
+            self._state_store,
             retention=REACTION_LOG_RETENTION,
             logger=logger,
         )
@@ -634,7 +633,7 @@ class FormationManagement(commands.Cog):
         start_window_start = now - window_tolerance
         start_window_end = now + window_tolerance
 
-        for guild_id_str in self.state:
+        for guild_id_str in self._state_store.state:
             guild_id = int(guild_id_str)
             guild = self.bot.get_guild(guild_id)
             if not guild:
@@ -695,26 +694,6 @@ class FormationManagement(commands.Cog):
     # region ====== Helpers ======
     # -- State --
 
-    @staticmethod
-    def _load_state() -> dict[str, dict[str, Any]]:
-        """Load the state from the JSON file.
-
-        Returns:
-            dict[str, dict[str, Any]]: The loaded state, or an empty dictionary if the file does not exist or an error occurs.
-        """
-        state = load_json_state(logger, FM_STATE_FILE)
-        logger.debug("Loaded formations state.")
-        return state
-
-    @staticmethod
-    def _save_state(state: dict[str, dict[str, Any]]) -> None:
-        """Save the state to the JSON file.
-
-        Args:
-            state (dict[str, dict[str, Any]]): The state to save.
-        """
-        save_json_state(logger, FM_STATE_FILE, state)
-
     def _get_guild_state(self, guild_id: int) -> dict[str, Any]:
         """Get state for a specific guild.
 
@@ -724,11 +703,7 @@ class FormationManagement(commands.Cog):
         Returns:
             dict[str, Any]: The state of the guild.
         """
-        key = str(guild_id)
-        if key not in self.state:
-            logger.debug(f"Initializing state container for guild {guild_id}.")
-            self.state[key] = {}
-        return self.state[key]
+        return self._state_store.ensure_guild(guild_id)
 
     def _set_guild_state(self, guild_id: int, payload: dict[str, Any]) -> None:
         """Set the state for a specific guild.
@@ -737,8 +712,7 @@ class FormationManagement(commands.Cog):
             guild_id (int): The ID of the guild.
             payload (dict[str, Any]): The state of the guild.
         """
-        self.state[str(guild_id)] = payload
-        self._save_state(self.state)
+        self._state_store.set_guild(guild_id, payload)
 
     def get_guild_draft(self, guild_id: int) -> FmMessageDraft:
         """Get the draft state for a specific guild.

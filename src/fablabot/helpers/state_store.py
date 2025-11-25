@@ -6,6 +6,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable, Mapping
     from logging import Logger
     from pathlib import Path
 
@@ -53,3 +54,63 @@ def save_json_state(logger: Logger, path: Path, state: dict[str, Any]) -> None:
         logger.exception(f"Failed to persist state to {path}")
     else:
         logger.debug(f"Saved state to {path}")
+
+
+class JsonStateStore:
+    """Lightweight JSON-backed state container shared across cogs."""
+
+    def __init__(
+        self,
+        logger: Logger,
+        path: Path,
+        *,
+        guild_default_factory: Callable[[], dict[str, Any]] | None = None,
+        initial_state: dict[str, Any] | None = None,
+    ) -> None:
+        """Initialize the state store and load existing data from disk.
+
+        Args:
+            logger (Logger): Logger used for diagnostics.
+            path (Path): File path for persisting the state.
+            guild_default_factory (Callable[[], dict[str, Any]] | None, optional): Factory
+                invoked when a guild has no entry yet. Defaults to an empty dict.
+            initial_state (dict[str, Any] | None, optional): Preloaded state (mostly for tests).
+                When provided, the JSON file is not read on initialization.
+        """
+        self.logger = logger
+        self.path = path
+        self._guild_default_factory = guild_default_factory or dict
+        self.state: dict[str, Any] = initial_state or load_json_state(logger, path)
+
+    def save(self) -> None:
+        """Persist the current in-memory state to disk."""
+        save_json_state(self.logger, self.path, self.state)
+
+    def save_state(self, _: dict[str, Any] | None = None) -> None:
+        """Compatibility wrapper so callbacks can ignore the passed state."""
+        self.save()
+
+    def ensure_guild(self, guild_id: int) -> dict[str, Any]:
+        """Ensure a guild entry exists and return it."""
+        key = str(guild_id)
+        if key not in self.state:
+            self.state[key] = self._guild_default_factory()
+        return self.state[key]
+
+    def set_guild(self, guild_id: int, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """Replace a guild entry with a sanitized payload and persist it."""
+        guild_state = dict(payload)
+        self.state[str(guild_id)] = guild_state
+        self.save()
+        return guild_state
+
+    def update_guild(self, guild_id: int, mutator: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
+        """Apply a mutation function to a guild entry and persist changes."""
+        guild_state = self.ensure_guild(guild_id)
+        mutator(guild_state)
+        self.save()
+        return guild_state
+
+    def guild_items(self) -> Iterable[tuple[str, Any]]:
+        """Iterate over guild_id -> state mappings (string guild ids)."""
+        return self.state.items()
