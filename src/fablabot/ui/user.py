@@ -32,7 +32,7 @@ class BulkRoleAssignmentView(ui.View):
             followup_id (int): The ID of the follow-up message to edit with results.
             action (Literal["add", "remove"]): "add" to add the role, "remove" to remove it.
         """
-        super().__init__()
+        super().__init__(timeout=None)
         self.role = role
         self.user = user
         self.followup_id = followup_id
@@ -128,7 +128,7 @@ class MultiRoleSelectorView(ui.View):
         Args:
             followup_id (int): The ID of the follow-up message to edit with results.
         """
-        super().__init__()
+        super().__init__(timeout=None)
         self.followup_id = followup_id
 
     @ui.select(cls=ui.RoleSelect, placeholder="Sélectionne les rôles...", min_values=1, max_values=25)

@@ -82,9 +82,11 @@ class ReactionLogManager:
         return history
 
     def _get_guild_state(self, guild_id: int) -> dict:
+        """Retrieve or initialize the state mapping for a specific guild."""
         return self.state_store.ensure_guild(guild_id)
 
     def _purge_all_internal(self) -> bool:
+        """Purge reaction logs across all guilds according to retention."""
         changed = False
         removed_total = 0
         for _, guild_state in self.state_store.guild_items():
@@ -101,6 +103,7 @@ class ReactionLogManager:
         return changed
 
     def _purge_entries(self, log: list[ReactionEvent]) -> list[ReactionEvent]:
+        """Purge reaction log entries according to retention."""
         cutoff = datetime.now(PARIS_TZ) - self._retention
         filtered: list[ReactionEvent] = []
         for entry in log:
@@ -119,6 +122,7 @@ class ReactionLogManager:
 
     @staticmethod
     def _last_known_name(log: list[ReactionEvent], user_id: int) -> str | None:
+        """Retrieve the last known username for a user from the reaction log."""
         for entry in reversed(log):
             if entry.user_id == user_id and entry.user_name:
                 return entry.user_name

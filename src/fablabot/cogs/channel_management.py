@@ -568,15 +568,7 @@ class ChannelManagement(commands.Cog):
 
     @staticmethod
     async def _get_codir_mention(guild: Guild, channel: TextChannel) -> str:
-        """Get CoDir role mention or return empty string if not found.
-
-        Args:
-            guild (Guild): The guild to search for the role.
-            channel (TextChannel): The channel to send error message to if role not found.
-
-        Returns:
-            str: The role mention with trailing space, or empty string if not found.
-        """
+        """Get CoDir role mention or return empty string if not found."""
         codir_role = get(guild.roles, name=RoleNames.CODIR)
         if codir_role is None:
             logger.error(f"Required role {RoleNames.CODIR} not found.")

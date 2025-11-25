@@ -388,7 +388,7 @@ class SelectFormationView(ui.View):
             formations (list[Formation]): List of formations to choose from.
             cmd (FmCommand): The command that triggered this view.
         """
-        super().__init__()
+        super().__init__(timeout=None)
         self.cog = cog
         self.followup_id = followup_id
         self.cmd = cmd
@@ -511,7 +511,7 @@ class _SelectTrainerView(ui.View):
             edit_formation_view (EditFormationView): The parent EditFormationView.
             original_message_id (int): The ID of the original edit message to update.
         """
-        super().__init__()
+        super().__init__(timeout=None)
         self.edit_formation_view = edit_formation_view
         self.original_message_id = original_message_id
 
@@ -663,7 +663,7 @@ class _EditFormationView(ui.View):
             formation_index (int): The index of the formation (1-based).
             original (Formation): The original formation being edited.
         """
-        super().__init__()
+        super().__init__(timeout=None)
         self.cog = cog
         self.followup_id = followup_id
         self.formation_index = formation_index

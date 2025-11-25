@@ -695,23 +695,11 @@ class FormationManagement(commands.Cog):
     # -- State --
 
     def _get_guild_state(self, guild_id: int) -> dict[str, Any]:
-        """Get state for a specific guild.
-
-        Args:
-            guild_id (int): The ID of the guild.
-
-        Returns:
-            dict[str, Any]: The state of the guild.
-        """
+        """Get state for a specific guild."""
         return self._state_store.ensure_guild(guild_id)
 
     def _set_guild_state(self, guild_id: int, payload: dict[str, Any]) -> None:
-        """Set the state for a specific guild.
-
-        Args:
-            guild_id (int): The ID of the guild.
-            payload (dict[str, Any]): The state of the guild.
-        """
+        """Set the state for a specific guild."""
         self._state_store.set_guild(guild_id, payload)
 
     def get_guild_draft(self, guild_id: int) -> FmMessageDraft:
@@ -743,14 +731,7 @@ class FormationManagement(commands.Cog):
         self._set_guild_state(guild_id, guild_state)
 
     def _get_last_published_in_guild(self, guild_id: int) -> PublishedMessage | None:
-        """Get the last published state for a specific guild.
-
-        Args:
-            guild_id (int): The ID of the guild.
-
-        Returns:
-            PublishedMessage | None: The last published state of the guild, or None if not found.
-        """
+        """Get the last published state for a specific guild."""
         guild_state = self._get_guild_state(guild_id)
         pub_dict = guild_state.get("published")
         if not pub_dict:
@@ -759,12 +740,7 @@ class FormationManagement(commands.Cog):
         return PublishedMessage.from_dict(pub_dict)
 
     def _set_last_published_in_guild(self, guild_id: int, published: PublishedMessage) -> None:
-        """Set the last published state for a specific guild.
-
-        Args:
-            guild_id (int): The ID of the guild.
-            published (PublishedMessage): The published state of the guild.
-        """
+        """Set the last published state for a specific guild."""
         guild_state = self._get_guild_state(guild_id)
         guild_state["published"] = published.to_dict()
         self._set_guild_state(guild_id, guild_state)
@@ -772,12 +748,7 @@ class FormationManagement(commands.Cog):
     # -- Reaction Logs & Updates --
 
     def _log_reaction(self, guild_id: int, reaction_event: ReactionEvent) -> None:
-        """Log a reaction event with Paris timezone.
-
-        Args:
-            guild_id (int): The ID of the guild.
-            reaction_event (ReactionEvent): The event to log.
-        """
+        """Log a reaction event with Paris timezone."""
         self._reaction_logs.append(guild_id, reaction_event)
 
     def _schedule_update(self, guild_id: int, delay: float = 2.0) -> None:
@@ -810,11 +781,7 @@ class FormationManagement(commands.Cog):
         self._pending_update_tasks[guild_id] = task
 
     async def _update_published_message(self, guild_id: int) -> None:
-        """Update the published message to reflect current registrations.
-
-        Args:
-            guild_id (int): The ID of the guild.
-        """
+        """Update the published message to reflect current registrations."""
         pub = self._get_last_published_in_guild(guild_id)
         if not pub:
             logger.debug(f"No published formations message recorded for guild {guild_id}; skipping update.")
