@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from discord import ButtonStyle, ChannelType, Embed, Interaction, Member, SelectOption, TextStyle, ui
 
-from fablabot.helpers.utils import format_member_mention, send_dm_to_member
+from fablabot.helpers import ErrorMessages, format_member_mention, send_dm_to_member
 from fablabot.models.message import SUGGESTION_OPTIONS, MessageDraft, MsgActionType, MsgReactionEvent, TrackedMessage
 
 if TYPE_CHECKING:
@@ -377,7 +377,7 @@ class _SelectMessageButton(ui.Button[Any]):
         """
         view = self.view
         if view is None:
-            await interaction.response.send_message("Vue expirée. Merci de relancer la commande.", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.EXPIRED_VIEW_MESSAGE, ephemeral=True)
             return
 
         assert isinstance(view, UnlinkMessageSelectView | StopTrackingSelectView)
@@ -410,19 +410,22 @@ class UnlinkMessageSelectView(ui.View):
             interaction (Interaction): The Discord interaction context.
             message_id (int): The ID of the message to unlink a reaction from.
         """
+        await interaction.response.defer()
         tracked = next((t for t in self.tracked_messages if t.message_id == message_id), None)
         if tracked is None:
-            await interaction.response.send_message("Message suivi introuvable.", ephemeral=True)
+            await interaction.followup.edit_message(self.followup_id, content="Message suivi introuvable.", view=None)
             return
         if not tracked.reactions:
-            await interaction.response.edit_message(
+            await interaction.followup.edit_message(
+                self.followup_id,
                 content="Aucune action configurée sur ce message suivi.",
                 view=None,
             )
             return
 
         view = _UnlinkReactionSelectView(self.cog, self.followup_id, tracked)
-        await interaction.response.edit_message(
+        await interaction.followup.edit_message(
+            self.followup_id,
             content=f"Sélectionne l'action à retirer pour le message `{tracked.message_id}`.",
             view=view,
         )
@@ -463,11 +466,12 @@ class _UnlinkReactionButton(ui.Button[_UnlinkReactionSelectView]):  # TODO: revi
     async def callback(self, interaction: Interaction) -> None:
         view = self.view
         if view is None:
-            await interaction.response.send_message("Vue expirée. Merci de relancer la commande.", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.EXPIRED_VIEW_MESSAGE, ephemeral=True)
             return
 
         assert isinstance(view, _UnlinkReactionSelectView)
         assert interaction.guild is not None
+        await interaction.response.defer()
 
         if self.reaction_index >= len(view.tracked.reactions):
             await interaction.response.send_message("Action introuvable.", ephemeral=True)
@@ -480,7 +484,8 @@ class _UnlinkReactionButton(ui.Button[_UnlinkReactionSelectView]):  # TODO: revi
             f"{view.tracked.message_id} in guild {interaction.guild.id}",
         )
 
-        await interaction.response.edit_message(
+        await interaction.followup.edit_message(
+            view.followup_id,
             content=f"Action retirée : {removed.emoji} : {view.cog.format_reaction_action(removed)}",
             view=None,
         )
@@ -512,12 +517,14 @@ class StopTrackingSelectView(ui.View):  # TODO: review
             message_id (int): The ID of the message to stop tracking.
         """
         assert interaction.guild is not None
+        await interaction.response.defer()
         if not self.cog.remove_tracked_message(interaction.guild.id, message_id):
-            await interaction.response.edit_message(content="Suivi introuvable pour ce message.", view=None)
+            await interaction.followup.edit_message(self.followup_id, content="Suivi introuvable pour ce message.", view=None)
             return
 
         logger.info(f"Stopped tracking message {message_id} in guild {interaction.guild.id}")
-        await interaction.response.edit_message(
+        await interaction.followup.edit_message(
+            self.followup_id,
             content=f"Suivi arrêté pour le message `{message_id}`.",
             view=None,
         )

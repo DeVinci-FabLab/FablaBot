@@ -164,6 +164,9 @@ class ErrorMessages:
     """Published message data is inconsistent."""
 
     # Generic errors
+    EXPIRED_VIEW_MESSAGE = "Cette vue n'est plus valide. Merci de relancer la commande."
+    """Expired view message."""
+
     GENERIC_ERROR = "Une erreur est survenue lors de {operation}."
     """Generic error message."""
 

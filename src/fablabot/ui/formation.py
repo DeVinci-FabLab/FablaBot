@@ -338,7 +338,7 @@ class _SelectFormationButton(ui.Button["SelectFormationView"]):
             interaction (Interaction): The interaction that triggered the button click.
         """
         if self.view is None:
-            await interaction.response.send_message("Cette vue n'est plus valide. Merci de réessayer.", ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.EXPIRED_VIEW_MESSAGE, ephemeral=True)
             return
 
         view = cast("SelectFormationView", self.view)
