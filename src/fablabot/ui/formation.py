@@ -337,16 +337,11 @@ class _SelectFormationButton(ui.Button["SelectFormationView"]):
             return
 
         view = cast("SelectFormationView", self.view)
-        for item in view.children:
-            if isinstance(item, ui.Button):
-                item.disabled = True
-        await interaction.response.edit_message(view=view)
         match view.cmd:
             case FmCommand.EDIT:
-                await interaction.followup.edit_message(
-                    view.followup_id,
+                await interaction.response.edit_message(
                     content=f"Modification : {self.formation.emoji} {self.formation.name}",
-                    view=_EditFormationView(view.cog, view.followup_id, self.formation_index, self.formation),
+                    view=_EditFormationView(view.cog, self.formation_index, self.formation),
                 )
             case FmCommand.REMOVE:
                 assert interaction.guild is not None
@@ -361,31 +356,28 @@ class _SelectFormationButton(ui.Button["SelectFormationView"]):
                     f"Guild {interaction.guild.id} removed formation {removed.name!r} ({removed.start_iso}) from draft.",
                 )
 
-                await interaction.followup.edit_message(
-                    view.followup_id,
+                await interaction.response.edit_message(
                     content=f"Supprimé: {removed.emoji} {removed.name}",
                     embed=build_preview_embed(f"Aperçu brouillon — {len(draft.fms)} formation(s)", preview),
+                    view=None,
                 )
             case _:
                 logger.error("Unknown command in SelectFormationView callback.")
-        await interaction.delete_original_response()
 
 
 class SelectFormationView(ui.View):
     """View to select which formation to edit."""
 
-    def __init__(self, cog: FormationManagement, followup_id: int, formations: list[Formation], cmd: FmCommand) -> None:
+    def __init__(self, cog: FormationManagement, formations: list[Formation], cmd: FmCommand) -> None:
         """Initialize the SelectFormationView.
 
         Args:
             cog (FormationManagement): FormationManagement cog instance.
-            followup_id (int): The ID of the follow-up message to edit with results.
             formations (list[Formation]): List of formations to choose from.
             cmd (FmCommand): The command that triggered this view.
         """
         super().__init__(timeout=None)
         self.cog = cog
-        self.followup_id = followup_id
         self.cmd = cmd
 
         for idx, fm in enumerate(formations[:MAX_FORMATION_BUTTONS], start=1):
@@ -499,16 +491,14 @@ class _EditNameDescriptionModal(ui.Modal, title="Modifier nom et description"):
 class _SelectTrainerView(ui.View):
     """View to select a trainer using UserSelect."""
 
-    def __init__(self, edit_formation_view: _EditFormationView, original_message_id: int) -> None:
+    def __init__(self, edit_formation_view: _EditFormationView) -> None:
         """Initialize the SelectTrainerView.
 
         Args:
             edit_formation_view (EditFormationView): The parent EditFormationView.
-            original_message_id (int): The ID of the original edit message to update.
         """
         super().__init__(timeout=None)
         self.edit_formation_view = edit_formation_view
-        self.original_message_id = original_message_id
 
     @ui.select(cls=ui.UserSelect, placeholder="Sélectionne lae formateur·ice", min_values=1, max_values=1)
     async def select_trainer(self, interaction: Interaction, select: ui.UserSelect) -> None:
@@ -524,16 +514,11 @@ class _SelectTrainerView(ui.View):
         edit_trainer_button = self.edit_formation_view.get_button(EDIT_TRAINER_BUTTON_ID)
         edit_trainer_button.label = f"Modifier lae formateur·ice : {selected_user.display_name}"
 
-        select.disabled = True
-        await interaction.response.edit_message(view=self)
-
-        await interaction.followup.edit_message(
-            self.original_message_id,
+        await interaction.response.edit_message(
             content=f"Modification : {self.edit_formation_view.updated_formation.emoji}"
             f" {self.edit_formation_view.updated_formation.name}",
             view=self.edit_formation_view,
         )
-        await interaction.delete_original_response()
 
 
 class _EditDatetimeModal(ui.Modal, title="Modifier date et heure"):
@@ -649,18 +634,16 @@ class _EditDurationSeatsModal(ui.Modal, title="Modifier durée et places"):
 class _EditFormationView(ui.View):
     """View to edit a formation with selects and modals."""
 
-    def __init__(self, cog: FormationManagement, followup_id: int, formation_index: int, original: Formation) -> None:
+    def __init__(self, cog: FormationManagement, formation_index: int, original: Formation) -> None:
         """Initialize the EditFormationView.
 
         Args:
             cog (FormationManagement): FormationManagement cog instance.
-            followup_id (int): The ID of the follow-up message to edit with results.
             formation_index (int): The index of the formation (1-based).
             original (Formation): The original formation being edited.
         """
         super().__init__(timeout=None)
         self.cog = cog
-        self.followup_id = followup_id
         self.formation_index = formation_index
 
         self.updated_formation = deepcopy(original)
@@ -701,13 +684,7 @@ class _EditFormationView(ui.View):
             interaction (Interaction): The interaction that triggered the button click.
             _button (ui.Button): The button that was clicked.
         """
-        assert interaction.message is not None
-
-        await interaction.response.send_message(
-            "Sélectionne lae formateur·ice :",
-            view=_SelectTrainerView(self, interaction.message.id),
-            ephemeral=True,
-        )
+        await interaction.response.edit_message(content="Sélectionne lae formateur·ice :", view=_SelectTrainerView(self))
 
     @ui.button(label="Date & Heure", style=ButtonStyle.secondary, row=2)
     async def edit_datetime_button(self, interaction: Interaction, _button: ui.Button) -> None:
@@ -763,11 +740,6 @@ class _EditFormationView(ui.View):
             interaction (Interaction): The interaction that triggered the button click.
             _button (ui.Button): The button that was clicked.
         """
-        for item in self.children:
-            if isinstance(item, ui.Button):
-                item.disabled = True
-        await interaction.response.edit_message(view=self)
-
         assert interaction.guild is not None
         draft = self.cog.get_guild_draft(interaction.guild.id)
         fms = sorted(draft.fms, key=lambda x: x.start_dt)
@@ -794,8 +766,7 @@ class _EditFormationView(ui.View):
             f"Guild {interaction.guild.id} edited formation {original.name!r} -> "
             f"{self.updated_formation.name!r} (index {self.formation_index} → {new_position}).",
         )
-        await interaction.followup.edit_message(
-            self.followup_id,
+        await interaction.response.edit_message(
             content=f"Mise à jour: {self.updated_formation.emoji} {self.updated_formation.name} (position {new_position}).",
             view=None,
             embed=build_preview_embed(f"Aperçu brouillon — {len(fms)} formation(s)", preview),
