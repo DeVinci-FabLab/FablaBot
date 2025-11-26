@@ -12,7 +12,7 @@ from discord import File
 from fablabot.helpers.constants import PARIS_TZ
 
 _LOG_PATH = "logs"
-_MAX_LOG_AGE_DAYS = 15
+_MAX_LOG_AGE_DAYS = 30
 
 
 class DailyFileHandler(logging.FileHandler):
