@@ -15,6 +15,7 @@ from warnings import deprecated
 from discord import Embed, File, Interaction, Member, RawReactionActionEvent, Role, TextChannel, app_commands
 from discord.ext import commands, tasks
 
+from fablabot.helpers import build_help_message
 from fablabot.helpers.constants import PARIS_TZ, ErrorMessages, RoleNames
 from fablabot.helpers.formation import (
     format_current_registrations,
@@ -132,22 +133,29 @@ class FormationManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             show (bool): Whether to show the help publicly or not.
         """
-        help_message = (
-            "**Commandes de gestion des formations :**\n"
-            "- `/fm start <role>` : Démarrer un nouveau brouillon de formation (modal pour intro/conclusion).\n"
-            "- `/fm edit_text [role] [text]` : "
-            "Modifier le texte d'introduction et/ou de conclusion du brouillon et le rôle à mentionner.\n"
-            "- `/fm add <emoji> <trainer> <date> <hour> <duration> <seats>` : "
-            "Ajouter une nouvelle formation au brouillon (modal pour nom/description/excusable).\n"
-            "- `/fm edit` : Modifier une formation existante dans le brouillon (view et modal).\n"
-            "- `/fm remove <index>` : Supprimer une formation du brouillon.\n"
-            "- `/fm clear` : Effacer le brouillon actuel.\n"
-            "- `/fm preview` : Prévisualiser le brouillon actuel.\n"
-            "- `/fm publish <channel>` : Publier le brouillon dans un salon spécifique.\n"
-            "- `/fm export [message_id]` : Exporter le brouillon sous forme de message.\n"
-            "- `/fm help [show]` : Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
-            "\n"
-            "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
+        help_message = build_help_message(
+            "Commandes de gestion des formations",
+            "fm",
+            [
+                (
+                    "start <role>",
+                    "Démarrer un brouillon de formation et choisir le rôle à mentionner (modal intro/conclusion)",
+                ),
+                (
+                    "edit_text [role] [text]",
+                    "Mettre à jour l'introduction, la conclusion ou le rôle mentionné du brouillon",
+                ),
+                (
+                    "add <emoji> <trainer> <date> <hour> <duration> <seats>",
+                    "Ajouter une formation au brouillon via un modal (nom, description, caractère excusable)",
+                ),
+                ("edit", "Modifier une formation existante après sélection"),
+                ("remove <index>", "Supprimer une formation du brouillon par son index"),
+                ("clear", "Vider le brouillon actuel en conservant intro et conclusion"),
+                ("preview", "Afficher l'aperçu du brouillon dans le salon courant"),
+                ("publish <channel>", "Publier le brouillon dans un salon cible avec réactions automatiques"),
+                ("export [message_id]", "Exporter les réactions/inscriptions en CSV ou texte"),
+            ],
         )
         await interaction.response.send_message(help_message, ephemeral=not show)
 

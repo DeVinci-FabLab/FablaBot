@@ -24,6 +24,7 @@ from discord import (
 from discord.ext import commands
 from discord.utils import get
 
+from fablabot.helpers import build_help_message
 from fablabot.helpers.constants import ADMIN_ROLES, RoleNames
 from fablabot.helpers.utils import (
     check_has_role,
@@ -92,14 +93,14 @@ class ChannelManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             show (bool): Whether to show the help publicly or not.
         """
-        help_message = (
-            "**Commandes de gestion des salons textuels :**\n"
-            "- `/text create <channel> <category>`: Crée un nouveau salon textuel dans la catégorie spécifiée.\n"
-            "- `/text rename <channel> <new_name>`: Renomme un salon textuel existant.\n"
-            "- `/text delete <channel>`: Supprime un salon textuel existant.\n"
-            "- `/text help [show]` : Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
-            "\n"
-            "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
+        help_message = build_help_message(
+            "Commandes de gestion des salons textuels",
+            "text",
+            [
+                ("create <channel> <category>", "Créer un salon textuel dans la catégorie spécifiée"),
+                ("rename <channel> <new_name>", "Renommer un salon textuel existant"),
+                ("delete <channel>", "Supprimer un salon textuel existant"),
+            ],
         )
         await interaction.response.send_message(help_message, ephemeral=not show)
 
@@ -229,15 +230,17 @@ class ChannelManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             show (bool): Whether to show the help publicly or not.
         """
-        help_message = (
-            "**Commandes de gestion des salons vocaux :**\n"
-            "- `/vocal create <name> <category> [is_temporary] [max_user]`: "
-            "Crée un nouveau salon vocal dans la catégorie spécifiée. Par défaut, le salon est temporaire et illimité.\n"
-            "- `/vocal rename <channel> <new_name>`: Renomme un salon vocal existant.\n"
-            "- `/vocal delete <channel>`: Supprime un salon vocal existant.\n"
-            "- `/vocal help [show]`: Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
-            "\n"
-            "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
+        help_message = build_help_message(
+            "Commandes de gestion des salons vocaux",
+            "vocal",
+            [
+                (
+                    "create <name> <category> [is_temporary] [max_user]",
+                    "Créer un salon vocal (temporaire par défaut) avec nombre d'utilisateurs optionnel",
+                ),
+                ("rename <channel> <new_name>", "Renommer un salon vocal existant"),
+                ("delete <channel>", "Supprimer un salon vocal existant"),
+            ],
         )
         await interaction.response.send_message(help_message, ephemeral=not show)
 

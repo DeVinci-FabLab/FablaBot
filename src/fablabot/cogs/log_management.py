@@ -10,6 +10,7 @@ from discord import Interaction, TextChannel, app_commands
 from discord.ext import commands
 
 from fablabot.guild_config import set_log_channel_id
+from fablabot.helpers import build_help_message
 from fablabot.helpers.constants import ADMIN_ROLES, PARIS_TZ, RoleNames
 from fablabot.helpers.utils import check_has_role, format_channel_mention, is_in_allowed_channel, log_request
 from fablabot.logging_handlers import DailyFileHandler, DiscordLogHandler
@@ -53,15 +54,15 @@ class LogManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             show (bool): Whether to show the help publicly or not.
         """
-        help_text = (
-            "**Commandes de gestion des logs :**\n"
-            "- `/log set <channel>`: Configure le salon recevant les logs du bot.\n"
-            "- `/log export [date]`: Exporte les logs récents.\n"
-            "- `/log help [show]`: Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
-            "\n"
-            "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
+        help_message = build_help_message(
+            "Commandes de gestion des logs",
+            "log",
+            [
+                ("set <channel>", "Configurer le salon recevant les logs du bot"),
+                ("export [date]", "Exporter les logs du jour ou d'une date donnée (format YYYY-MM-DD)"),
+            ],
         )
-        await interaction.response.send_message(help_text, ephemeral=not show)
+        await interaction.response.send_message(help_message, ephemeral=not show)
 
     @log_group.command(
         name="set",

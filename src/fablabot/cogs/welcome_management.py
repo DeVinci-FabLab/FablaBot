@@ -11,6 +11,7 @@ from discord.ext import commands
 from discord.utils import get
 
 from fablabot.guild_config import is_welcome_verify_enabled, set_welcome_verify_enabled
+from fablabot.helpers import build_help_message
 from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames
 from fablabot.helpers.utils import (
     check_has_role,
@@ -67,13 +68,19 @@ class WelcomeManagement(commands.Cog):
             interaction (Interaction): The Discord interaction object.
             show (bool): Whether to show the help publicly or not.
         """
-        help_message = (
-            "**Commandes de gestion des channels de bienvenue :**\n"
-            "- `/welcome verify <enable>`: Activer/désactiver la création automatique de salons de bienvenue.\n"
-            "- `/welcome approve <city>`: Valider le nouveau membre. Ajoute les rôles appropriés en fonction de la ville.\n"
-            "- `/welcome help [show]`: Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
-            "\n"
-            "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
+        help_message = build_help_message(
+            "Commandes de gestion des channels de bienvenue",
+            "welcome",
+            [
+                (
+                    "verify <enable>",
+                    "Activer ou désactiver la création automatique de salons de bienvenue",
+                ),
+                (
+                    "approve <city>",
+                    "Valider un nouveau membre et lui attribuer les rôles adaptés à sa ville",
+                ),
+            ],
         )
         await interaction.response.send_message(help_message, ephemeral=not show)
 

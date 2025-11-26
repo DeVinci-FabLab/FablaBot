@@ -13,6 +13,7 @@ from discord import Interaction, Member, Role, User, app_commands
 from discord.ext import commands
 from discord.utils import get
 
+from fablabot.helpers import build_help_message
 from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames
 from fablabot.helpers.utils import (
     escape_md,
@@ -72,18 +73,18 @@ class UserManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             show (bool): Whether to show the help publicly or not.
         """
-        help_message = (
-            "**Commandes de gestion des utilisateurs :**\n"
-            "- `/user op <user>` : Donne des droits admin temporaires à un utilisateur.\n"
-            "- `/user deop <user>` : Retire les droits admin temporaires d'un utilisateur.\n"
-            "- `/user add_role <user> <role>` : Donne un rôle à un utilisateur.\n"
-            "- `/user remove_role <user> <role>` : Retire un rôle à un utilisateur.\n"
-            "- `/user add_roles <role>` : Donne un rôle à plusieurs utilisateurs via un sélecteur.\n"
-            "- `/user remove_roles <role>` : Retire un rôle à plusieurs utilisateurs via un sélecteur.\n"
-            "- `/user with_roles` : Obtenir les membres avec des rôles spécifiques.\n"
-            "- `/user help [show]` : Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
-            "\n"
-            "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
+        help_message = build_help_message(
+            "Commandes de gestion des utilisateurs",
+            "user",
+            [
+                ("op <user>", "Donner des droits admin temporaires à un utilisateur"),
+                ("deop <user>", "Retirer des droits admin temporaires à un utilisateur"),
+                ("add_role <user> <role>", "Ajouter un rôle à un utilisateur"),
+                ("remove_role <user> <role>", "Retirer un rôle à un utilisateur"),
+                ("add_roles <role>", "Ajouter un rôle à plusieurs utilisateurs via un sélecteur"),
+                ("remove_roles <role>", "Retirer un rôle à plusieurs utilisateurs via un sélecteur"),
+                ("with_roles", "Lister les membres possédant les rôles sélectionnés"),
+            ],
         )
         await interaction.response.send_message(help_message, ephemeral=not show)
 
