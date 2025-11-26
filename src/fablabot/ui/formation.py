@@ -6,13 +6,14 @@ from copy import deepcopy
 import logging
 from typing import TYPE_CHECKING, cast
 
-from discord import ButtonStyle, Embed, Interaction, TextStyle, ui
+from discord import ButtonStyle, Interaction, TextStyle, ui
 from emoji import emojize
 
 from fablabot.helpers.constants import PARIS_TZ, ErrorMessages
 from fablabot.helpers.formation import Emojis, parse_date_time, render_message
 from fablabot.helpers.utils import is_valid_emoji, log_request
 from fablabot.models.formation import FmCommand, FmMessageDraft, Formation
+from fablabot.ui.common import build_preview_embed
 
 if TYPE_CHECKING:
     from fablabot.cogs import FormationManagement
@@ -97,10 +98,7 @@ class StartFmModal(ui.Modal, title="Commencer une annonce de formation"):
         logger.info(f"Guild {interaction.guild.id} started a new formations draft.")
         await interaction.response.send_message(
             "Brouillon initialisé.\nUtilise **/fm add** pour ajouter des formations. **/fm preview** pour voir le rendu.",
-            embed=Embed(
-                title="Aperçu brouillon — 0 formation",
-                description=f"{content or '_(vide)_'}",
-            ),
+            embed=build_preview_embed("Aperçu brouillon — 0 formation", content),
             ephemeral=True,
         )
 
@@ -198,10 +196,7 @@ class EditTextModal(ui.Modal, title="Modifier le texte de l'annonce de formation
 
         await interaction.response.send_message(
             "Brouillon mis à jour.",
-            embed=Embed(
-                title=f"Aperçu brouillon — {len(draft.fms)} formation(s)",
-                description=f"{content or '_(vide)_'}",
-            ),
+            embed=build_preview_embed(f"Aperçu brouillon — {len(draft.fms)} formation(s)", content),
             ephemeral=True,
         )
 
@@ -308,7 +303,7 @@ class AddFmModal(ui.Modal, title="Ajouter une formation"):
         await interaction.response.send_message(
             "Formation ajoutée & brouillon mis à jour (trié). "
             "Utilise **/fm add** pour ajouter d'autres formations. **/fm preview** pour voir le rendu.",
-            embed=Embed(title=f"Aperçu brouillon — {len(fms)} formation(s)", description=preview or "_(vide)_"),
+            embed=build_preview_embed(f"Aperçu brouillon — {len(fms)} formation(s)", preview),
             ephemeral=True,
         )
 
@@ -369,7 +364,7 @@ class _SelectFormationButton(ui.Button["SelectFormationView"]):
                 await interaction.followup.edit_message(
                     view.followup_id,
                     content=f"Supprimé: {removed.emoji} {removed.name}",
-                    embed=Embed(title=f"Aperçu brouillon — {len(draft.fms)} formation(s)", description=preview or "_(vide)_"),
+                    embed=build_preview_embed(f"Aperçu brouillon — {len(draft.fms)} formation(s)", preview),
                 )
             case _:
                 logger.error("Unknown command in SelectFormationView callback.")
@@ -803,7 +798,7 @@ class _EditFormationView(ui.View):
             self.followup_id,
             content=f"Mise à jour: {self.updated_formation.emoji} {self.updated_formation.name} (position {new_position}).",
             view=None,
-            embed=Embed(title=f"Aperçu brouillon — {len(fms)} formation(s)", description=preview or "_(vide)_"),
+            embed=build_preview_embed(f"Aperçu brouillon — {len(fms)} formation(s)", preview),
         )
 
     def get_button(self, button_id: int) -> ui.Button[_EditFormationView]:
