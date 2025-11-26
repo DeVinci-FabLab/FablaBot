@@ -57,6 +57,8 @@ class MessageManagement(commands.Cog):
 
     Commands:
         - /msg help: Display help for message management commands.
+        - /msg clear: Clear the current channel of its last messages.
+        - /msg dm: Send a direct message to multiple users.
         - /msg start: Create or overwrite a message draft via a modal.
         - /msg follow: Start tracking an already published message.
         - /msg link_reaction: Link an action (DM / channel / role) to a reaction.
@@ -111,8 +113,9 @@ class MessageManagement(commands.Cog):
             "Commandes de gestion des messages",
             "msg",
             [
-                ("start", "Créer ou remplacer le brouillon via un modal"),
+                ("clear [messages]", "Nettoyer les derniers messages du salon (par défaut 5)"),
                 ("dm <message>", "Envoyer un message privé à plusieurs utilisateurs sélectionnés"),
+                ("start", "Créer ou remplacer le brouillon via un modal"),
                 ("follow <channel> <message>", "Ajouter le suivi sur un message existant (ID ou lien)"),
                 (
                     "link_reaction <message> <emoji>",
@@ -124,10 +127,9 @@ class MessageManagement(commands.Cog):
                 ("publish <channel>", "Publier le brouillon et activer le suivi"),
                 ("export [message]", "Exporter l'historique des réactions d'un message suivi"),
                 ("stop", "Arrêter le suivi d'un message (sélection via une vue)"),
-                ("clear [messages]", "Nettoyer les derniers messages du salon (par défaut 5)"),
             ],
             footer=(
-                "Actions supportées : `user_dm` (DM le réacteur), "
+                "Actions supportées : `user_dm` (DM la personne qui réagit), "
                 "`role_dm` (DM les membres d'un rôle), `channel` (message dans un salon cible)"
             ),
         )
@@ -177,7 +179,7 @@ class MessageManagement(commands.Cog):
         description="Envoie un message privé à plusieurs utilisateurs via un sélecteur.",
     )
     @app_commands.describe(message="Le message à envoyer en MP.")
-    async def msg_dm(self, interaction: Interaction, *, message: str) -> None:
+    async def msg_dm(self, interaction: Interaction, *, message: str) -> None:  # TODO: modal
         """Send a direct message to multiple users.
 
         Args:
@@ -329,14 +331,12 @@ class MessageManagement(commands.Cog):
                 await interaction.response.send_message(ErrorMessages.MSG_NO_DRAFT, ephemeral=True)
                 return
 
-        view = mui.ReactionActionTypeView(self, interaction.guild.id, target_message_id, emoji, None)
+        view = mui.ReactionActionTypeView(self, interaction.guild.id, target_message_id, emoji)
         await interaction.response.send_message(
             "Choisis le type d'action puis la cible avant de rédiger le message envoyé lors de la réaction.",
             view=view,
             ephemeral=True,
         )
-        followup_message = await interaction.original_response()
-        view.followup_id = followup_message.id
 
     @msg_group.command(
         name="unlink_reaction",
@@ -361,21 +361,18 @@ class MessageManagement(commands.Cog):
             )
             return
 
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        followup_mes = await interaction.followup.send("Chargement des messages suivis...", wait=True, ephemeral=True)
-
-        view = mui.UnlinkMessageSelectView(self, followup_mes.id, tracked_with_actions)
-        await interaction.followup.edit_message(
-            followup_mes.id,
-            content="Sélectionne le message suivi puis l'action à retirer.",
+        view = mui.UnlinkMessageSelectView(self, tracked_with_actions)
+        await interaction.response.send_message(
+            "Sélectionne le message suivi puis l'action à retirer.",
             view=view,
+            ephemeral=True,
         )
 
     @msg_group.command(
         name="list",
         description="Lister les messages actuellement suivis.",
     )
-    async def msg_list(self, interaction: Interaction) -> None:
+    async def msg_list(self, interaction: Interaction) -> None:  # TODO: voir brouillon
         """List currently tracked messages.
 
         Args:
@@ -398,9 +395,7 @@ class MessageManagement(commands.Cog):
                 for idx, reaction in enumerate(tracked.reactions, start=1):
                     action_label = self.format_reaction_action(reaction)
                     preview = reaction.message_content
-                    if len(preview) > 120:
-                        preview = f"{preview[:117]}..."
-                    lines.append(f"   {idx}. {reaction.emoji} : {action_label} | {preview}")
+                    lines.append(f"   {idx}. {reaction.emoji} : {action_label} | `{preview.replace('\n', '\\n')}`")
             else:
                 lines.append("   (aucune action liée)")
         await interaction.response.send_message("\n".join(lines), ephemeral=True)
@@ -568,15 +563,8 @@ class MessageManagement(commands.Cog):
             await interaction.response.send_message(ErrorMessages.MSG_NO_TRACKED_AVAILABLE, ephemeral=True)
             return
 
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        followup_mes = await interaction.followup.send("Chargement des messages suivis...", wait=True, ephemeral=True)
-
-        view = mui.StopTrackingSelectView(self, followup_mes.id, list(tracked_map.values()))
-        await interaction.followup.edit_message(
-            followup_mes.id,
-            content="Sélectionne le message dont tu veux arrêter le suivi.",
-            view=view,
-        )
+        view = mui.StopTrackingSelectView(self, list(tracked_map.values()))
+        await interaction.response.send_message(content="Sélectionne le message dont tu veux arrêter le suivi.", view=view)
 
     # endregion Message Slash Commands Group
 
@@ -870,7 +858,11 @@ class MessageManagement(commands.Cog):
             member (Member): The member who reacted.
             action (MsgReactionEvent): The reaction action to execute.
         """
-        rendered = action.message_content.replace("{username}", member.display_name).replace("{user}", member.mention)
+        rendered = (
+            action.message_content.replace("{username}", member.display_name)
+            .replace("{user}", member.mention)
+            .replace("{emoji}", str(action.emoji))
+        )
 
         match action.action_type:
             case "channel":

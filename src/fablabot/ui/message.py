@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from discord import ButtonStyle, ChannelType, Interaction, Member, SelectOption, TextStyle, ui
 
-from fablabot.helpers import ErrorMessages, format_member_mention, send_dm_to_member
+from fablabot.helpers.constants import ErrorMessages
+from fablabot.helpers.utils import format_member_mention, send_dm_to_member
 from fablabot.models.message import SUGGESTION_OPTIONS, MessageDraft, MsgActionType, MsgReactionEvent, TrackedMessage
 from fablabot.ui.common import build_preview_embed
 
@@ -139,7 +140,7 @@ class _ReactionMessageInputModal(ui.Modal, title="Message à envoyer"):
     message_input: ui.TextInput = ui.TextInput(
         label="Utilise {username} pour le nom du réacteur.",
         style=TextStyle.long,
-        placeholder="Entrez le message à envoyer...",
+        placeholder="{user} a réagi avec {emoji}...",
         required=True,
         max_length=2000,
     )
@@ -153,7 +154,6 @@ class _ReactionMessageInputModal(ui.Modal, title="Message à envoyer"):
         action_type: MsgActionType,
         target_id: int,
         target_value: str,
-        followup_id: int,
     ) -> None:
         """Initialize the modal.
 
@@ -165,7 +165,6 @@ class _ReactionMessageInputModal(ui.Modal, title="Message à envoyer"):
             action_type (MsgActionType): The type of action.
             target_id (int): The pre-filled target ID.
             target_value (str): The pre-filled target value.
-            followup_id (int): The ID of the follow-up message to edit with results.
         """
         super().__init__()
         self.cog = cog
@@ -175,7 +174,6 @@ class _ReactionMessageInputModal(ui.Modal, title="Message à envoyer"):
         self.action_type: MsgActionType = action_type
         self.target_id = target_id
         self.target_value = target_value
-        self.followup_id = followup_id
 
     async def on_submit(self, interaction: Interaction) -> None:
         """Handle modal submission.
@@ -193,9 +191,8 @@ class _ReactionMessageInputModal(ui.Modal, title="Message à envoyer"):
             message_id=self.message_id,
         )
 
-        await interaction.response.defer()
         feedback = await self.cog.register_reaction_action(self.guild_id, reaction)
-        await interaction.followup.edit_message(self.followup_id, content=feedback, view=None)
+        await interaction.response.edit_message(content=feedback, view=None)
 
 
 class _ReactionTargetView(ui.View):
@@ -208,7 +205,6 @@ class _ReactionTargetView(ui.View):
         message_id: int | None,
         emoji: str,
         action_type: Literal["channel", "role_dm"],
-        followup_id: int | None,
     ) -> None:
         """Initialize the modal.
 
@@ -218,7 +214,6 @@ class _ReactionTargetView(ui.View):
             message_id (int): The message identifier.
             emoji (str): The emoji for this reaction.
             action_type (Literal["channel", "role_dm"]): The type of action.
-            followup_id (int | None): The ID of the follow-up message to edit with results.
         """
         super().__init__(timeout=None)
         self.cog = cog
@@ -226,7 +221,6 @@ class _ReactionTargetView(ui.View):
         self.message_id = message_id
         self.emoji = emoji
         self.action_type: MsgActionType = action_type
-        self.followup_id = followup_id
 
         async def _on_select(interaction: Interaction) -> None:
             match action_type:
@@ -237,8 +231,6 @@ class _ReactionTargetView(ui.View):
                     target_id = self.role_select.values[0].id
                     target_value = self.role_select.values[0].name
 
-            followup_message_id = self.followup_id or (interaction.message.id if interaction.message else 0)
-
             await interaction.response.send_modal(
                 _ReactionMessageInputModal(
                     self.cog,
@@ -248,7 +240,6 @@ class _ReactionTargetView(ui.View):
                     self.action_type,
                     target_id,
                     target_value,
-                    followup_message_id,
                 ),
             )
 
@@ -275,7 +266,6 @@ class ReactionActionTypeView(ui.View):
         guild_id: int,
         message_id: int | None,
         emoji: str,
-        followup_id: int | None,
     ) -> None:
         """Initialize the ReactionActionTypeView.
 
@@ -284,24 +274,15 @@ class ReactionActionTypeView(ui.View):
             guild_id (int): The guild identifier.
             message_id (int | None): The message identifier.
             emoji (str): The emoji for this reaction.
-            followup_id (int | None): The ID of the follow-up message to edit with results.
         """
         super().__init__(timeout=None)
         self.cog = cog
         self.guild_id = guild_id
         self.message_id = message_id
         self.emoji = emoji
-        self.followup_id = followup_id
 
     async def _open_target_view(self, interaction: Interaction, action_type: Literal["channel", "role_dm"]) -> None:
-        target_view = _ReactionTargetView(
-            self.cog,
-            self.guild_id,
-            self.message_id,
-            self.emoji,
-            action_type,
-            self.followup_id or (interaction.message.id if interaction.message else 0),
-        )
+        target_view = _ReactionTargetView(self.cog, self.guild_id, self.message_id, self.emoji, action_type)
         await interaction.response.edit_message(
             content="Choisis la cible puis rédige le message envoyé lors de la réaction.",
             view=target_view,
@@ -317,7 +298,7 @@ class ReactionActionTypeView(ui.View):
         """
         await self._open_target_view(interaction, "channel")
 
-    @ui.button(label="DM la personne", style=ButtonStyle.secondary)
+    @ui.button(label="DM la personne", style=ButtonStyle.primary)
     async def user_dm_button(self, interaction: Interaction, _button: ui.Button) -> None:
         """Handle user DM button click.
 
@@ -325,8 +306,6 @@ class ReactionActionTypeView(ui.View):
             interaction (Interaction): The Discord interaction context.
             _button (ui.Button): The button that was clicked.
         """
-        followup_message_id = self.followup_id or (interaction.message.id if interaction.message else 0)
-
         await interaction.response.send_modal(
             _ReactionMessageInputModal(
                 self.cog,
@@ -336,11 +315,10 @@ class ReactionActionTypeView(ui.View):
                 "user_dm",
                 0,
                 "",
-                followup_message_id,
             ),
         )
 
-    @ui.button(label="DM un rôle", style=ButtonStyle.secondary)
+    @ui.button(label="DM un rôle", style=ButtonStyle.primary)
     async def role_dm_button(self, interaction: Interaction, _button: ui.Button) -> None:
         """Handle role DM button click.
 
@@ -382,20 +360,22 @@ class _SelectMessageButton(ui.Button[Any]):
         await view.handle_selection(interaction, self.message_id)
 
 
-class UnlinkMessageSelectView(ui.View):
+# HACK: une seule classe de sélection de message pour link, unlink, stop, export
+# TODO: follow link_reaction du draft
+
+
+class UnlinkMessageSelectView(ui.View):  # TODO: voir apperçu début de chaque message
     """View to pick which tracked message to edit before unlinking a reaction."""
 
-    def __init__(self, cog: MessageManagement, followup_id: int, tracked_messages: list[TrackedMessage]) -> None:
+    def __init__(self, cog: MessageManagement, tracked_messages: list[TrackedMessage]) -> None:
         """Initialize the UnlinkMessageSelectView.
 
         Args:
             cog (MessageManagement): The MessageManagement cog instance.
-            followup_id (int): The ID of the follow-up message to edit with results.
             tracked_messages (list[TrackedMessage]): The list of tracked messages to select from.
         """
         super().__init__(timeout=None)
         self.cog = cog
-        self.followup_id = followup_id
         self.tracked_messages = tracked_messages
 
         for tracked in tracked_messages[:MAX_TRACKED_OPTIONS]:
@@ -408,34 +388,27 @@ class UnlinkMessageSelectView(ui.View):
             interaction (Interaction): The Discord interaction context.
             message_id (int): The ID of the message to unlink a reaction from.
         """
-        await interaction.response.defer()
         tracked = next((t for t in self.tracked_messages if t.message_id == message_id), None)
         if tracked is None:
-            await interaction.followup.edit_message(self.followup_id, content="Message suivi introuvable.", view=None)
+            await interaction.response.edit_message(content="Message suivi introuvable.", view=None)
             return
         if not tracked.reactions:
-            await interaction.followup.edit_message(
-                self.followup_id,
-                content="Aucune action configurée sur ce message suivi.",
-                view=None,
-            )
+            await interaction.response.edit_message(content="Aucune action configurée sur ce message suivi.", view=None)
             return
 
-        view = _UnlinkReactionSelectView(self.cog, self.followup_id, tracked)
-        await interaction.followup.edit_message(
-            self.followup_id,
+        view = _UnlinkReactionSelectView(self.cog, tracked)
+        await interaction.response.edit_message(
             content=f"Sélectionne l'action à retirer pour le message `{tracked.message_id}`.",
             view=view,
         )
 
 
-class _UnlinkReactionSelectView(ui.View):  # TODO: review
+class _UnlinkReactionSelectView(ui.View):  # TODO: review, voir display name et non id
     """View to pick which reaction action to remove from a tracked message."""
 
-    def __init__(self, cog: MessageManagement, followup_id: int, tracked: TrackedMessage) -> None:
+    def __init__(self, cog: MessageManagement, tracked: TrackedMessage) -> None:
         super().__init__(timeout=None)
         self.cog = cog
-        self.followup_id = followup_id
         self.tracked = tracked
 
         for idx, reaction in enumerate(tracked.reactions[:MAX_TRACKED_OPTIONS], start=1):
@@ -461,7 +434,7 @@ class _UnlinkReactionButton(ui.Button[_UnlinkReactionSelectView]):  # TODO: revi
         self.reaction_index = reaction_index
         self.description = description
 
-    async def callback(self, interaction: Interaction) -> None:
+    async def callback(self, interaction: Interaction) -> None:  # TODO: remove bot reaction
         view = self.view
         if view is None:
             await interaction.response.send_message(ErrorMessages.EXPIRED_VIEW_MESSAGE, ephemeral=True)
@@ -469,7 +442,6 @@ class _UnlinkReactionButton(ui.Button[_UnlinkReactionSelectView]):  # TODO: revi
 
         assert isinstance(view, _UnlinkReactionSelectView)
         assert interaction.guild is not None
-        await interaction.response.defer()
 
         if self.reaction_index >= len(view.tracked.reactions):
             await interaction.response.send_message("Action introuvable.", ephemeral=True)
@@ -482,8 +454,7 @@ class _UnlinkReactionButton(ui.Button[_UnlinkReactionSelectView]):  # TODO: revi
             f"{view.tracked.message_id} in guild {interaction.guild.id}",
         )
 
-        await interaction.followup.edit_message(
-            view.followup_id,
+        await interaction.response.edit_message(
             content=f"Action retirée : {removed.emoji} : {view.cog.format_reaction_action(removed)}",
             view=None,
         )
@@ -492,17 +463,15 @@ class _UnlinkReactionButton(ui.Button[_UnlinkReactionSelectView]):  # TODO: revi
 class StopTrackingSelectView(ui.View):  # TODO: review
     """View to pick a tracked message to stop following."""
 
-    def __init__(self, cog: MessageManagement, followup_id: int, tracked_messages: list[TrackedMessage]) -> None:
+    def __init__(self, cog: MessageManagement, tracked_messages: list[TrackedMessage]) -> None:
         """Initialize the StopTrackingSelectView.
 
         Args:
             cog (MessageManagement): The MessageManagement cog instance.
-            followup_id (int): The ID of the follow-up message to edit with results.
             tracked_messages (list[TrackedMessage]): The list of tracked messages to select from.
         """
         super().__init__(timeout=None)
         self.cog = cog
-        self.followup_id = followup_id
 
         for tracked in tracked_messages[:MAX_TRACKED_OPTIONS]:
             self.add_item(_SelectMessageButton(tracked.message_id))
@@ -515,14 +484,12 @@ class StopTrackingSelectView(ui.View):  # TODO: review
             message_id (int): The ID of the message to stop tracking.
         """
         assert interaction.guild is not None
-        await interaction.response.defer()
         if not self.cog.remove_tracked_message(interaction.guild.id, message_id):
-            await interaction.followup.edit_message(self.followup_id, content="Suivi introuvable pour ce message.", view=None)
+            await interaction.response.edit_message(content="Suivi introuvable pour ce message.", view=None)
             return
 
         logger.info(f"Stopped tracking message {message_id} in guild {interaction.guild.id}")
-        await interaction.followup.edit_message(
-            self.followup_id,
+        await interaction.response.edit_message(
             content=f"Suivi arrêté pour le message `{message_id}`.",
             view=None,
         )
@@ -572,7 +539,6 @@ class SuggestionModal(ui.Modal, title="Envoyer une suggestion"):
     def __init__(
         self,
         cog: SuggestionManagement,
-        initial_view_followup_id: int,
         recipient_key: str,
         *,
         anonymous_flag: bool,
@@ -581,13 +547,11 @@ class SuggestionModal(ui.Modal, title="Envoyer une suggestion"):
 
         Args:
             cog (SuggestionManagement): The SuggestionManagement cog instance.
-            initial_view_followup_id (int): The ID of the initial view message to update.
             recipient_key (str): The key of the recipient configuration.
             anonymous_flag (bool): Whether the suggestion is anonymous.
         """
         super().__init__()
         self.cog = cog
-        self.initial_view_followup_id = initial_view_followup_id
         self.recipient_key = recipient_key
         self.anonymous_flag = anonymous_flag
 
@@ -600,7 +564,7 @@ class SuggestionModal(ui.Modal, title="Envoyer une suggestion"):
         config = SUGGESTION_OPTIONS[self.recipient_key]
         await self.cog.handle_suggestion(interaction, self.suggestion_input.value, config, anonymous=self.anonymous_flag)
 
-        await interaction.followup.edit_message(self.initial_view_followup_id, content=config.success_message, view=None)
+        await interaction.response.edit_message(content=config.success_message, view=None)
 
 
 class OpenModalButton(ui.Button):
@@ -627,9 +591,8 @@ class OpenModalButton(ui.Button):
             return
 
         assert interaction.message is not None
-        followup_id = interaction.message.id
 
-        modal = SuggestionModal(self.cog, followup_id, recipient, anonymous_flag=getattr(self.view_ref, "anonymous", False))
+        modal = SuggestionModal(self.cog, recipient, anonymous_flag=getattr(self.view_ref, "anonymous", False))
         await interaction.response.send_modal(modal)
 
 
