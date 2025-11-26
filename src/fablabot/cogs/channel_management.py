@@ -434,13 +434,20 @@ class ChannelManagement(commands.Cog):
         if not isinstance(msg.channel, TextChannel):
             logger.debug(f"Message {msg.id} deleted in non-text channel {msg.channel}")
             return
-        if not msg.channel.name.endswith("_bot"):
-            return
         if not msg.author.bot:
             logger.debug(f"Message {msg.id} deleted wasn't sent by a bot, ignoring")
             return
 
+        from fablabot.guild_config import get_commands_channel_id, get_log_channel_id
+
         assert msg.guild is not None
+        if (
+            not msg.channel.name.endswith("_bot")
+            and get_log_channel_id() != msg.channel.id
+            and get_commands_channel_id(msg.guild.id) != msg.channel.id
+        ):
+            return
+
         codir_mention = await self._get_codir_mention(msg.guild, msg.channel)
         try:
             async for entry in msg.guild.audit_logs(limit=1, action=AuditLogAction.message_delete):
@@ -448,7 +455,9 @@ class ChannelManagement(commands.Cog):
                 assert isinstance(deleter, Member)
                 logger.warning(f"Message deleted in channel {msg.channel.name!r} by {deleter.name!r} : {msg.content}")
                 try:
-                    await msg.channel.send(f"{codir_mention}Un message a été supprimé par {deleter.mention} :\n> {msg.content}")
+                    await msg.channel.send(
+                        f"{codir_mention}Un message a été supprimé par {deleter.mention} :\n>>> {msg.content}",
+                    )
                 except HTTPException:
                     logger.exception("HTTP error while notifying message deletion")
         except HTTPException:
@@ -472,7 +481,14 @@ class ChannelManagement(commands.Cog):
         channel = self.bot.get_channel(payload.channel_id)
         if not isinstance(channel, TextChannel):
             return
-        if not channel.name.endswith("_bot"):
+
+        from fablabot.guild_config import get_commands_channel_id, get_log_channel_id
+
+        if (
+            not channel.name.endswith("_bot")
+            and get_log_channel_id() != channel.id
+            and get_commands_channel_id(guild.id) != channel.id
+        ):
             return
 
         codir_mention = await self._get_codir_mention(guild, channel)
