@@ -36,8 +36,8 @@ from discord import (
 )
 from discord.ext import commands
 
-from fablabot.helpers import build_help_message
 from fablabot.helpers.constants import ADMIN_ROLES, PARIS_TZ, ErrorMessages, RoleNames
+from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.state_store import JsonStateStore
 from fablabot.helpers.utils import ensure_command_context, get_members_by_role, is_valid_emoji, log_request, send_dm_to_member

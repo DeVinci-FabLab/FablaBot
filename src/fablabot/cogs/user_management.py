@@ -13,8 +13,8 @@ from discord import Interaction, Member, Role, User, app_commands
 from discord.ext import commands
 from discord.utils import get
 
-from fablabot.helpers import build_help_message
 from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames
+from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.safe_discord_operations import safe_add_roles, safe_remove_roles
 from fablabot.helpers.utils import ensure_command_context, escape_md, format_member_mention, format_role_mention
 from fablabot.ui import uui

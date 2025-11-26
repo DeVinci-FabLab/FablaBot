@@ -7,8 +7,8 @@ from typing import Literal
 
 from discord import ButtonStyle, Interaction, Member, Role, ui
 
-from fablabot.helpers import escape_md, format_member_mention, format_role_mention, safe_add_roles, safe_remove_roles
-from fablabot.helpers.utils import get_members_by_role
+from fablabot.helpers.safe_discord_operations import safe_add_roles, safe_remove_roles
+from fablabot.helpers.utils import escape_md, format_member_mention, format_role_mention, get_members_by_role
 
 logger = logging.getLogger(__name__)
 

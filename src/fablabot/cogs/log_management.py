@@ -10,8 +10,8 @@ from discord import Interaction, TextChannel, app_commands
 from discord.ext import commands
 
 from fablabot.guild_config import set_log_channel_id
-from fablabot.helpers import build_help_message
 from fablabot.helpers.constants import ADMIN_ROLES, PARIS_TZ, RoleNames
+from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.utils import ensure_command_context, format_channel_mention
 from fablabot.logging_handlers import DailyFileHandler, DiscordLogHandler
 

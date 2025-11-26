@@ -24,8 +24,8 @@ from discord import (
 from discord.ext import commands
 from discord.utils import get
 
-from fablabot.helpers import build_help_message
 from fablabot.helpers.constants import ADMIN_ROLES, RoleNames
+from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.safe_discord_operations import (
     safe_create_text_channel,
     safe_create_voice_channel,

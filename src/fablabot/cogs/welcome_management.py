@@ -11,8 +11,8 @@ from discord.ext import commands
 from discord.utils import get
 
 from fablabot.guild_config import is_welcome_verify_enabled, set_welcome_verify_enabled
-from fablabot.helpers import build_help_message
 from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames
+from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.safe_discord_operations import safe_add_roles, safe_create_text_channel, safe_delete_channel
 from fablabot.helpers.utils import ensure_command_context, escape_md
 

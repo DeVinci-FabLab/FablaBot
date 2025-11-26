@@ -20,7 +20,7 @@ from fablabot.cogs import (
     UserManagement,
     WelcomeManagement,
 )
-from fablabot.helpers import configure_logging
+from fablabot.helpers.logging_setup import configure_logging
 
 if TYPE_CHECKING:
     from fablabot.logging_handlers import DailyFileHandler, DiscordLogHandler

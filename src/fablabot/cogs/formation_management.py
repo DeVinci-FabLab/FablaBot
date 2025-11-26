@@ -15,7 +15,6 @@ from warnings import deprecated
 from discord import Embed, File, Interaction, Member, RawReactionActionEvent, Role, TextChannel, app_commands
 from discord.ext import commands, tasks
 
-from fablabot.helpers import build_help_message
 from fablabot.helpers.constants import PARIS_TZ, ErrorMessages, RoleNames
 from fablabot.helpers.formation import (
     format_current_registrations,
@@ -29,6 +28,7 @@ from fablabot.helpers.formation import (
     send_registration_dm,
     send_waitlist_dm,
 )
+from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.state_store import JsonStateStore
 from fablabot.helpers.utils import ensure_command_context, is_valid_emoji
