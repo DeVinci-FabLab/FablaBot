@@ -31,7 +31,7 @@ from fablabot.helpers.formation import (
 )
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.state_store import JsonStateStore
-from fablabot.helpers.utils import check_has_role, is_in_allowed_channel, is_valid_emoji, log_request
+from fablabot.helpers.utils import ensure_command_context, is_valid_emoji
 from fablabot.models import FmCommand, FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
 from fablabot.ui import fmui
 
@@ -168,10 +168,13 @@ class FormationManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             role (Role): The role to mention.
         """
-        log_request(logger, "fm.start", interaction, role=role)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+        if not await ensure_command_context(
+            logger,
+            "fm.start",
+            interaction,
+            log_details={"role": role},
+            required_roles=ALLOWED_ROLES,
+        ):
             return
 
         await interaction.response.send_modal(fmui.StartFmModal(self, role.id))
@@ -189,10 +192,13 @@ class FormationManagement(commands.Cog):
             role (Role | None, optional): The new role to mention. Defaults to None.
             text (bool, optional): Whether to modify the introduction or conclusion text. Defaults to False.
         """
-        log_request(logger, "fm.edit_text", interaction, role=role)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+        if not await ensure_command_context(
+            logger,
+            "fm.edit_text",
+            interaction,
+            log_details={"role": role},
+            required_roles=ALLOWED_ROLES,
+        ):
             return
 
         if role is None and text is False:
@@ -263,20 +269,20 @@ class FormationManagement(commands.Cog):
             seats (app_commands.Range[int, 1, 500]): Number of seats.
             excusable (bool, optional): Whether absences are excusable for this formation. Defaults to True.
         """
-        log_request(
+        if not await ensure_command_context(
             logger,
             "fm.add",
             interaction,
-            emoji=emoji,
-            trainer=trainer,
-            date=date,
-            hour=hour,
-            duration=duration,
-            seats=seats,
-        )
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+            log_details={
+                "emoji": emoji,
+                "trainer": trainer,
+                "date": date,
+                "hour": hour,
+                "duration": duration,
+                "seats": seats,
+            },
+            required_roles=ALLOWED_ROLES,
+        ):
             return
 
         assert interaction.guild is not None
@@ -315,10 +321,7 @@ class FormationManagement(commands.Cog):
         Args:
             interaction (Interaction): The Discord interaction context.
         """
-        log_request(logger, "fm.edit", interaction)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+        if not await ensure_command_context(logger, "fm.edit", interaction, required_roles=ALLOWED_ROLES):
             return
 
         assert interaction.guild is not None
@@ -342,10 +345,7 @@ class FormationManagement(commands.Cog):
         Args:
             interaction (Interaction): The Discord interaction context.
         """
-        log_request(logger, "fm.remove", interaction)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+        if not await ensure_command_context(logger, "fm.remove", interaction, required_roles=ALLOWED_ROLES):
             return
 
         assert interaction.guild is not None
@@ -369,10 +369,7 @@ class FormationManagement(commands.Cog):
         Args:
             interaction (Interaction): The Discord interaction context.
         """
-        log_request(logger, "fm.clear", interaction)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+        if not await ensure_command_context(logger, "fm.clear", interaction, required_roles=ALLOWED_ROLES):
             return
 
         assert interaction.guild is not None
@@ -403,10 +400,7 @@ class FormationManagement(commands.Cog):
         Args:
             interaction (Interaction): The Discord interaction context.
         """
-        log_request(logger, "fm.preview", interaction)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+        if not await ensure_command_context(logger, "fm.preview", interaction, required_roles=ALLOWED_ROLES):
             return
 
         await interaction.response.defer(thinking=True)
@@ -429,10 +423,13 @@ class FormationManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             channel (TextChannel): The target announcement channel.
         """
-        log_request(logger, "fm.publish", interaction, channel=channel)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+        if not await ensure_command_context(
+            logger,
+            "fm.publish",
+            interaction,
+            log_details={"channel": channel},
+            required_roles=ALLOWED_ROLES,
+        ):
             return
 
         assert interaction.guild is not None
@@ -495,10 +492,13 @@ class FormationManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             message_id (str | None, optional): The ID of the published message. Defaults to None.
         """
-        log_request(logger, "fm.export", interaction, message_id=message_id)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+        if not await ensure_command_context(
+            logger,
+            "fm.export",
+            interaction,
+            log_details={"message_id": message_id},
+            required_roles=ALLOWED_ROLES,
+        ):
             return
 
         assert interaction.guild is not None

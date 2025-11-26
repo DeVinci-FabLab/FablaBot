@@ -14,7 +14,7 @@ from fablabot.guild_config import is_welcome_verify_enabled, set_welcome_verify_
 from fablabot.helpers import build_help_message
 from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames
 from fablabot.helpers.safe_discord_operations import safe_add_roles, safe_create_text_channel, safe_delete_channel
-from fablabot.helpers.utils import check_has_role, escape_md, is_in_allowed_channel, log_request
+from fablabot.helpers.utils import ensure_command_context, escape_md
 
 logger = logging.getLogger(__name__)
 
@@ -89,11 +89,13 @@ class WelcomeManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             enable (bool): Whether to enable or disable the feature.
         """
-        log_request(logger, "welcome.auto", interaction, enable=enable)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-
-        if not await check_has_role(logger, interaction, ADMIN_ROLES):
+        if not await ensure_command_context(
+            logger,
+            "welcome.auto",
+            interaction,
+            log_details={"enable": enable},
+            required_roles=ADMIN_ROLES,
+        ):
             return
 
         assert interaction.guild is not None
@@ -122,8 +124,14 @@ class WelcomeManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             city (Literal["Paris", "Nantes", "Montpellier"]): The user's city.
         """
-        log_request(logger, "welcome.approve", interaction, city=city)
-        if not await check_has_role(logger, interaction, ADMIN_ROLES):
+        if not await ensure_command_context(
+            logger,
+            "welcome.approve",
+            interaction,
+            log_details={"city": city},
+            required_roles=ADMIN_ROLES,
+            enforce_commands_channel=False,
+        ):
             return
 
         channel = interaction.channel

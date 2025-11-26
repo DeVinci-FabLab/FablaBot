@@ -23,6 +23,7 @@ from fablabot.guild_config import get_commands_channel_id, set_commands_channel_
 from fablabot.helpers.constants import ErrorMessages
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from logging import Logger
 
 _COMMANDS_CHANNEL_NAME = "commandes_bot"
@@ -44,7 +45,7 @@ def log_request(logger: Logger, command_name: str, interaction: Interaction, **k
     logger.info(f"[{command_name}]: user={interaction.user!s} id={interaction.user.id} {details}")
 
 
-async def is_in_allowed_channel(logger: Logger, interaction: Interaction) -> bool:
+async def _is_in_allowed_channel(logger: Logger, interaction: Interaction) -> bool:
     """Check if the interaction was made in the allowed commands channel.
 
     Args:
@@ -112,7 +113,7 @@ async def is_in_allowed_channel(logger: Logger, interaction: Interaction) -> boo
     return True
 
 
-async def check_has_role(logger: Logger, interaction: Interaction, roles: set[str]) -> bool:
+async def _check_has_role(logger: Logger, interaction: Interaction, roles: set[str]) -> bool:
     """Check if the interaction user has any of the specified roles.
 
     Args:
@@ -143,6 +144,39 @@ async def check_has_role(logger: Logger, interaction: Interaction, roles: set[st
             ephemeral=True,
         )
         return False
+    return True
+
+
+async def ensure_command_context(
+    logger: Logger,
+    command_name: str,
+    interaction: Interaction,
+    *,
+    log_details: Mapping[str, Any] | None = None,
+    required_roles: set[str] | None = None,
+    enforce_commands_channel: bool = True,
+) -> bool:
+    """Log a command execution and run shared context checks.
+
+    Args:
+        logger (Logger): Logger for diagnostics.
+        command_name (str): Name of the invoked command for logging.
+        interaction (Interaction): Discord interaction context.
+        log_details (Mapping[str, Any] | None): Optional contextual details to log.
+        required_roles (set[str] | None): Required role names; skipped when None.
+        enforce_commands_channel (bool): Whether to enforce the configured commands channel.
+
+    Returns:
+        bool: ``True`` when all checks pass, ``False`` otherwise.
+    """
+    log_request(logger, command_name, interaction, **(log_details or {}))
+
+    if enforce_commands_channel and not await _is_in_allowed_channel(logger, interaction):
+        return False
+
+    if required_roles is not None and not await _check_has_role(logger, interaction, required_roles):
+        return False
+
     return True
 
 

@@ -16,7 +16,7 @@ from discord.utils import get
 from fablabot.helpers import build_help_message
 from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames
 from fablabot.helpers.safe_discord_operations import safe_add_roles, safe_remove_roles
-from fablabot.helpers.utils import escape_md, format_member_mention, format_role_mention, is_in_allowed_channel, log_request
+from fablabot.helpers.utils import ensure_command_context, escape_md, format_member_mention, format_role_mention
 from fablabot.ui import uui
 
 logger = logging.getLogger(__name__)
@@ -104,8 +104,12 @@ class UserManagement(commands.Cog):
             time (app_commands.Range[int, 1, 90], optional):
                 The duration in minutes for which privileges are granted. Defaults to 5.
         """
-        log_request(logger, "user.op", interaction, target=member, reason=reason, duration=time)
-        if not await is_in_allowed_channel(logger, interaction):
+        if not await ensure_command_context(
+            logger,
+            "user.op",
+            interaction,
+            log_details={"target": member, "reason": reason, "duration": time},
+        ):
             return
 
         assert interaction.guild is not None
@@ -163,8 +167,7 @@ class UserManagement(commands.Cog):
             member (Member): The user to remove privileges from.
 
         """
-        log_request(logger, "user.deop", interaction, target=member)
-        if not await is_in_allowed_channel(logger, interaction):
+        if not await ensure_command_context(logger, "user.deop", interaction, log_details={"target": member}):
             return
 
         assert interaction.guild is not None
@@ -223,8 +226,7 @@ class UserManagement(commands.Cog):
             member (Member): The user to add the role to.
             role (Role): The role to add to the user.
         """
-        log_request(logger, "user.add_role", interaction, target=member, role=role)
-        if not await is_in_allowed_channel(logger, interaction):
+        if not await ensure_command_context(logger, "user.add_role", interaction, log_details={"target": member, "role": role}):
             return
 
         if not self._can_assign_role(interaction.user, role):
@@ -262,8 +264,12 @@ class UserManagement(commands.Cog):
             member (Member): The user to remove the role from.
             role (Role): The role to remove from the user.
         """
-        log_request(logger, "user.remove_role", interaction, target=member, role=role)
-        if not await is_in_allowed_channel(logger, interaction):
+        if not await ensure_command_context(
+            logger,
+            "user.remove_role",
+            interaction,
+            log_details={"target": member, "role": role},
+        ):
             return
 
         if not self._can_assign_role(interaction.user, role):
@@ -302,8 +308,7 @@ class UserManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             role (Role): The role to add to the users.
         """
-        log_request(logger, "user.add_roles", interaction, role=role)
-        if not await is_in_allowed_channel(logger, interaction):
+        if not await ensure_command_context(logger, "user.add_roles", interaction, log_details={"role": role}):
             return
 
         assert isinstance(interaction.user, Member)
@@ -337,8 +342,7 @@ class UserManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             role (Role): The role to remove from the users.
         """
-        log_request(logger, "user.remove_roles", interaction, role=role)
-        if not await is_in_allowed_channel(logger, interaction):
+        if not await ensure_command_context(logger, "user.remove_roles", interaction, log_details={"role": role}):
             return
 
         assert isinstance(interaction.user, Member)
@@ -370,8 +374,7 @@ class UserManagement(commands.Cog):
         Args:
             interaction (Interaction): The Discord interaction context.
         """
-        log_request(logger, "user.with_roles", interaction)
-        if not await is_in_allowed_channel(logger, interaction):
+        if not await ensure_command_context(logger, "user.with_roles", interaction):
             return
 
         await interaction.response.defer(thinking=True)

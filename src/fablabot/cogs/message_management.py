@@ -40,14 +40,7 @@ from fablabot.helpers import build_help_message
 from fablabot.helpers.constants import ADMIN_ROLES, PARIS_TZ, ErrorMessages, RoleNames
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.state_store import JsonStateStore
-from fablabot.helpers.utils import (
-    check_has_role,
-    get_members_by_role,
-    is_in_allowed_channel,
-    is_valid_emoji,
-    log_request,
-    send_dm_to_member,
-)
+from fablabot.helpers.utils import ensure_command_context, get_members_by_role, is_valid_emoji, log_request, send_dm_to_member
 from fablabot.models.common import ReactionAction, ReactionEvent
 from fablabot.models.message import EASTER_EGGS, MessageDraft, MsgReactionEvent, TrackedMessage
 from fablabot.ui import mui
@@ -191,17 +184,16 @@ class MessageManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             message (str): The message content to send.
         """
-        log_request(logger, "message.dm", interaction, message=message)
-        if not await is_in_allowed_channel(logger, interaction):
+        if not await ensure_command_context(
+            logger,
+            "message.dm",
+            interaction,
+            log_details={"message": message},
+            required_roles={RoleNames.BUREAU},
+        ):
             return
 
         assert isinstance(interaction.user, Member)
-
-        role_names = {role.name for role in interaction.user.roles}
-        if RoleNames.BUREAU not in role_names:
-            logger.warning(f"Unauthorized dm by {interaction.user}")
-            await interaction.response.send_message(ErrorMessages.INSUFFICIENT_PERMISSIONS, ephemeral=True)
-            return
 
         await interaction.response.defer(thinking=True)
         followup_mes = await interaction.followup.send("Sélection des membres en cours...", wait=True)
@@ -231,11 +223,7 @@ class MessageManagement(commands.Cog):
         Args:
             interaction (Interaction): The Discord interaction context.
         """
-        log_request(logger, "msg.start", interaction)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-
-        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+        if not await ensure_command_context(logger, "msg.start", interaction, required_roles=ALLOWED_ROLES):
             return
 
         await interaction.response.send_modal(mui.StartMessageModal(self))
@@ -246,10 +234,13 @@ class MessageManagement(commands.Cog):
         message="ID du message ou lien complet",
     )
     async def msg_follow(self, interaction: Interaction, *, channel: TextChannel, message: str) -> None:  # TODO: review
-        log_request(logger, "msg.follow", interaction, channel=channel.name, message=message)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+        if not await ensure_command_context(
+            logger,
+            "msg.follow",
+            interaction,
+            log_details={"channel": channel.name, "message": message},
+            required_roles=ALLOWED_ROLES,
+        ):
             return
 
         message_id = self._parse_message_id(message)
@@ -306,11 +297,13 @@ class MessageManagement(commands.Cog):
             emoji (str): The emoji that triggers the action.
             message (str): The ID or link of the tracked message.
         """
-        log_request(logger, "msg.link_reaction", interaction, message=message, emoji=emoji)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-
-        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+        if not await ensure_command_context(
+            logger,
+            "msg.link_reaction",
+            interaction,
+            log_details={"message": message, "emoji": emoji},
+            required_roles=ALLOWED_ROLES,
+        ):
             return
 
         if not is_valid_emoji(emoji):
@@ -355,11 +348,7 @@ class MessageManagement(commands.Cog):
         Args:
             interaction (Interaction): The Discord interaction context.
         """
-        log_request(logger, "msg.unlink_reaction", interaction)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-
-        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+        if not await ensure_command_context(logger, "msg.unlink_reaction", interaction, required_roles=ALLOWED_ROLES):
             return
 
         assert interaction.guild is not None
@@ -392,11 +381,7 @@ class MessageManagement(commands.Cog):
         Args:
             interaction (Interaction): The Discord interaction context.
         """
-        log_request(logger, "msg.list", interaction)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-
-        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+        if not await ensure_command_context(logger, "msg.list", interaction, required_roles=ALLOWED_ROLES):
             return
 
         assert interaction.guild is not None
@@ -430,11 +415,7 @@ class MessageManagement(commands.Cog):
         Args:
             interaction (Interaction): The Discord interaction context.
         """
-        log_request(logger, "msg.preview", interaction)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-
-        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+        if not await ensure_command_context(logger, "msg.preview", interaction, required_roles=ALLOWED_ROLES):
             return
 
         assert interaction.guild is not None
@@ -466,11 +447,13 @@ class MessageManagement(commands.Cog):
             interaction (Interaction): Le contexte d'interaction Discord.
             channel (TextChannel): Le salon cible pour la publication.
         """
-        log_request(logger, "msg.publish", interaction, channel=channel.name)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-
-        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+        if not await ensure_command_context(
+            logger,
+            "msg.publish",
+            interaction,
+            log_details={"channel": channel.name},
+            required_roles=ALLOWED_ROLES,
+        ):
             return
 
         assert interaction.guild is not None
@@ -527,11 +510,13 @@ class MessageManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             message (str | None, optional): The ID or link of the tracked message. Defaults to None.
         """
-        log_request(logger, "msg.export", interaction, message=message)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-
-        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+        if not await ensure_command_context(
+            logger,
+            "msg.export",
+            interaction,
+            log_details={"message": message},
+            required_roles=ALLOWED_ROLES,
+        ):
             return
 
         assert interaction.guild is not None
@@ -574,11 +559,7 @@ class MessageManagement(commands.Cog):
         Args:
             interaction (Interaction): The Discord interaction context.
         """
-        log_request(logger, "msg.stop", interaction)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-
-        if not await check_has_role(logger, interaction, ALLOWED_ROLES):
+        if not await ensure_command_context(logger, "msg.stop", interaction, required_roles=ALLOWED_ROLES):
             return
 
         assert interaction.guild is not None

@@ -12,7 +12,7 @@ from discord.ext import commands
 from fablabot.guild_config import set_log_channel_id
 from fablabot.helpers import build_help_message
 from fablabot.helpers.constants import ADMIN_ROLES, PARIS_TZ, RoleNames
-from fablabot.helpers.utils import check_has_role, format_channel_mention, is_in_allowed_channel, log_request
+from fablabot.helpers.utils import ensure_command_context, format_channel_mention
 from fablabot.logging_handlers import DailyFileHandler, DiscordLogHandler
 
 logger = logging.getLogger(__name__)
@@ -76,11 +76,13 @@ class LogManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             channel (TextChannel): The text channel receiving bot logs.
         """
-        log_request(logger, "log.set", interaction, channel=channel.name, channel_id=channel.id)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-
-        if not await check_has_role(logger, interaction, ADMIN_ROLES):
+        if not await ensure_command_context(
+            logger,
+            "log.set",
+            interaction,
+            log_details={"channel": channel.name, "channel_id": channel.id},
+            required_roles=ADMIN_ROLES,
+        ):
             return
 
         discord_log_handler = getattr(self.bot, "discord_log_handler", None)
@@ -128,11 +130,13 @@ class LogManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             date (str | None): Date of logs to export in DD/MM/YYYY format. If not specified, exports logs from today.
         """
-        log_request(logger, "log.export", interaction, date=date)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-
-        if not await check_has_role(logger, interaction, ADMIN_ROLES | {RoleNames.DIGITAL_MANAGER, RoleNames.DIGITAL_POLE}):
+        if not await ensure_command_context(
+            logger,
+            "log.export",
+            interaction,
+            log_details={"date": date},
+            required_roles=ADMIN_ROLES | {RoleNames.DIGITAL_MANAGER, RoleNames.DIGITAL_POLE},
+        ):
             return
 
         file_log_handler = getattr(self.bot, "file_log_handler", None)

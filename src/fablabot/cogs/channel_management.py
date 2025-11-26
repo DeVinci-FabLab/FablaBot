@@ -32,7 +32,7 @@ from fablabot.helpers.safe_discord_operations import (
     safe_delete_channel,
     safe_edit_channel,
 )
-from fablabot.helpers.utils import check_has_role, escape_md, format_channel_mention, is_in_allowed_channel, log_request
+from fablabot.helpers.utils import ensure_command_context, escape_md, format_channel_mention
 
 logger = logging.getLogger(__name__)
 
@@ -116,11 +116,13 @@ class ChannelManagement(commands.Cog):
             channel (str): The name of the channel to create.
             category (CategoryChannel): The category to create the channel in.
         """
-        log_request(logger, "text.create", interaction, channel=channel, category=category.name)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-
-        if not await check_has_role(logger, interaction, ADMIN_ROLES):
+        if not await ensure_command_context(
+            logger,
+            "text.create",
+            interaction,
+            log_details={"channel": channel, "category": category.name},
+            required_roles=ADMIN_ROLES,
+        ):
             return
 
         if channel in (c.name for c in category.channels):
@@ -160,11 +162,13 @@ class ChannelManagement(commands.Cog):
             channel (TextChannel): The channel to rename.
             new_name (str): The new name of the channel.
         """
-        log_request(logger, "text.rename", interaction, channel=channel.name, new_name=new_name)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-
-        if not await check_has_role(logger, interaction, ADMIN_ROLES):
+        if not await ensure_command_context(
+            logger,
+            "text.rename",
+            interaction,
+            log_details={"channel": channel.name, "new_name": new_name},
+            required_roles=ADMIN_ROLES,
+        ):
             return
 
         old_name = channel.name
@@ -194,11 +198,13 @@ class ChannelManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             channel (TextChannel): The channel to delete.
         """
-        log_request(logger, "text.delete", interaction, channel=channel.name)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-
-        if not await check_has_role(logger, interaction, ADMIN_ROLES):
+        if not await ensure_command_context(
+            logger,
+            "text.delete",
+            interaction,
+            log_details={"channel": channel.name},
+            required_roles=ADMIN_ROLES,
+        ):
             return
 
         channel_name = channel.name
@@ -269,19 +275,18 @@ class ChannelManagement(commands.Cog):
             max_user (app_commands.Range[int, 1, 99] | None, optional):
                 The maximum number of users allowed in the channel. Defaults to None.
         """
-        log_request(
+        if not await ensure_command_context(
             logger,
             "vocal.create",
             interaction,
-            name=name,
-            category=category.name,
-            is_temporary=is_temporary,
-            max_user=max_user,
-        )
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-
-        if not await check_has_role(logger, interaction, ADMIN_ROLES):
+            log_details={
+                "name": name,
+                "category": category.name,
+                "is_temporary": is_temporary,
+                "max_user": max_user,
+            },
+            required_roles=ADMIN_ROLES,
+        ):
             return
 
         existing = {vc.name for vc in category.voice_channels}
@@ -328,11 +333,13 @@ class ChannelManagement(commands.Cog):
             channel (VoiceChannel): The voice channel to rename.
             new_name (str): The new name of the voice channel.
         """
-        log_request(logger, "vocal.rename", interaction, channel=channel.name, new_name=new_name)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-
-        if not await check_has_role(logger, interaction, ADMIN_ROLES):
+        if not await ensure_command_context(
+            logger,
+            "vocal.rename",
+            interaction,
+            log_details={"channel": channel.name, "new_name": new_name},
+            required_roles=ADMIN_ROLES,
+        ):
             return
 
         if re.search(rf"{DYNAMIC_SUFFIX}{INDEX_SEPARATOR}\d+$", channel.name):
@@ -388,11 +395,13 @@ class ChannelManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             channel (VoiceChannel): The voice channel to delete.
         """
-        log_request(logger, "vocal.delete", interaction, channel=channel.name)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-
-        if not await check_has_role(logger, interaction, ADMIN_ROLES):
+        if not await ensure_command_context(
+            logger,
+            "vocal.delete",
+            interaction,
+            log_details={"channel": channel.name},
+            required_roles=ADMIN_ROLES,
+        ):
             return
 
         if len(channel.members) > 0:

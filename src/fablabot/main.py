@@ -95,15 +95,15 @@ class Fablabot(commands.Bot):
             ctx (commands.Context[Any]): The invocation context of the command.
             exception (Exception): The raised exception.
         """
-        logger.error(f"Unhandled command error: {exception}")
-        await ctx.reply(str(exception), ephemeral=True)
+        logger.exception("Unhandled command error", exc_info=exception)
+        await ctx.send("Une erreur inattendue est survenue lors de l'exécution de la commande.")
 
 
 def main() -> None:
     """Run the bot using the token from the environment."""
-    logger.info("Starting FablaBot")
+    logger.info("Starting FablaBot.")
     bot = Fablabot()
-    logger.info("Running bot")
+    logger.info("Running bot.")
     bot.run(DISCORD_TOKEN)
 
 
