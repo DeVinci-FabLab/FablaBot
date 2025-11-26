@@ -310,9 +310,17 @@ class FormationManagement(commands.Cog):
             )
             return
 
-        await interaction.response.send_modal(
-            fmui.AddFmModal(self, emoji_clean, trainer.mention, start_dt.isoformat(), duration.strip(), int(seats), excusable),
+        fm = Formation(
+            emoji=emoji_clean,
+            name="",
+            trainer_mention=trainer.mention,
+            start_iso=start_dt.isoformat(),
+            duration=duration.strip(),
+            seats=int(seats),
+            excusable=excusable,
         )
+
+        await interaction.response.send_modal(fmui.AddFmModal(self, fm))
 
     @fm_group.command(name="edit", description="Modifier une formation existante.")
     async def fm_edit(self, interaction: Interaction) -> None:
@@ -333,7 +341,12 @@ class FormationManagement(commands.Cog):
             return
 
         view = fmui.SelectFormationView(self, draft.fms, FmCommand.EDIT)
-        await interaction.response.send_message("Sélectionne la formation à modifier.", view=view, ephemeral=True)
+        await interaction.response.send_message(
+            "Sélectionne la formation à modifier.",
+            view=view,
+            embed=Embed(title="Aperçu brouillon", description=render_message(draft)),
+            ephemeral=True,
+        )
 
     @fm_group.command(name="remove", description="Retirer une formation du brouillon par son index (1..n).")
     async def fm_remove(self, interaction: Interaction) -> None:
@@ -354,7 +367,12 @@ class FormationManagement(commands.Cog):
             return
 
         view = fmui.SelectFormationView(self, draft.fms, FmCommand.REMOVE)
-        await interaction.response.send_message("Sélectionne la formation à supprimer.", view=view, ephemeral=True)
+        await interaction.response.send_message(
+            "Sélectionne la formation à supprimer.",
+            view=view,
+            embed=Embed(title="Aperçu brouillon", description=render_message(draft)),
+            ephemeral=True,
+        )
 
     @fm_group.command(name="clear", description="Vider le brouillon courant (intro et fin conservées).")
     async def fm_clear(self, interaction: Interaction) -> None:

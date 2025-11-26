@@ -15,6 +15,7 @@ from fablabot.helpers.formation.rendering import (
     format_respo_contacts,
     humanize_dt,
     parse_date_time,
+    render_formation,
     render_message,
 )
 
@@ -28,6 +29,7 @@ __all__ = [
     "notify_responsible_before_formation",
     "notify_trainer_before_formation",
     "parse_date_time",
+    "render_formation",
     "render_message",
     "send_promotion_dm",
     "send_registration_dm",

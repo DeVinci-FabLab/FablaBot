@@ -6,14 +6,13 @@ from copy import deepcopy
 import logging
 from typing import TYPE_CHECKING, cast
 
-from discord import ButtonStyle, Interaction, TextStyle, ui
+from discord import ButtonStyle, Embed, Interaction, TextStyle, ui
 from emoji import emojize
 
 from fablabot.helpers.constants import PARIS_TZ, ErrorMessages
-from fablabot.helpers.formation import Emojis, parse_date_time, render_message
+from fablabot.helpers.formation import Emojis, parse_date_time, render_formation, render_message
 from fablabot.helpers.utils import is_valid_emoji, log_request
 from fablabot.models.formation import FmCommand, FmMessageDraft, Formation
-from fablabot.ui.common import build_preview_embed
 
 if TYPE_CHECKING:
     from fablabot.cogs import FormationManagement
@@ -98,7 +97,7 @@ class StartFmModal(ui.Modal, title="Commencer une annonce de formation"):
         logger.info(f"Guild {interaction.guild.id} started a new formations draft.")
         await interaction.response.send_message(
             "Brouillon initialisé.\nUtilise **/fm add** pour ajouter des formations. **/fm preview** pour voir le rendu.",
-            embed=build_preview_embed("Aperçu brouillon — 0 formation", content),
+            embed=Embed(title="Aperçu brouillon — 0 formation", description=content or "_(vide)_"),
             ephemeral=True,
         )
 
@@ -196,7 +195,7 @@ class EditTextModal(ui.Modal, title="Modifier le texte de l'annonce de formation
 
         await interaction.response.send_message(
             "Brouillon mis à jour.",
-            embed=build_preview_embed(f"Aperçu brouillon — {len(draft.fms)} formation(s)", content),
+            embed=Embed(title=f"Aperçu brouillon — {len(draft.fms)} formation(s)", description=content or "_(vide)_"),
             ephemeral=True,
         )
 
@@ -224,35 +223,16 @@ class AddFmModal(ui.Modal, title="Ajouter une formation"):
         max_length=500,
     )
 
-    def __init__(
-        self,
-        cog: FormationManagement,
-        emoji: str,
-        trainer_mention: str,
-        start_iso: str,
-        duration: str,
-        seats: int,
-        excusable: bool,
-    ) -> None:
+    def __init__(self, cog: FormationManagement, fm: Formation) -> None:
         """Initialize the AddFmModal.
 
         Args:
             cog (FormationManagement): FormationManagement cog instance.
-            emoji (str): Pre-filled emoji value.
-            trainer_mention (str): The trainer mention for this formation.
-            start_iso (str): The start date and time in ISO format.
-            duration (str): The duration of the formation.
-            seats (int): The number of seats available.
-            excusable (bool): Whether absences are excusable for this formation.
+            fm (Formation): Formation object with pre-filled data.
         """
         super().__init__()
         self.cog = cog
-        self.emoji = emoji
-        self.trainer_mention = trainer_mention
-        self.start_iso = start_iso
-        self.duration = duration
-        self.seats = seats
-        self.excusable = excusable
+        self.fm = fm
 
     async def on_submit(self, interaction: Interaction) -> None:
         """Called when the modal is submitted.
@@ -263,8 +243,8 @@ class AddFmModal(ui.Modal, title="Ajouter une formation"):
         assert interaction.guild is not None
         draft = self.cog.get_guild_draft(interaction.guild.id)
 
-        description = self.description_input.value.strip()
         name = self.name_input.value.strip()
+        description = self.description_input.value.strip()
 
         log_request(
             logger,
@@ -274,19 +254,11 @@ class AddFmModal(ui.Modal, title="Ajouter une formation"):
             description=description,
         )
 
-        fm = Formation(
-            emoji=self.emoji,
-            name=name,
-            trainer_mention=self.trainer_mention,
-            start_iso=self.start_iso,
-            duration=self.duration,
-            seats=self.seats,
-            description=description,
-            excusable=self.excusable,
-        )
+        self.fm.name = name
+        self.fm.description = description
 
         fms = list(draft.fms)
-        fms.append(fm)
+        fms.append(self.fm)
         fms.sort(key=lambda x: x.start_dt)
 
         draft = FmMessageDraft(
@@ -299,13 +271,16 @@ class AddFmModal(ui.Modal, title="Ajouter une formation"):
         self.cog.set_guild_draft(interaction.guild.id, draft)
 
         preview = render_message(draft)
-        logger.info(f"Guild {interaction.guild.id} added formation {fm.name!r} ({fm.start_iso}) to draft.")
+        logger.info(f"Guild {interaction.guild.id} added formation {self.fm.name!r} ({self.fm.start_iso}) to draft.")
         await interaction.response.send_message(
             "Formation ajoutée & brouillon mis à jour (trié). "
             "Utilise **/fm add** pour ajouter d'autres formations. **/fm preview** pour voir le rendu.",
-            embed=build_preview_embed(f"Aperçu brouillon — {len(fms)} formation(s)", preview),
+            embed=Embed(title=f"Aperçu brouillon — {len(fms)} formation(s)", description=preview or "_(vide)_"),
             ephemeral=True,
         )
+
+
+# region ====== SelectFormationView and its components ======
 
 
 class _SelectFormationButton(ui.Button["SelectFormationView"]):
@@ -342,6 +317,7 @@ class _SelectFormationButton(ui.Button["SelectFormationView"]):
                 await interaction.response.edit_message(
                     content=f"Modification : {self.formation.emoji} {self.formation.name}",
                     view=_EditFormationView(view.cog, self.formation_index, self.formation),
+                    embed=Embed(description=render_formation(self.formation)),
                 )
             case FmCommand.REMOVE:
                 assert interaction.guild is not None
@@ -358,7 +334,7 @@ class _SelectFormationButton(ui.Button["SelectFormationView"]):
 
                 await interaction.response.edit_message(
                     content=f"Supprimé: {removed.emoji} {removed.name}",
-                    embed=build_preview_embed(f"Aperçu brouillon — {len(draft.fms)} formation(s)", preview),
+                    embed=Embed(title=f"Aperçu brouillon — {len(draft.fms)} formation(s)", description=preview or "_(vide)_"),
                     view=None,
                 )
             case _:
@@ -384,7 +360,9 @@ class SelectFormationView(ui.View):
             self.add_item(_SelectFormationButton(idx, fm))
 
 
-# region ====== EditFormationView and its modals ======
+# endregion SelectFormationView and its components
+
+# region ====== EditFormationView and its components ======
 
 
 class _EditEmojiModal(ui.Modal, title="Modifier l'émoji"):
@@ -769,7 +747,7 @@ class _EditFormationView(ui.View):
         await interaction.response.edit_message(
             content=f"Mise à jour: {self.updated_formation.emoji} {self.updated_formation.name} (position {new_position}).",
             view=None,
-            embed=build_preview_embed(f"Aperçu brouillon — {len(fms)} formation(s)", preview),
+            embed=Embed(title=f"Aperçu brouillon — {len(fms)} formation(s)", description=preview or "_(vide)_"),
         )
 
     def get_button(self, button_id: int) -> ui.Button[_EditFormationView]:
@@ -794,7 +772,8 @@ class _EditFormationView(ui.View):
         await interaction.response.edit_message(
             content=f"Modification : {self.updated_formation.emoji} {self.updated_formation.name}",
             view=self,
+            embed=Embed(description=render_formation(self.updated_formation)),
         )
 
 
-# endregion EditFormationView and its modals
+# endregion EditFormationView and its components

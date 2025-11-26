@@ -5,12 +5,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Literal
 
-from discord import ButtonStyle, ChannelType, Interaction, Member, SelectOption, TextStyle, ui
+from discord import ButtonStyle, ChannelType, Embed, Interaction, Member, SelectOption, TextStyle, ui
 
 from fablabot.helpers.constants import ErrorMessages
 from fablabot.helpers.utils import format_member_mention, send_dm_to_member
 from fablabot.models.message import SUGGESTION_OPTIONS, MessageDraft, MsgActionType, MsgReactionEvent, TrackedMessage
-from fablabot.ui.common import build_preview_embed
 
 if TYPE_CHECKING:
     from fablabot.cogs import MessageManagement, SuggestionManagement
@@ -129,7 +128,7 @@ class StartMessageModal(ui.Modal, title="Préparer un message"):
 
         await interaction.response.send_message(
             "Brouillon enregistré. Ajoute des réactions avec `/msg link_reaction` puis `/msg preview` et `/msg publish`.",
-            embed=build_preview_embed("Aperçu brouillon", draft.content),
+            embed=Embed(title="Aperçu brouillon", description=draft.content or "_(vide)_"),
             ephemeral=True,
         )
 

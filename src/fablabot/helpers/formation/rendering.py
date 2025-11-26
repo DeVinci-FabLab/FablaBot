@@ -125,6 +125,28 @@ def humanize_dt(dt: datetime) -> str:
     return f"**{day_name} {date_part} à {time_part}**"
 
 
+def render_formation(fm: Formation) -> str:
+    """Render a single formation entry.
+
+    Args:
+        fm (Formation): The formation to render.
+
+    Returns:
+        str: The rendered formation string.
+    """
+    lines: list[str] = []
+    lines.append(f"{fm.emoji} **{fm.name}** avec {fm.trainer_mention} ({'non ' if not fm.excusable else ''}excusable)")
+    lines.append(
+        f"> {humanize_dt(fm.start_dt)}  – "  # noqa: RUF001
+        f"{Emojis.get_clock_emoji(fm.start_dt)} {fm.duration}  – "  # noqa: RUF001
+        f"{Emojis.PEOPLE} {len(fm.registered_users)}/{fm.seats} places"
+    )
+    render_description = fm.description.replace("\n", "\n> ")
+    if fm.description:
+        lines.append(f"> {render_description}")
+    return "\n".join(lines)
+
+
 def render_message(draft: FmMessageDraft) -> str:
     """Render the message for the formations.
 
@@ -146,15 +168,7 @@ def render_message(draft: FmMessageDraft) -> str:
 
     fms = sorted(draft.fms, key=lambda x: x.start_dt)
     for fm in fms:
-        line_block = [
-            f"{fm.emoji} **{fm.name}** avec {fm.trainer_mention} ({'non ' if not fm.excusable else ''}excusable)",
-            f"> {humanize_dt(fm.start_dt)}  – "  # noqa: RUF001
-            f"{Emojis.get_clock_emoji(fm.start_dt)} {fm.duration}  – "  # noqa: RUF001
-            f"{Emojis.PEOPLE} {len(fm.registered_users)}/{fm.seats} places",
-        ]
-        render_description = fm.description.replace("\n", "\n> ")
-        line_block += [f"> {render_description}"] if fm.description else []
-        lines.append("\n".join(line_block))
+        lines.append(render_formation(fm))
         lines.append("")
 
     end_lines = [
