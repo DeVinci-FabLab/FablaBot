@@ -26,17 +26,13 @@ from discord.utils import get
 
 from fablabot.helpers import build_help_message
 from fablabot.helpers.constants import ADMIN_ROLES, RoleNames
-from fablabot.helpers.utils import (
-    check_has_role,
-    escape_md,
-    format_channel_mention,
-    is_in_allowed_channel,
-    log_request,
+from fablabot.helpers.safe_discord_operations import (
     safe_create_text_channel,
     safe_create_voice_channel,
     safe_delete_channel,
     safe_edit_channel,
 )
+from fablabot.helpers.utils import check_has_role, escape_md, format_channel_mention, is_in_allowed_channel, log_request
 
 logger = logging.getLogger(__name__)
 

@@ -15,15 +15,8 @@ from discord.utils import get
 
 from fablabot.helpers import build_help_message
 from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames
-from fablabot.helpers.utils import (
-    escape_md,
-    format_member_mention,
-    format_role_mention,
-    is_in_allowed_channel,
-    log_request,
-    safe_add_roles,
-    safe_remove_roles,
-)
+from fablabot.helpers.safe_discord_operations import safe_add_roles, safe_remove_roles
+from fablabot.helpers.utils import escape_md, format_member_mention, format_role_mention, is_in_allowed_channel, log_request
 from fablabot.ui import uui
 
 logger = logging.getLogger(__name__)

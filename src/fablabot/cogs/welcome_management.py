@@ -13,15 +13,8 @@ from discord.utils import get
 from fablabot.guild_config import is_welcome_verify_enabled, set_welcome_verify_enabled
 from fablabot.helpers import build_help_message
 from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames
-from fablabot.helpers.utils import (
-    check_has_role,
-    escape_md,
-    is_in_allowed_channel,
-    log_request,
-    safe_add_roles,
-    safe_create_text_channel,
-    safe_delete_channel,
-)
+from fablabot.helpers.safe_discord_operations import safe_add_roles, safe_create_text_channel, safe_delete_channel
+from fablabot.helpers.utils import check_has_role, escape_md, is_in_allowed_channel, log_request
 
 logger = logging.getLogger(__name__)
 
