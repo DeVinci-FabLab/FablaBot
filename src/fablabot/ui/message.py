@@ -335,6 +335,9 @@ class ReactionActionTypeView(ui.View):
         await self._open_target_view(interaction, "role_dm")
 
 
+# region ====== TrackedMessageSelectView and its Components ======
+
+
 class _TrackedMessageSelectButton(ui.Button["TrackedMessageSelectView"]):
     """Button to select a tracked message before performing an action."""
 
@@ -373,7 +376,7 @@ class _TrackedMessageSelectButton(ui.Button["TrackedMessageSelectView"]):
             case MsgCommand.STOP:
                 await view.stop_tracking(interaction, self.tracked)
             case MsgCommand.EXPORT:
-                raise NotImplementedError("Export command not yet implemented in TrackedMessageSelectView.")
+                await view.export_history(interaction, self.tracked)
             case _:
                 logger.error("Unknown command in TrackedMessageSelectView callback.")
 
@@ -383,7 +386,7 @@ class _TrackedMessageSelectButton(ui.Button["TrackedMessageSelectView"]):
 
 
 class TrackedMessageSelectView(ui.View):
-    """View to pick a tracked message before unlinking an action or stopping tracking."""
+    """View to pick a tracked message or draft before running message commands."""
 
     def __init__(self, cog: MessageManagement, tracked_messages: list[TrackedMessage], cmd: MsgCommand) -> None:
         """Initialize the TrackedMessageSelectView.
@@ -435,6 +438,25 @@ class TrackedMessageSelectView(ui.View):
             content=f"Suivi arrêté pour le message `{tracked.message_id}`.",
             view=None,
         )
+
+    async def export_history(self, interaction: Interaction, tracked: TrackedMessage) -> None:
+        """Export reaction history for a tracked message.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            tracked (TrackedMessage): The tracked message to export history for.
+        """
+        assert interaction.guild is not None
+
+        file, content = self.cog.build_reaction_export(interaction.guild.id, tracked.message_id)
+        if file is None:
+            await interaction.response.edit_message(content=content, view=None)
+            return
+
+        await interaction.response.edit_message(content=content, attachments=[file], view=None)
+
+
+# endregion TrackedMessageSelectView and its Components
 
 
 class _UnlinkReactionSelectView(ui.View):  # TODO: review, voir display name et non id

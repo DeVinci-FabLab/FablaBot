@@ -505,53 +505,27 @@ class MessageManagement(commands.Cog):
         name="export",
         description="Exporter l'historique des réactions d'un message suivi.",
     )
-    @app_commands.describe(message="ID ou lien du message (optionnel : dernier suivi actif par défaut)")
-    async def msg_export(
-        self, interaction: Interaction, *, message: str | None = None
-    ) -> None:  # TODO: TrackedMessageSelectView
+    async def msg_export(self, interaction: Interaction) -> None:
         """Export the reaction history of a tracked message.
 
         Args:
             interaction (Interaction): The Discord interaction context.
-            message (str | None, optional): The ID or link of the tracked message. Defaults to None.
         """
-        if not await ensure_command_context(
-            logger,
-            "msg.export",
-            interaction,
-            log_details={"message": message},
-            required_roles=ALLOWED_ROLES,
-        ):
+        if not await ensure_command_context(logger, "msg.export", interaction, required_roles=ALLOWED_ROLES):
             return
 
         assert interaction.guild is not None
 
-        if message is not None:
-            message_id = self._parse_message_id(message)
-            if message_id is None:
-                await interaction.response.send_message(ErrorMessages.INVALID_MESSAGE_ID, ephemeral=True)
-                return
-        else:
-            message_id = self._latest_tracked_id(interaction.guild.id)
-            if message_id is None:
-                await interaction.response.send_message(ErrorMessages.MSG_NO_TRACKED_AVAILABLE, ephemeral=True)
-                return
-
-        history = self._reaction_logs.history(interaction.guild.id, message_id)
-        if not history:
-            await interaction.response.send_message(ErrorMessages.MSG_NO_REACTION_HISTORY, ephemeral=True)
+        tracked_map = self._get_tracked_messages(interaction.guild.id)
+        if not tracked_map:
+            await interaction.response.send_message(ErrorMessages.MSG_NO_TRACKED_AVAILABLE, ephemeral=True)
             return
 
-        buffer = io.StringIO()
-        writer = csv.writer(buffer, lineterminator="\n")
-        writer.writerow(["timestamp_iso", "action", "emoji", "user_name", "user_id"])
-        for ev in history:
-            writer.writerow([ev.ts_iso, ev.action, ev.emoji, ev.user_name or "", ev.user_id])
-
-        logger.info(f"Exported {len(history)} reaction events for message {message_id} in guild {interaction.guild.id}")
+        view = mui.TrackedMessageSelectView(self, list(tracked_map.values()), MsgCommand.EXPORT)
         await interaction.response.send_message(
-            content=f"Export des réactions pour le message `{message_id}`.",
-            file=File(fp=io.BytesIO(buffer.getvalue().encode("utf-8")), filename="message_reactions_log.csv"),
+            "Choisis le message suivi dont tu veux exporter les réactions.",
+            view=view,
+            ephemeral=True,
         )
 
     @msg_group.command(
@@ -677,6 +651,33 @@ class MessageManagement(commands.Cog):
             "user_dm": "DM réacteur",
             "role_dm": f"DM rôle <@&{target}>",
         }.get(reaction.action_type, reaction.action_type)
+
+    def build_reaction_export(self, guild_id: int, message_id: int) -> tuple[File | None, str]:
+        """Build the reaction history export for a message.
+
+        Args:
+            guild_id (int): The guild identifier.
+            message_id (int): The message identifier.
+
+        Returns:
+            tuple[File | None, str]: The file to send (None if no history) and the associated message.
+        """
+        history = self._reaction_logs.history(guild_id, message_id)
+        if not history:
+            return None, ErrorMessages.MSG_NO_REACTION_HISTORY
+
+        buffer = io.StringIO()
+        writer = csv.writer(buffer, lineterminator="\n")
+        writer.writerow(["timestamp_iso", "action", "emoji", "user_name", "user_id"])
+        for ev in history:
+            writer.writerow([ev.ts_iso, ev.action, ev.emoji, ev.user_name or "", ev.user_id])
+
+        logger.info(f"Exported {len(history)} reaction events for message {message_id} in guild {guild_id}")
+        file = File(
+            fp=io.BytesIO(buffer.getvalue().encode("utf-8")),
+            filename=f"message_{message_id}_reactions_log.csv",
+        )
+        return file, f"Export des réactions pour le message `{message_id}`."
 
     def _get_guild_state(self, guild_id: int) -> dict[str, Any]:
         """Retrieve or initialize the state for a guild."""
