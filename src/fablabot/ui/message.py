@@ -201,6 +201,9 @@ class StartMessageModal(ui.Modal, title="Préparer un message"):
         )
 
 
+# region ====== UI Components for Linking Reactions ======
+
+
 class _ReactionMessageInputModal(ui.Modal, title="Message à envoyer"):
     """Modal for inputting the content of the message to send for a reaction action."""
 
@@ -212,35 +215,18 @@ class _ReactionMessageInputModal(ui.Modal, title="Message à envoyer"):
         max_length=2000,
     )
 
-    def __init__(
-        self,
-        cog: MessageManagement,
-        guild_id: int,
-        message_id: int | None,
-        emoji: str,
-        action_type: MsgActionType,
-        target_id: int,
-        target_value: str,
-    ) -> None:
+    def __init__(self, cog: MessageManagement, guild_id: int, reaction: MsgReactionEvent) -> None:
         """Initialize the modal.
 
         Args:
             cog (MessageManagement): The MessageManagement cog instance.
             guild_id (int): The guild identifier.
-            message_id (int | None): The message identifier (None = brouillon).
-            emoji (str): The emoji for this reaction.
-            action_type (MsgActionType): The type of action.
-            target_id (int): The pre-filled target ID.
-            target_value (str): The pre-filled target value.
+            reaction (MsgReactionEvent): The reaction event being configured.
         """
         super().__init__()
         self.cog = cog
         self.guild_id = guild_id
-        self.message_id = message_id
-        self.emoji = emoji
-        self.action_type: MsgActionType = action_type
-        self.target_id = target_id
-        self.target_value = target_value
+        self.reaction = reaction
 
     async def on_submit(self, interaction: Interaction) -> None:
         """Handle modal submission.
@@ -249,16 +235,9 @@ class _ReactionMessageInputModal(ui.Modal, title="Message à envoyer"):
             interaction (Interaction): The interaction context.
         """
         message_content = self.message_input.value.strip()
-        reaction = MsgReactionEvent(
-            emoji=self.emoji,
-            action_type=self.action_type,
-            message_content=message_content,
-            target_id=self.target_id,
-            target_name=self.target_value,
-            message_id=self.message_id,
-        )
+        self.reaction.message_content = message_content
 
-        feedback = await self.cog.register_reaction_action(self.guild_id, reaction)
+        feedback = await self.cog.register_reaction_action(self.guild_id, self.reaction)
         await interaction.response.edit_message(content=feedback, view=None)
 
 
@@ -302,11 +281,14 @@ class _ReactionTargetView(ui.View):
                 _ReactionMessageInputModal(
                     self.cog,
                     self.guild_id,
-                    self.message_id,
-                    self.emoji,
-                    self.action_type,
-                    target_id,
-                    target_value,
+                    MsgReactionEvent(
+                        emoji=self.emoji,
+                        action_type=self.action_type,
+                        message_content="",
+                        target_id=target_id,
+                        target_name=target_value,
+                        message_id=self.message_id,
+                    ),
                 ),
             )
 
@@ -324,7 +306,7 @@ class _ReactionTargetView(ui.View):
                 self.add_item(self.role_select)
 
 
-class _ReactionActionTypeSelectView(ui.View):  # TODO: review
+class _ReactionActionTypeSelectView(ui.View):
     """View to pick an action type before selecting the reaction target."""
 
     def __init__(
@@ -348,13 +330,6 @@ class _ReactionActionTypeSelectView(ui.View):  # TODO: review
         self.message_id = message_id
         self.emoji = emoji
 
-    async def _open_target_view(self, interaction: Interaction, action_type: Literal["channel", "role_dm"]) -> None:
-        target_view = _ReactionTargetView(self.cog, self.guild_id, self.message_id, self.emoji, action_type)
-        await interaction.response.edit_message(
-            content="Choisis la cible puis rédige le message envoyé lors de la réaction.",
-            view=target_view,
-        )
-
     @ui.button(label="Message dans un salon", style=ButtonStyle.primary)
     async def channel_button(self, interaction: Interaction, _button: ui.Button) -> None:
         """Handle channel button click.
@@ -363,7 +338,11 @@ class _ReactionActionTypeSelectView(ui.View):  # TODO: review
             interaction (Interaction): The Discord interaction context.
             _button (ui.Button): The button that was clicked.
         """
-        await self._open_target_view(interaction, "channel")
+        target_view = _ReactionTargetView(self.cog, self.guild_id, self.message_id, self.emoji, "channel")
+        await interaction.response.edit_message(
+            content="Choisis le channel où envoyer le message puis rédige le message envoyé lors de la réaction.",
+            view=target_view,
+        )
 
     @ui.button(label="DM la personne", style=ButtonStyle.primary)
     async def user_dm_button(self, interaction: Interaction, _button: ui.Button) -> None:
@@ -377,11 +356,14 @@ class _ReactionActionTypeSelectView(ui.View):  # TODO: review
             _ReactionMessageInputModal(
                 self.cog,
                 self.guild_id,
-                self.message_id,
-                self.emoji,
-                "user_dm",
-                0,
-                "",
+                MsgReactionEvent(
+                    emoji=self.emoji,
+                    action_type="user_dm",
+                    message_content="",
+                    target_id=0,
+                    target_name="",
+                    message_id=self.message_id,
+                ),
             ),
         )
 
@@ -393,7 +375,16 @@ class _ReactionActionTypeSelectView(ui.View):  # TODO: review
             interaction (Interaction): The Discord interaction context.
             _button (ui.Button): The button that was clicked.
         """
-        await self._open_target_view(interaction, "role_dm")
+        target_view = _ReactionTargetView(self.cog, self.guild_id, self.message_id, self.emoji, "role_dm")
+        await interaction.response.edit_message(
+            content="Choisis le rôle à MP puis rédige le message envoyé lors de la réaction.",
+            view=target_view,
+        )
+
+
+# endregion UI Components for Linking Reactions
+
+# TODO: follow prend link_reaction du draft
 
 
 # region ====== TrackedMessageSelectView and its Components ======
@@ -473,10 +464,7 @@ class _DraftSelectButton(ui.Button["TrackedMessageSelectView"]):
                 await interaction.response.send_message(ErrorMessages.EXPIRED_VIEW_MESSAGE, ephemeral=True)
 
 
-# TODO: follow prend link_reaction du draft
-
-
-class TrackedMessageSelectView(ui.View):
+class TrackedMessageSelectView(ui.View):  # TODO: show preview
     """View to pick a tracked message or draft before running message commands."""
 
     def __init__(
@@ -590,31 +578,10 @@ class TrackedMessageSelectView(ui.View):
 
 # endregion TrackedMessageSelectView and its Components
 
-
-class _UnlinkReactionSelectView(ui.View):  # TODO: review, voir display name et non id
-    """View to pick which reaction action to remove from a tracked message."""
-
-    def __init__(self, cog: MessageManagement, target: TrackedMessage | MessageDraft) -> None:
-        super().__init__(timeout=None)
-        self.cog = cog
-        self.target = target
-
-        for idx, reaction in enumerate(target.reactions[:MAX_TRACKED_OPTIONS], start=1):
-            action_label = self.cog.format_reaction_action(reaction)
-            preview = reaction.message_content
-            if len(preview) > 60:
-                preview = f"{preview[:57]}..."
-
-            self.add_item(
-                _UnlinkReactionButton(
-                    idx - 1,
-                    label=f"{idx}. {reaction.emoji} - {action_label}"[:80],
-                    description=preview,
-                ),
-            )
+# region ====== UnlinkReaction UI Components ======
 
 
-class _UnlinkReactionButton(ui.Button[_UnlinkReactionSelectView]):  # TODO: review
+class _UnlinkReactionButton(ui.Button["_UnlinkReactionSelectView"]):  # TODO: review
     """Button to remove a specific reaction action."""
 
     def __init__(self, reaction_index: int, *, label: str, description: str) -> None:
@@ -652,6 +619,31 @@ class _UnlinkReactionButton(ui.Button[_UnlinkReactionSelectView]):  # TODO: revi
             view=None,
         )
 
+
+class _UnlinkReactionSelectView(ui.View):  # TODO: review, voir display name et non id
+    """View to pick which reaction action to remove from a tracked message."""
+
+    def __init__(self, cog: MessageManagement, target: TrackedMessage | MessageDraft) -> None:
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.target = target
+
+        for idx, reaction in enumerate(target.reactions[:MAX_TRACKED_OPTIONS], start=1):
+            action_label = self.cog.format_reaction_action(reaction)
+            preview = reaction.message_content
+            if len(preview) > 60:
+                preview = f"{preview[:57]}..."
+
+            self.add_item(
+                _UnlinkReactionButton(
+                    idx - 1,
+                    label=f"{idx}. {reaction.emoji} - {action_label}"[:80],
+                    description=preview,
+                ),
+            )
+
+
+# endregion UnlinkReaction UI Components
 
 # region ====== Suggestion UI Components ======
 

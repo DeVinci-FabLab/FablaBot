@@ -225,7 +225,14 @@ class MessageManagement(commands.Cog):
         channel="Salon dans lequel se trouve le message",
         message="ID du message ou lien complet",
     )
-    async def msg_follow(self, interaction: Interaction, *, channel: TextChannel, message: str) -> None:  # TODO: review
+    async def msg_follow(self, interaction: Interaction, *, channel: TextChannel, message: str) -> None:
+        """Start tracking an already published message.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            channel (TextChannel): The channel where the message is located.
+            message (str): The message ID or full link.
+        """
         if not await ensure_command_context(
             logger,
             "msg.follow",
@@ -243,7 +250,7 @@ class MessageManagement(commands.Cog):
 
         await interaction.response.defer(ephemeral=True, thinking=True)
         try:
-            fetched = await channel.fetch_message(message_id)
+            fetched: Message = await channel.fetch_message(message_id)
         except Exception:
             logger.exception(f"Failed to fetch message {message_id} in {channel}")
             await interaction.followup.send(ErrorMessages.INVALID_MESSAGE_ID, ephemeral=True)
@@ -320,7 +327,7 @@ class MessageManagement(commands.Cog):
         name="unlink_reaction",
         description="Retirer une action associée à une réaction sur un message suivi.",
     )
-    async def msg_unlink_reaction(self, interaction: Interaction) -> None:  # TODO: review
+    async def msg_unlink_reaction(self, interaction: Interaction) -> None:
         """Remove one reaction action from a tracked message via a selection view.
 
         Args:
@@ -509,7 +516,7 @@ class MessageManagement(commands.Cog):
         name="stop",
         description="Arrêter le suivi d'un message.",
     )
-    async def msg_stop(self, interaction: Interaction) -> None:  # TODO: review
+    async def msg_stop(self, interaction: Interaction) -> None:
         """Stop tracking a tracked message.
 
         Args:
