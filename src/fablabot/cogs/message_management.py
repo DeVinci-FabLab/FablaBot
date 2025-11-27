@@ -663,16 +663,17 @@ class MessageManagement(commands.Cog):
             return None
 
     @staticmethod
-    def format_reaction_action(reaction: MsgReactionEvent) -> str:
+    def format_reaction_action(reaction: MsgReactionEvent, *, show_label: bool = False) -> str:
         """Format a reaction action for display.
 
         Args:
             reaction (MsgReactionEvent): The reaction event to format.
+            show_label (bool): Whether to show the action type label or the id.
 
         Returns:
             str: The formatted action description.
         """
-        target = reaction.target_id or reaction.target_name or ""
+        target = reaction.target_name if show_label else reaction.target_id
         return {
             "channel": f"message salon <#{target}>",
             "user_dm": "DM réacteur",

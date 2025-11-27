@@ -629,7 +629,7 @@ class _UnlinkReactionButton(ui.Button["_UnlinkReactionSelectView"]):  # TODO: re
         )
 
 
-class _UnlinkReactionSelectView(ui.View):  # TODO: review, voir display name et non id
+class _UnlinkReactionSelectView(ui.View):  # TODO: review, see preview
     """View to pick which reaction action to remove from a tracked message."""
 
     def __init__(self, cog: MessageManagement, target: TrackedMessage | MessageDraft) -> None:
@@ -638,7 +638,7 @@ class _UnlinkReactionSelectView(ui.View):  # TODO: review, voir display name et 
         self.target = target
 
         for idx, reaction in enumerate(target.reactions[:MAX_TRACKED_OPTIONS], start=1):
-            action_label = self.cog.format_reaction_action(reaction)
+            action_label = self.cog.format_reaction_action(reaction, show_label=True)
             preview = reaction.message_content
             if len(preview) > 60:
                 preview = f"{preview[:57]}..."
