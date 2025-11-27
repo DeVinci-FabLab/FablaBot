@@ -2,24 +2,28 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 import logging
 from typing import TYPE_CHECKING, Any, Literal, cast
 
-from discord import ButtonStyle, ChannelType, Embed, Interaction, Member, SelectOption, TextStyle, ui
+from discord import ButtonStyle, ChannelType, Embed, Guild, Interaction, Member, SelectOption, TextStyle, ui
+from discord.utils import get
 
-from fablabot.helpers.constants import ErrorMessages
-from fablabot.helpers.utils import format_member_mention, send_dm_to_member
+from fablabot.helpers.constants import PARIS_TZ, ErrorMessages
+from fablabot.helpers.utils import format_member_mention, get_members_by_role, send_dm_to_member
 from fablabot.models.message import (
+    ANONYMOUS_ICON_URL,
     SUGGESTION_OPTIONS,
     MessageDraft,
     MsgActionType,
     MsgCommand,
     MsgReactionEvent,
+    SuggestionConfig,
     TrackedMessage,
 )
 
 if TYPE_CHECKING:
-    from fablabot.cogs import MessageManagement, SuggestionManagement
+    from fablabot.cogs import MessageManagement
 
 logger = logging.getLogger(__name__)
 
@@ -595,36 +599,9 @@ class _UnlinkReactionButton(ui.Button[_UnlinkReactionSelectView]):  # TODO: revi
 # region ====== Suggestion UI Components ======
 
 
-class RecipientSelect(ui.Select):
-    """Select component for choosing the recipient of a suggestion."""
+class _SuggestionModal(ui.Modal, title="Envoyer une suggestion"):
+    """Modal for submitting a suggestion."""
 
-    def __init__(self, view: InitialView) -> None:
-        """Initialize the RecipientSelect.
-
-        Args:
-            view (InitialView): The parent view.
-        """
-        options = [SelectOption(label=config.label, value=key) for key, config in SUGGESTION_OPTIONS.items()]
-        super().__init__(placeholder="Choisir le destinataire...", min_values=1, max_values=1, options=options)
-        self.view_ref = view
-
-    async def callback(self, interaction: Interaction) -> None:
-        self.view_ref.selected_recipient = self.values[0]
-        await interaction.response.defer(ephemeral=True)
-
-
-class AnonymitySelect(ui.Select):
-    def __init__(self, view: InitialView) -> None:
-        options = [SelectOption(label="Non (avec nom)", value="no"), SelectOption(label="Oui (anonyme)", value="yes")]
-        super().__init__(placeholder="Souhaitez-vous rester anonyme ?", min_values=1, max_values=1, options=options)
-        self.view_ref = view
-
-    async def callback(self, interaction: Interaction) -> None:
-        self.view_ref.anonymous = self.values[0] == "yes"
-        await interaction.response.defer(ephemeral=True)
-
-
-class SuggestionModal(ui.Modal, title="Envoyer une suggestion"):
     suggestion_input: ui.TextInput = ui.TextInput(
         label="Votre suggestion",
         style=TextStyle.long,
@@ -635,7 +612,7 @@ class SuggestionModal(ui.Modal, title="Envoyer une suggestion"):
 
     def __init__(
         self,
-        cog: SuggestionManagement,
+        cog: MessageManagement,
         recipient_key: str,
         *,
         anonymous_flag: bool,
@@ -643,7 +620,7 @@ class SuggestionModal(ui.Modal, title="Envoyer une suggestion"):
         """Initialize the SuggestionModal.
 
         Args:
-            cog (SuggestionManagement): The SuggestionManagement cog instance.
+            cog (MessageManagement): The MessageManagement cog instance.
             recipient_key (str): The key of the recipient configuration.
             anonymous_flag (bool): Whether the suggestion is anonymous.
         """
@@ -659,55 +636,136 @@ class SuggestionModal(ui.Modal, title="Envoyer une suggestion"):
             interaction (Interaction): The interaction context.
         """
         config = SUGGESTION_OPTIONS[self.recipient_key]
-        await self.cog.handle_suggestion(interaction, self.suggestion_input.value, config, anonymous=self.anonymous_flag)
+        suggestion_text = self.suggestion_input.value
+        logger.info(
+            f"[{config.command_name}]: user={interaction.user if not self.anonymous_flag else 'Anonymous'!r} "
+            f"suggestion_text={suggestion_text!r}",
+        )
+
+        assert interaction.guild is not None
+        author = interaction.user
+
+        embed = Embed(
+            title=config.embed_title,
+            description=suggestion_text,
+            color=config.embed_color,
+            timestamp=datetime.now(PARIS_TZ),
+        )
+        if not self.anonymous_flag:
+            embed.set_author(name=author.display_name, icon_url=author.display_avatar.url)
+            embed.add_field(name="Utilisateur·ice", value=author.mention, inline=False)
+        else:
+            embed.set_author(
+                name="Anonymous",
+                icon_url=ANONYMOUS_ICON_URL,
+            )
+
+        success = await self._send_suggestion(interaction.guild, embed, config, author.id if not self.anonymous_flag else None)
+
+        if not success:
+            await interaction.response.send_message(config.error_message, ephemeral=True)
+            return
+
+        logger.info(
+            f"Guild {interaction.guild.id} user "
+            f"{interaction.user.id if not self.anonymous_flag else 'Anonymous'} made a suggestion via {config.command_name}.",
+        )
 
         await interaction.response.edit_message(content=config.success_message, view=None)
 
-
-class OpenModalButton(ui.Button):
-    def __init__(self, view: InitialView, cog: SuggestionManagement) -> None:
-        """Initialize the OpenModalButton.
+    @staticmethod
+    async def _send_suggestion(guild: Guild, embed: Embed, config: SuggestionConfig, user_id: int | None) -> bool:
+        """Send a suggestion to responsible members and channel.
 
         Args:
-            view (InitialView): The parent view.
-            cog (SuggestionManagement): The SuggestionManagement cog instance.
-        """
-        super().__init__(label="Rédiger la suggestion", style=ButtonStyle.primary)
-        self.view_ref = view
-        self.cog = cog
+            guild (Guild): The guild where the suggestion is made.
+            embed (Embed): The suggestion embed to send.
+            config (SuggestionConfig): The suggestion configuration.
+            user_id (int | None): The ID of the user making the suggestion.
 
-    async def callback(self, interaction: Interaction) -> None:
-        """Handle button click.
+        Returns:
+            bool: True if at least one recipient received the suggestion, False otherwise.
+        """
+        responsibles: set[Member] = get_members_by_role(logger, guild, role=config.role_name) if config.role_name else set()
+        channel = get(guild.text_channels, name=config.channel_name) if config.channel_name else None
+
+        if not responsibles and not channel:
+            logger.error(
+                f"Guild {guild.id} has no {config.role_name} responsibles and no {config.channel_name} channel configured.",
+            )
+            return False
+
+        for responsible in responsibles:
+            await send_dm_to_member(logger, guild, responsible, None, embed=embed, dm_type="suggestion")
+        if channel:
+            try:
+                await channel.send(embed=embed)
+            except Exception:
+                logger.exception(f"Failed to send suggestion from user {user_id or 'Anonymous'} to channel {channel.id}.")
+
+        return True
+
+
+class SuggestionView(ui.View):
+    """Initial view for submitting a suggestion."""
+
+    def __init__(self, cog: MessageManagement) -> None:
+        """Initialize the InitialView.
+
+        Args:
+            cog (MessageManagement): The MessageManagement cog instance.
+        """
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.selected_recipient: str | None = None
+        self.anonymous: bool = False
+
+    @ui.select(
+        placeholder="Choisir le destinataire...",
+        options=[SelectOption(label=config.label, value=key) for key, config in SUGGESTION_OPTIONS.items()],
+    )
+    async def recipient_select(self, interaction: Interaction, select: ui.Select) -> None:
+        """Handle recipient selection.
 
         Args:
             interaction (Interaction): The interaction context.
+            select (ui.Select): The select menu instance.
         """
-        recipient = getattr(self.view_ref, "selected_recipient", None)
-        if recipient is None:
+        self.selected_recipient = select.values[0]
+        await interaction.response.defer(ephemeral=True)
+
+    @ui.button(label="Masquer mon nom", style=ButtonStyle.secondary)
+    async def anonymity_button(self, interaction: Interaction, button: ui.Button) -> None:
+        """Handle anonymity toggle.
+
+        Args:
+            interaction (Interaction): The interaction context.
+            button (ui.Button): The button instance.
+        """
+        self.anonymous = not self.anonymous
+        button.label = "Afficher mon nom" if self.anonymous else "Masquer mon nom"
+        await interaction.response.edit_message(view=self)
+
+    @ui.button(label="Rédiger la suggestion", style=ButtonStyle.primary)
+    async def open_modal_button(self, interaction: Interaction, _button: ui.Button) -> None:
+        """Handle button click to open the suggestion modal.
+
+        Args:
+            interaction (Interaction): The interaction context.
+            _button (ui.Button): The button instance.
+        """
+        if self.selected_recipient is None:
             await interaction.response.send_message("Veuillez d'abord choisir le destinataire.", ephemeral=True)
             return
 
         assert interaction.message is not None
 
-        modal = SuggestionModal(self.cog, recipient, anonymous_flag=getattr(self.view_ref, "anonymous", False))
+        modal = _SuggestionModal(
+            cog=self.cog,
+            recipient_key=self.selected_recipient,
+            anonymous_flag=self.anonymous,
+        )
         await interaction.response.send_modal(modal)
-
-
-class InitialView(ui.View):
-    """Initial view for submitting a suggestion."""
-
-    def __init__(self, cog: SuggestionManagement) -> None:
-        """Initialize the InitialView.
-
-        Args:
-            cog (SuggestionManagement): The SuggestionManagement cog instance.
-        """
-        super().__init__(timeout=None)
-        self.selected_recipient: str | None = None
-        self.anonymous: bool = False
-        self.add_item(RecipientSelect(self))
-        self.add_item(AnonymitySelect(self))
-        self.add_item(OpenModalButton(self, cog))
 
 
 # endregion Suggestion UI Components

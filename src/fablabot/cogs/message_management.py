@@ -554,6 +554,27 @@ class MessageManagement(commands.Cog):
 
     # endregion Message Slash Commands Group
 
+    # region ====== Suggestion Slash Command ======
+
+    @app_commands.command(name="suggest", description="Envoyer une suggestion (choisir destinataire, texte, anonymat)")
+    async def suggest(self, interaction: Interaction) -> None:
+        """Single command entrypoint for sending suggestions via a small interactive flow.
+
+        The flow collects the recipient and anonymity via components, then opens a modal to input the suggestion text.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+        """
+        await ensure_command_context(logger, "suggest", interaction, enforce_commands_channel=False)
+        view = mui.SuggestionView(self)
+        await interaction.response.send_message(
+            "Veuillez choisir le destinataire et si vous souhaitez rester anonyme, puis cliquez sur 'Rédiger la suggestion'.",
+            view=view,
+            ephemeral=True,
+        )
+
+    # endregion Suggestion Slash Command
+
     # region ====== Listeners ======
 
     @commands.Cog.listener()
