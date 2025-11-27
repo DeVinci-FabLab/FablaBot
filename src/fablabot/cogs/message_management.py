@@ -40,7 +40,14 @@ from fablabot.helpers.constants import ADMIN_ROLES, PARIS_TZ, ErrorMessages, Rol
 from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.state_store import JsonStateStore
-from fablabot.helpers.utils import ensure_command_context, get_members_by_role, is_valid_emoji, log_request, send_dm_to_member
+from fablabot.helpers.utils import (
+    ensure_command_context,
+    get_members_by_role,
+    get_or_fetch_member,
+    is_valid_emoji,
+    log_request,
+    send_dm_to_member,
+)
 from fablabot.models.common import ReactionAction, ReactionEvent
 from fablabot.models.message import EASTER_EGGS, MessageDraft, MsgCommand, MsgReactionEvent, TrackedMessage
 from fablabot.ui import mui
@@ -564,9 +571,31 @@ class MessageManagement(commands.Cog):
             return
 
         for egg in EASTER_EGGS:
-            if any(keyword in msg.content.lower() for keyword in egg.keywords) and random.random() < egg.probability:
+            if any(pattern.search(msg.content) for pattern in egg.keywords) and random.random() < egg.probability:
                 await msg.channel.send(content=egg.response, reference=msg)
+                if egg.reaction:
+                    with contextlib.suppress(Exception):
+                        await msg.add_reaction(egg.reaction)
                 logger.info(f"Easter egg triggered by {msg.author} in {msg.channel}: {egg.keywords}")
+
+                break
+
+        from fablabot.guild_config import is_philippine_bully_enabled, set_philippine_bully_enabled
+
+        assert msg.guild is not None
+        if "monster" in msg.content.lower() and is_philippine_bully_enabled(msg.guild.id):
+            philippine = await get_or_fetch_member(msg.guild, 641386630581714976)
+            if philippine is not None:
+                await philippine.timeout(timedelta(seconds=10), reason="Monster detected in message")
+                logger.debug(f"Philippine timed out in guild {msg.guild.id} due to monster message by {msg.author}")
+
+        if "go bully philippine" in msg.content.lower() and msg.author.id == 585347569329373214:
+            set_philippine_bully_enabled(msg.guild.id, enabled=True)
+            logger.debug(f"Philippine Bully enabled in guild {msg.guild.id} by {msg.author}")
+
+        if "stop bullying philippine" in msg.content.lower() and msg.author.id == 585347569329373214:
+            set_philippine_bully_enabled(msg.guild.id, enabled=False)
+            logger.debug(f"Philippine Bully disabled in guild {msg.guild.id} by {msg.author}")
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: RawReactionActionEvent) -> None:

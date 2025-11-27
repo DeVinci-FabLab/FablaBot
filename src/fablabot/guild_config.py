@@ -14,6 +14,7 @@ CONFIG_FILE = Path("data/guild_config.json")
 _GUILD_KEY_COMMANDS = "commands_channel_id"
 _KEY_LOG = "log_channel_id"
 _GUILD_KEY_WELCOME = "welcome_verify_enabled"
+_GUILD_KEY_BULLY = "philippine_bully_enabled"
 _GLOBAL_SECTION = "__global__"
 
 _config_store = JsonStateStore(logger, CONFIG_FILE)
@@ -116,6 +117,30 @@ def set_log_channel_id(channel_id: int) -> None:
         channel_id (int): The channel ID to set.
     """
     _update_entry(None, **{_KEY_LOG: channel_id})
+
+
+def is_philippine_bully_enabled(guild_id: int) -> bool:
+    """Check if Philippine Bully is enabled for a specific guild.
+
+    Args:
+        guild_id (int): The ID of the guild to check.
+
+    Returns:
+        bool: True if Philippine Bully is enabled, False otherwise.
+    """
+    entry = _load_all().get(str(guild_id), {})
+    value = entry.get(_GUILD_KEY_BULLY)
+    return bool(value) if isinstance(value, bool) else False
+
+
+def set_philippine_bully_enabled(guild_id: int, *, enabled: bool) -> None:
+    """Set the Philippine Bully status for a specific guild.
+
+    Args:
+        guild_id (int): The ID of the guild to set the status for.
+        enabled (bool): Whether to enable or disable the feature.
+    """
+    _update_entry(guild_id, **{_GUILD_KEY_BULLY: bool(enabled)})
 
 
 def is_welcome_verify_enabled(guild_id: int) -> bool:
