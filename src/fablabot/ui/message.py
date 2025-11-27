@@ -263,7 +263,7 @@ class _ReactionTargetView(ui.View):
                 self.add_item(self.role_select)
 
 
-class ReactionActionTypeView(ui.View):
+class _ReactionActionTypeSelectView(ui.View):  # TODO: review
     """View to pick an action type before selecting the reaction target."""
 
     def __init__(
@@ -370,7 +370,7 @@ class _TrackedMessageSelectButton(ui.Button["TrackedMessageSelectView"]):
         view = cast("TrackedMessageSelectView", self.view)
         match view.cmd:
             case MsgCommand.LINK:
-                raise NotImplementedError("Link command not yet implemented in TrackedMessageSelectView.")
+                await view.open_link_selector(interaction, self.tracked.message_id)
             case MsgCommand.UNLINK:
                 await view.open_unlink_selector(interaction, self.tracked)
             case MsgCommand.STOP:
@@ -381,43 +381,114 @@ class _TrackedMessageSelectButton(ui.Button["TrackedMessageSelectView"]):
                 logger.error("Unknown command in TrackedMessageSelectView callback.")
 
 
-# HACK: une seule classe de sélection de message pour link, unlink, stop, export
+class _DraftSelectButton(ui.Button["TrackedMessageSelectView"]):
+    """Button to select the current draft."""
+
+    def __init__(self) -> None:
+        super().__init__(label="Brouillon", style=ButtonStyle.secondary, custom_id="select_draft")
+
+    async def callback(self, interaction: Interaction) -> None:
+        """Handle draft selection.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+        """
+        if self.view is None:
+            await interaction.response.send_message(ErrorMessages.EXPIRED_VIEW_MESSAGE, ephemeral=True)
+            return
+
+        view = cast("TrackedMessageSelectView", self.view)
+        if view.draft is None:
+            await interaction.response.send_message(ErrorMessages.MSG_NO_DRAFT, ephemeral=True)
+            return
+
+        match view.cmd:
+            case MsgCommand.LINK:
+                await view.open_link_selector(interaction, None)
+            case MsgCommand.UNLINK:
+                await view.open_unlink_selector(interaction, view.draft)
+            case _:
+                logger.error("Unknown command in TrackedMessageSelectView draft callback.")
+                await interaction.response.send_message(ErrorMessages.EXPIRED_VIEW_MESSAGE, ephemeral=True)
+
+
 # TODO: follow prend link_reaction du draft
 
 
 class TrackedMessageSelectView(ui.View):
     """View to pick a tracked message or draft before running message commands."""
 
-    def __init__(self, cog: MessageManagement, tracked_messages: list[TrackedMessage], cmd: MsgCommand) -> None:
+    def __init__(
+        self,
+        cog: MessageManagement,
+        tracked_messages: list[TrackedMessage],
+        cmd: MsgCommand,
+        *,
+        draft: MessageDraft | None = None,
+        emoji: str | None = None,
+    ) -> None:
         """Initialize the TrackedMessageSelectView.
 
         Args:
             cog (MessageManagement): The MessageManagement cog instance.
             tracked_messages (list[TrackedMessage]): The list of tracked messages to select from.
             cmd (MsgTrackedCommand): The command determining what happens after selection.
+            draft (MessageDraft | None): Optional draft to include as a selectable target.
+            emoji (str | None): Emoji passed through when linking a reaction.
         """
         super().__init__(timeout=None)
         self.cog = cog
         self.tracked_messages = tracked_messages
         self.cmd = cmd
+        self.draft = draft
+        self.emoji = emoji
 
-        for tracked in tracked_messages[:MAX_TRACKED_OPTIONS]:
+        if self.draft is not None and self.cmd in {MsgCommand.LINK, MsgCommand.UNLINK}:
+            self.add_item(_DraftSelectButton())
+
+        max_options = MAX_TRACKED_OPTIONS - (1 if self.draft else 0)
+        for tracked in tracked_messages[:max_options]:
             self.add_item(_TrackedMessageSelectButton(tracked))
 
-    async def open_unlink_selector(self, interaction: Interaction, tracked: TrackedMessage) -> None:
-        """Open the reaction unlink view for the selected tracked message.
+    async def open_link_selector(self, interaction: Interaction, target_message_id: int | None) -> None:
+        """Open the link workflow for the selected target.
 
         Args:
             interaction (Interaction): The Discord interaction context.
-            tracked (TrackedMessage): The tracked message for which to open the unlink selector.
+            target_message_id (int | None): The ID of the target message (None = draft).
         """
-        if not tracked.reactions:
-            await interaction.response.edit_message(content="Aucune action configurée sur ce message suivi.", view=None)
+        assert interaction.guild is not None
+
+        if self.emoji is None:
+            await interaction.response.send_message(ErrorMessages.INVALID_EMOJI, ephemeral=True)
             return
 
+        if target_message_id is None and self.draft is None:
+            await interaction.response.send_message(ErrorMessages.MSG_NO_DRAFT, ephemeral=True)
+            return
+
+        target_label = "le brouillon" if target_message_id is None else f"le message `{target_message_id}`"
+        view = _ReactionActionTypeSelectView(self.cog, interaction.guild.id, target_message_id, self.emoji)
+        await interaction.response.edit_message(
+            content=f"Choisis le type d'action pour {target_label} puis la cible.",
+            view=view,
+        )
+
+    async def open_unlink_selector(self, interaction: Interaction, tracked: TrackedMessage | MessageDraft) -> None:
+        """Open the reaction unlink view for the selected target.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            tracked (TrackedMessage | MessageDraft): The target for which to open the unlink selector.
+        """
+        if not tracked.reactions:
+            await interaction.response.edit_message(content="Aucune action configurée sur ce message.", view=None)
+            return
+
+        target_label = f"message `{tracked.message_id}`" if isinstance(tracked, TrackedMessage) else "brouillon"
         view = _UnlinkReactionSelectView(self.cog, tracked)
         await interaction.response.edit_message(
-            content=f"Sélectionne l'action à retirer pour le message `{tracked.message_id}`.",
+            content=f"Sélectionne l'action à retirer pour le {target_label}.",
             view=view,
         )
 
@@ -462,12 +533,12 @@ class TrackedMessageSelectView(ui.View):
 class _UnlinkReactionSelectView(ui.View):  # TODO: review, voir display name et non id
     """View to pick which reaction action to remove from a tracked message."""
 
-    def __init__(self, cog: MessageManagement, tracked: TrackedMessage) -> None:
+    def __init__(self, cog: MessageManagement, target: TrackedMessage | MessageDraft) -> None:
         super().__init__(timeout=None)
         self.cog = cog
-        self.tracked = tracked
+        self.target = target
 
-        for idx, reaction in enumerate(tracked.reactions[:MAX_TRACKED_OPTIONS], start=1):
+        for idx, reaction in enumerate(target.reactions[:MAX_TRACKED_OPTIONS], start=1):
             action_label = self.cog.format_reaction_action(reaction)
             preview = reaction.message_content
             if len(preview) > 60:
@@ -499,19 +570,24 @@ class _UnlinkReactionButton(ui.Button[_UnlinkReactionSelectView]):  # TODO: revi
         assert isinstance(view, _UnlinkReactionSelectView)
         assert interaction.guild is not None
 
-        if self.reaction_index >= len(view.tracked.reactions):
+        if self.reaction_index >= len(view.target.reactions):
             await interaction.response.send_message("Action introuvable.", ephemeral=True)
             return
 
-        removed = view.tracked.reactions.pop(self.reaction_index)
-        view.cog.set_tracked_message(interaction.guild.id, view.tracked)
+        removed = view.target.reactions.pop(self.reaction_index)
+        if isinstance(view.target, MessageDraft):
+            view.cog.set_draft(interaction.guild.id, view.target)
+            target_label = "le brouillon"
+        else:
+            view.cog.set_tracked_message(interaction.guild.id, view.target)
+            target_label = f"le message {view.target.message_id}"
         logger.info(
-            f"Removed reaction action {removed.emoji} ({removed.action_type}) on message "
-            f"{view.tracked.message_id} in guild {interaction.guild.id}",
+            f"Removed reaction action {removed.emoji} ({removed.action_type}) on {target_label} "
+            f"in guild {interaction.guild.id}",
         )
 
         await interaction.response.edit_message(
-            content=f"Action retirée : {removed.emoji} : {view.cog.format_reaction_action(removed)}",
+            content=f"Action retirée de {target_label} : {removed.emoji} : {view.cog.format_reaction_action(removed)}",
             view=None,
         )
 

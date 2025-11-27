@@ -289,29 +289,24 @@ class MessageManagement(commands.Cog):
         )
 
     @msg_group.command(name="link_reaction", description="Associer une réaction à une action automatisée.")
-    @app_commands.describe(
-        emoji="Emoji déclencheur",
-        message="ID ou lien du message suivi (laisser vide pour ajouter au brouillon)",
-    )
+    @app_commands.describe(emoji="Emoji déclencheur")
     async def msg_link_reaction(
         self,
         interaction: Interaction,
         *,
         emoji: str,
-        message: str | None = None,
-    ) -> None:  # TODO: TrackedMessageSelectView
+    ) -> None:
         """Link a reaction to an automated action.
 
         Args:
             interaction (Interaction): The Discord interaction context.
             emoji (str): The emoji that triggers the action.
-            message (str): The ID or link of the tracked message.
         """
         if not await ensure_command_context(
             logger,
             "msg.link_reaction",
             interaction,
-            log_details={"message": message, "emoji": emoji},
+            log_details={"emoji": emoji},
             required_roles=ALLOWED_ROLES,
         ):
             return
@@ -322,26 +317,19 @@ class MessageManagement(commands.Cog):
 
         assert interaction.guild is not None
 
-        target_message_id: int | None = None
-        if message:
-            target_message_id = self._parse_message_id(message)
-            if target_message_id is None:
-                logger.warning(f"Invalid message id for link_reaction by {interaction.user}")
-                await interaction.response.send_message(ErrorMessages.INVALID_MESSAGE_ID, ephemeral=True)
-                return
-            tracked = self._get_tracked_message(interaction.guild.id, target_message_id)
-            if tracked is None:
-                await interaction.response.send_message(ErrorMessages.MSG_NO_TRACKED, ephemeral=True)
-                return
-        else:
-            draft = self.get_draft(interaction.guild.id)
-            if draft is None:
-                await interaction.response.send_message(ErrorMessages.MSG_NO_DRAFT, ephemeral=True)
-                return
+        draft = self.get_draft(interaction.guild.id)
 
-        view = mui.ReactionActionTypeView(self, interaction.guild.id, target_message_id, emoji)
+        tracked_map = self._get_tracked_messages(interaction.guild.id)
+        if not tracked_map and draft is None:
+            await interaction.response.send_message(
+                "Aucun brouillon ou message suivi disponible. Lance `/msg start` ou `/msg follow`.",
+                ephemeral=True,
+            )
+            return
+
+        view = mui.TrackedMessageSelectView(self, list(tracked_map.values()), MsgCommand.LINK, draft=draft, emoji=emoji)
         await interaction.response.send_message(
-            "Choisis le type d'action puis la cible avant de rédiger le message envoyé lors de la réaction.",
+            "Choisis le brouillon ou un message suivi pour ajouter la réaction.",
             view=view,
             ephemeral=True,
         )
@@ -362,16 +350,23 @@ class MessageManagement(commands.Cog):
         assert interaction.guild is not None
         tracked_map = self._get_tracked_messages(interaction.guild.id)
         tracked_with_actions = [t for t in tracked_map.values() if t.reactions]
-        if not tracked_with_actions:
+        draft = self.get_draft(interaction.guild.id)
+        draft_with_actions = draft if draft and draft.reactions else None
+        if not tracked_with_actions and draft_with_actions is None:
             await interaction.response.send_message(
-                "Aucune action configurée sur les messages suivis.",
+                "Aucune action configurée sur les messages suivis ou le brouillon.",
                 ephemeral=True,
             )
             return
 
-        view = mui.TrackedMessageSelectView(self, tracked_with_actions, MsgCommand.UNLINK)
+        view = mui.TrackedMessageSelectView(
+            self,
+            tracked_with_actions,
+            MsgCommand.UNLINK,
+            draft=draft_with_actions,
+        )
         await interaction.response.send_message(
-            "Sélectionne le message suivi puis l'action à retirer.",
+            "Sélectionne le message suivi ou le brouillon puis l'action à retirer.",
             view=view,
             ephemeral=True,
         )
