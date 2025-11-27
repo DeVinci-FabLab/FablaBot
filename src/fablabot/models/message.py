@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum, auto
 from typing import Any, Literal
 
 from fablabot.helpers.constants import RoleNames
@@ -59,6 +60,26 @@ EASTER_EGGS: list[EasterEggTrigger] = [
 
 MsgActionType = Literal["channel", "user_dm", "role_dm"]
 """Supported reaction action types for message management."""
+
+
+class MsgCommand(Enum):
+    """Enumeration of tracked message commands.
+
+    Attributes:
+        LINK: Link a new reaction-based action to a tracked message.
+        UNLINK: Unlink a configured reaction from a tracked message.
+        STOP: Stop tracking a tracked message.
+        EXPORT: Export tracked messages to a JSON file.
+    """
+
+    LINK = auto()
+    """Link a new reaction-based action to a tracked message."""
+    UNLINK = auto()
+    """Unlink a configured reaction from a tracked message."""
+    STOP = auto()
+    """Stop tracking a tracked message."""
+    EXPORT = auto()
+    """Export tracked messages to a JSON file."""
 
 
 @dataclass

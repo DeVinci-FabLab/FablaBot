@@ -7,6 +7,7 @@ from fablabot.models.message import (
     EASTER_EGGS,
     SUGGESTION_OPTIONS,
     MessageDraft,
+    MsgCommand,
     MsgReactionEvent,
     TrackedMessage,
 )
@@ -19,6 +20,7 @@ __all__ = [
     "FmMessageDraft",
     "Formation",
     "MessageDraft",
+    "MsgCommand",
     "MsgReactionEvent",
     "PublishedMessage",
     "ReactionAction",

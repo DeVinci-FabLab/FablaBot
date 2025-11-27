@@ -1,15 +1,22 @@
-"""User interface components for message-related features."""
+﻿"""User interface components for message-related features."""
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from discord import ButtonStyle, ChannelType, Embed, Interaction, Member, SelectOption, TextStyle, ui
 
 from fablabot.helpers.constants import ErrorMessages
 from fablabot.helpers.utils import format_member_mention, send_dm_to_member
-from fablabot.models.message import SUGGESTION_OPTIONS, MessageDraft, MsgActionType, MsgReactionEvent, TrackedMessage
+from fablabot.models.message import (
+    SUGGESTION_OPTIONS,
+    MessageDraft,
+    MsgActionType,
+    MsgCommand,
+    MsgReactionEvent,
+    TrackedMessage,
+)
 
 if TYPE_CHECKING:
     from fablabot.cogs import MessageManagement, SuggestionManagement
@@ -328,69 +335,79 @@ class ReactionActionTypeView(ui.View):
         await self._open_target_view(interaction, "role_dm")
 
 
-class _SelectMessageButton(ui.Button[Any]):
-    """Button to select a tracked message to unlink a reaction from or stop tracking."""
+class _TrackedMessageSelectButton(ui.Button["TrackedMessageSelectView"]):
+    """Button to select a tracked message before performing an action."""
 
-    def __init__(self, message_id: int) -> None:
-        """Initialize the _SelectMessageButton.
+    def __init__(self, tracked: TrackedMessage) -> None:
+        """Initialize the tracked message button.
 
         Args:
-            message_id (int): The ID of the message to select.
+            tracked (TrackedMessage): The tracked message represented by this button.
         """
         super().__init__(
-            label=f"Message {message_id}",
+            label=f"Message {tracked.message_id}",
             style=ButtonStyle.primary,
-            custom_id=f"select_msg_{message_id}",
+            custom_id=f"select_tracked_msg_{tracked.message_id}",
         )
-        self.message_id = message_id
+        self.tracked = tracked
 
     async def callback(self, interaction: Interaction) -> None:
         """Handle button click.
 
         Args:
             interaction (Interaction): The Discord interaction context.
+
+        Raises:
+            NotImplementedError: If the command is not yet implemented.
         """
-        view = self.view
-        if view is None:
+        if self.view is None:
             await interaction.response.send_message(ErrorMessages.EXPIRED_VIEW_MESSAGE, ephemeral=True)
             return
 
-        assert isinstance(view, UnlinkMessageSelectView | StopTrackingSelectView)
-        await view.handle_selection(interaction, self.message_id)
+        view = cast("TrackedMessageSelectView", self.view)
+        match view.cmd:
+            case MsgCommand.LINK:
+                raise NotImplementedError("Link command not yet implemented in TrackedMessageSelectView.")
+            case MsgCommand.UNLINK:
+                await view.open_unlink_selector(interaction, self.tracked)
+            case MsgCommand.STOP:
+                await view.stop_tracking(interaction, self.tracked)
+            case MsgCommand.EXPORT:
+                raise NotImplementedError("Export command not yet implemented in TrackedMessageSelectView.")
+            case _:
+                logger.error("Unknown command in TrackedMessageSelectView callback.")
 
 
 # HACK: une seule classe de sélection de message pour link, unlink, stop, export
-# TODO: follow link_reaction du draft
+# TODO: follow prend link_reaction du draft
 
 
-class UnlinkMessageSelectView(ui.View):  # TODO: voir apperçu début de chaque message
-    """View to pick which tracked message to edit before unlinking a reaction."""
+class TrackedMessageSelectView(ui.View):
+    """View to pick a tracked message before unlinking an action or stopping tracking."""
 
-    def __init__(self, cog: MessageManagement, tracked_messages: list[TrackedMessage]) -> None:
-        """Initialize the UnlinkMessageSelectView.
+    def __init__(self, cog: MessageManagement, tracked_messages: list[TrackedMessage], cmd: MsgCommand) -> None:
+        """Initialize the TrackedMessageSelectView.
 
         Args:
             cog (MessageManagement): The MessageManagement cog instance.
             tracked_messages (list[TrackedMessage]): The list of tracked messages to select from.
+            cmd (MsgTrackedCommand): The command determining what happens after selection.
         """
         super().__init__(timeout=None)
         self.cog = cog
         self.tracked_messages = tracked_messages
+        self.cmd = cmd
 
         for tracked in tracked_messages[:MAX_TRACKED_OPTIONS]:
-            self.add_item(_SelectMessageButton(tracked.message_id))
+            self.add_item(_TrackedMessageSelectButton(tracked))
 
-    async def handle_selection(self, interaction: Interaction, message_id: int) -> None:
-        """Handle the selection of a tracked message to unlink a reaction from.
+    async def open_unlink_selector(self, interaction: Interaction, tracked: TrackedMessage) -> None:
+        """Open the reaction unlink view for the selected tracked message.
 
         Args:
             interaction (Interaction): The Discord interaction context.
-            message_id (int): The ID of the message to unlink a reaction from.
+            tracked (TrackedMessage): The tracked message for which to open the unlink selector.
         """
-        tracked = next((t for t in self.tracked_messages if t.message_id == message_id), None)
-        if tracked is None:
-            await interaction.response.edit_message(content="Message suivi introuvable.", view=None)
-            return
         if not tracked.reactions:
             await interaction.response.edit_message(content="Aucune action configurée sur ce message suivi.", view=None)
             return
@@ -399,6 +416,24 @@ class UnlinkMessageSelectView(ui.View):  # TODO: voir apperçu début de chaque 
         await interaction.response.edit_message(
             content=f"Sélectionne l'action à retirer pour le message `{tracked.message_id}`.",
             view=view,
+        )
+
+    async def stop_tracking(self, interaction: Interaction, tracked: TrackedMessage) -> None:
+        """Remove tracking for the selected message.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            tracked (TrackedMessage): The tracked message to stop tracking.
+        """
+        assert interaction.guild is not None
+        if not self.cog.remove_tracked_message(interaction.guild.id, tracked.message_id):
+            await interaction.response.edit_message(content="Suivi introuvable pour ce message.", view=None)
+            return
+
+        logger.info(f"Stopped tracking message {tracked.message_id} in guild {interaction.guild.id}")
+        await interaction.response.edit_message(
+            content=f"Suivi arrêté pour le message `{tracked.message_id}`.",
+            view=None,
         )
 
 
@@ -455,41 +490,6 @@ class _UnlinkReactionButton(ui.Button[_UnlinkReactionSelectView]):  # TODO: revi
 
         await interaction.response.edit_message(
             content=f"Action retirée : {removed.emoji} : {view.cog.format_reaction_action(removed)}",
-            view=None,
-        )
-
-
-class StopTrackingSelectView(ui.View):  # TODO: review
-    """View to pick a tracked message to stop following."""
-
-    def __init__(self, cog: MessageManagement, tracked_messages: list[TrackedMessage]) -> None:
-        """Initialize the StopTrackingSelectView.
-
-        Args:
-            cog (MessageManagement): The MessageManagement cog instance.
-            tracked_messages (list[TrackedMessage]): The list of tracked messages to select from.
-        """
-        super().__init__(timeout=None)
-        self.cog = cog
-
-        for tracked in tracked_messages[:MAX_TRACKED_OPTIONS]:
-            self.add_item(_SelectMessageButton(tracked.message_id))
-
-    async def handle_selection(self, interaction: Interaction, message_id: int) -> None:
-        """Handle the selection of a tracked message to stop tracking.
-
-        Args:
-            interaction (Interaction): The Discord interaction context.
-            message_id (int): The ID of the message to stop tracking.
-        """
-        assert interaction.guild is not None
-        if not self.cog.remove_tracked_message(interaction.guild.id, message_id):
-            await interaction.response.edit_message(content="Suivi introuvable pour ce message.", view=None)
-            return
-
-        logger.info(f"Stopped tracking message {message_id} in guild {interaction.guild.id}")
-        await interaction.response.edit_message(
-            content=f"Suivi arrêté pour le message `{message_id}`.",
             view=None,
         )
 

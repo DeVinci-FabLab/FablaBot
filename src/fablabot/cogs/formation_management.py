@@ -340,7 +340,7 @@ class FormationManagement(commands.Cog):
             await interaction.response.send_message(ErrorMessages.DRAFT_EMPTY, ephemeral=True)
             return
 
-        view = fmui.SelectFormationView(self, draft.fms, FmCommand.EDIT)
+        view = fmui.FormationSelectView(self, draft.fms, FmCommand.EDIT)
         await interaction.response.send_message(
             "Sélectionne la formation à modifier.",
             view=view,
@@ -366,7 +366,7 @@ class FormationManagement(commands.Cog):
             await interaction.response.send_message(ErrorMessages.DRAFT_EMPTY, ephemeral=True)
             return
 
-        view = fmui.SelectFormationView(self, draft.fms, FmCommand.REMOVE)
+        view = fmui.FormationSelectView(self, draft.fms, FmCommand.REMOVE)
         await interaction.response.send_message(
             "Sélectionne la formation à supprimer.",
             view=view,

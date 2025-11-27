@@ -1,4 +1,4 @@
-"""Message management commands for Discord Bot. Provides slash commands for sending and managing messages."""
+﻿"""Message management commands for Discord Bot. Provides slash commands for sending and managing messages."""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.state_store import JsonStateStore
 from fablabot.helpers.utils import ensure_command_context, get_members_by_role, is_valid_emoji, log_request, send_dm_to_member
 from fablabot.models.common import ReactionAction, ReactionEvent
-from fablabot.models.message import EASTER_EGGS, MessageDraft, MsgReactionEvent, TrackedMessage
+from fablabot.models.message import EASTER_EGGS, MessageDraft, MsgCommand, MsgReactionEvent, TrackedMessage
 from fablabot.ui import mui
 
 logger = logging.getLogger(__name__)
@@ -299,7 +299,7 @@ class MessageManagement(commands.Cog):
         *,
         emoji: str,
         message: str | None = None,
-    ) -> None:
+    ) -> None:  # TODO: TrackedMessageSelectView
         """Link a reaction to an automated action.
 
         Args:
@@ -369,7 +369,7 @@ class MessageManagement(commands.Cog):
             )
             return
 
-        view = mui.UnlinkMessageSelectView(self, tracked_with_actions)
+        view = mui.TrackedMessageSelectView(self, tracked_with_actions, MsgCommand.UNLINK)
         await interaction.response.send_message(
             "Sélectionne le message suivi puis l'action à retirer.",
             view=view,
@@ -506,7 +506,9 @@ class MessageManagement(commands.Cog):
         description="Exporter l'historique des réactions d'un message suivi.",
     )
     @app_commands.describe(message="ID ou lien du message (optionnel : dernier suivi actif par défaut)")
-    async def msg_export(self, interaction: Interaction, *, message: str | None = None) -> None:
+    async def msg_export(
+        self, interaction: Interaction, *, message: str | None = None
+    ) -> None:  # TODO: TrackedMessageSelectView
         """Export the reaction history of a tracked message.
 
         Args:
@@ -571,7 +573,7 @@ class MessageManagement(commands.Cog):
             await interaction.response.send_message(ErrorMessages.MSG_NO_TRACKED_AVAILABLE, ephemeral=True)
             return
 
-        view = mui.StopTrackingSelectView(self, list(tracked_map.values()))
+        view = mui.TrackedMessageSelectView(self, list(tracked_map.values()), MsgCommand.STOP)
         await interaction.response.send_message(content="Sélectionne le message dont tu veux arrêter le suivi.", view=view)
 
     # endregion Message Slash Commands Group
@@ -804,12 +806,7 @@ class MessageManagement(commands.Cog):
             f"for message {tracked.message_id} in guild {guild_id}",
         )
         await self._ensure_reaction_on_message(guild_id, tracked, reaction.emoji)
-
-        action_desc = {
-            "channel": f"message dans <#{reaction.target_id}>",
-            "user_dm": "DM à la personne qui réagit",
-            "role_dm": f"DM aux membres du rôle <@&{reaction.target_id}>",
-        }.get(reaction.action_type, reaction.action_type)
+        action_desc = self.format_reaction_action(reaction)
 
         return f"Réaction {reaction.emoji} ajoutée.\nAction : {action_desc}\nMessage envoyé :\n{reaction.message_content}"
 

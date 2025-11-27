@@ -280,14 +280,14 @@ class AddFmModal(ui.Modal, title="Ajouter une formation"):
         )
 
 
-# region ====== SelectFormationView and its components ======
+# region ====== FormationSelectView and its components ======
 
 
-class _SelectFormationButton(ui.Button["SelectFormationView"]):
+class _FormationSelectButton(ui.Button["FormationSelectView"]):
     """Button to select a formation to edit."""
 
     def __init__(self, formation_index: int, formation: Formation) -> None:
-        """Initialize the SelectFormationButton.
+        """Initialize the FormationSelectButton.
 
         Args:
             formation_index (int): The index of the formation (1-based).
@@ -311,41 +311,21 @@ class _SelectFormationButton(ui.Button["SelectFormationView"]):
             await interaction.response.send_message(ErrorMessages.EXPIRED_VIEW_MESSAGE, ephemeral=True)
             return
 
-        view = cast("SelectFormationView", self.view)
+        view = cast("FormationSelectView", self.view)
         match view.cmd:
             case FmCommand.EDIT:
-                await interaction.response.edit_message(
-                    content=f"Modification : {self.formation.emoji} {self.formation.name}",
-                    view=_EditFormationView(view.cog, self.formation_index, self.formation),
-                    embed=Embed(description=render_formation(self.formation)),
-                )
+                await view.open_edit_view(interaction, self.formation_index, self.formation)
             case FmCommand.REMOVE:
-                assert interaction.guild is not None
-                draft = view.cog.get_guild_draft(interaction.guild.id)
-
-                removed = draft.fms.pop(self.formation_index - 1)
-
-                view.cog.set_guild_draft(interaction.guild.id, draft)
-
-                preview = render_message(draft)
-                logger.info(
-                    f"Guild {interaction.guild.id} removed formation {removed.name!r} ({removed.start_iso}) from draft.",
-                )
-
-                await interaction.response.edit_message(
-                    content=f"Supprimé: {removed.emoji} {removed.name}",
-                    embed=Embed(title=f"Aperçu brouillon — {len(draft.fms)} formation(s)", description=preview or "_(vide)_"),
-                    view=None,
-                )
+                await view.remove_formation(interaction, self.formation_index)
             case _:
-                logger.error("Unknown command in SelectFormationView callback.")
+                logger.error("Unknown command in FormationSelectView callback.")
 
 
-class SelectFormationView(ui.View):
+class FormationSelectView(ui.View):
     """View to select which formation to edit."""
 
     def __init__(self, cog: FormationManagement, formations: list[Formation], cmd: FmCommand) -> None:
-        """Initialize the SelectFormationView.
+        """Initialize the FormationSelectView.
 
         Args:
             cog (FormationManagement): FormationManagement cog instance.
@@ -357,10 +337,49 @@ class SelectFormationView(ui.View):
         self.cmd = cmd
 
         for idx, fm in enumerate(formations[:MAX_FORMATION_BUTTONS], start=1):
-            self.add_item(_SelectFormationButton(idx, fm))
+            self.add_item(_FormationSelectButton(idx, fm))
+
+    async def open_edit_view(self, interaction: Interaction, formation_index: int, formation: Formation) -> None:
+        """Called to open the edit formation view.
+
+        Args:
+            interaction (Interaction): The interaction that triggered the button click.
+            formation_index (int): The index of the formation (1-based).
+            formation (Formation): The formation object.
+        """
+        await interaction.response.edit_message(
+            content=f"Modification : {formation.emoji} {formation.name}",
+            view=_EditFormationView(self.cog, formation_index, formation),
+            embed=Embed(description=render_formation(formation)),
+        )
+
+    async def remove_formation(self, interaction: Interaction, formation_index: int) -> None:
+        """Called to remove a formation from the draft.
+
+        Args:
+            interaction (Interaction): The interaction that triggered the button click.
+            formation_index (int): The index of the formation (1-based).
+        """
+        assert interaction.guild is not None
+        draft = self.cog.get_guild_draft(interaction.guild.id)
+
+        removed = draft.fms.pop(formation_index - 1)
+
+        self.cog.set_guild_draft(interaction.guild.id, draft)
+
+        preview = render_message(draft)
+        logger.info(
+            f"Guild {interaction.guild.id} removed formation {removed.name!r} ({removed.start_iso}) from draft.",
+        )
+
+        await interaction.response.edit_message(
+            content=f"Supprimé: {removed.emoji} {removed.name}",
+            embed=Embed(title=f"Aperçu brouillon — {len(draft.fms)} formation(s)", description=preview or "_(vide)_"),
+            view=None,
+        )
 
 
-# endregion SelectFormationView and its components
+# endregion FormationSelectView and its components
 
 # region ====== EditFormationView and its components ======
 
