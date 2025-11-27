@@ -29,8 +29,10 @@ logger = logging.getLogger(__name__)
 
 MAX_TRACKED_OPTIONS = 25
 
+# region ====== BulkDM UI Components ======
 
-class BulkDMView(ui.View):
+
+class _BulkDMView(ui.View):
     """View for bulk direct message sending."""
 
     def __init__(self, sender: Member, followup_id: int, message: str) -> None:
@@ -101,6 +103,61 @@ class BulkDMView(ui.View):
 
         await interaction.followup.edit_message(self.followup_id, content="\n".join(lines))
         await interaction.delete_original_response()
+
+
+class BulkDMModal(ui.Modal, title="Envoyer un MP à plusieurs utilisateurs"):
+    """Modal for composing a bulk direct message."""
+
+    message_input: ui.TextInput = ui.TextInput(
+        label="Message à envoyer",
+        style=TextStyle.long,
+        placeholder="Saisis le message à envoyer en MP...",
+        required=True,
+        max_length=2000,
+    )
+
+    def __init__(self, cog: MessageManagement) -> None:
+        """Initialize the BulkDMModal.
+
+        Args:
+            cog (MessageManagement): The MessageManagement cog instance.
+        """
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: Interaction) -> None:
+        """Handle modal submission.
+
+        Args:
+            interaction (Interaction): The interaction context.
+        """
+        assert isinstance(interaction.user, Member)
+
+        await interaction.response.defer(thinking=True)
+        followup_mes = await interaction.followup.send("Sélection des membres en cours...", wait=True)
+
+        message = self.message_input.value.strip()
+        message += (
+            f"\n\n*Ce message vous a été envoyé par un membre du Bureau du Fablab. Merci de ne pas y répondre directement.*"
+            f"\nPour plus d'informations, contactez <@{interaction.user.id}>."
+        )
+
+        view = _BulkDMView(
+            sender=interaction.user,
+            followup_id=followup_mes.id,
+            message=message,
+        )
+        await interaction.followup.send(
+            (
+                "Selectionnez les membres a qui envoyer le message puis cliquez sur **Confirmer**.\n\n"
+                f"Message à envoyer :\n>>> {message}"
+            ),
+            view=view,
+            ephemeral=True,
+        )
+
+
+# endregion BulkDM UI Components
 
 
 class StartMessageModal(ui.Modal, title="Préparer un message"):

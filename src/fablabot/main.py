@@ -76,7 +76,6 @@ class Fablabot(commands.Bot):
             FormationManagement(self),
             LogManagement(self),
             MessageManagement(self),
-            SuggestionManagement(self),
             UserManagement(self),
             WelcomeManagement(self),
         ):

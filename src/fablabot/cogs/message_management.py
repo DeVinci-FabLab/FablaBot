@@ -193,42 +193,17 @@ class MessageManagement(commands.Cog):
         name="dm",
         description="Envoie un message privé à plusieurs utilisateurs via un sélecteur.",
     )
-    @app_commands.describe(message="Le message à envoyer en MP.")
-    async def msg_dm(self, interaction: Interaction, *, message: str) -> None:  # TODO: modal
+    async def msg_dm(self, interaction: Interaction) -> None:
         """Send a direct message to multiple users.
 
         Args:
             interaction (Interaction): The Discord interaction context.
             message (str): The message content to send.
         """
-        if not await ensure_command_context(
-            logger,
-            "message.dm",
-            interaction,
-            log_details={"message": message},
-            required_roles={RoleNames.BUREAU},
-        ):
+        if not await ensure_command_context(logger, "message.dm", interaction, required_roles={RoleNames.BUREAU}):
             return
 
-        assert isinstance(interaction.user, Member)
-
-        await interaction.response.defer(thinking=True)
-        followup_mes = await interaction.followup.send("Sélection des membres en cours...", wait=True)
-
-        message += (
-            f"\n\n*Ce message vous a été envoyé par un membre du Bureau du Fablab. Merci de ne pas y répondre directement.*"
-            f"\nPour plus d'informations, contactez <@{interaction.user.id}>."
-        )
-
-        view = mui.BulkDMView(interaction.user, followup_mes.id, message)
-        await interaction.followup.send(
-            (
-                "Selectionnez les membres a qui envoyer le message puis cliquez sur **Confirmer**.\n\n"
-                f"Message à envoyer :\n>>> {message}"
-            ),
-            view=view,
-            ephemeral=True,
-        )
+        await interaction.response.send_modal(mui.BulkDMModal(self))
 
     @msg_group.command(
         name="start",
