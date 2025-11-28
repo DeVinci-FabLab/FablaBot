@@ -225,7 +225,7 @@ class MessageManagement(commands.Cog):
         channel="Salon dans lequel se trouve le message",
         message="ID du message ou lien complet",
     )
-    async def msg_follow(self, interaction: Interaction, *, channel: TextChannel, message: str) -> None:
+    async def msg_follow(self, interaction: Interaction, *, channel: TextChannel, message: str) -> None:  # TODO: review
         """Start tracking an already published message.
 
         Args:
@@ -248,12 +248,11 @@ class MessageManagement(commands.Cog):
             await interaction.response.send_message(ErrorMessages.INVALID_MESSAGE_ID, ephemeral=True)
             return
 
-        await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             fetched: Message = await channel.fetch_message(message_id)
         except Exception:
             logger.exception(f"Failed to fetch message {message_id} in {channel}")
-            await interaction.followup.send(ErrorMessages.INVALID_MESSAGE_ID, ephemeral=True)
+            await interaction.response.send_message(ErrorMessages.INVALID_MESSAGE_ID, ephemeral=True)
             return
 
         assert interaction.guild is not None
@@ -271,7 +270,7 @@ class MessageManagement(commands.Cog):
             f"Started tracking message {fetched.id} in guild {interaction.guild.id} "
             f"(reactions preserved: {len(tracked.reactions)})",
         )
-        await interaction.followup.send(
+        await interaction.response.send_message(
             f"Suivi démarré sur le message `{fetched.id}` dans {channel.mention}.\n"
             "Ajoute des actions avec `/msg link_reaction`.",
             ephemeral=True,
@@ -449,12 +448,11 @@ class MessageManagement(commands.Cog):
             await interaction.response.send_message(ErrorMessages.MSG_DRAFT_EMPTY, ephemeral=True)
             return
 
-        await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             msg = await channel.send(draft.content)
         except Exception:
             logger.exception(f"Failed to publish draft in {channel}")
-            await interaction.followup.send(
+            await interaction.response.send_message(
                 ErrorMessages.HTTP_ERROR.format(operation="la publication du message"),
                 ephemeral=True,
             )
@@ -481,7 +479,7 @@ class MessageManagement(commands.Cog):
         logger.info(
             f"Published message {msg.id} in guild {interaction.guild.id} with {len(updated_reactions)} reaction actions",
         )
-        await interaction.followup.send(
+        await interaction.response.send_message(
             f"Message publié dans {channel.mention} (ID `{msg.id}`) avec {len(updated_reactions)} réaction(s) configurée(s).",
         )
 
