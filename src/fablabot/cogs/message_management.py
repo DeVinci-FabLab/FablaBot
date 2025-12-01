@@ -225,7 +225,7 @@ class MessageManagement(commands.Cog):
         channel="Salon dans lequel se trouve le message",
         message="ID du message ou lien complet",
     )
-    async def msg_follow(self, interaction: Interaction, *, channel: TextChannel, message: str) -> None:  # TODO: review
+    async def msg_follow(self, interaction: Interaction, *, channel: TextChannel, message: str) -> None:
         """Start tracking an already published message.
 
         Args:
@@ -256,15 +256,27 @@ class MessageManagement(commands.Cog):
             return
 
         assert interaction.guild is not None
+        draft = self.get_draft(interaction.guild.id)
+        migrated_reactions: list[MsgReactionEvent] = []
+        if draft and draft.reactions:
+            for reaction in draft.reactions:
+                cloned = copy(reaction)
+                cloned.message_id = fetched.id
+                migrated_reactions.append(cloned)
+            draft.reactions.clear()
+            self.set_draft(interaction.guild.id, draft)
+
         tracked = TrackedMessage(
             message_id=fetched.id,
             channel_id=channel.id,
             content=fetched.content or "(contenu vide ou embed)",
-            reactions=[],
+            reactions=migrated_reactions,
             created_by=interaction.user.id,
             created_at_iso=datetime.now(PARIS_TZ).isoformat(),
         )
         self.set_tracked_message(interaction.guild.id, tracked)
+        if migrated_reactions:
+            await self._sync_reactions_on_message(interaction.guild.id, tracked)
 
         logger.info(
             f"Started tracking message {fetched.id} in guild {interaction.guild.id} "
@@ -272,8 +284,7 @@ class MessageManagement(commands.Cog):
         )
         await interaction.response.send_message(
             f"Suivi démarré sur le message `{fetched.id}` dans {channel.mention}.\n"
-            "Ajoute des actions avec `/msg link_reaction`.",
-            ephemeral=True,
+            f"{len(migrated_reactions)} réaction(s) importée(s) depuis le brouillon.",
         )
 
     @msg_group.command(name="link_reaction", description="Associer une réaction à une action automatisée.")
@@ -463,17 +474,18 @@ class MessageManagement(commands.Cog):
             cloned = copy(reaction)
             cloned.message_id = msg.id
             updated_reactions.append(cloned)
-        tracked = TrackedMessage(
-            message_id=msg.id,
-            channel_id=channel.id,
-            content=draft.content,
-            reactions=updated_reactions,
-            created_by=interaction.user.id,
-            created_at_iso=datetime.now(PARIS_TZ).isoformat(),
-        )
-        self.set_tracked_message(interaction.guild.id, tracked)
+        if updated_reactions:
+           tracked = TrackedMessage(
+                message_id=msg.id,
+                channel_id=channel.id,
+                content=draft.content,
+                reactions=updated_reactions,
+                created_by=interaction.user.id,
+                created_at_iso=datetime.now(PARIS_TZ).isoformat(),
+            )
+            self.set_tracked_message(interaction.guild.id, tracked)
 
-        await self._sync_reactions_on_message(interaction.guild.id, tracked)
+            await self._sync_reactions_on_message(interaction.guild.id, tracked)
         self._clear_draft(interaction.guild.id)
 
         logger.info(
