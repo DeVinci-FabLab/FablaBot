@@ -58,6 +58,7 @@ MESSAGES_STATE_FILE = Path("data/messages_state.json")
 REACTION_LOG_RETENTION = timedelta(days=30)
 ALLOWED_ROLES = ADMIN_ROLES | {RoleNames.BUREAU}
 AUSTIN_ID = 585347569329373214
+PHILIPPINE_ID = 641386630581714976
 
 
 class MessageManagement(commands.Cog):
@@ -639,19 +640,28 @@ class MessageManagement(commands.Cog):
         from fablabot.guild_config import is_philippine_bully_enabled, set_philippine_bully_enabled
 
         assert msg.guild is not None
-        if "monster" in msg.content.lower() and is_philippine_bully_enabled(msg.guild.id):
-            philippine = await get_or_fetch_member(msg.guild, 641386630581714976)
+        count = msg.content.lower().count("monster")
+        if count > 0 and is_philippine_bully_enabled(msg.guild.id):
+            philippine = await get_or_fetch_member(msg.guild, PHILIPPINE_ID)
             if philippine is not None:
-                await philippine.timeout(timedelta(seconds=10), reason="Monster detected in message")
+                await philippine.timeout(
+                    (philippine.timed_out_until or datetime.now(PARIS_TZ)) + timedelta(minutes=count),
+                    reason="Monster detected in message",
+                )
                 logger.debug(f"Philippine timed out in guild {msg.guild.id} due to monster message by {msg.author}")
 
         if "go bully philippine" in msg.content.lower() and msg.author.id == AUSTIN_ID:
             set_philippine_bully_enabled(msg.guild.id, enabled=True)
             logger.debug(f"Philippine Bully enabled in guild {msg.guild.id} by {msg.author}")
+            await msg.author.send("Philippine Bully activé.")
 
         if "stop bullying philippine" in msg.content.lower() and msg.author.id == AUSTIN_ID:
             set_philippine_bully_enabled(msg.guild.id, enabled=False)
+            philippine = await get_or_fetch_member(msg.guild, PHILIPPINE_ID)
+            if philippine is not None:
+                await philippine.timeout(None, reason="Bully command issued")
             logger.debug(f"Philippine Bully disabled in guild {msg.guild.id} by {msg.author}")
+            await msg.author.send("Philippine Bully désactivé.")
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: RawReactionActionEvent) -> None:
@@ -659,7 +669,7 @@ class MessageManagement(commands.Cog):
 
         Args:
             payload (RawReactionActionEvent): The raw reaction add event payload.
-        """  # TODO: add logging
+        """
         if payload.guild_id is None:
             return
         guild = self.bot.get_guild(payload.guild_id)
