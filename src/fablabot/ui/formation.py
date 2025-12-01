@@ -9,7 +9,11 @@ from typing import TYPE_CHECKING, cast
 from discord import ButtonStyle, Embed, Interaction, TextStyle, ui
 from emoji import emojize
 
-from fablabot.helpers.constants import PARIS_TZ, ErrorMessages
+from fablabot.helpers.constants import (
+    MAX_TRACKED_OPTIONS,
+    PARIS_TZ,
+    ErrorMessages,
+)
 from fablabot.helpers.formation import Emojis, parse_date_time, render_formation, render_message
 from fablabot.helpers.utils import is_valid_emoji, log_request
 from fablabot.models.formation import FmCommand, FmMessageDraft, Formation
@@ -23,7 +27,6 @@ EDIT_EMOJI_BUTTON_ID = 13
 EDIT_TRAINER_BUTTON_ID = 14
 MAKE_EXCUSABLE_BUTTON_ID = 15
 MAKE_NON_EXCUSABLE_BUTTON_ID = 16
-MAX_FORMATION_BUTTONS = 25
 MIN_SEATS = 1
 MAX_SEATS = 500
 
@@ -335,8 +338,9 @@ class FormationSelectView(ui.View):
         super().__init__(timeout=None)
         self.cog = cog
         self.cmd = cmd
+        self.displayed_formations = formations[:MAX_TRACKED_OPTIONS]
 
-        for idx, fm in enumerate(formations[:MAX_FORMATION_BUTTONS], start=1):
+        for idx, fm in enumerate(self.displayed_formations, start=1):
             self.add_item(_FormationSelectButton(idx, fm))
 
     async def open_edit_view(self, interaction: Interaction, formation_index: int, formation: Formation) -> None:

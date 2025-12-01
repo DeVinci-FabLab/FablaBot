@@ -332,6 +332,7 @@ class MessageManagement(commands.Cog):
             "Choisis le brouillon ou un message suivi pour ajouter la réaction.",
             view=view,
             ephemeral=True,
+            embed=view.preview_embed,
         )
 
     @msg_group.command(
@@ -369,6 +370,7 @@ class MessageManagement(commands.Cog):
             "Sélectionne le message suivi ou le brouillon puis l'action à retirer.",
             view=view,
             ephemeral=True,
+            embed=view.preview_embed,
         )
 
     @msg_group.command(
@@ -547,6 +549,7 @@ class MessageManagement(commands.Cog):
             "Choisis le message suivi dont tu veux exporter les réactions.",
             view=view,
             ephemeral=True,
+            embed=view.preview_embed,
         )
 
     @msg_group.command(
@@ -581,6 +584,7 @@ class MessageManagement(commands.Cog):
             "Choisis le message dont tu veux arrêter le suivi.",
             view=view,
             ephemeral=True,
+            embed=view.preview_embed,
         )
 
     # endregion Message Slash Commands Group

@@ -370,4 +370,17 @@ def format_channel_mention(channel: TextChannel | VoiceChannel) -> str:
     return f"{channel.mention} ({escape_md(channel.name)})"
 
 
+def format_preview_content(content: str, char_limit: int) -> str:
+    """Format a short, display-ready preview of a formation content.
+
+    Args:
+        content (str): The content to format.
+        char_limit (int): The maximum number of characters for the preview.
+    """
+    trimmed = content.strip() or "_(vide)_"
+    if len(trimmed) > char_limit:
+        trimmed = trimmed[: char_limit - 3] + "..."
+    return f">>> {trimmed}"
+
+
 # endregion Formatting Helpers

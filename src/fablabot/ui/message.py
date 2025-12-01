@@ -9,8 +9,15 @@ from typing import TYPE_CHECKING, Any, Literal
 from discord import ButtonStyle, ChannelType, Embed, Guild, Interaction, Member, SelectOption, TextChannel, TextStyle, ui
 from discord.utils import get
 
-from fablabot.helpers.constants import PARIS_TZ, ErrorMessages
-from fablabot.helpers.utils import format_member_mention, get_members_by_role, send_dm_to_member
+from fablabot.helpers.constants import (
+    EMBED_PREVIEW_MAX_CHARS,
+    EMBED_PREVIEW_MIN_CHARS,
+    EMBED_TOTAL_FIELD_CHAR_BUDGET,
+    MAX_TRACKED_OPTIONS,
+    PARIS_TZ,
+    ErrorMessages,
+)
+from fablabot.helpers.utils import format_member_mention, format_preview_content, get_members_by_role, send_dm_to_member
 from fablabot.models.message import (
     ANONYMOUS_ICON_URL,
     SUGGESTION_OPTIONS,
@@ -27,7 +34,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-MAX_TRACKED_OPTIONS = 25
 
 # region ====== BulkDM UI Components ======
 
@@ -460,7 +466,7 @@ class _DraftSelectButton(ui.Button["TrackedMessageSelectView"]):
                 await interaction.response.send_message(ErrorMessages.EXPIRED_VIEW_MESSAGE, ephemeral=True)
 
 
-class TrackedMessageSelectView(ui.View):  # TODO: show preview
+class TrackedMessageSelectView(ui.View):
     """View to pick a tracked message or draft before running message commands."""
 
     def __init__(
@@ -490,13 +496,46 @@ class TrackedMessageSelectView(ui.View):  # TODO: show preview
         self.draft = draft
         self.emoji = emoji
         self.followup_message_id = followup_message_id
+        self._show_draft_option = self.draft is not None and self.cmd in {MsgCommand.LINK, MsgCommand.UNLINK}
+        self.displayed_tracked_messages = tracked_messages[: MAX_TRACKED_OPTIONS - (1 if self._show_draft_option else 0)]
 
-        if self.draft is not None and self.cmd in {MsgCommand.LINK, MsgCommand.UNLINK}:
+        if self._show_draft_option:
             self.add_item(_DraftSelectButton())
 
-        max_options = MAX_TRACKED_OPTIONS - (1 if self.draft else 0)
-        for tracked in tracked_messages[:max_options]:
+        for tracked in self.displayed_tracked_messages:
             self.add_item(_TrackedMessageSelectButton(tracked))
+
+        self.preview_embed = self._build_preview_embed()
+
+    def _build_preview_embed(self) -> Embed:
+        """Build an embed showing the content of selectable messages."""
+        embed = Embed(title="Aperçu des messages disponibles")
+        field_count = len(self.displayed_tracked_messages) + (1 if self._show_draft_option else 0)
+        per_field_limit = max(
+            EMBED_PREVIEW_MIN_CHARS,
+            min(EMBED_PREVIEW_MAX_CHARS, EMBED_TOTAL_FIELD_CHAR_BUDGET // max(1, field_count)),
+        )
+
+        for tracked in self.displayed_tracked_messages:
+            preview = format_preview_content(tracked.content, per_field_limit)
+            embed.add_field(
+                name=f"Message {tracked.message_id}",
+                value=preview,
+                inline=False,
+            )
+
+        if self._show_draft_option and self.draft is not None:
+            preview = format_preview_content(self.draft.content, per_field_limit)
+            embed.add_field(
+                name="Brouillon",
+                value=preview,
+                inline=False,
+            )
+
+        if not embed.fields:
+            embed.description = "Aucun message sélectionnable."
+
+        return embed
 
     async def open_link_selector(self, interaction: Interaction, target_message_id: int | None) -> None:
         """Open the link workflow for the selected target.
@@ -538,6 +577,7 @@ class TrackedMessageSelectView(ui.View):  # TODO: show preview
         await interaction.response.edit_message(
             content=f"Sélectionne l'action à retirer pour le {target_label}.",
             view=view,
+            embed=view.preview_embed,
         )
 
     async def export_history(self, interaction: Interaction, tracked: TrackedMessage) -> None:
@@ -583,6 +623,7 @@ class TrackedMessageSelectView(ui.View):  # TODO: show preview
             content=f"Suivi arrêté pour le message `{tracked.message_id}`.",
             view=None,
         )
+        await interaction.delete_original_response()
 
 
 # endregion TrackedMessageSelectView and its Components
@@ -616,20 +657,48 @@ class _UnlinkReactionButton(ui.Button["_UnlinkReactionSelectView"]):
         await self.view.remove_link(interaction, self.reaction_index)
 
 
-class _UnlinkReactionSelectView(ui.View):  # TODO: see preview
+class _UnlinkReactionSelectView(ui.View):
     """View to pick which reaction action to remove from a tracked message."""
 
     def __init__(self, cog: MessageManagement, target: TrackedMessage | MessageDraft) -> None:
         super().__init__(timeout=None)
         self.cog = cog
         self.target = target
+        self.reactions = target.reactions[:MAX_TRACKED_OPTIONS]
 
-        for idx, reaction in enumerate(target.reactions[:MAX_TRACKED_OPTIONS], start=1):
+        for idx, reaction in enumerate(self.reactions, start=1):
             action_label = self.cog.format_reaction_action(reaction, show_label=True)
 
             self.add_item(
                 _UnlinkReactionButton(idx - 1, label=f"{idx}. {reaction.emoji} - {action_label}"[:80]),
             )
+
+        self.preview_embed = self._build_preview_embed()
+
+    def _build_preview_embed(self) -> Embed:
+        """Build an embed listing the linked actions for the target."""
+        embed = Embed(title="Actions liées disponibles")
+        field_count = len(self.reactions)
+        per_field_limit = max(
+            EMBED_PREVIEW_MIN_CHARS,
+            min(EMBED_PREVIEW_MAX_CHARS, EMBED_TOTAL_FIELD_CHAR_BUDGET // max(1, field_count)),
+        )
+        target_label = f"message `{self.target.message_id}`" if isinstance(self.target, TrackedMessage) else "brouillon"
+        embed.description = f"Sélectionne une action à retirer pour le {target_label}."
+
+        for idx, reaction in enumerate(self.reactions, start=1):
+            action_label = self.cog.format_reaction_action(reaction, show_label=True)
+            preview = format_preview_content(reaction.message_content or "", per_field_limit)
+            embed.add_field(
+                name=f"{idx}. {reaction.emoji} — {action_label}",
+                value=preview,
+                inline=False,
+            )
+
+        if not embed.fields:
+            embed.description = "Aucune action liée."
+
+        return embed
 
     async def remove_link(self, interaction: Interaction, reaction_index: int) -> None:
         """Handle the removal of a reaction action.
