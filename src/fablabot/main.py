@@ -16,7 +16,6 @@ from fablabot.cogs import (
     FormationManagement,
     LogManagement,
     MessageManagement,
-    SuggestionManagement,
     UserManagement,
     WelcomeManagement,
 )
