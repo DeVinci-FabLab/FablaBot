@@ -46,6 +46,7 @@ class BulkRoleAssignmentView(ui.View):
             interaction (Interaction): The interaction that triggered the selection.
             _select (ui.UserSelect): The select component.
         """
+        logger.debug(f"Bulk role select_members user={interaction.user} selection={_select.values}")
         if not interaction.response.is_done():
             await interaction.response.defer()
 
@@ -62,6 +63,7 @@ class BulkRoleAssignmentView(ui.View):
             await interaction.response.send_message("Aucun membre sélectionné.", ephemeral=True)
             return
 
+        logger.info(f"Bulk role confirm user={interaction.user} role={self.role} action={self.action} members={members}")
         self.select_members.disabled = True
         button.disabled = True
         await interaction.response.edit_message(view=self)
@@ -97,8 +99,7 @@ class BulkRoleAssignmentView(ui.View):
                     failed.append(m)
 
         logger.info(
-            f"Members to {self.action} role {self.role}: {members},"
-            f"\nSuccess:{modified},\nAlready: {already},\nFailed: {failed}",
+            f"Members to {self.action} role={self.role} members={members} success={modified} already={already} failed={failed}",
         )
 
         action_str = {"add": "Ajouté", "remove": "Retiré"}
@@ -139,6 +140,7 @@ class MultiRoleSelectorView(ui.View):
             interaction (Interaction): The interaction that triggered the selection.
             _select (ui.RoleSelect): The select component.
         """
+        logger.debug(f"Multi-role select_roles user={interaction.user} selection={_select.values}")
         if not interaction.response.is_done():
             await interaction.response.defer()
 
@@ -155,7 +157,7 @@ class MultiRoleSelectorView(ui.View):
             await interaction.response.send_message("Aucun rôle sélectionné.", ephemeral=True)
             return
 
-        logger.info(f"Roles selected: {roles}")
+        logger.info(f"Roles selected user={interaction.user} roles={roles}")
 
         self.select_roles.disabled = True
         button.disabled = True

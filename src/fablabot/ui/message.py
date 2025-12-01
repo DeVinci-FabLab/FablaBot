@@ -83,6 +83,7 @@ class _BulkDMView(ui.View):
             await interaction.response.send_message("Aucun membre sélectionné.", ephemeral=True)
             return
 
+        logger.info(f"Bulk DM recipients chosen user={interaction.user} guild_id={interaction.guild.id} members={members}")
         for child in self.children:
             if isinstance(child, ui.Button | ui.UserSelect):
                 child.disabled = True
@@ -97,7 +98,7 @@ class _BulkDMView(ui.View):
             else:
                 failed.append(m)
 
-        logger.info(f"Bulk DM by {self.sender} delivered to {delivered} with failures {failed}")
+        logger.info(f"Bulk DM by user={self.sender} delivered={delivered} failed={failed}")
 
         lines: list[str] = ["Envoi des messages terminé."]
         if delivered:
@@ -143,6 +144,10 @@ class BulkDMModal(ui.Modal, title="Envoyer un MP à plusieurs utilisateurs"):
         """
         assert isinstance(interaction.user, Member)
 
+        guild_id = interaction.guild.id if interaction.guild else None
+        logger.info(
+            f"BulkDMModal submitted user={interaction.user} guild_id={guild_id} message_input={self.message_input.value}",
+        )
         await interaction.response.defer(thinking=True)
         followup_mes = await interaction.followup.send("Sélection des membres en cours...", wait=True)
 
@@ -201,6 +206,10 @@ class StartMessageModal(ui.Modal, title="Préparer un message"):
             interaction (Interaction): The interaction context.
         """
         assert interaction.guild is not None
+        logger.info(
+            f"StartMessageModal submitted user={interaction.user} guild_id={interaction.guild.id} "
+            f"content_input={self.content_input.value}",
+        )
         draft = MessageDraft(content=self.content_input.value.strip(), reactions=[])
         self.cog.set_draft(interaction.guild.id, draft)
 
@@ -249,6 +258,11 @@ class _ReactionMessageInputModal(ui.Modal, title="Message à envoyer"):
             interaction (Interaction): The interaction context.
         """
         message_content = self.message_input.value.strip()
+        logger.info(
+            f"Reaction modal submitted user={interaction.user} guild_id={self.guild_id} emoji={self.reaction.emoji} "
+            f"action={self.reaction.action_type} target_id={self.reaction.target_id} target_name={self.reaction.target_name} "
+            f"content={message_content!r}",
+        )
         self.reaction.message_content = message_content
 
         feedback = await self.cog.register_reaction_action(self.guild_id, self.reaction)
@@ -291,6 +305,10 @@ class _ReactionTargetView(ui.View):
                     target_id = self.role_select.values[0].id
                     target_value = self.role_select.values[0].name
 
+            logger.info(
+                f"Reaction target selected user={interaction.user} guild_id={self.guild_id} action_type={self.action_type} "
+                f"target_id={target_id} target_name={target_value} emoji={self.emoji}",
+            )
             await interaction.response.send_modal(
                 _ReactionMessageInputModal(
                     self.cog,
@@ -352,6 +370,10 @@ class _ReactionActionTypeSelectView(ui.View):
             interaction (Interaction): The Discord interaction context.
             _button (ui.Button): The button that was clicked.
         """
+        logger.info(
+            f"Reaction action type selected user={interaction.user} guild_id={self.guild_id} message_id={self.message_id} "
+            f"emoji={self.emoji} action_type=channel",
+        )
         target_view = _ReactionTargetView(self.cog, self.guild_id, self.message_id, self.emoji, "channel")
         await interaction.response.edit_message(
             content="Choisis le channel où envoyer le message puis rédige le message envoyé lors de la réaction.",
@@ -366,6 +388,10 @@ class _ReactionActionTypeSelectView(ui.View):
             interaction (Interaction): The Discord interaction context.
             _button (ui.Button): The button that was clicked.
         """
+        logger.info(
+            f"Reaction action type selected user={interaction.user} guild_id={self.guild_id} message_id={self.message_id} "
+            f"emoji={self.emoji} action_type=user_dm",
+        )
         await interaction.response.send_modal(
             _ReactionMessageInputModal(
                 self.cog,
@@ -389,6 +415,10 @@ class _ReactionActionTypeSelectView(ui.View):
             interaction (Interaction): The Discord interaction context.
             _button (ui.Button): The button that was clicked.
         """
+        logger.info(
+            f"Reaction action type selected user={interaction.user} guild_id={self.guild_id} message_id={self.message_id} "
+            f"emoji={self.emoji} action_type=role_dm",
+        )
         target_view = _ReactionTargetView(self.cog, self.guild_id, self.message_id, self.emoji, "role_dm")
         await interaction.response.edit_message(
             content="Choisis le rôle à MP puis rédige le message envoyé lors de la réaction.",
@@ -431,6 +461,9 @@ class _TrackedMessageSelectButton(ui.Button["TrackedMessageSelectView"]):
             await interaction.response.send_message(ErrorMessages.EXPIRED_VIEW_MESSAGE, ephemeral=True)
             return
 
+        logger.info(
+            f"Tracked message selected user={interaction.user} command={self.view.cmd} message_id={self.tracked.message_id}",
+        )
         match self.view.cmd:
             case MsgCommand.LINK:
                 await self.view.open_link_selector(interaction, self.tracked.message_id)
@@ -464,6 +497,7 @@ class _DraftSelectButton(ui.Button["TrackedMessageSelectView"]):
             await interaction.response.send_message(ErrorMessages.MSG_NO_DRAFT, ephemeral=True)
             return
 
+        logger.info(f"Draft selected user={interaction.user} command={self.view.cmd}")
         match self.view.cmd:
             case MsgCommand.LINK:
                 await self.view.open_link_selector(interaction, None)
@@ -562,6 +596,10 @@ class TrackedMessageSelectView(ui.View):
             await interaction.response.send_message(ErrorMessages.MSG_NO_DRAFT, ephemeral=True)
             return
 
+        logger.info(
+            f"Open link selector user={interaction.user} guild_id={interaction.guild.id} target_message_id={target_message_id} "
+            f"emoji={self.emoji}",
+        )
         target_label = "le brouillon" if target_message_id is None else f"le message `{target_message_id}`"
         view = _ReactionActionTypeSelectView(self.cog, interaction.guild.id, target_message_id, self.emoji)
         await interaction.response.edit_message(
@@ -675,6 +713,10 @@ class _UnlinkReactionButton(ui.Button["_UnlinkReactionSelectView"]):
             await interaction.response.send_message(ErrorMessages.EXPIRED_VIEW_MESSAGE, ephemeral=True)
             return
 
+        target_label = self.view.target.message_id if isinstance(self.view.target, TrackedMessage) else "draft"
+        logger.info(
+            f"Unlink reaction selected user={interaction.user} target={target_label} reaction_index={self.reaction_index}",
+        )
         await self.view.remove_link(interaction, self.reaction_index)
 
 
@@ -814,9 +856,9 @@ class _SuggestionModal(ui.Modal, title="Envoyer une suggestion"):
         """
         config = SUGGESTION_OPTIONS[self.recipient_key]
         suggestion_text = self.suggestion_input.value
+        user_label = interaction.user if not self.anonymous_flag else "Anonymous"
         logger.info(
-            f"[{config.command_name}]: user={interaction.user if not self.anonymous_flag else 'Anonymous'!r} "
-            f"suggestion_text={suggestion_text!r}",
+            f"[{config.command_name}]: user={user_label} suggestion_text={suggestion_text}",
         )
 
         assert interaction.guild is not None
@@ -843,10 +885,7 @@ class _SuggestionModal(ui.Modal, title="Envoyer une suggestion"):
             await interaction.response.send_message(config.error_message, ephemeral=True)
             return
 
-        logger.info(
-            f"Guild {interaction.guild.id} user "
-            f"{interaction.user.id if not self.anonymous_flag else 'Anonymous'} made a suggestion via {config.command_name}.",
-        )
+        logger.info(f"Suggestion submitted guild_id={interaction.guild.id} user={user_label} command={config.command_name}")
 
         await interaction.response.edit_message(content=config.success_message, view=None)
 
@@ -909,6 +948,7 @@ class SuggestionView(ui.View):
             select (ui.Select): The select menu instance.
         """
         self.selected_recipient = select.values[0]
+        logger.debug(f"Suggestion recipient selected recipient_key={self.selected_recipient}")
         await interaction.response.defer(ephemeral=True)
 
     @ui.button(label="Masquer mon nom", style=ButtonStyle.secondary)
@@ -920,6 +960,7 @@ class SuggestionView(ui.View):
             button (ui.Button): The button instance.
         """
         self.anonymous = not self.anonymous
+        logger.debug(f"Suggestion anonymity toggled anonymous={self.anonymous}")
         button.label = "Afficher mon nom" if self.anonymous else "Masquer mon nom"
         await interaction.response.edit_message(view=self)
 
@@ -937,6 +978,10 @@ class SuggestionView(ui.View):
 
         assert interaction.message is not None
 
+        user_label = interaction.user if not self.anonymous else "Anonymous"
+        logger.info(
+            f"Opening suggestion modal user={user_label} recipient_key={self.selected_recipient} anonymous={self.anonymous}",
+        )
         modal = _SuggestionModal(
             cog=self.cog,
             recipient_key=self.selected_recipient,

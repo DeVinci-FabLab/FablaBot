@@ -315,6 +315,10 @@ class _FormationSelectButton(ui.Button["FormationSelectView"]):
             return
 
         view = cast("FormationSelectView", self.view)
+        logger.info(
+            f"Formation selected user={interaction.user} command={view.cmd} index={self.formation_index} "
+            f"name={self.formation.name!r}",
+        )
         match view.cmd:
             case FmCommand.EDIT:
                 await view.open_edit_view(interaction, self.formation_index, self.formation)
@@ -425,6 +429,10 @@ class _EditEmojiModal(ui.Modal, title="Modifier l'émoji"):
         fms = sorted(draft.fms, key=lambda x: x.start_dt)
 
         candidate = emojize(candidate_raw, language="alias")
+        logger.info(
+            f"EditEmojiModal submitted user={interaction.user} guild_id={interaction.guild.id} "
+            f"formation_index={self.view_ref.formation_index} candidate_raw={candidate_raw} candidate={candidate}",
+        )
         if not is_valid_emoji(candidate):
             logger.warning(f"Guild {interaction.guild.id} tried to edit formation with invalid emoji: {candidate!r}.")
             await interaction.response.send_message(ErrorMessages.INVALID_EMOJI, ephemeral=True)
@@ -483,6 +491,10 @@ class _EditNameDescriptionModal(ui.Modal, title="Modifier nom et description"):
         Args:
             interaction (Interaction): The interaction that triggered the modal submission.
         """
+        logger.info(
+            f"EditNameDescriptionModal submitted user={interaction.user} formation_index={self.view_ref.formation_index} "
+            f"name={self.name_input.value!r} description={self.description_input.value!r}",
+        )
         self.view_ref.updated_formation.name = self.name_input.value.strip()
         self.view_ref.updated_formation.description = self.description_input.value.strip()
 
@@ -510,6 +522,10 @@ class _SelectTrainerView(ui.View):
             select (ui.UserSelect): The select component.
         """
         selected_user = select.values[0]
+        logger.info(
+            f"Trainer selected user={interaction.user} "
+            f"formation_index={self.edit_formation_view.formation_index} selected_trainer={selected_user}",
+        )
         self.edit_formation_view.updated_formation.trainer_mention = selected_user.mention
 
         edit_trainer_button = self.edit_formation_view.get_button(EDIT_TRAINER_BUTTON_ID)
@@ -555,6 +571,10 @@ class _EditDatetimeModal(ui.Modal, title="Modifier date et heure"):
         """
         assert interaction.guild is not None
         candidate = self.datetime_input.value.strip()
+        logger.info(
+            f"EditDatetimeModal submitted user={interaction.user} guild_id={interaction.guild.id} "
+            f"formation_index={self.view_ref.formation_index} candidate={candidate}",
+        )
 
         try:
             date_str, hour_str = candidate.split()
@@ -604,6 +624,10 @@ class _EditDurationSeatsModal(ui.Modal, title="Modifier durée et places"):
         """
         assert interaction.guild is not None
         candidate = self.duration_seats_input.value.strip()
+        logger.info(
+            f"EditDurationSeatsModal submitted user={interaction.user} guild_id={interaction.guild.id} "
+            f"formation_index={self.view_ref.formation_index} candidate={candidate}",
+        )
         parts = [part.strip() for part in candidate.split("-")]
 
         if len(parts) != 2:
@@ -627,6 +651,10 @@ class _EditDurationSeatsModal(ui.Modal, title="Modifier durée et places"):
             await interaction.response.send_message(ErrorMessages.INVALID_SEATS, ephemeral=True)
             return
 
+        logger.info(
+            f"EditDurationSeatsModal parsed user={interaction.user} guild_id={interaction.guild.id} "
+            f"formation_index={self.view_ref.formation_index} duration={new_duration} seats={new_seats}",
+        )
         self.view_ref.updated_formation.duration = new_duration
         self.view_ref.updated_formation.seats = new_seats
         await self.view_ref.refresh_main_message(interaction)
@@ -665,6 +693,10 @@ class _EditFormationView(ui.View):
             interaction (Interaction): The interaction that triggered the button click.
             _button (ui.Button): The button that was clicked.
         """
+        logger.info(
+            f"Edit emoji button clicked user={interaction.user} formation_index={self.formation_index} "
+            f"name={self.updated_formation.name!r}",
+        )
         await interaction.response.send_modal(_EditEmojiModal(self))
 
     @ui.button(label="Modifier nom & description", style=ButtonStyle.secondary, row=0)
@@ -675,6 +707,10 @@ class _EditFormationView(ui.View):
             interaction (Interaction): The interaction that triggered the button click.
             _button (ui.Button): The button that was clicked.
         """
+        logger.info(
+            f"Edit name/description button clicked user={interaction.user} formation_index={self.formation_index} "
+            f"name={self.updated_formation.name!r}",
+        )
         await interaction.response.send_modal(_EditNameDescriptionModal(self))
 
     @ui.button(label="Modifier lae formateur·ice", style=ButtonStyle.secondary, row=1, id=EDIT_TRAINER_BUTTON_ID)
@@ -685,6 +721,10 @@ class _EditFormationView(ui.View):
             interaction (Interaction): The interaction that triggered the button click.
             _button (ui.Button): The button that was clicked.
         """
+        logger.info(
+            f"Edit trainer button clicked user={interaction.user} formation_index={self.formation_index} "
+            f"name={self.updated_formation.name!r}",
+        )
         await interaction.response.edit_message(content="Sélectionne lae formateur·ice :", view=_SelectTrainerView(self))
 
     @ui.button(label="Date & Heure", style=ButtonStyle.secondary, row=2)
@@ -695,6 +735,10 @@ class _EditFormationView(ui.View):
             interaction (Interaction): The interaction that triggered the button click.
             _button (ui.Button): The button that was clicked.
         """
+        logger.info(
+            f"Edit datetime button clicked user={interaction.user} formation_index={self.formation_index} "
+            f"name={self.updated_formation.name!r}",
+        )
         await interaction.response.send_modal(_EditDatetimeModal(self))
 
     @ui.button(label="Durée & Places", style=ButtonStyle.secondary, row=2)
@@ -705,6 +749,10 @@ class _EditFormationView(ui.View):
             interaction (Interaction): The interaction that triggered the button click.
             _button (ui.Button): The button that was clicked.
         """
+        logger.info(
+            f"Edit duration/seats button clicked user={interaction.user} formation_index={self.formation_index} "
+            f"name={self.updated_formation.name!r}",
+        )
         await interaction.response.send_modal(_EditDurationSeatsModal(self))
 
     @ui.button(label="Rendre la formation excusable", style=ButtonStyle.secondary, row=3, id=MAKE_EXCUSABLE_BUTTON_ID)
@@ -715,6 +763,10 @@ class _EditFormationView(ui.View):
             interaction (Interaction): The interaction that triggered the button click.
             button (ui.Button): The button that was clicked.
         """
+        logger.info(
+            f"Set excusable=true user={interaction.user} formation_index={self.formation_index} "
+            f"name={self.updated_formation.name!r}",
+        )
         self.updated_formation.excusable = True
         self.get_button(MAKE_NON_EXCUSABLE_BUTTON_ID).disabled = False
         button.disabled = True
@@ -728,6 +780,10 @@ class _EditFormationView(ui.View):
             interaction (Interaction): The interaction that triggered the button click.
             button (ui.Button): The button that was clicked.
         """
+        logger.info(
+            f"Set excusable=false user={interaction.user} formation_index={self.formation_index} "
+            f"name={self.updated_formation.name!r}",
+        )
         self.updated_formation.excusable = False
         self.get_button(MAKE_EXCUSABLE_BUTTON_ID).disabled = False
         button.disabled = True
@@ -765,7 +821,7 @@ class _EditFormationView(ui.View):
 
         logger.info(
             f"Guild {interaction.guild.id} edited formation {original.name!r} -> "
-            f"{self.updated_formation.name!r} (index {self.formation_index} → {new_position}).",
+            f"{self.updated_formation.name!r} (index {self.formation_index} -> {new_position}).",
         )
         await interaction.response.edit_message(
             content=f"Mise à jour: {self.updated_formation.emoji} {self.updated_formation.name} (position {new_position}).",
