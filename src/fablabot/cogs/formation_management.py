@@ -488,7 +488,7 @@ class FormationManagement(commands.Cog):
             f"{success_reactions}/{len(draft.fms)} réaction(s) ajoutée(s).",
         )
 
-        await asyncio.sleep(24 * 60 * 60)
+        await asyncio.sleep(1.5 * 60 * 60)
         with contextlib.suppress(Exception):
             await msg.publish()
 
