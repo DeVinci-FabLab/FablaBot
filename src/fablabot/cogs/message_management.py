@@ -375,7 +375,7 @@ class MessageManagement(commands.Cog):
         name="list",
         description="Lister les messages actuellement suivis.",
     )
-    async def msg_list(self, interaction: Interaction) -> None:  # TODO: voir brouillon
+    async def msg_list(self, interaction: Interaction) -> None:
         """List currently tracked messages.
 
         Args:
@@ -386,16 +386,32 @@ class MessageManagement(commands.Cog):
 
         assert interaction.guild is not None
         tracked_map = self._get_tracked_messages(interaction.guild.id)
-        if not tracked_map:
+        draft = self.get_draft(interaction.guild.id)
+        if not tracked_map and draft is None:
             await interaction.response.send_message(ErrorMessages.MSG_NO_TRACKED_AVAILABLE, ephemeral=True)
             return
 
-        lines: list[str] = ["**Suivis de messages actifs**", ""]
-        for tracked in tracked_map.values():
-            link = f"https://discord.com/channels/{interaction.guild.id}/{tracked.channel_id}/{tracked.message_id}"
-            lines.append(f"- ID `{tracked.message_id}` : {link}")
-            if tracked.reactions:
-                for idx, reaction in enumerate(tracked.reactions, start=1):
+        lines: list[str] = []
+        if tracked_map:
+            lines.extend(["**Suivis de messages actifs**", ""])
+            for tracked in tracked_map.values():
+                link = f"https://discord.com/channels/{interaction.guild.id}/{tracked.channel_id}/{tracked.message_id}"
+                lines.append(f"- ID `{tracked.message_id}` : {link}")
+                if tracked.reactions:
+                    for idx, reaction in enumerate(tracked.reactions, start=1):
+                        action_label = self.format_reaction_action(reaction)
+                        preview = reaction.message_content
+                        lines.append(f"   {idx}. {reaction.emoji} : {action_label} | `{preview.replace('\n', '\\n')}`")
+                else:
+                    lines[-1] += " (aucune action liée)"
+
+        if draft is not None:
+            if lines:
+                lines.append("")
+            content_preview = (draft.content.strip() or "_(vide)_").replace("\n", "\\n")
+            lines.extend(["**Brouillon en cours**", f"- Contenu : `{content_preview}`"])
+            if draft.reactions:
+                for idx, reaction in enumerate(draft.reactions, start=1):
                     action_label = self.format_reaction_action(reaction)
                     preview = reaction.message_content
                     lines.append(f"   {idx}. {reaction.emoji} : {action_label} | `{preview.replace('\n', '\\n')}`")
