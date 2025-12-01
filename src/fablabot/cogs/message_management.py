@@ -400,7 +400,7 @@ class MessageManagement(commands.Cog):
                     lines.append(f"   {idx}. {reaction.emoji} : {action_label} | `{preview.replace('\n', '\\n')}`")
             else:
                 lines.append("   (aucune action liée)")
-        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+        await interaction.response.send_message("\n".join(lines))
 
     @msg_group.command(
         name="preview",
@@ -475,7 +475,7 @@ class MessageManagement(commands.Cog):
             cloned.message_id = msg.id
             updated_reactions.append(cloned)
         if updated_reactions:
-           tracked = TrackedMessage(
+            tracked = TrackedMessage(
                 message_id=msg.id,
                 channel_id=channel.id,
                 content=draft.content,
@@ -515,8 +515,16 @@ class MessageManagement(commands.Cog):
             await interaction.response.send_message(ErrorMessages.MSG_NO_TRACKED_AVAILABLE, ephemeral=True)
             return
 
-        view = mui.TrackedMessageSelectView(self, list(tracked_map.values()), MsgCommand.EXPORT)
-        await interaction.response.send_message(
+        await interaction.response.defer(thinking=True)
+        followup_mes = await interaction.followup.send("Sélection du message à exporter en cours...", wait=True)
+
+        view = mui.TrackedMessageSelectView(
+            self,
+            list(tracked_map.values()),
+            MsgCommand.EXPORT,
+            followup_message_id=followup_mes.id,
+        )
+        await interaction.followup.send(
             "Choisis le message suivi dont tu veux exporter les réactions.",
             view=view,
             ephemeral=True,
@@ -541,8 +549,20 @@ class MessageManagement(commands.Cog):
             await interaction.response.send_message(ErrorMessages.MSG_NO_TRACKED_AVAILABLE, ephemeral=True)
             return
 
-        view = mui.TrackedMessageSelectView(self, list(tracked_map.values()), MsgCommand.STOP)
-        await interaction.response.send_message(content="Sélectionne le message dont tu veux arrêter le suivi.", view=view)
+        await interaction.response.defer(thinking=True)
+        followup_mes = await interaction.followup.send("Sélection du message à stopper en cours...", wait=True)
+
+        view = mui.TrackedMessageSelectView(
+            self,
+            list(tracked_map.values()),
+            MsgCommand.STOP,
+            followup_message_id=followup_mes.id,
+        )
+        await interaction.followup.send(
+            "Choisis le message dont tu veux arrêter le suivi.",
+            view=view,
+            ephemeral=True,
+        )
 
     # endregion Message Slash Commands Group
 

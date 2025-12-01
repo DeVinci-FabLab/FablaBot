@@ -475,6 +475,7 @@ class TrackedMessageSelectView(ui.View):  # TODO: show preview
         *,
         draft: MessageDraft | None = None,
         emoji: str | None = None,
+        followup_message_id: int | None = None,
     ) -> None:
         """Initialize the TrackedMessageSelectView.
 
@@ -484,6 +485,7 @@ class TrackedMessageSelectView(ui.View):  # TODO: show preview
             cmd (MsgTrackedCommand): The command determining what happens after selection.
             draft (MessageDraft | None): Optional draft to include as a selectable target.
             emoji (str | None): Emoji passed through when linking a reaction.
+            followup_message_id (int | None): ID of the follow-up message to edit with results.
         """
         super().__init__(timeout=None)
         self.cog = cog
@@ -491,6 +493,7 @@ class TrackedMessageSelectView(ui.View):  # TODO: show preview
         self.cmd = cmd
         self.draft = draft
         self.emoji = emoji
+        self.followup_message_id = followup_message_id
 
         if self.draft is not None and self.cmd in {MsgCommand.LINK, MsgCommand.UNLINK}:
             self.add_item(_DraftSelectButton())
@@ -541,24 +544,6 @@ class TrackedMessageSelectView(ui.View):  # TODO: show preview
             view=view,
         )
 
-    async def stop_tracking(self, interaction: Interaction, tracked: TrackedMessage) -> None:
-        """Remove tracking for the selected message.
-
-        Args:
-            interaction (Interaction): The Discord interaction context.
-            tracked (TrackedMessage): The tracked message to stop tracking.
-        """
-        assert interaction.guild is not None
-        if not self.cog.remove_tracked_message(interaction.guild.id, tracked.message_id):
-            await interaction.response.edit_message(content="Suivi introuvable pour ce message.", view=None)
-            return
-
-        logger.info(f"Stopped tracking message {tracked.message_id} in guild {interaction.guild.id}")
-        await interaction.response.edit_message(
-            content=f"Suivi arrêté pour le message `{tracked.message_id}`.",
-            view=None,
-        )
-
     async def export_history(self, interaction: Interaction, tracked: TrackedMessage) -> None:
         """Export reaction history for a tracked message.
 
@@ -567,13 +552,41 @@ class TrackedMessageSelectView(ui.View):  # TODO: show preview
             tracked (TrackedMessage): The tracked message to export history for.
         """
         assert interaction.guild is not None
+        assert self.followup_message_id is not None
+        await interaction.response.defer()
 
         file, content = self.cog.build_reaction_export(interaction.guild.id, tracked.message_id)
         if file is None:
-            await interaction.response.edit_message(content=content, view=None)
+            await interaction.followup.edit_message(self.followup_message_id, content=content, view=None)
+        else:
+            await interaction.followup.edit_message(self.followup_message_id, content=content, attachments=[file], view=None)
+
+        await interaction.delete_original_response()
+
+    async def stop_tracking(self, interaction: Interaction, tracked: TrackedMessage) -> None:
+        """Remove tracking for the selected message.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            tracked (TrackedMessage): The tracked message to stop tracking.
+        """
+        assert interaction.guild is not None
+        assert self.followup_message_id is not None
+        await interaction.response.defer()
+
+        if not self.cog.remove_tracked_message(interaction.guild.id, tracked.message_id):
+            logger.error(
+                f"Tracked message {tracked.message_id} not found in guild {interaction.guild.id} during stop tracking.",
+            )
+            await interaction.response.edit_message(content="Suivi introuvable pour ce message.", view=None)
             return
 
-        await interaction.response.edit_message(content=content, attachments=[file], view=None)
+        logger.info(f"Stopped tracking message {tracked.message_id} in guild {interaction.guild.id}")
+        await interaction.followup.edit_message(
+            self.followup_message_id,
+            content=f"Suivi arrêté pour le message `{tracked.message_id}`.",
+            view=None,
+        )
 
 
 # endregion TrackedMessageSelectView and its Components
