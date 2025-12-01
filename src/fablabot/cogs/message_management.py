@@ -890,7 +890,7 @@ class MessageManagement(commands.Cog):
         await self._ensure_reaction_on_message(guild_id, tracked, reaction.emoji)
         action_desc = self.format_reaction_action(reaction)
 
-        return f"Réaction {reaction.emoji} ajoutée.\nAction : {action_desc}\nMessage envoyé :\n{reaction.message_content}"
+        return f"Réaction {reaction.emoji} ajoutée.\nAction : {action_desc}\nMessage envoyé :\n>>> {reaction.message_content}"
 
     async def _sync_reactions_on_message(self, guild_id: int, tracked: TrackedMessage) -> None:
         """Ensure all configured reaction emojis are present on the tracked message."""

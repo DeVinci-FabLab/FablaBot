@@ -112,7 +112,11 @@ class _BulkDMView(ui.View):
 
 
 class BulkDMModal(ui.Modal, title="Envoyer un MP à plusieurs utilisateurs"):
-    """Modal for composing a bulk direct message."""
+    """Modal for composing a bulk direct message.
+
+    Attributes:
+        message_input (ui.TextInput): Input field for the bulk direct message content.
+    """
 
     message_input: ui.TextInput = ui.TextInput(
         label="Message à envoyer",
@@ -211,7 +215,11 @@ class StartMessageModal(ui.Modal, title="Préparer un message"):
 
 
 class _ReactionMessageInputModal(ui.Modal, title="Message à envoyer"):
-    """Modal for inputting the content of the message to send for a reaction action."""
+    """Modal for inputting the content of the message to send for a reaction action.
+
+    Attributes:
+        message_input (ui.TextInput): Input field for the reaction message content.
+    """
 
     message_input: ui.TextInput = ui.TextInput(
         label="Utilise {username} pour le nom du réacteur.",
@@ -559,6 +567,7 @@ class TrackedMessageSelectView(ui.View):
         await interaction.response.edit_message(
             content=f"Choisis le type d'action pour {target_label} puis la cible.",
             view=view,
+            embed=None,
         )
 
     async def open_unlink_selector(self, interaction: Interaction, tracked: TrackedMessage | MessageDraft) -> None:
@@ -593,9 +602,15 @@ class TrackedMessageSelectView(ui.View):
 
         file, content = self.cog.build_reaction_export(interaction.guild.id, tracked.message_id)
         if file is None:
-            await interaction.followup.edit_message(self.followup_message_id, content=content, view=None)
+            await interaction.followup.edit_message(self.followup_message_id, content=content, view=None, embed=None)
         else:
-            await interaction.followup.edit_message(self.followup_message_id, content=content, attachments=[file], view=None)
+            await interaction.followup.edit_message(
+                self.followup_message_id,
+                content=content,
+                attachments=[file],
+                view=None,
+                embed=None,
+            )
 
         await interaction.delete_original_response()
 
@@ -614,7 +629,12 @@ class TrackedMessageSelectView(ui.View):
             logger.error(
                 f"Tracked message {tracked.message_id} not found in guild {interaction.guild.id} during stop tracking.",
             )
-            await interaction.response.edit_message(content="Suivi introuvable pour ce message.", view=None)
+            await interaction.followup.edit_message(
+                self.followup_message_id,
+                content="Suivi introuvable pour ce message.",
+                view=None,
+                embed=None,
+            )
             return
 
         logger.info(f"Stopped tracking message {tracked.message_id} in guild {interaction.guild.id}")
@@ -622,6 +642,7 @@ class TrackedMessageSelectView(ui.View):
             self.followup_message_id,
             content=f"Suivi arrêté pour le message `{tracked.message_id}`.",
             view=None,
+            embed=None,
         )
         await interaction.delete_original_response()
 
@@ -661,6 +682,12 @@ class _UnlinkReactionSelectView(ui.View):
     """View to pick which reaction action to remove from a tracked message."""
 
     def __init__(self, cog: MessageManagement, target: TrackedMessage | MessageDraft) -> None:
+        """Initialize the unlink reaction select view.
+
+        Args:
+            cog (MessageManagement): The message management cog instance.
+            target (TrackedMessage | MessageDraft): The target message or draft to manage reactions for.
+        """
         super().__init__(timeout=None)
         self.cog = cog
         self.target = target
@@ -711,7 +738,7 @@ class _UnlinkReactionSelectView(ui.View):
         assert guild is not None
 
         if reaction_index >= len(self.target.reactions):
-            await interaction.response.send_message("Action introuvable.", ephemeral=True)
+            await interaction.response.edit_message(content="Action introuvable.", embed=None)
             return
 
         removed = self.target.reactions.pop(reaction_index)
@@ -736,6 +763,7 @@ class _UnlinkReactionSelectView(ui.View):
         await interaction.response.edit_message(
             content=f"Action retirée de {target_label} : {removed.emoji} : {self.cog.format_reaction_action(removed)}",
             view=None,
+            embed=None,
         )
 
 
@@ -745,7 +773,11 @@ class _UnlinkReactionSelectView(ui.View):
 
 
 class _SuggestionModal(ui.Modal, title="Envoyer une suggestion"):
-    """Modal for submitting a suggestion."""
+    """Modal for submitting a suggestion.
+
+    Attributes:
+        suggestion_input (ui.TextInput): Input field for the suggestion content.
+    """
 
     suggestion_input: ui.TextInput = ui.TextInput(
         label="Votre suggestion",

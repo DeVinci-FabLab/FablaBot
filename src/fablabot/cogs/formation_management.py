@@ -634,7 +634,7 @@ class FormationManagement(commands.Cog):
                 ts_iso=datetime.now(PARIS_TZ).isoformat(timespec="seconds"),
             )
 
-            self._log_reaction(payload.guild_id, reaction_event)
+            self._reaction_logs.append(payload.guild_id, reaction_event)
 
             self._schedule_update(payload.guild_id)
 
@@ -765,11 +765,7 @@ class FormationManagement(commands.Cog):
         guild_state["published"] = published.to_dict()
         self._set_guild_state(guild_id, guild_state)
 
-    # -- Reaction Logs & Updates --
-
-    def _log_reaction(self, guild_id: int, reaction_event: ReactionEvent) -> None:
-        """Log a reaction event with Paris timezone."""
-        self._reaction_logs.append(guild_id, reaction_event)
+    # -- Reaction Updates --
 
     def _schedule_update(self, guild_id: int, delay: float = 2.0) -> None:
         """Schedule a debounced update for a guild's published message.
