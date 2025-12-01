@@ -760,17 +760,9 @@ class MessageManagement(commands.Cog):
         )
         return file, f"Export des réactions pour le message `{message_id}`."
 
-    def _get_guild_state(self, guild_id: int) -> dict[str, Any]:
-        """Retrieve or initialize the state for a guild."""
-        return self._state_store.ensure_guild(guild_id)
-
-    def _set_guild_state(self, guild_id: int, payload: dict[str, Any]) -> None:
-        """Set the state for a guild."""
-        self._state_store.set_guild(guild_id, payload)
-
     def _get_tracked_messages(self, guild_id: int) -> dict[int, TrackedMessage]:
         """Retrieve all tracked messages for a guild."""
-        guild_state = self._get_guild_state(guild_id)
+        guild_state = self._state_store.ensure_guild(guild_id)
         tracked_raw = guild_state.get("tracked", {}) or {}
         tracked: dict[int, TrackedMessage] = {}
         for msg_id_str, payload in tracked_raw.items():
@@ -803,10 +795,10 @@ class MessageManagement(commands.Cog):
             guild_id (int): The ID of the guild.
             tracked (TrackedMessage): The tracked message to set or update.
         """
-        guild_state = self._get_guild_state(guild_id)
+        guild_state = self._state_store.ensure_guild(guild_id)
         tracked_map = guild_state.setdefault("tracked", {})
         tracked_map[str(tracked.message_id)] = tracked.to_dict()
-        self._set_guild_state(guild_id, guild_state)
+        self._state_store.set_guild(guild_id, guild_state)
 
     def remove_tracked_message(self, guild_id: int, message_id: int) -> bool:
         """Remove a tracked message for a guild.
@@ -818,13 +810,13 @@ class MessageManagement(commands.Cog):
         Returns:
             bool: True if the message was removed, False if it was not found.
         """
-        guild_state = self._get_guild_state(guild_id)
+        guild_state = self._state_store.ensure_guild(guild_id)
         tracked_map: dict[str, Any] = guild_state.get("tracked") or {}
         if str(message_id) not in tracked_map:
             return False
         tracked_map.pop(str(message_id), None)
         guild_state["tracked"] = tracked_map
-        self._set_guild_state(guild_id, guild_state)
+        self._state_store.set_guild(guild_id, guild_state)
         return True
 
     def get_draft(self, guild_id: int) -> MessageDraft | None:
@@ -836,7 +828,7 @@ class MessageManagement(commands.Cog):
         Returns:
             MessageDraft | None: The message draft for the guild, or None if not found.
         """
-        guild_state = self._get_guild_state(guild_id)
+        guild_state = self._state_store.ensure_guild(guild_id)
         draft_raw = guild_state.get("draft")
         return MessageDraft.from_dict(draft_raw) if draft_raw else None
 
@@ -847,17 +839,17 @@ class MessageManagement(commands.Cog):
             guild_id (int): The ID of the guild.
             draft (MessageDraft): The message draft to set.
         """
-        guild_state = self._get_guild_state(guild_id)
+        guild_state = self._state_store.ensure_guild(guild_id)
         guild_state["draft"] = draft.to_dict()
-        self._set_guild_state(guild_id, guild_state)
+        self._state_store.set_guild(guild_id, guild_state)
         logger.debug(f"Draft updated for guild {guild_id} with {len(draft.reactions)} reactions")
 
     def _clear_draft(self, guild_id: int) -> None:
         """Clear the message draft for a guild."""
-        guild_state = self._get_guild_state(guild_id)
+        guild_state = self._state_store.ensure_guild(guild_id)
         if "draft" in guild_state:
             guild_state.pop("draft", None)
-            self._set_guild_state(guild_id, guild_state)
+            self._state_store.set_guild(guild_id, guild_state)
             logger.debug(f"Draft cleared for guild {guild_id}")
 
     async def register_reaction_action(self, guild_id: int, reaction: MsgReactionEvent) -> str:
