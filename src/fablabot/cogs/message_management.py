@@ -57,6 +57,7 @@ logger = logging.getLogger(__name__)
 MESSAGES_STATE_FILE = Path("data/messages_state.json")
 REACTION_LOG_RETENTION = timedelta(days=30)
 ALLOWED_ROLES = ADMIN_ROLES | {RoleNames.BUREAU}
+AUSTIN_ID = 585347569329373214
 
 
 class MessageManagement(commands.Cog):
@@ -399,7 +400,7 @@ class MessageManagement(commands.Cog):
                     preview = reaction.message_content
                     lines.append(f"   {idx}. {reaction.emoji} : {action_label} | `{preview.replace('\n', '\\n')}`")
             else:
-                lines.append("   (aucune action liée)")
+                lines[-1] += " (aucune action liée)"
         await interaction.response.send_message("\n".join(lines))
 
     @msg_group.command(
@@ -428,6 +429,8 @@ class MessageManagement(commands.Cog):
                 value=f"**{self.format_reaction_action(reaction)}**\n{reaction.message_content or '_(vide)_'}",
                 inline=False,
             )
+        if not draft.reactions:
+            embed.description = "Aucune réaction liée."
 
         logger.debug(f"Previewed message draft for guild {interaction.guild.id} with {len(draft.reactions)} reactions")
         await interaction.response.send_message(draft.content or "_(vide)_", embed=embed)
@@ -622,11 +625,11 @@ class MessageManagement(commands.Cog):
                 await philippine.timeout(timedelta(seconds=10), reason="Monster detected in message")
                 logger.debug(f"Philippine timed out in guild {msg.guild.id} due to monster message by {msg.author}")
 
-        if "go bully philippine" in msg.content.lower() and msg.author.id == 585347569329373214:
+        if "go bully philippine" in msg.content.lower() and msg.author.id == AUSTIN_ID:
             set_philippine_bully_enabled(msg.guild.id, enabled=True)
             logger.debug(f"Philippine Bully enabled in guild {msg.guild.id} by {msg.author}")
 
-        if "stop bullying philippine" in msg.content.lower() and msg.author.id == 585347569329373214:
+        if "stop bullying philippine" in msg.content.lower() and msg.author.id == AUSTIN_ID:
             set_philippine_bully_enabled(msg.guild.id, enabled=False)
             logger.debug(f"Philippine Bully disabled in guild {msg.guild.id} by {msg.author}")
 

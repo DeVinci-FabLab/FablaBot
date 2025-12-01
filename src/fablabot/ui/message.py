@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import logging
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal
 
 from discord import ButtonStyle, ChannelType, Embed, Guild, Interaction, Member, SelectOption, TextChannel, TextStyle, ui
 from discord.utils import get
@@ -384,8 +384,6 @@ class _ReactionActionTypeSelectView(ui.View):
 
 # endregion UI Components for Linking Reactions
 
-# TODO: follow prend link_reaction du draft
-
 
 # region ====== TrackedMessageSelectView and its Components ======
 
@@ -419,16 +417,15 @@ class _TrackedMessageSelectButton(ui.Button["TrackedMessageSelectView"]):
             await interaction.response.send_message(ErrorMessages.EXPIRED_VIEW_MESSAGE, ephemeral=True)
             return
 
-        view = cast("TrackedMessageSelectView", self.view)
-        match view.cmd:
+        match self.view.cmd:
             case MsgCommand.LINK:
-                await view.open_link_selector(interaction, self.tracked.message_id)
+                await self.view.open_link_selector(interaction, self.tracked.message_id)
             case MsgCommand.UNLINK:
-                await view.open_unlink_selector(interaction, self.tracked)
+                await self.view.open_unlink_selector(interaction, self.tracked)
             case MsgCommand.STOP:
-                await view.stop_tracking(interaction, self.tracked)
+                await self.view.stop_tracking(interaction, self.tracked)
             case MsgCommand.EXPORT:
-                await view.export_history(interaction, self.tracked)
+                await self.view.export_history(interaction, self.tracked)
             case _:
                 logger.error("Unknown command in TrackedMessageSelectView callback.")
 
@@ -449,16 +446,15 @@ class _DraftSelectButton(ui.Button["TrackedMessageSelectView"]):
             await interaction.response.send_message(ErrorMessages.EXPIRED_VIEW_MESSAGE, ephemeral=True)
             return
 
-        view = cast("TrackedMessageSelectView", self.view)
-        if view.draft is None:
+        if self.view.draft is None:
             await interaction.response.send_message(ErrorMessages.MSG_NO_DRAFT, ephemeral=True)
             return
 
-        match view.cmd:
+        match self.view.cmd:
             case MsgCommand.LINK:
-                await view.open_link_selector(interaction, None)
+                await self.view.open_link_selector(interaction, None)
             case MsgCommand.UNLINK:
-                await view.open_unlink_selector(interaction, view.draft)
+                await self.view.open_unlink_selector(interaction, self.view.draft)
             case _:
                 logger.error("Unknown command in TrackedMessageSelectView draft callback.")
                 await interaction.response.send_message(ErrorMessages.EXPIRED_VIEW_MESSAGE, ephemeral=True)
@@ -594,55 +590,33 @@ class TrackedMessageSelectView(ui.View):  # TODO: show preview
 # region ====== UnlinkReaction UI Components ======
 
 
-class _UnlinkReactionButton(ui.Button["_UnlinkReactionSelectView"]):  # TODO: review
+class _UnlinkReactionButton(ui.Button["_UnlinkReactionSelectView"]):
     """Button to remove a specific reaction action."""
 
-    def __init__(self, reaction_index: int, *, label: str, description: str) -> None:
+    def __init__(self, reaction_index: int, *, label: str) -> None:
+        """Initialize the unlink reaction button.
+
+        Args:
+            reaction_index (int): Index of the reaction action to remove.
+            label (str): The label to display on the button.
+        """
         super().__init__(label=label, style=ButtonStyle.danger, custom_id=f"unlink_action_{reaction_index}")
         self.reaction_index = reaction_index
-        self.description = description
 
     async def callback(self, interaction: Interaction) -> None:
-        view = self.view
-        if view is None:
+        """Handle button click to remove the reaction action.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+        """
+        if self.view is None:
             await interaction.response.send_message(ErrorMessages.EXPIRED_VIEW_MESSAGE, ephemeral=True)
             return
 
-        assert isinstance(view, _UnlinkReactionSelectView)
-        guild = interaction.guild
-        assert guild is not None
-
-        if self.reaction_index >= len(view.target.reactions):
-            await interaction.response.send_message("Action introuvable.", ephemeral=True)
-            return
-
-        removed = view.target.reactions.pop(self.reaction_index)
-        if isinstance(view.target, MessageDraft):
-            view.cog.set_draft(guild.id, view.target)
-            target_label = "le brouillon"
-        else:
-            view.cog.set_tracked_message(guild.id, view.target)
-            target_label = f"le message {view.target.message_id}"
-
-            if removed.emoji not in [ev.emoji for ev in view.target.reactions]:
-                channel = await guild.fetch_channel(view.target.channel_id)
-                if not isinstance(channel, TextChannel):
-                    return
-                try:
-                    msg = await channel.fetch_message(view.target.message_id)
-                except Exception:
-                    logger.exception(f"Tracked message {view.target.message_id} no longer accessible.")
-                    return
-                await msg.remove_reaction(removed.emoji, view.cog.bot.user)
-        logger.info(f"Removed reaction action {removed.emoji} ({removed.action_type}) on {target_label} in guild {guild.id}")
-
-        await interaction.response.edit_message(
-            content=f"Action retirée de {target_label} : {removed.emoji} : {view.cog.format_reaction_action(removed)}",
-            view=None,
-        )
+        await self.view.remove_link(interaction, self.reaction_index)
 
 
-class _UnlinkReactionSelectView(ui.View):  # TODO: review, see preview
+class _UnlinkReactionSelectView(ui.View):  # TODO: see preview
     """View to pick which reaction action to remove from a tracked message."""
 
     def __init__(self, cog: MessageManagement, target: TrackedMessage | MessageDraft) -> None:
@@ -652,17 +626,48 @@ class _UnlinkReactionSelectView(ui.View):  # TODO: review, see preview
 
         for idx, reaction in enumerate(target.reactions[:MAX_TRACKED_OPTIONS], start=1):
             action_label = self.cog.format_reaction_action(reaction, show_label=True)
-            preview = reaction.message_content
-            if len(preview) > 60:
-                preview = f"{preview[:57]}..."
 
             self.add_item(
-                _UnlinkReactionButton(
-                    idx - 1,
-                    label=f"{idx}. {reaction.emoji} - {action_label}"[:80],
-                    description=preview,
-                ),
+                _UnlinkReactionButton(idx - 1, label=f"{idx}. {reaction.emoji} - {action_label}"[:80]),
             )
+
+    async def remove_link(self, interaction: Interaction, reaction_index: int) -> None:
+        """Handle the removal of a reaction action.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            reaction_index (int): The index of the reaction action to remove.
+        """
+        guild = interaction.guild
+        assert guild is not None
+
+        if reaction_index >= len(self.target.reactions):
+            await interaction.response.send_message("Action introuvable.", ephemeral=True)
+            return
+
+        removed = self.target.reactions.pop(reaction_index)
+        if isinstance(self.target, MessageDraft):
+            self.cog.set_draft(guild.id, self.target)
+            target_label = "le brouillon"
+        else:
+            self.cog.set_tracked_message(guild.id, self.target)
+            target_label = f"le message {self.target.message_id}"
+            if removed.emoji not in [ev.emoji for ev in self.target.reactions]:
+                channel = await guild.fetch_channel(self.target.channel_id)
+                if not isinstance(channel, TextChannel):
+                    return
+                try:
+                    msg = await channel.fetch_message(self.target.message_id)
+                except Exception:
+                    logger.exception(f"Tracked message {self.target.message_id} no longer accessible.")
+                    return
+                await msg.remove_reaction(removed.emoji, self.cog.bot.user)  # type: ignore[arg-type]
+        logger.info(f"Removed reaction action {removed.emoji} ({removed.action_type}) on {target_label} in guild {guild.id}")
+
+        await interaction.response.edit_message(
+            content=f"Action retirée de {target_label} : {removed.emoji} : {self.cog.format_reaction_action(removed)}",
+            view=None,
+        )
 
 
 # endregion UnlinkReaction UI Components
