@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import Any
+
+from fablabot.helpers.state_store import JsonStateStore
 
 logger = logging.getLogger(__name__)
 
@@ -13,53 +14,42 @@ CONFIG_FILE = Path("data/guild_config.json")
 _GUILD_KEY_COMMANDS = "commands_channel_id"
 _KEY_LOG = "log_channel_id"
 _GUILD_KEY_WELCOME = "welcome_verify_enabled"
+_GUILD_KEY_BULLY = "philippine_bully_enabled"
 _GLOBAL_SECTION = "__global__"
+
+_config_store = JsonStateStore(logger, CONFIG_FILE)
 
 
 def _load_all() -> dict[str, dict[str, Any]]:
     """Load all guild configuration data from the JSON file.
 
     Returns:
-        dict[str, dict[str, Any]]: The loaded configuration data, keyed by guild ID.
+        dict[str, dict[str, Any]]: Mapping of guild IDs to their configuration entries.
     """
-    if not CONFIG_FILE.exists():
+    state = _config_store.state
+    if not isinstance(state, dict):
+        logger.warning("Guild configuration store is not a mapping; resetting.")
         return {}
-    try:
-        with CONFIG_FILE.open("r", encoding="utf-8") as stream:
-            data = json.load(stream)
-    except json.JSONDecodeError:
-        logger.exception("Failed to decode guild configuration JSON; ignoring contents.")
-        return {}
-    if not isinstance(data, dict):
-        logger.warning("Guild configuration file does not contain an object; ignoring contents.")
-        return {}
-    result: dict[str, dict[str, Any]] = {}
-    for guild_id, payload in data.items():
-        if isinstance(guild_id, str) and isinstance(payload, dict):
-            result[guild_id] = payload
-    return result
+    return {k: v for k, v in state.items() if isinstance(v, dict)}
 
 
 def _save_all(data: dict[str, dict[str, Any]]) -> None:
-    """Save all guild configuration data to the JSON file.
+    """Persist all guild configuration data through the shared state store.
 
     Args:
-        data (dict[str, dict[str, Any]]): The configuration data to save, keyed by guild ID.
+        data (dict[str, dict[str, Any]]): Mapping of guild IDs to their configuration entries.
     """
-    CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = CONFIG_FILE.with_suffix(".tmp")
-    with tmp_path.open("w", encoding="utf-8") as stream:
-        json.dump(data, stream, indent=2, sort_keys=True)
-        stream.write("\n")
-    tmp_path.replace(CONFIG_FILE)
+    _config_store.state.clear()
+    _config_store.state.update({k: v for k, v in data.items() if isinstance(v, dict)})
+    _config_store.save()
 
 
-def _update_entry(guild_id: int | None, **updates: Any) -> None:
+def _update_entry(guild_id: int | None, **updates: int | bool | None) -> None:
     """Update the configuration entry for a specific guild or the global section.
 
     Args:
         guild_id (int | None): The ID of the guild to update.
-        **updates (Any): Key-value pairs to update in the guild's configuration.
+        **updates (int | bool | None): Key-value pairs to update in the guild's configuration.
     """
     key = _GLOBAL_SECTION if guild_id is None else str(guild_id)
     data = _load_all()
@@ -70,10 +60,9 @@ def _update_entry(guild_id: int | None, **updates: Any) -> None:
             if field in entry:
                 entry.pop(field)
                 changed = True
-        else:
-            if entry.get(field) != value:
-                entry[field] = value
-                changed = True
+        elif entry.get(field) != value:
+            entry[field] = value
+            changed = True
     if not changed:
         return
     if entry:
@@ -127,17 +116,31 @@ def set_log_channel_id(channel_id: int) -> None:
     Args:
         channel_id (int): The channel ID to set.
     """
-    data = _load_all()
-    updated = False
+    _update_entry(None, **{_KEY_LOG: channel_id})
 
-    current_global = dict(data.get(_GLOBAL_SECTION, {}))
-    if current_global.get(_KEY_LOG) != channel_id:
-        current_global[_KEY_LOG] = channel_id
-        data[_GLOBAL_SECTION] = current_global
-        updated = True
 
-    if updated:
-        _save_all(data)
+def is_philippine_bully_enabled(guild_id: int) -> bool:
+    """Check if Philippine Bully is enabled for a specific guild.
+
+    Args:
+        guild_id (int): The ID of the guild to check.
+
+    Returns:
+        bool: True if Philippine Bully is enabled, False otherwise.
+    """
+    entry = _load_all().get(str(guild_id), {})
+    value = entry.get(_GUILD_KEY_BULLY)
+    return bool(value) if isinstance(value, bool) else False
+
+
+def set_philippine_bully_enabled(guild_id: int, *, enabled: bool) -> None:
+    """Set the Philippine Bully status for a specific guild.
+
+    Args:
+        guild_id (int): The ID of the guild to set the status for.
+        enabled (bool): Whether to enable or disable the feature.
+    """
+    _update_entry(guild_id, **{_GUILD_KEY_BULLY: bool(enabled)})
 
 
 def is_welcome_verify_enabled(guild_id: int) -> bool:
@@ -154,7 +157,7 @@ def is_welcome_verify_enabled(guild_id: int) -> bool:
     return bool(value) if isinstance(value, bool) else False
 
 
-def set_welcome_verify_enabled(guild_id: int, enabled: bool) -> None:
+def set_welcome_verify_enabled(guild_id: int, *, enabled: bool) -> None:
     """Set the welcome verification status for a specific guild.
 
     Args:

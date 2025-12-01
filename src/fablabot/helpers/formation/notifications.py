@@ -7,14 +7,14 @@ import logging
 import re
 from typing import TYPE_CHECKING, Literal
 
-from discord import Guild
-
-from fablabot.cogs.helpers.constants import RoleNames
-from fablabot.cogs.helpers.formation_rendering import format_formation_export, humanize_dt
-from fablabot.cogs.helpers.utils import get_members_by_role, get_or_fetch_member, send_dm_to_member
+from fablabot.helpers.constants import RoleNames
+from fablabot.helpers.formation.rendering import format_formation_export, humanize_dt
+from fablabot.helpers.utils import get_members_by_role, get_or_fetch_member, send_dm_to_member
 
 if TYPE_CHECKING:
-    from fablabot.cogs.helpers.formation_models import Formation
+    from discord import Guild
+
+    from fablabot.models.formation import Formation
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ async def send_registration_dm(
         f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
     )
 
-    await send_dm_to_member(logger, guild, member, message, f"registration for formation {formation.name}")
+    await send_dm_to_member(logger, guild, member, message, dm_type=f"registration for formation {formation.name}")
 
 
 async def send_waitlist_dm(
@@ -81,7 +81,7 @@ async def send_waitlist_dm(
         f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
     )
 
-    await send_dm_to_member(logger, guild, member, message, f"waitlist for formation {formation_name}")
+    await send_dm_to_member(logger, guild, member, message, dm_type=f"waitlist for formation {formation_name}")
 
 
 async def send_promotion_dm(
@@ -114,7 +114,7 @@ async def send_promotion_dm(
         f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
     )
 
-    await send_dm_to_member(logger, guild, member, message, f"promotion for formation {formation.name}")
+    await send_dm_to_member(logger, guild, member, message, dm_type=f"promotion for formation {formation.name}")
 
 
 async def notify_trainer_before_formation(
@@ -153,15 +153,17 @@ async def notify_trainer_before_formation(
         timing_line = f"Ta formation **{formation.name}** commence maintenant (le {datetime_text})."
         subject = f"start alert for formation {formation.name}"
 
+    excusable_line = "Merci de transmettre au **CoDir** la liste des participants à excuser si besoin.\n\n"
+
     message = (
         f"Salut {trainer.display_name} !\n"
         f"{timing_line}\n\n"
         f"{formation_export}\n\n"
-        "Merci de transmettre au **CoDir** la liste des participants à excuser si besoin.\n\n"
+        f"{excusable_line if formation.excusable and moment == 'start' else ''}"
         f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
     )
 
-    await send_dm_to_member(logger, guild, trainer, message, subject)
+    await send_dm_to_member(logger, guild, trainer, message, dm_type=subject)
 
 
 async def notify_responsible_before_formation(
@@ -192,7 +194,7 @@ async def notify_responsible_before_formation(
     for responsible in responsibles:
         message = f"Salut {responsible.display_name} !\n{timing_line}\n\n{formation_export}"
 
-        await send_dm_to_member(logger, guild, responsible, message, subject)
+        await send_dm_to_member(logger, guild, responsible, message, dm_type=subject)
 
     if not responsibles:
         logger.error(f"No responsible found to notify for formation {formation.name!r} in guild {guild.id}.")
@@ -212,7 +214,10 @@ async def notify_participants_before_formation(
     """
     datetime_text = humanize_dt(formation.start_dt).lower()[2:-2]
 
-    message_content = f"La formation **{formation.name}** commence bientôt (le {datetime_text}).\n\n*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
+    message_content = (
+        f"La formation **{formation.name}** commence bientôt (le {datetime_text}).\n\n"
+        f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
+    )
 
     for entry in formation.registered_users:
         participant_id = int(entry["user_id"])
@@ -223,4 +228,4 @@ async def notify_participants_before_formation(
 
         message = f"Salut {participant.display_name} !\n{message_content}"
 
-        await send_dm_to_member(logger, guild, participant, message, f"reminder for formation {formation.name}")
+        await send_dm_to_member(logger, guild, participant, message, dm_type=f"reminder for formation {formation.name}")

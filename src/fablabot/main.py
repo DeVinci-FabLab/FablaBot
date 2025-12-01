@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, override
+from typing import TYPE_CHECKING, Any, override
 
 from discord import Intents
 from discord.app_commands import AppCommandContext
@@ -18,9 +18,12 @@ from fablabot.cogs import (
     MessageManagement,
     SuggestionManagement,
     UserManagement,
-    Welcome,
+    WelcomeManagement,
 )
-from fablabot.logging_handlers import DailyFileHandler, DiscordLogHandler
+from fablabot.helpers.logging_setup import configure_logging
+
+if TYPE_CHECKING:
+    from fablabot.logging_handlers import DailyFileHandler, DiscordLogHandler
 
 logger = logging.getLogger(__name__)
 load_dotenv()
@@ -28,8 +31,6 @@ load_dotenv()
 DISCORD_TOKEN_FILE = os.environ.get("DISCORD_TOKEN_FILE") or ""
 with open(DISCORD_TOKEN_FILE) as f:
     DISCORD_TOKEN = f.read().strip()
-
-LOG_PATH = "logs"
 
 
 class Fablabot(commands.Bot):
@@ -67,27 +68,7 @@ class Fablabot(commands.Bot):
     @override
     async def setup_hook(self) -> None:
         """Load the bot extensions."""
-        root_logger = logging.getLogger()
-        for h in list(root_logger.handlers):
-            root_logger.removeHandler(h)
-
-        formatter = logging.Formatter("[%(asctime)s] |  %(levelname)s  | %(name)s: %(message)s")
-
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
-        console_handler.setFormatter(formatter)
-        root_logger.addHandler(console_handler)
-
-        file_handler = DailyFileHandler(level=logging.DEBUG, formatter=formatter)
-        root_logger.addHandler(file_handler)
-
-        discord_handler = DiscordLogHandler(self, level=logging.ERROR)
-        root_logger.addHandler(discord_handler)
-
-        root_logger.setLevel(logging.DEBUG)
-
-        self.discord_log_handler = discord_handler
-        self.file_log_handler = file_handler
+        self.discord_log_handler, self.file_log_handler = configure_logging(self)
 
         self.tree.clear_commands(guild=None)
         for cog in (
@@ -95,16 +76,15 @@ class Fablabot(commands.Bot):
             FormationManagement(self),
             LogManagement(self),
             MessageManagement(self),
-            SuggestionManagement(self),
             UserManagement(self),
-            Welcome(self),
+            WelcomeManagement(self),
         ):
             await self.add_cog(cog)
-            logger.info(f"Loaded cog {cog.__class__.__name__}")
+            logger.info(f"Loaded cog {cog.__class__.__name__}.")
 
         # Synchronisation globale des commandes
         await self.tree.sync()
-        logger.info("Commands synced")
+        logger.info("Commands synced.")
 
     @override
     async def on_command_error(self, ctx: commands.Context[Any], exception: Exception) -> None:
@@ -114,15 +94,15 @@ class Fablabot(commands.Bot):
             ctx (commands.Context[Any]): The invocation context of the command.
             exception (Exception): The raised exception.
         """
-        logger.error(f"Unhandled command error: {exception}")
-        await ctx.reply(str(exception), ephemeral=True)
+        logger.exception("Unhandled command error", exc_info=exception)
+        await ctx.send("Une erreur inattendue est survenue lors de l'exécution de la commande.")
 
 
 def main() -> None:
     """Run the bot using the token from the environment."""
-    logger.info("Starting FablaBot")
+    logger.info("Starting FablaBot.")
     bot = Fablabot()
-    logger.info("Running bot")
+    logger.info("Running bot.")
     bot.run(DISCORD_TOKEN)
 
 

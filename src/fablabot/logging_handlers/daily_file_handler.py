@@ -9,8 +9,10 @@ from typing import override
 
 from discord import File
 
-LOG_PATH = "logs"
-MAX_LOG_AGE_DAYS = 15
+from fablabot.helpers.constants import PARIS_TZ
+
+_LOG_PATH = "logs"
+_MAX_LOG_AGE_DAYS = 30
 
 
 class DailyFileHandler(logging.FileHandler):
@@ -24,10 +26,10 @@ class DailyFileHandler(logging.FileHandler):
     def __init__(
         self,
         *,
-        log_dir: str = LOG_PATH,
+        log_dir: str = _LOG_PATH,
         level: int = logging.DEBUG,
         formatter: logging.Formatter,
-        max_age_days: int = MAX_LOG_AGE_DAYS,
+        max_age_days: int = _MAX_LOG_AGE_DAYS,
     ) -> None:
         """Initialize the daily file handler.
 
@@ -39,7 +41,7 @@ class DailyFileHandler(logging.FileHandler):
         """
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        self.current_date = datetime.now().date()
+        self.current_date = datetime.now(PARIS_TZ).date()
         self.max_age_days = max_age_days
 
         log_file = self.log_dir / f"{self.current_date}.log"
@@ -56,7 +58,7 @@ class DailyFileHandler(logging.FileHandler):
         Args:
             record (logging.LogRecord): The log record to emit.
         """
-        current_date = datetime.now().date()
+        current_date = datetime.now(PARIS_TZ).date()
 
         if current_date != self.current_date:
             self.close()
@@ -89,12 +91,12 @@ class DailyFileHandler(logging.FileHandler):
         if not self.log_dir.exists():
             return
 
-        cutoff_date = datetime.now().date() - timedelta(days=self.max_age_days)
+        cutoff_date = datetime.now(PARIS_TZ).date() - timedelta(days=self.max_age_days)
 
         for log_file in self.log_dir.glob("*.log"):
             try:
                 file_date_str = log_file.stem
-                file_date = datetime.strptime(file_date_str, "%Y-%m-%d").date()
+                file_date = datetime.strptime(file_date_str, "%Y-%m-%d").replace(tzinfo=PARIS_TZ).date()
 
                 if file_date < cutoff_date:
                     log_file.unlink()

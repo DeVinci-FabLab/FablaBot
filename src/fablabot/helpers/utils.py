@@ -2,34 +2,34 @@
 
 from __future__ import annotations
 
-from logging import Logger
-from typing import Any, overload
+import re
+from typing import TYPE_CHECKING, Any, overload
 
 from discord import (
-    CategoryChannel,
+    Embed,
     Forbidden,
     Guild,
     HTTPException,
     Interaction,
     Member,
-    PermissionOverwrite,
     Role,
     TextChannel,
     VoiceChannel,
 )
 from discord.utils import get
+from emoji import EMOJI_DATA
 
-from fablabot.cogs.helpers.constants import ErrorMessages, RoleNames
 from fablabot.guild_config import get_commands_channel_id, set_commands_channel_id
+from fablabot.helpers.constants import ErrorMessages
 
-COMMANDS_CHANNEL_NAME = "commandes_bot"
-ADMIN_ROLES = {
-    RoleNames.ADMIN_TEMP,
-    RoleNames.ADMIN,
-    RoleNames.PRESIDENT,
-    RoleNames.VICE_PRESIDENT,
-    RoleNames.SECRETARY,
-}
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from logging import Logger
+
+_COMMANDS_CHANNEL_NAME = "commandes_bot"
+_DISCORD_EMOJI_RE = re.compile(r"^<a?:\w+:\d+>$")
+_REGIONAL_INDICATOR_START = 0x1F1E6
+_REGIONAL_INDICATOR_END = 0x1F1FF
 
 
 def log_request(logger: Logger, command_name: str, interaction: Interaction, **kwargs: Any) -> None:
@@ -45,7 +45,7 @@ def log_request(logger: Logger, command_name: str, interaction: Interaction, **k
     logger.info(f"[{command_name}]: user={interaction.user!s} id={interaction.user.id} {details}")
 
 
-async def is_in_allowed_channel(logger: Logger, interaction: Interaction) -> bool:
+async def _is_in_allowed_channel(logger: Logger, interaction: Interaction) -> bool:
     """Check if the interaction was made in the allowed commands channel.
 
     Args:
@@ -71,7 +71,7 @@ async def is_in_allowed_channel(logger: Logger, interaction: Interaction) -> boo
     if stored_channel_id is not None:
         try:
             maybe_channel: Any = interaction.guild.get_channel(stored_channel_id) or await interaction.guild.fetch_channel(
-                stored_channel_id
+                stored_channel_id,
             )
         except Exception:
             logger.warning(
@@ -88,7 +88,7 @@ async def is_in_allowed_channel(logger: Logger, interaction: Interaction) -> boo
                 set_commands_channel_id(interaction.guild.id, None)
 
     if commands_channel is None:
-        maybe_channel = get(interaction.guild.channels, name=COMMANDS_CHANNEL_NAME)
+        maybe_channel = get(interaction.guild.channels, name=_COMMANDS_CHANNEL_NAME)
         if isinstance(maybe_channel, TextChannel):
             commands_channel = maybe_channel
             set_commands_channel_id(interaction.guild.id, maybe_channel.id)
@@ -103,7 +103,7 @@ async def is_in_allowed_channel(logger: Logger, interaction: Interaction) -> boo
 
     if interaction.channel != commands_channel:
         logger.warning(
-            f"Attempt to use command in a different channel than {COMMANDS_CHANNEL_NAME}: {interaction.channel.name}"
+            f"Attempt to use command in a different channel than {_COMMANDS_CHANNEL_NAME}: {interaction.channel.name}",
         )
         await interaction.response.send_message(
             f"Vous ne pouvez pas utiliser de commandes en dehors du salon {commands_channel.mention}.",
@@ -113,7 +113,7 @@ async def is_in_allowed_channel(logger: Logger, interaction: Interaction) -> boo
     return True
 
 
-async def check_has_role(logger: Logger, interaction: Interaction, roles: set[str]) -> bool:
+async def _check_has_role(logger: Logger, interaction: Interaction, roles: set[str]) -> bool:
     """Check if the interaction user has any of the specified roles.
 
     Args:
@@ -136,7 +136,7 @@ async def check_has_role(logger: Logger, interaction: Interaction, roles: set[st
     member_role_names = {role.name for role in interaction.user.roles}
     if not member_role_names & roles:
         logger.warning(
-            f"User {interaction.user} doesn't have any of the roles {', '.join(roles)} in the guild {interaction.guild.id}"
+            f"User {interaction.user} doesn't have any of the roles {', '.join(roles)} in the guild {interaction.guild.id}",
         )
         msg = f"Il est requis d'avoir au moins l'un des rôles suivants pour utiliser cette commande : {', '.join(roles)}."
         await interaction.response.send_message(
@@ -147,7 +147,60 @@ async def check_has_role(logger: Logger, interaction: Interaction, roles: set[st
     return True
 
 
-async def can_dm_user(user: Member) -> bool:
+async def ensure_command_context(
+    logger: Logger,
+    command_name: str,
+    interaction: Interaction,
+    *,
+    log_details: Mapping[str, Any] | None = None,
+    required_roles: set[str] | None = None,
+    enforce_commands_channel: bool = True,
+) -> bool:
+    """Log a command execution and run shared context checks.
+
+    Args:
+        logger (Logger): Logger for diagnostics.
+        command_name (str): Name of the invoked command for logging.
+        interaction (Interaction): Discord interaction context.
+        log_details (Mapping[str, Any] | None): Optional contextual details to log.
+        required_roles (set[str] | None): Required role names; skipped when None.
+        enforce_commands_channel (bool): Whether to enforce the configured commands channel.
+
+    Returns:
+        bool: ``True`` when all checks pass, ``False`` otherwise.
+    """
+    log_request(logger, command_name, interaction, **(log_details or {}))
+
+    if enforce_commands_channel and not await _is_in_allowed_channel(logger, interaction):
+        return False
+
+    if required_roles is not None and not await _check_has_role(logger, interaction, required_roles):
+        return False
+
+    return True
+
+
+def is_valid_emoji(emoji: str) -> bool:
+    """Check if an emoji is valid.
+
+    Args:
+        emoji (str): The emoji to check.
+
+    Returns:
+        bool: True if valid, False otherwise.
+    """
+    emoji_clean = emoji.strip()
+    try:
+        return emoji_clean is not None and (
+            emoji_clean in EMOJI_DATA
+            or _DISCORD_EMOJI_RE.match(emoji_clean) is not None
+            or _REGIONAL_INDICATOR_START <= ord(emoji_clean) <= _REGIONAL_INDICATOR_END
+        )
+    except Exception:
+        return False
+
+
+async def _can_dm_user(user: Member) -> bool:
     """Check if the bot can send a DM to the user.
 
     Args:
@@ -158,18 +211,20 @@ async def can_dm_user(user: Member) -> bool:
     """
     try:
         await user.send()
-        return True
     except Forbidden:
         return False
     except HTTPException:
         return True
+    return True
 
 
 async def send_dm_to_member(
     logger: Logger,
     guild: Guild,
     member: Member,
-    message_content: str,
+    message_content: str | None,
+    *,
+    embed: Embed | None = None,
     dm_type: str,
 ) -> bool:
     """Send a direct message to a guild member.
@@ -178,7 +233,8 @@ async def send_dm_to_member(
         logger (Logger): The logger of the cog.
         guild (Guild): The guild where the user is located.
         member (Member): The member to notify.
-        message_content (str): The message content to send.
+        message_content (str | None): The message content to send.
+        embed (Embed | None): The embed to send. Defaults to None.
         dm_type (str): The type of DM being sent (for logging purposes).
 
     Returns:
@@ -189,14 +245,17 @@ async def send_dm_to_member(
     if member.bot:
         return False
 
-    if not await can_dm_user(member):
+    if not await _can_dm_user(member):
         logger.error(f"Cannot DM user {member.id} ({member.name!r}) in guild {guild.id}; skipping {dm_type} DM.")
         return False
 
     logger.debug(f"Resolved member {member.id} ({member.display_name}) for {dm_type} DM in guild {guild.id}.")
 
     try:
-        await member.send(message_content)
+        if embed is not None:
+            await member.send(message_content, embed=embed)
+        else:
+            await member.send(message_content)
     except Exception:
         logger.exception(f"Failed to send {dm_type} DM to user {member} in guild {guild.id}.")
         return False
@@ -311,188 +370,17 @@ def format_channel_mention(channel: TextChannel | VoiceChannel) -> str:
     return f"{channel.mention} ({escape_md(channel.name)})"
 
 
+def format_preview_content(content: str, char_limit: int) -> str:
+    """Format a short, display-ready preview of a formation content.
+
+    Args:
+        content (str): The content to format.
+        char_limit (int): The maximum number of characters for the preview.
+    """
+    trimmed = content.strip() or "_(vide)_"
+    if len(trimmed) > char_limit:
+        trimmed = trimmed[: char_limit - 3] + "..."
+    return f">>> {trimmed}"
+
+
 # endregion Formatting Helpers
-
-
-# region ====== Safe Discord Operations (with error handling) ======
-
-
-async def safe_add_roles(
-    logger: Logger,
-    member: Member,
-    *roles: Role,
-    reason: str | None = None,
-) -> tuple[bool, str | None]:
-    """Safely add roles to a member with error handling.
-
-    Args:
-        logger (Logger): The logger to use for error messages.
-        member (Member): The member to add roles to.
-        *roles (Role): The roles to add.
-        reason (str | None, optional): The reason for adding roles. Defaults to None.
-
-    Returns:
-        tuple[bool, str | None]: (Success status, Error message if failed).
-    """
-    try:
-        await member.add_roles(*roles, reason=reason)
-        return True, None
-    except Forbidden:
-        logger.exception(f"Forbidden to add roles {roles} to {member}")
-        return False, ErrorMessages.ROLE_ADD_FAILED
-    except HTTPException:
-        logger.exception(f"HTTP error while adding roles {roles} to {member}")
-        return False, ErrorMessages.HTTP_ERROR.format(
-            operation=f"l'ajout des rôles {', '.join(role.name for role in roles)} à {format_member_mention(member)}"
-        )
-
-
-async def safe_remove_roles(
-    logger: Logger,
-    member: Member,
-    *roles: Role,
-    reason: str | None = None,
-) -> tuple[bool, str | None]:
-    """Safely remove roles from a member with error handling.
-
-    Args:
-        logger (Logger): The logger to use for error messages.
-        member (Member): The member to remove roles from.
-        *roles (Role): The roles to remove.
-        reason (str | None, optional): The reason for removing roles. Defaults to None.
-
-    Returns:
-        tuple[bool, str | None]: (Success status, Error message if failed).
-    """
-    try:
-        await member.remove_roles(*roles, reason=reason)
-        return True, None
-    except Forbidden:
-        logger.exception(f"Forbidden to remove roles {roles} from {member}")
-        return False, ErrorMessages.ROLE_REMOVE_FAILED
-    except HTTPException:
-        logger.exception(f"HTTP error while removing roles {roles} from {member}")
-        return False, ErrorMessages.HTTP_ERROR.format(
-            operation=f"le retrait des rôles {', '.join(role.name for role in roles)} à {format_member_mention(member)}"
-        )
-
-
-async def safe_create_text_channel(
-    logger: Logger,
-    category: CategoryChannel,
-    name: str,
-    overwrites: dict[Any, PermissionOverwrite] | None = None,
-    reason: str | None = None,
-    **options: Any,
-) -> tuple[TextChannel | None, str | None]:
-    """Safely create a text channel with error handling.
-
-    Args:
-        logger (Logger): The logger to use for error messages.
-        category (CategoryChannel): The category to create the channel in.
-        name (str): The name of the channel.
-        overwrites (dict[Any, PermissionOverwrite] | None, optional): Permission overwrites. Defaults to None.
-        reason (str | None, optional): The reason for creation. Defaults to None.
-        **options (Any): Additional channel options.
-
-    Returns:
-        tuple[TextChannel | None, str | None]: (Created channel or None, Error message if failed).
-    """
-    try:
-        channel = await category.create_text_channel(
-            name=name,
-            overwrites=overwrites or {},
-            reason=reason,
-            **options,
-        )
-        return channel, None
-    except HTTPException:
-        logger.exception(f"HTTP error while creating text channel {name!r} in category {category}")
-        return None, ErrorMessages.CHANNEL_CREATE_FAILED.format(channel_type=f"salon textuel {name!r}")
-
-
-async def safe_create_voice_channel(
-    logger: Logger,
-    category: CategoryChannel,
-    name: str,
-    overwrites: dict[Any, PermissionOverwrite] | None = None,
-    reason: str | None = None,
-    **options: Any,
-) -> tuple[VoiceChannel | None, str | None]:
-    """Safely create a voice channel with error handling.
-
-    Args:
-        logger (Logger): The logger to use for error messages.
-        category (CategoryChannel): The category to create the channel in.
-        name (str): The name of the channel.
-        overwrites (dict[Any, PermissionOverwrite] | None, optional): Permission overwrites. Defaults to None.
-        reason (str | None, optional): The reason for creation. Defaults to None.
-        **options (Any): Additional channel options.
-
-    Returns:
-        tuple[VoiceChannel | None, str | None]: (Created channel or None, Error message if failed).
-    """
-    try:
-        channel = await category.create_voice_channel(
-            name=name,
-            overwrites=overwrites or {},
-            reason=reason,
-            **options,
-        )
-        return channel, None
-    except HTTPException:
-        logger.exception(f"HTTP error while creating voice channel {name!r} in category {category}")
-        return None, ErrorMessages.CHANNEL_CREATE_FAILED.format(channel_type=f"salon vocal {name!r}")
-
-
-async def safe_delete_channel(
-    logger: Logger,
-    channel: TextChannel | VoiceChannel,
-    reason: str | None = None,
-) -> tuple[bool, str | None]:
-    """Safely delete a channel with error handling.
-
-    Args:
-        logger (Logger): The logger to use for error messages.
-        channel (TextChannel | VoiceChannel): The channel to delete.
-        reason (str | None, optional): The reason for deletion. Defaults to None.
-
-    Returns:
-        tuple[bool, str | None]: (Success status, Error message if failed).
-    """
-    channel_type = "salon textuel" if isinstance(channel, TextChannel) else "salon vocal"
-    try:
-        await channel.delete(reason=reason)
-        return True, None
-    except HTTPException:
-        logger.exception(f"HTTP error while deleting channel {channel}")
-        return False, ErrorMessages.CHANNEL_DELETE_FAILED.format(channel_type=channel_type)
-
-
-async def safe_edit_channel(
-    logger: Logger,
-    channel: TextChannel | VoiceChannel,
-    reason: str | None = None,
-    **options: Any,
-) -> tuple[bool, str | None]:
-    """Safely edit a channel with error handling.
-
-    Args:
-        logger (Logger): The logger to use for error messages.
-        channel (TextChannel | VoiceChannel): The channel to edit.
-        reason (str | None, optional): The reason for editing. Defaults to None.
-        **options (Any): The channel attributes to edit.
-
-    Returns:
-        tuple[bool, str | None]: (Success status, Error message if failed).
-    """
-    channel_type = "salon textuel" if isinstance(channel, TextChannel) else "salon vocal"
-    try:
-        await channel.edit(reason=reason, **options)
-        return True, None
-    except HTTPException:
-        logger.exception(f"HTTP error while editing channel {channel}")
-        return False, ErrorMessages.CHANNEL_EDIT_FAILED.format(channel_type=channel_type)
-
-
-# endregion Safe Discord Operations

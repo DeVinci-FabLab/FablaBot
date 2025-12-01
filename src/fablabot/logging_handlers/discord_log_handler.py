@@ -7,13 +7,13 @@ from typing import override
 from discord import File, TextChannel
 from discord.ext import commands
 
-from fablabot.cogs.helpers.constants import MAX_MSG_CHARS
 from fablabot.guild_config import get_log_channel_id
+from fablabot.helpers.constants import MAX_MSG_CHARS
 
-CLEAR = "\u001b[0m"
-RED = "\u001b[31m"
-UNDERLINE = "\u001b[4m"
-CYAN = "\u001b[34m"
+_CLEAR = "\u001b[0m"
+_RED = "\u001b[31m"
+_UNDERLINE = "\u001b[4m"
+_CYAN = "\u001b[34m"
 
 
 class DiscordLogHandler(logging.Handler):
@@ -31,7 +31,7 @@ class DiscordLogHandler(logging.Handler):
         self.log_channel_id = get_log_channel_id() or 0
         # ANSI escape code formatter for colored log output in Discord
         ansi_log_format = (
-            f"{RED}[%(levelname)s]{CLEAR} {CYAN}{UNDERLINE}%(module)s.%(funcName)s{CLEAR}{CYAN}:{CLEAR} %(message)s"
+            f"{_RED}[%(levelname)s]{_CLEAR} {_CYAN}{_UNDERLINE}%(module)s.%(funcName)s{_CLEAR}{_CYAN}:{_CLEAR} %(message)s"
         )
         self.setFormatter(logging.Formatter(ansi_log_format))
         self.setLevel(level)

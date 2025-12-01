@@ -1,0 +1,993 @@
+﻿"""User interface components for message-related features."""
+
+from __future__ import annotations
+
+from datetime import datetime
+import logging
+from typing import TYPE_CHECKING, Any, Literal
+
+from discord import ButtonStyle, ChannelType, Embed, Guild, Interaction, Member, SelectOption, TextChannel, TextStyle, ui
+from discord.utils import get
+
+from fablabot.helpers.constants import (
+    EMBED_PREVIEW_MAX_CHARS,
+    EMBED_PREVIEW_MIN_CHARS,
+    EMBED_TOTAL_FIELD_CHAR_BUDGET,
+    MAX_TRACKED_OPTIONS,
+    PARIS_TZ,
+    ErrorMessages,
+)
+from fablabot.helpers.utils import format_member_mention, format_preview_content, get_members_by_role, send_dm_to_member
+from fablabot.models.message import (
+    ANONYMOUS_ICON_URL,
+    SUGGESTION_OPTIONS,
+    MessageDraft,
+    MsgActionType,
+    MsgCommand,
+    MsgReactionEvent,
+    SuggestionConfig,
+    TrackedMessage,
+)
+
+if TYPE_CHECKING:
+    from fablabot.cogs import MessageManagement
+
+logger = logging.getLogger(__name__)
+
+
+# region ====== BulkDM UI Components ======
+
+
+class _BulkDMView(ui.View):
+    """View for bulk direct message sending."""
+
+    def __init__(self, sender: Member, followup_id: int, message: str) -> None:
+        """Initialize the view for bulk direct messages.
+
+        Args:
+            sender (Member): The member initiating the message sending.
+            followup_id (int): The ID of the follow-up message to edit with results.
+            message (str): The message to send to the selected members.
+        """
+        super().__init__(timeout=None)
+        self.sender = sender
+        self.followup_id = followup_id
+        self.message = message
+
+        async def _on_select(interaction: Interaction) -> None:
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+
+        self.select: ui.UserSelect[Any] = ui.UserSelect(
+            placeholder="Sélectionne les membres...",
+            min_values=1,
+            max_values=25,
+        )
+        self.select.callback = _on_select  # type: ignore[method-assign]
+
+        self.confirm_button: ui.Button[Any] = ui.Button(label="Confirmer", style=ButtonStyle.primary)
+        self.confirm_button.callback = self.confirm  # type: ignore[method-assign]
+
+        self.add_item(self.select)
+        self.add_item(self.confirm_button)
+
+    async def confirm(self, interaction: Interaction) -> None:
+        """Confirm the direct message sending.
+
+        Args:
+            interaction (Interaction): The Discord interaction triggered by the confirm button.
+        """
+        assert interaction.guild is not None
+        members: list[Member] = [m for m in self.select.values if isinstance(m, Member)]
+        if not members:
+            await interaction.response.send_message("Aucun membre sélectionné.", ephemeral=True)
+            return
+
+        logger.info(f"Bulk DM recipients chosen user={interaction.user} guild_id={interaction.guild.id} members={members}")
+        for child in self.children:
+            if isinstance(child, ui.Button | ui.UserSelect):
+                child.disabled = True
+        await interaction.response.edit_message(view=self)
+
+        delivered: list[Member] = []
+        failed: list[Member] = []
+
+        for m in members:
+            if await send_dm_to_member(logger, interaction.guild, m, self.message, dm_type="Bulk"):
+                delivered.append(m)
+            else:
+                failed.append(m)
+
+        logger.info(f"Bulk DM by user={self.sender} delivered={delivered} failed={failed}")
+
+        lines: list[str] = ["Envoi des messages terminé."]
+        if delivered:
+            lines.append("Succès : " + ", ".join(format_member_mention(m) for m in delivered))
+        if failed:
+            lines.append("Échecs : " + ", ".join(format_member_mention(m) for m in failed))
+        lines.append("Contenu envoyé :")
+        lines.append(f">>> {self.message}")
+
+        await interaction.followup.edit_message(self.followup_id, content="\n".join(lines))
+        await interaction.delete_original_response()
+
+
+class BulkDMModal(ui.Modal, title="Envoyer un MP à plusieurs utilisateurs"):
+    """Modal for composing a bulk direct message.
+
+    Attributes:
+        message_input (ui.TextInput): Input field for the bulk direct message content.
+    """
+
+    message_input: ui.TextInput = ui.TextInput(
+        label="Message à envoyer",
+        style=TextStyle.long,
+        placeholder="Saisis le message à envoyer en MP...",
+        required=True,
+        max_length=2000,
+    )
+
+    def __init__(self, cog: MessageManagement) -> None:
+        """Initialize the BulkDMModal.
+
+        Args:
+            cog (MessageManagement): The MessageManagement cog instance.
+        """
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: Interaction) -> None:
+        """Handle modal submission.
+
+        Args:
+            interaction (Interaction): The interaction context.
+        """
+        assert isinstance(interaction.user, Member)
+
+        guild_id = interaction.guild.id if interaction.guild else None
+        logger.info(
+            f"BulkDMModal submitted user={interaction.user} guild_id={guild_id} message_input={self.message_input.value}",
+        )
+        await interaction.response.defer(thinking=True)
+        followup_mes = await interaction.followup.send("Sélection des membres en cours...", wait=True)
+
+        message = self.message_input.value.strip()
+        message += (
+            f"\n\n*Ce message vous a été envoyé par un membre du Bureau du Fablab. Merci de ne pas y répondre directement.*"
+            f"\nPour plus d'informations, contactez <@{interaction.user.id}>."
+        )
+
+        view = _BulkDMView(
+            sender=interaction.user,
+            followup_id=followup_mes.id,
+            message=message,
+        )
+        await interaction.followup.send(
+            (
+                "Selectionnez les membres a qui envoyer le message puis cliquez sur **Confirmer**.\n\n"
+                f"Message à envoyer :\n>>> {message}"
+            ),
+            view=view,
+            ephemeral=True,
+        )
+
+
+# endregion BulkDM UI Components
+
+
+class StartMessageModal(ui.Modal, title="Préparer un message"):
+    """Modal to start a new message draft.
+
+    Attributes:
+        content_input (ui.TextInput): Input field for the message content.
+    """
+
+    content_input: ui.TextInput = ui.TextInput(
+        label="Contenu du message",
+        style=TextStyle.long,
+        placeholder="Saisis le message à publier",
+        required=True,
+        max_length=2000,
+    )
+
+    def __init__(self, cog: MessageManagement) -> None:
+        """Initialize the StartMessageModal.
+
+        Args:
+            cog (MessageManagement): MessageManagement cog instance.
+        """
+        super().__init__()
+        self.cog = cog
+
+    async def on_submit(self, interaction: Interaction) -> None:
+        """Handle modal submission.
+
+        Args:
+            interaction (Interaction): The interaction context.
+        """
+        assert interaction.guild is not None
+        logger.info(
+            f"StartMessageModal submitted user={interaction.user} guild_id={interaction.guild.id} "
+            f"content_input={self.content_input.value}",
+        )
+        draft = MessageDraft(content=self.content_input.value.strip(), reactions=[])
+        self.cog.set_draft(interaction.guild.id, draft)
+
+        await interaction.response.send_message(
+            "Brouillon enregistré. Ajoute des réactions avec `/msg link_reaction` puis `/msg preview` et `/msg publish`.",
+            embed=Embed(title="Aperçu brouillon", description=draft.content or "_(vide)_"),
+            ephemeral=True,
+        )
+
+
+# region ====== UI Components for Linking Reactions ======
+
+
+class _ReactionMessageInputModal(ui.Modal, title="Message à envoyer"):
+    """Modal for inputting the content of the message to send for a reaction action.
+
+    Attributes:
+        message_input (ui.TextInput): Input field for the reaction message content.
+    """
+
+    message_input: ui.TextInput = ui.TextInput(
+        label="Utilise {username} pour le nom du réacteur.",
+        style=TextStyle.long,
+        placeholder="{user} a réagi avec {emoji}...",
+        required=True,
+        max_length=2000,
+    )
+
+    def __init__(self, cog: MessageManagement, guild_id: int, reaction: MsgReactionEvent) -> None:
+        """Initialize the modal.
+
+        Args:
+            cog (MessageManagement): The MessageManagement cog instance.
+            guild_id (int): The guild identifier.
+            reaction (MsgReactionEvent): The reaction event being configured.
+        """
+        super().__init__()
+        self.cog = cog
+        self.guild_id = guild_id
+        self.reaction = reaction
+
+    async def on_submit(self, interaction: Interaction) -> None:
+        """Handle modal submission.
+
+        Args:
+            interaction (Interaction): The interaction context.
+        """
+        message_content = self.message_input.value.strip()
+        logger.info(
+            f"Reaction modal submitted user={interaction.user} guild_id={self.guild_id} emoji={self.reaction.emoji} "
+            f"action={self.reaction.action_type} target_id={self.reaction.target_id} target_name={self.reaction.target_name} "
+            f"content={message_content!r}",
+        )
+        self.reaction.message_content = message_content
+
+        feedback = await self.cog.register_reaction_action(self.guild_id, self.reaction)
+        await interaction.response.edit_message(content=feedback, view=None)
+
+
+class _ReactionTargetView(ui.View):
+    """View for selecting the target of a reaction action if it's necessary and the content of the message."""
+
+    def __init__(
+        self,
+        cog: MessageManagement,
+        guild_id: int,
+        message_id: int | None,
+        emoji: str,
+        action_type: Literal["channel", "role_dm"],
+    ) -> None:
+        """Initialize the modal.
+
+        Args:
+            cog (MessageManagement): The MessageManagement cog instance.
+            guild_id (int): The guild identifier.
+            message_id (int): The message identifier.
+            emoji (str): The emoji for this reaction.
+            action_type (Literal["channel", "role_dm"]): The type of action.
+        """
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.guild_id = guild_id
+        self.message_id = message_id
+        self.emoji = emoji
+        self.action_type: MsgActionType = action_type
+
+        async def _on_select(interaction: Interaction) -> None:
+            match action_type:
+                case "channel":
+                    target_id = self.channel_select.values[0].id
+                    target_value = self.channel_select.values[0].name
+                case "role_dm":
+                    target_id = self.role_select.values[0].id
+                    target_value = self.role_select.values[0].name
+
+            logger.info(
+                f"Reaction target selected user={interaction.user} guild_id={self.guild_id} action_type={self.action_type} "
+                f"target_id={target_id} target_name={target_value} emoji={self.emoji}",
+            )
+            await interaction.response.send_modal(
+                _ReactionMessageInputModal(
+                    self.cog,
+                    self.guild_id,
+                    MsgReactionEvent(
+                        emoji=self.emoji,
+                        action_type=self.action_type,
+                        message_content="",
+                        target_id=target_id,
+                        target_name=target_value,
+                        message_id=self.message_id,
+                    ),
+                ),
+            )
+
+        match action_type:
+            case "channel":
+                self.channel_select: ui.ChannelSelect[Any] = ui.ChannelSelect(
+                    placeholder="Sélectionne le canal...",
+                    channel_types=[ChannelType.text],
+                )
+                self.channel_select.callback = _on_select  # type: ignore[method-assign]
+                self.add_item(self.channel_select)
+            case "role_dm":
+                self.role_select: ui.RoleSelect[Any] = ui.RoleSelect(placeholder="Sélectionne le rôle...")
+                self.role_select.callback = _on_select  # type: ignore[method-assign]
+                self.add_item(self.role_select)
+
+
+class _ReactionActionTypeSelectView(ui.View):
+    """View to pick an action type before selecting the reaction target."""
+
+    def __init__(
+        self,
+        cog: MessageManagement,
+        guild_id: int,
+        message_id: int | None,
+        emoji: str,
+    ) -> None:
+        """Initialize the ReactionActionTypeView.
+
+        Args:
+            cog (MessageManagement): The MessageManagement cog instance.
+            guild_id (int): The guild identifier.
+            message_id (int | None): The message identifier.
+            emoji (str): The emoji for this reaction.
+        """
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.guild_id = guild_id
+        self.message_id = message_id
+        self.emoji = emoji
+
+    @ui.button(label="Message dans un salon", style=ButtonStyle.primary)
+    async def channel_button(self, interaction: Interaction, _button: ui.Button) -> None:
+        """Handle channel button click.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            _button (ui.Button): The button that was clicked.
+        """
+        logger.info(
+            f"Reaction action type selected user={interaction.user} guild_id={self.guild_id} message_id={self.message_id} "
+            f"emoji={self.emoji} action_type=channel",
+        )
+        target_view = _ReactionTargetView(self.cog, self.guild_id, self.message_id, self.emoji, "channel")
+        await interaction.response.edit_message(
+            content="Choisis le channel où envoyer le message puis rédige le message envoyé lors de la réaction.",
+            view=target_view,
+        )
+
+    @ui.button(label="DM la personne", style=ButtonStyle.primary)
+    async def user_dm_button(self, interaction: Interaction, _button: ui.Button) -> None:
+        """Handle user DM button click.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            _button (ui.Button): The button that was clicked.
+        """
+        logger.info(
+            f"Reaction action type selected user={interaction.user} guild_id={self.guild_id} message_id={self.message_id} "
+            f"emoji={self.emoji} action_type=user_dm",
+        )
+        await interaction.response.send_modal(
+            _ReactionMessageInputModal(
+                self.cog,
+                self.guild_id,
+                MsgReactionEvent(
+                    emoji=self.emoji,
+                    action_type="user_dm",
+                    message_content="",
+                    target_id=0,
+                    target_name="",
+                    message_id=self.message_id,
+                ),
+            ),
+        )
+
+    @ui.button(label="DM un rôle", style=ButtonStyle.primary)
+    async def role_dm_button(self, interaction: Interaction, _button: ui.Button) -> None:
+        """Handle role DM button click.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            _button (ui.Button): The button that was clicked.
+        """
+        logger.info(
+            f"Reaction action type selected user={interaction.user} guild_id={self.guild_id} message_id={self.message_id} "
+            f"emoji={self.emoji} action_type=role_dm",
+        )
+        target_view = _ReactionTargetView(self.cog, self.guild_id, self.message_id, self.emoji, "role_dm")
+        await interaction.response.edit_message(
+            content="Choisis le rôle à MP puis rédige le message envoyé lors de la réaction.",
+            view=target_view,
+        )
+
+
+# endregion UI Components for Linking Reactions
+
+
+# region ====== TrackedMessageSelectView and its Components ======
+
+
+class _TrackedMessageSelectButton(ui.Button["TrackedMessageSelectView"]):
+    """Button to select a tracked message before performing an action."""
+
+    def __init__(self, tracked: TrackedMessage) -> None:
+        """Initialize the tracked message button.
+
+        Args:
+            tracked (TrackedMessage): The tracked message represented by this button.
+        """
+        super().__init__(
+            label=f"Message {tracked.message_id}",
+            style=ButtonStyle.primary,
+            custom_id=f"select_tracked_msg_{tracked.message_id}",
+        )
+        self.tracked = tracked
+
+    async def callback(self, interaction: Interaction) -> None:
+        """Handle button click.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+
+        Raises:
+            NotImplementedError: If the command is not yet implemented.
+        """
+        if self.view is None:
+            await interaction.response.send_message(ErrorMessages.EXPIRED_VIEW_MESSAGE, ephemeral=True)
+            return
+
+        logger.info(
+            f"Tracked message selected user={interaction.user} command={self.view.cmd} message_id={self.tracked.message_id}",
+        )
+        match self.view.cmd:
+            case MsgCommand.LINK:
+                await self.view.open_link_selector(interaction, self.tracked.message_id)
+            case MsgCommand.UNLINK:
+                await self.view.open_unlink_selector(interaction, self.tracked)
+            case MsgCommand.STOP:
+                await self.view.stop_tracking(interaction, self.tracked)
+            case MsgCommand.EXPORT:
+                await self.view.export_history(interaction, self.tracked)
+            case _:
+                logger.error("Unknown command in TrackedMessageSelectView callback.")
+
+
+class _DraftSelectButton(ui.Button["TrackedMessageSelectView"]):
+    """Button to select the current draft."""
+
+    def __init__(self) -> None:
+        super().__init__(label="Brouillon", style=ButtonStyle.secondary, custom_id="select_draft")
+
+    async def callback(self, interaction: Interaction) -> None:
+        """Handle draft selection.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+        """
+        if self.view is None:
+            await interaction.response.send_message(ErrorMessages.EXPIRED_VIEW_MESSAGE, ephemeral=True)
+            return
+
+        if self.view.draft is None:
+            await interaction.response.send_message(ErrorMessages.MSG_NO_DRAFT, ephemeral=True)
+            return
+
+        logger.info(f"Draft selected user={interaction.user} command={self.view.cmd}")
+        match self.view.cmd:
+            case MsgCommand.LINK:
+                await self.view.open_link_selector(interaction, None)
+            case MsgCommand.UNLINK:
+                await self.view.open_unlink_selector(interaction, self.view.draft)
+            case _:
+                logger.error("Unknown command in TrackedMessageSelectView draft callback.")
+                await interaction.response.send_message(ErrorMessages.EXPIRED_VIEW_MESSAGE, ephemeral=True)
+
+
+class TrackedMessageSelectView(ui.View):
+    """View to pick a tracked message or draft before running message commands."""
+
+    def __init__(
+        self,
+        cog: MessageManagement,
+        tracked_messages: list[TrackedMessage],
+        cmd: MsgCommand,
+        *,
+        draft: MessageDraft | None = None,
+        emoji: str | None = None,
+        followup_message_id: int | None = None,
+    ) -> None:
+        """Initialize the TrackedMessageSelectView.
+
+        Args:
+            cog (MessageManagement): The MessageManagement cog instance.
+            tracked_messages (list[TrackedMessage]): The list of tracked messages to select from.
+            cmd (MsgTrackedCommand): The command determining what happens after selection.
+            draft (MessageDraft | None): Optional draft to include as a selectable target.
+            emoji (str | None): Emoji passed through when linking a reaction.
+            followup_message_id (int | None): ID of the follow-up message to edit with results.
+        """
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.tracked_messages = tracked_messages
+        self.cmd = cmd
+        self.draft = draft
+        self.emoji = emoji
+        self.followup_message_id = followup_message_id
+        self._show_draft_option = self.draft is not None and self.cmd in {MsgCommand.LINK, MsgCommand.UNLINK}
+        self.displayed_tracked_messages = tracked_messages[: MAX_TRACKED_OPTIONS - (1 if self._show_draft_option else 0)]
+
+        if self._show_draft_option:
+            self.add_item(_DraftSelectButton())
+
+        for tracked in self.displayed_tracked_messages:
+            self.add_item(_TrackedMessageSelectButton(tracked))
+
+        self.preview_embed = self._build_preview_embed()
+
+    def _build_preview_embed(self) -> Embed:
+        """Build an embed showing the content of selectable messages."""
+        embed = Embed(title="Aperçu des messages disponibles")
+        field_count = len(self.displayed_tracked_messages) + (1 if self._show_draft_option else 0)
+        per_field_limit = max(
+            EMBED_PREVIEW_MIN_CHARS,
+            min(EMBED_PREVIEW_MAX_CHARS, EMBED_TOTAL_FIELD_CHAR_BUDGET // max(1, field_count)),
+        )
+
+        for tracked in self.displayed_tracked_messages:
+            preview = format_preview_content(tracked.content, per_field_limit)
+            embed.add_field(
+                name=f"Message {tracked.message_id}",
+                value=preview,
+                inline=False,
+            )
+
+        if self._show_draft_option and self.draft is not None:
+            preview = format_preview_content(self.draft.content, per_field_limit)
+            embed.add_field(
+                name="Brouillon",
+                value=preview,
+                inline=False,
+            )
+
+        if not embed.fields:
+            embed.description = "Aucun message sélectionnable."
+
+        return embed
+
+    async def open_link_selector(self, interaction: Interaction, target_message_id: int | None) -> None:
+        """Open the link workflow for the selected target.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            target_message_id (int | None): The ID of the target message (None = draft).
+        """
+        assert interaction.guild is not None
+
+        if self.emoji is None:
+            await interaction.response.send_message(ErrorMessages.INVALID_EMOJI, ephemeral=True)
+            return
+
+        if target_message_id is None and self.draft is None:
+            await interaction.response.send_message(ErrorMessages.MSG_NO_DRAFT, ephemeral=True)
+            return
+
+        logger.info(
+            f"Open link selector user={interaction.user} guild_id={interaction.guild.id} target_message_id={target_message_id} "
+            f"emoji={self.emoji}",
+        )
+        target_label = "le brouillon" if target_message_id is None else f"le message `{target_message_id}`"
+        view = _ReactionActionTypeSelectView(self.cog, interaction.guild.id, target_message_id, self.emoji)
+        await interaction.response.edit_message(
+            content=f"Choisis le type d'action pour {target_label} puis la cible.",
+            view=view,
+            embed=None,
+        )
+
+    async def open_unlink_selector(self, interaction: Interaction, tracked: TrackedMessage | MessageDraft) -> None:
+        """Open the reaction unlink view for the selected target.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            tracked (TrackedMessage | MessageDraft): The target for which to open the unlink selector.
+        """
+        if not tracked.reactions:
+            await interaction.response.edit_message(content="Aucune action configurée sur ce message.", view=None)
+            return
+
+        target_label = f"message `{tracked.message_id}`" if isinstance(tracked, TrackedMessage) else "brouillon"
+        view = _UnlinkReactionSelectView(self.cog, tracked)
+        await interaction.response.edit_message(
+            content=f"Sélectionne l'action à retirer pour le {target_label}.",
+            view=view,
+            embed=view.preview_embed,
+        )
+
+    async def export_history(self, interaction: Interaction, tracked: TrackedMessage) -> None:
+        """Export reaction history for a tracked message.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            tracked (TrackedMessage): The tracked message to export history for.
+        """
+        assert interaction.guild is not None
+        assert self.followup_message_id is not None
+        await interaction.response.defer()
+
+        file, content = self.cog.build_reaction_export(interaction.guild.id, tracked.message_id)
+        if file is None:
+            await interaction.followup.edit_message(self.followup_message_id, content=content, view=None, embed=None)
+        else:
+            await interaction.followup.edit_message(
+                self.followup_message_id,
+                content=content,
+                attachments=[file],
+                view=None,
+                embed=None,
+            )
+
+        await interaction.delete_original_response()
+
+    async def stop_tracking(self, interaction: Interaction, tracked: TrackedMessage) -> None:
+        """Remove tracking for the selected message.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            tracked (TrackedMessage): The tracked message to stop tracking.
+        """
+        assert interaction.guild is not None
+        assert self.followup_message_id is not None
+        await interaction.response.defer()
+
+        if not self.cog.remove_tracked_message(interaction.guild.id, tracked.message_id):
+            logger.error(
+                f"Tracked message {tracked.message_id} not found in guild {interaction.guild.id} during stop tracking.",
+            )
+            await interaction.followup.edit_message(
+                self.followup_message_id,
+                content="Suivi introuvable pour ce message.",
+                view=None,
+                embed=None,
+            )
+            return
+
+        logger.info(f"Stopped tracking message {tracked.message_id} in guild {interaction.guild.id}")
+        await interaction.followup.edit_message(
+            self.followup_message_id,
+            content=f"Suivi arrêté pour le message `{tracked.message_id}`.",
+            view=None,
+            embed=None,
+        )
+        await interaction.delete_original_response()
+
+
+# endregion TrackedMessageSelectView and its Components
+
+# region ====== UnlinkReaction UI Components ======
+
+
+class _UnlinkReactionButton(ui.Button["_UnlinkReactionSelectView"]):
+    """Button to remove a specific reaction action."""
+
+    def __init__(self, reaction_index: int, *, label: str) -> None:
+        """Initialize the unlink reaction button.
+
+        Args:
+            reaction_index (int): Index of the reaction action to remove.
+            label (str): The label to display on the button.
+        """
+        super().__init__(label=label, style=ButtonStyle.danger, custom_id=f"unlink_action_{reaction_index}")
+        self.reaction_index = reaction_index
+
+    async def callback(self, interaction: Interaction) -> None:
+        """Handle button click to remove the reaction action.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+        """
+        if self.view is None:
+            await interaction.response.send_message(ErrorMessages.EXPIRED_VIEW_MESSAGE, ephemeral=True)
+            return
+
+        target_label = self.view.target.message_id if isinstance(self.view.target, TrackedMessage) else "draft"
+        logger.info(
+            f"Unlink reaction selected user={interaction.user} target={target_label} reaction_index={self.reaction_index}",
+        )
+        await self.view.remove_link(interaction, self.reaction_index)
+
+
+class _UnlinkReactionSelectView(ui.View):
+    """View to pick which reaction action to remove from a tracked message."""
+
+    def __init__(self, cog: MessageManagement, target: TrackedMessage | MessageDraft) -> None:
+        """Initialize the unlink reaction select view.
+
+        Args:
+            cog (MessageManagement): The message management cog instance.
+            target (TrackedMessage | MessageDraft): The target message or draft to manage reactions for.
+        """
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.target = target
+        self.reactions = target.reactions[:MAX_TRACKED_OPTIONS]
+
+        for idx, reaction in enumerate(self.reactions, start=1):
+            action_label = self.cog.format_reaction_action(reaction, show_label=True)
+
+            self.add_item(
+                _UnlinkReactionButton(idx - 1, label=f"{idx}. {reaction.emoji} - {action_label}"[:80]),
+            )
+
+        self.preview_embed = self._build_preview_embed()
+
+    def _build_preview_embed(self) -> Embed:
+        """Build an embed listing the linked actions for the target."""
+        embed = Embed(title="Actions liées disponibles")
+        field_count = len(self.reactions)
+        per_field_limit = max(
+            EMBED_PREVIEW_MIN_CHARS,
+            min(EMBED_PREVIEW_MAX_CHARS, EMBED_TOTAL_FIELD_CHAR_BUDGET // max(1, field_count)),
+        )
+        target_label = f"message `{self.target.message_id}`" if isinstance(self.target, TrackedMessage) else "brouillon"
+        embed.description = f"Sélectionne une action à retirer pour le {target_label}."
+
+        for idx, reaction in enumerate(self.reactions, start=1):
+            action_label = self.cog.format_reaction_action(reaction, show_label=True)
+            preview = format_preview_content(reaction.message_content or "", per_field_limit)
+            embed.add_field(
+                name=f"{idx}. {reaction.emoji} — {action_label}",
+                value=preview,
+                inline=False,
+            )
+
+        if not embed.fields:
+            embed.description = "Aucune action liée."
+
+        return embed
+
+    async def remove_link(self, interaction: Interaction, reaction_index: int) -> None:
+        """Handle the removal of a reaction action.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            reaction_index (int): The index of the reaction action to remove.
+        """
+        guild = interaction.guild
+        assert guild is not None
+
+        if reaction_index >= len(self.target.reactions):
+            await interaction.response.edit_message(content="Action introuvable.", embed=None)
+            return
+
+        removed = self.target.reactions.pop(reaction_index)
+        if isinstance(self.target, MessageDraft):
+            self.cog.set_draft(guild.id, self.target)
+            target_label = "le brouillon"
+        else:
+            self.cog.set_tracked_message(guild.id, self.target)
+            target_label = f"le message {self.target.message_id}"
+            if removed.emoji not in [ev.emoji for ev in self.target.reactions]:
+                channel = await guild.fetch_channel(self.target.channel_id)
+                if not isinstance(channel, TextChannel):
+                    return
+                try:
+                    msg = await channel.fetch_message(self.target.message_id)
+                except Exception:
+                    logger.exception(f"Tracked message {self.target.message_id} no longer accessible.")
+                    return
+                await msg.remove_reaction(removed.emoji, self.cog.bot.user)  # type: ignore[arg-type]
+        logger.info(f"Removed reaction action {removed.emoji} ({removed.action_type}) on {target_label} in guild {guild.id}")
+
+        await interaction.response.edit_message(
+            content=f"Action retirée de {target_label} : {removed.emoji} : {self.cog.format_reaction_action(removed)}",
+            view=None,
+            embed=None,
+        )
+
+
+# endregion UnlinkReaction UI Components
+
+# region ====== Suggestion UI Components ======
+
+
+class _SuggestionModal(ui.Modal, title="Envoyer une suggestion"):
+    """Modal for submitting a suggestion.
+
+    Attributes:
+        suggestion_input (ui.TextInput): Input field for the suggestion content.
+    """
+
+    suggestion_input: ui.TextInput = ui.TextInput(
+        label="Votre suggestion",
+        style=TextStyle.long,
+        placeholder="Décrivez votre suggestion...",
+        required=True,
+        max_length=2000,
+    )
+
+    def __init__(
+        self,
+        cog: MessageManagement,
+        recipient_key: str,
+        *,
+        anonymous_flag: bool,
+    ) -> None:
+        """Initialize the SuggestionModal.
+
+        Args:
+            cog (MessageManagement): The MessageManagement cog instance.
+            recipient_key (str): The key of the recipient configuration.
+            anonymous_flag (bool): Whether the suggestion is anonymous.
+        """
+        super().__init__()
+        self.cog = cog
+        self.recipient_key = recipient_key
+        self.anonymous_flag = anonymous_flag
+
+    async def on_submit(self, interaction: Interaction) -> None:
+        """Handle modal submission.
+
+        Args:
+            interaction (Interaction): The interaction context.
+        """
+        config = SUGGESTION_OPTIONS[self.recipient_key]
+        suggestion_text = self.suggestion_input.value
+        user_label = interaction.user if not self.anonymous_flag else "Anonymous"
+        logger.info(
+            f"[{config.command_name}]: user={user_label} suggestion_text={suggestion_text}",
+        )
+
+        assert interaction.guild is not None
+        author = interaction.user
+
+        embed = Embed(
+            title=config.embed_title,
+            description=suggestion_text,
+            color=config.embed_color,
+            timestamp=datetime.now(PARIS_TZ),
+        )
+        if not self.anonymous_flag:
+            embed.set_author(name=author.display_name, icon_url=author.display_avatar.url)
+            embed.add_field(name="Utilisateur·ice", value=author.mention, inline=False)
+        else:
+            embed.set_author(
+                name="Anonymous",
+                icon_url=ANONYMOUS_ICON_URL,
+            )
+
+        success = await self._send_suggestion(interaction.guild, embed, config, author.id if not self.anonymous_flag else None)
+
+        if not success:
+            await interaction.response.send_message(config.error_message, ephemeral=True)
+            return
+
+        logger.info(f"Suggestion submitted guild_id={interaction.guild.id} user={user_label} command={config.command_name}")
+
+        await interaction.response.edit_message(content=config.success_message, view=None)
+
+    @staticmethod
+    async def _send_suggestion(guild: Guild, embed: Embed, config: SuggestionConfig, user_id: int | None) -> bool:
+        """Send a suggestion to responsible members and channel.
+
+        Args:
+            guild (Guild): The guild where the suggestion is made.
+            embed (Embed): The suggestion embed to send.
+            config (SuggestionConfig): The suggestion configuration.
+            user_id (int | None): The ID of the user making the suggestion.
+
+        Returns:
+            bool: True if at least one recipient received the suggestion, False otherwise.
+        """
+        responsibles: set[Member] = get_members_by_role(logger, guild, role=config.role_name) if config.role_name else set()
+        channel = get(guild.text_channels, name=config.channel_name) if config.channel_name else None
+
+        if not responsibles and not channel:
+            logger.error(
+                f"Guild {guild.id} has no {config.role_name} responsibles and no {config.channel_name} channel configured.",
+            )
+            return False
+
+        for responsible in responsibles:
+            await send_dm_to_member(logger, guild, responsible, None, embed=embed, dm_type="suggestion")
+        if channel:
+            try:
+                await channel.send(embed=embed)
+            except Exception:
+                logger.exception(f"Failed to send suggestion from user {user_id or 'Anonymous'} to channel {channel.id}.")
+
+        return True
+
+
+class SuggestionView(ui.View):
+    """Initial view for submitting a suggestion."""
+
+    def __init__(self, cog: MessageManagement) -> None:
+        """Initialize the InitialView.
+
+        Args:
+            cog (MessageManagement): The MessageManagement cog instance.
+        """
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.selected_recipient: str | None = None
+        self.anonymous: bool = False
+
+    @ui.select(
+        placeholder="Choisir le destinataire...",
+        options=[SelectOption(label=config.label, value=key) for key, config in SUGGESTION_OPTIONS.items()],
+    )
+    async def recipient_select(self, interaction: Interaction, select: ui.Select) -> None:
+        """Handle recipient selection.
+
+        Args:
+            interaction (Interaction): The interaction context.
+            select (ui.Select): The select menu instance.
+        """
+        self.selected_recipient = select.values[0]
+        logger.debug(f"Suggestion recipient selected recipient_key={self.selected_recipient}")
+        await interaction.response.defer(ephemeral=True)
+
+    @ui.button(label="Masquer mon nom", style=ButtonStyle.secondary)
+    async def anonymity_button(self, interaction: Interaction, button: ui.Button) -> None:
+        """Handle anonymity toggle.
+
+        Args:
+            interaction (Interaction): The interaction context.
+            button (ui.Button): The button instance.
+        """
+        self.anonymous = not self.anonymous
+        logger.debug(f"Suggestion anonymity toggled anonymous={self.anonymous}")
+        button.label = "Afficher mon nom" if self.anonymous else "Masquer mon nom"
+        await interaction.response.edit_message(view=self)
+
+    @ui.button(label="Rédiger la suggestion", style=ButtonStyle.primary)
+    async def open_modal_button(self, interaction: Interaction, _button: ui.Button) -> None:
+        """Handle button click to open the suggestion modal.
+
+        Args:
+            interaction (Interaction): The interaction context.
+            _button (ui.Button): The button instance.
+        """
+        if self.selected_recipient is None:
+            await interaction.response.send_message("Veuillez d'abord choisir le destinataire.", ephemeral=True)
+            return
+
+        assert interaction.message is not None
+
+        user_label = interaction.user if not self.anonymous else "Anonymous"
+        logger.info(
+            f"Opening suggestion modal user={user_label} recipient_key={self.selected_recipient} anonymous={self.anonymous}",
+        )
+        modal = _SuggestionModal(
+            cog=self.cog,
+            recipient_key=self.selected_recipient,
+            anonymous_flag=self.anonymous,
+        )
+        await interaction.response.send_modal(modal)
+
+
+# endregion Suggestion UI Components

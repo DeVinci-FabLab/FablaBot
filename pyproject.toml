@@ -1,6 +1,6 @@
 [project]
 dependencies = [
-  "discord-py==2.5.2",
+  "discord-py>=2.6.4",
   "emoji>=2.15.0",
   "python-dotenv==1.0.0",
   "selenium==4.8.3",
@@ -39,22 +39,31 @@ target-version = "py313"
 docstring-code-format = true
 
 [tool.ruff.lint]
-ignore = ["D105", "E5", "PTH123", "W505"]
+ignore = ["D105", "PTH123"]
 select = [
+  "ARG",
   "B",
   "C4",
+  "COM",
+  "D",
+  "DTZ",
   "E",
   "F",
   "I",
   "N",
+  "PGH",
   "PIE",
+  "PLR",
   "PTH",
+  "PYI",
   "RET",
   "RUF",
   "SIM",
+  "SLF",
+  "TC",
+  "TRY",
   "UP",
   "W",
-  "D",
 ]
 
 [tool.ruff.lint.pydocstyle]
@@ -83,11 +92,14 @@ disable = [
   "R0902", # too-many-instance-attributes
   "R0903", # too-few-public-methods
   "W0212", # protected-access -> Best management with ruff
+  "W0221", # arguments-differ -> Best management with ruff
   "W0511", # fixme
+  "W0611", # unused-import -> Best management with ruff
   "W0613", # unused-argument -> Best management with ruff
-  "W1113", # keyword-arg-before-vararg -> Best management with ruff
-  "W1203", # logging-f-string-interpolation
   "W0718",
+  "W1113", # keyword-arg-before-vararg -> Best management with ruff
+  "W1202", # logging-format-interpolation
+  "W1203", # logging-f-string-interpolation
 ]
 enable = "all"
 exit-zero = true
@@ -98,4 +110,4 @@ output-format = "text"
 
 [tool.pylint.logging]
 logging-format-style = "new"
-logging-modules = ["loggerplusplus"]
+logging-modules = ["logging"]

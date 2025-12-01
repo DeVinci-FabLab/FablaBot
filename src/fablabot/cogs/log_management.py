@@ -6,23 +6,13 @@ from datetime import datetime
 import logging
 from warnings import deprecated
 
-from discord import (
-    Interaction,
-    TextChannel,
-    app_commands,
-)
+from discord import Interaction, TextChannel, app_commands
 from discord.ext import commands
 
-from fablabot.cogs.helpers import (
-    ADMIN_ROLES,
-    PARIS_TZ,
-    RoleNames,
-    check_has_role,
-    format_channel_mention,
-    is_in_allowed_channel,
-    log_request,
-)
 from fablabot.guild_config import set_log_channel_id
+from fablabot.helpers.constants import ADMIN_ROLES, PARIS_TZ, RoleNames
+from fablabot.helpers.help_messages import build_help_message
+from fablabot.helpers.utils import ensure_command_context, format_channel_mention
 from fablabot.logging_handlers import DailyFileHandler, DiscordLogHandler
 
 logger = logging.getLogger(__name__)
@@ -52,39 +42,47 @@ class LogManagement(commands.Cog):
     # region ====== Log Slash Commands Group ======
     log_group = app_commands.Group(name="log", description="Configuration des logs du bot")
 
-    @log_group.command(name="help", description="Affiche l'aide pour les commandes de gestion des logs.")
+    @log_group.command(
+        name="help",
+        description="Affiche l'aide pour les commandes de gestion des logs.",
+    )
     @app_commands.describe(show="Afficher l'aide publiquement ou non")
-    async def log_help(self, interaction: Interaction, show: bool = False) -> None:
+    async def log_help(self, interaction: Interaction, *, show: bool = False) -> None:
         """Display help for log management commands.
 
         Args:
             interaction (Interaction): The Discord interaction context.
             show (bool): Whether to show the help publicly or not.
         """
-        help_text = (
-            "**Commandes de gestion des logs :**\n"
-            "- `/log set <channel>`: Configure le salon recevant les logs du bot.\n"
-            "- `/log export [date]`: Exporte les logs récents.\n"
-            "- `/log help [show]`: Affiche cette aide. Par défaut, elle est affichée secrètement.\n"
-            "\n"
-            "Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes."
+        help_message = build_help_message(
+            "Commandes de gestion des logs",
+            "log",
+            [
+                ("set <channel>", "Configurer le salon recevant les logs du bot"),
+                ("export [date]", "Exporter les logs du jour ou d'une date donnée (format YYYY-MM-DD)"),
+            ],
         )
-        await interaction.response.send_message(help_text, ephemeral=not show)
+        await interaction.response.send_message(help_message, ephemeral=not show)
 
-    @log_group.command(name="set", description="Configure le salon recevant les logs du bot en cas d'erreur.")
+    @log_group.command(
+        name="set",
+        description="Configure le salon recevant les logs du bot en cas d'erreur.",
+    )
     @app_commands.describe(channel="Salon textuel qui recevra les logs du bot.")
-    async def log_set(self, interaction: Interaction, channel: TextChannel) -> None:
+    async def log_set(self, interaction: Interaction, *, channel: TextChannel) -> None:
         """Configure the log channel destination for Discord logging.
 
         Args:
             interaction (Interaction): The Discord interaction context.
             channel (TextChannel): The text channel receiving bot logs.
         """
-        log_request(logger, "log.set", interaction, channel=channel.name, channel_id=channel.id)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-
-        if not await check_has_role(logger, interaction, ADMIN_ROLES):
+        if not await ensure_command_context(
+            logger,
+            "log.set",
+            interaction,
+            log_details={"channel": channel.name, "channel_id": channel.id},
+            required_roles=ADMIN_ROLES,
+        ):
             return
 
         discord_log_handler = getattr(self.bot, "discord_log_handler", None)
@@ -118,22 +116,27 @@ class LogManagement(commands.Cog):
             confirmation += f" Ancien salon : {format_channel_mention(previous_channel)}."
         await interaction.response.send_message(confirmation)
 
-    @log_group.command(name="export", description="Exporte les logs récents.")
-    @app_commands.describe(
-        date="Date des logs à exporter (format : DD/MM/YYYY). Si non spécifié, les logs d'aujourd'hui seront exportés."
+    @log_group.command(
+        name="export",
+        description="Exporte les logs récents.",
     )
-    async def log_export(self, interaction: Interaction, date: str | None = None) -> None:
+    @app_commands.describe(
+        date="Date des logs à exporter (format : DD/MM/YYYY). Si non spécifié, les logs d'aujourd'hui seront exportés.",
+    )
+    async def log_export(self, interaction: Interaction, *, date: str | None = None) -> None:
         """Export recent logs.
 
         Args:
             interaction (Interaction): The Discord interaction context.
             date (str | None): Date of logs to export in DD/MM/YYYY format. If not specified, exports logs from today.
         """
-        log_request(logger, "log.export", interaction, date=date)
-        if not await is_in_allowed_channel(logger, interaction):
-            return
-
-        if not await check_has_role(logger, interaction, ADMIN_ROLES | {RoleNames.DIGITAL_MANAGER, RoleNames.DIGITAL_POLE}):
+        if not await ensure_command_context(
+            logger,
+            "log.export",
+            interaction,
+            log_details={"date": date},
+            required_roles=ADMIN_ROLES | {RoleNames.DIGITAL_MANAGER, RoleNames.DIGITAL_POLE},
+        ):
             return
 
         file_log_handler = getattr(self.bot, "file_log_handler", None)

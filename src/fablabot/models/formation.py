@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Any, Literal
+from enum import Enum, auto
+from typing import Any
 
-from fablabot.cogs.helpers.constants import PARIS_TZ
+from fablabot.helpers.constants import PARIS_TZ
 
 
 @dataclass
@@ -70,9 +72,43 @@ class Formation:
         """
         return asdict(self)
 
+    def __copy__(self) -> Formation:
+        """Create a shallow copy of the Formation instance.
+
+        Returns:
+            Formation: A shallow copy of the Formation instance.
+        """
+        return Formation(**self.to_dict())
+
+    def __deepcopy__(self, memo: dict[int, Any] | None = None) -> Formation:
+        """Create a deep copy of the Formation instance.
+
+        Args:
+            memo (dict[int, Any] | None): Memoization dictionary for deep copy.
+
+        Returns:
+            Formation: A deep copy of the Formation instance.
+        """
+        if memo is None:
+            memo = {}
+        return Formation(
+            emoji=self.emoji,
+            name=self.name,
+            trainer_mention=self.trainer_mention,
+            start_iso=self.start_iso,
+            duration=self.duration,
+            seats=self.seats,
+            description=self.description,
+            excusable=self.excusable,
+            registered_users=deepcopy(self.registered_users, memo),
+            waitlisted_users=deepcopy(self.waitlisted_users, memo),
+            notified_hour_before=self.notified_hour_before,
+            notified_at_start=self.notified_at_start,
+        )
+
 
 @dataclass
-class Draft:
+class FmMessageDraft:
     """Draft message containing formations.
 
     Attributes:
@@ -95,10 +131,10 @@ class Draft:
     """Ending text."""
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert the Draft instance to a dictionary.
+        """Convert the FmMessageDraft instance to a dictionary.
 
         Returns:
-            dict[str, Any]: The dictionary representation of the Draft.
+            dict[str, Any]: The dictionary representation of the FmMessageDraft.
         """
         return {
             "header": self.header,
@@ -109,14 +145,14 @@ class Draft:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> Draft:
-        """Create a Draft instance from a dictionary.
+    def from_dict(cls, data: dict[str, Any]) -> FmMessageDraft:
+        """Create a FmMessageDraft instance from a dictionary.
 
         Args:
             data (dict[str, Any]): Dictionary containing draft data.
 
         Returns:
-            Draft: The Draft instance.
+            FmMessageDraft: The FmMessageDraft instance.
         """
         return cls(
             header=data.get("header", ""),
@@ -134,14 +170,14 @@ class PublishedMessage:
     Attributes:
         message_id (int): The Discord message ID.
         channel_id (int): The Discord channel ID.
-        message (Draft): The message payload with formations.
+        message (FmMessageDraft): The message payload with formations.
     """
 
     message_id: int
     """The Discord message ID."""
     channel_id: int
     """The Discord channel ID."""
-    message: Draft
+    message: FmMessageDraft
     """The message payload with formations."""
 
     def to_dict(self) -> dict[str, Any]:
@@ -169,59 +205,19 @@ class PublishedMessage:
         return cls(
             message_id=data.get("message_id", 0),
             channel_id=data.get("channel_id", 0),
-            message=Draft.from_dict(data.get("message", {})),
+            message=FmMessageDraft.from_dict(data.get("message", {})),
         )
 
 
-@dataclass
-class ReactionEvent:
-    """A single reaction event log entry.
+class FmCommand(Enum):
+    """Enumeration of formation management commands.
 
     Attributes:
-        message_id (int): The Discord message ID.
-        user_id (int): The Discord user ID.
-        user_name (str): The Discord user name.
-        emoji (str): The emoji used in the reaction.
-        action (str): The action taken ('add' or 'remove').
-        ts_iso (str): The timestamp in ISO format.
+        EDIT (FmCommand): Edit an existing formation in the draft.
+        REMOVE (FmCommand): Remove a formation from the draft.
     """
 
-    message_id: int
-    """The Discord message ID."""
-    user_id: int
-    """The Discord user ID."""
-    user_name: str | None
-    """The Discord user name."""
-    emoji: str
-    """The emoji used in the reaction."""
-    action: Literal["add", "remove"]
-    """The action taken ('add' or 'remove')."""
-    ts_iso: str
-    """The timestamp in ISO format."""
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert the ReactionEvent instance to a dictionary.
-
-        Returns:
-            dict[str, Any]: The dictionary representation of the ReactionEvent.
-        """
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> ReactionEvent:
-        """Create a ReactionEvent instance from a dictionary.
-
-        Args:
-            data (dict[str, Any]): Dictionary containing reaction event data.
-
-        Returns:
-            ReactionEvent: The ReactionEvent instance.
-        """
-        return cls(
-            message_id=data.get("message_id", 0),
-            user_id=data.get("user_id", 0),
-            user_name=data.get("user_name"),
-            emoji=data.get("emoji", ""),
-            action=data.get("action", "add"),
-            ts_iso=data.get("ts_iso", ""),
-        )
+    EDIT = auto()
+    """Edit an existing formation in the draft."""
+    REMOVE = auto()
+    """Remove a formation from the draft."""

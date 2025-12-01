@@ -2,23 +2,93 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import io
 import logging
 from typing import TYPE_CHECKING, Any
 
-from discord import Guild
 from discord.utils import get
 
-from fablabot.cogs.helpers.constants import MAX_MSG_CHARS, Emojis, RoleNames
-from fablabot.cogs.helpers.utils import escape_md, get_members_by_role
+from fablabot.helpers.constants import MAX_MSG_CHARS, PARIS_TZ, RoleNames
+from fablabot.helpers.utils import escape_md, get_members_by_role
 
 if TYPE_CHECKING:
-    from fablabot.cogs.helpers.formation_models import Formation
+    from discord import Guild
+
+    from fablabot.models.formation import FmMessageDraft, Formation
 
 logger = logging.getLogger(__name__)
 
-FM_REQUEST_FORMS = "https://forms.office.com/e/MqVdQujzjf"
+_FM_REQUEST_FORMS = "https://forms.office.com/e/MqVdQujzjf"
+_THREE_QUARTERS_HOUR = 45
+_ONE_QUARTER_HOUR = 15
+
+
+class Emojis:
+    """Discord emojis used throughout the bot."""
+
+    PEOPLE = ":busts_in_silhouette:"
+    ARROW_RIGHT = ":arrow_right:"
+    WARNING = ":warning:"
+    LOUDSPEAKER = ":loudspeaker:"
+
+    @staticmethod
+    def get_clock_emoji(dt: datetime) -> str:
+        """Get the clock emoji corresponding to the given hour and minute.
+
+        Args:
+            dt (datetime): The datetime to get the clock emoji for.
+
+        Returns:
+            str: The corresponding clock emoji.
+        """
+        dt = Emojis.round_hour(dt)
+        clock_emojis = {
+            (0, 0): ":clock12:",
+            (0, 30): ":clock1230:",
+            (1, 0): ":clock1:",
+            (1, 30): ":clock130:",
+            (2, 0): ":clock2:",
+            (2, 30): ":clock230:",
+            (3, 0): ":clock3:",
+            (3, 30): ":clock330:",
+            (4, 0): ":clock4:",
+            (4, 30): ":clock430:",
+            (5, 0): ":clock5:",
+            (5, 30): ":clock530:",
+            (6, 0): ":clock6:",
+            (6, 30): ":clock630:",
+            (7, 0): ":clock7:",
+            (7, 30): ":clock730:",
+            (8, 0): ":clock8:",
+            (8, 30): ":clock830:",
+            (9, 0): ":clock9:",
+            (9, 30): ":clock930:",
+            (10, 0): ":clock10:",
+            (10, 30): ":clock1030:",
+            (11, 0): ":clock11:",
+            (11, 30): ":clock1130:",
+        }
+        return clock_emojis.get((dt.hour % 12, dt.minute), ":clock12:")
+
+    @staticmethod
+    def round_hour(dt: datetime) -> datetime:
+        """Round a datetime to the nearest hour emoji.
+
+        Args:
+            dt (datetime): The datetime to round.
+
+        Returns:
+            datetime: The rounded datetime.
+        """
+        if dt.minute >= _THREE_QUARTERS_HOUR:
+            dt += timedelta(hours=1)
+            dt = dt.replace(minute=0, second=0, microsecond=0)
+        elif dt.minute < _ONE_QUARTER_HOUR:
+            dt = dt.replace(minute=0, second=0, microsecond=0)
+        else:
+            dt = dt.replace(minute=30, second=0, microsecond=0)
+        return dt
 
 
 def parse_date_time(date_str: str, hour_str: str, timezone: Any) -> datetime:
@@ -55,57 +125,63 @@ def humanize_dt(dt: datetime) -> str:
     return f"**{day_name} {date_part} à {time_part}**"
 
 
-def render_message(
-    header: str,
-    role_id: int,
-    intro: str,
-    fms: list[Formation],
-    end: str,
-) -> str:
+def render_formation(fm: Formation) -> str:
+    """Render a single formation entry.
+
+    Args:
+        fm (Formation): The formation to render.
+
+    Returns:
+        str: The rendered formation string.
+    """
+    lines: list[str] = []
+    lines.append(f"{fm.emoji} **{fm.name}** avec {fm.trainer_mention} ({'non ' if not fm.excusable else ''}excusable)")
+    lines.append(
+        f"> {humanize_dt(fm.start_dt)}  – "  # noqa: RUF001
+        f"{Emojis.get_clock_emoji(fm.start_dt)} {fm.duration}  – "  # noqa: RUF001
+        f"{Emojis.PEOPLE} {len(fm.registered_users)}/{fm.seats} places"
+    )
+    render_description = fm.description.replace("\n", "\n> ")
+    if fm.description:
+        lines.append(f"> {render_description}")
+    return "\n".join(lines)
+
+
+def render_message(draft: FmMessageDraft) -> str:
     """Render the message for the formations.
 
     Args:
-        header (str): The header line (e.g. title).
-        role_id (int): The role mention to prepend.
-        intro (str): The introduction text.
-        fms (list[Formation]): The list of formations to include in the message.
-        end (str): The ending text.
+        draft (FmMessageDraft): The draft containing all message parts.
 
     Returns:
         str: The rendered message.
     """
     logger.debug("Rendering formations message.")
     lines: list[str] = []
-    header_text = header.strip()
-    intro_block = intro.strip()
+    header_text = draft.header.strip()
+    intro_block = draft.intro.strip()
     lines.append(header_text)
-    lines.append(f"Hey <@&{role_id}> !")
+    lines.append(f"Hey <@&{draft.role_id}> !")
     if intro_block:
         lines.append(intro_block)
     lines.append("")
 
+    fms = sorted(draft.fms, key=lambda x: x.start_dt)
     for fm in fms:
-        line_block = [
-            f"{fm.emoji} **{fm.name}** avec {fm.trainer_mention}{' (excusable)' if fm.excusable else ''}",
-            f"> {humanize_dt(fm.start_dt)}  – "  # noqa: RUF001
-            f"{Emojis.get_clock_emoji(fm.start_dt)} {fm.duration}  – "  # noqa: RUF001
-            f"{Emojis.PEOPLE} {len(fm.registered_users)}/{fm.seats} places",
-        ]
-        line_block += [f"> {fm.description}"] if fm.description else []
-        lines.append("\n".join(line_block))
+        lines.append(render_formation(fm))
         lines.append("")
 
     end_lines = [
         f"{Emojis.ARROW_RIGHT} Pour s'inscrire, réagis avec les émojis des formations correspondantes.",
         f"{Emojis.WARNING} Si tu ne peux plus venir, n'oublie pas de retirer ta réaction pour libérer la place.",
         "",
-        f"Tu veux apprendre autre chose ? [**Propose une formation ici**]({FM_REQUEST_FORMS})",
+        f"Tu veux apprendre autre chose ? [**Propose une formation ici**]({_FM_REQUEST_FORMS})",
     ]
     lines.append("\n".join(end_lines))
     lines.append("")
 
-    if end.strip():
-        lines.append(end.strip())
+    if draft.end.strip():
+        lines.append(draft.end.strip())
         lines.append("")
 
     if lines and not lines[-1]:
@@ -131,7 +207,7 @@ def format_respo_contacts(guild: Guild) -> str:
     if not members:
         logger.debug(f"Role '{RoleNames.TRAININGS_MANAGER}' has no human members in guild {guild.id}; using fallback contacts.")
         return "un·e membre du Pôle Formations"
-    mentions = [member.mention for member in members]
+    mentions = [m.mention for m in members]
     logger.debug(f"Resolved {len(mentions)} formation contacts for guild {guild.id}.")
     return " ou ".join(mentions)
 
@@ -153,9 +229,9 @@ def format_formation_export(formation: Formation) -> str:
         for idx, user_entry in enumerate(formation.registered_users, start=1):
             user_id = user_entry.get("user_id")
             username = user_entry.get("username", "Utilisateur inconnu")
-            ts = user_entry.get("ts_iso", datetime.min.isoformat(timespec="seconds"))
+            ts = user_entry.get("ts_iso", datetime.min.replace(tzinfo=PARIS_TZ).isoformat(timespec="seconds"))
             dt = datetime.fromisoformat(ts)
-            when = humanize_dt(dt).lower()[2:-2] if dt != datetime.min else "n/a"
+            when = humanize_dt(dt).lower()[2:-2] if dt != datetime.min.replace(tzinfo=PARIS_TZ) else "n/a"
             lines.append(f"{idx}. <@{user_id}> ({escape_md(username)}) · inscrit·e le {when}")
     else:
         lines.append("_(Aucune inscription)_")
@@ -164,9 +240,9 @@ def format_formation_export(formation: Formation) -> str:
         for idx, user_entry in enumerate(formation.waitlisted_users, start=len(formation.registered_users) + 1):
             user_id = user_entry.get("user_id")
             username = user_entry.get("username", "Utilisateur inconnu")
-            ts = user_entry.get("ts_iso", datetime.min)
+            ts = user_entry.get("ts_iso", datetime.min.replace(tzinfo=PARIS_TZ).isoformat(timespec="seconds"))
             dt = datetime.fromisoformat(ts)
-            when = humanize_dt(dt).lower()[2:-2] if dt != datetime.min else "n/a"
+            when = humanize_dt(dt).lower()[2:-2] if dt != datetime.min.replace(tzinfo=PARIS_TZ) else "n/a"
             lines.append(f"{idx}. <@{user_id}> ({escape_md(username)}) · inscrit·e le {when} (en attente)")
 
     return "\n".join(lines)
