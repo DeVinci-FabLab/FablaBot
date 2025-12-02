@@ -59,7 +59,7 @@ REACTION_LOG_RETENTION = timedelta(days=30)
 ALLOWED_ROLES = ADMIN_ROLES | {RoleNames.BUREAU}
 MAIN_GUILD_ID = 1073721836782755862
 AUSTIN_ID = 585347569329373214
-PHILIPPINE_ID = 641386630581714976
+FIFI_ID = 641386630581714976
 
 
 class MessageManagement(commands.Cog):
@@ -641,30 +641,30 @@ class MessageManagement(commands.Cog):
 
                 break
 
-        from fablabot.guild_config import is_philippine_bully_enabled, set_philippine_bully_enabled
+        from fablabot.guild_config import is_fifi_enabled, set_fifi_enabled
 
         count = msg.content.lower().count("monster")
-        if count > 0 and is_philippine_bully_enabled(msg.guild.id):
-            philippine = await get_or_fetch_member(msg.guild, PHILIPPINE_ID)
-            if philippine is not None:
-                await philippine.timeout(
-                    (philippine.timed_out_until or datetime.now(PARIS_TZ)) + timedelta(seconds=count * 20),
+        if count > 0 and is_fifi_enabled(msg.guild.id):
+            fifi = await get_or_fetch_member(msg.guild, FIFI_ID)
+            if fifi is not None:
+                await fifi.timeout(
+                    (fifi.timed_out_until or datetime.now(PARIS_TZ)) + timedelta(seconds=count * 20),
                     reason="Monster detected in message",
                 )
-                logger.debug(f"Philippine timed out in guild {msg.guild.id} due to monster message by {msg.author}")
+                logger.debug(f"Fifi timed out in guild {msg.guild.id} due to monster message by {msg.author}")
 
-        if "go bully philippine" in msg.content.lower() and msg.author.id == AUSTIN_ID:
-            set_philippine_bully_enabled(msg.guild.id, enabled=True)
-            logger.debug(f"Philippine Bully enabled in guild {msg.guild.id} by {msg.author}")
-            await msg.author.send("Philippine Bully activé.")
+        if "start fifi" in msg.content.lower() and msg.author.id == AUSTIN_ID:
+            set_fifi_enabled(msg.guild.id, enabled=True)
+            logger.debug(f"Fifi enabled in guild {msg.guild.id} by {msg.author}")
+            await msg.author.send("Fifi activé.")
 
-        if "stop bullying philippine" in msg.content.lower() and msg.author.id == AUSTIN_ID:
-            set_philippine_bully_enabled(msg.guild.id, enabled=False)
-            philippine = await get_or_fetch_member(msg.guild, PHILIPPINE_ID)
-            if philippine is not None:
-                await philippine.timeout(None, reason="Bully command issued")
-            logger.debug(f"Philippine Bully disabled in guild {msg.guild.id} by {msg.author}")
-            await msg.author.send("Philippine Bully désactivé.")
+        if "stop fifi" in msg.content.lower() and msg.author.id == AUSTIN_ID:
+            set_fifi_enabled(msg.guild.id, enabled=False)
+            fifi = await get_or_fetch_member(msg.guild, FIFI_ID)
+            if fifi is not None:
+                await fifi.timeout(None, reason="Fifi command issued")
+            logger.debug(f"Fifi disabled in guild {msg.guild.id} by {msg.author}")
+            await msg.author.send("Fifi désactivé.")
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: RawReactionActionEvent) -> None:
