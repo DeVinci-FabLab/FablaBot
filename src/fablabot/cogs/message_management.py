@@ -648,7 +648,7 @@ class MessageManagement(commands.Cog):
             philippine = await get_or_fetch_member(msg.guild, PHILIPPINE_ID)
             if philippine is not None:
                 await philippine.timeout(
-                    (philippine.timed_out_until or datetime.now(PARIS_TZ)) + timedelta(minutes=count),
+                    (philippine.timed_out_until or datetime.now(PARIS_TZ)) + timedelta(seconds=count * 20),
                     reason="Monster detected in message",
                 )
                 logger.debug(f"Philippine timed out in guild {msg.guild.id} due to monster message by {msg.author}")
