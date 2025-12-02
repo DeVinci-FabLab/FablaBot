@@ -78,7 +78,7 @@ EASTER_EGGS: list[EasterEggTrigger] = [
         "<:MonsterKiwi:1438645773947506829>",
     ),
     EasterEggTrigger(
-        [re.compile(r"(\s|^)quoi$", flags=re.IGNORECASE)],
+        [re.compile(r"(\s|^)quoi\s*\?*$", flags=re.IGNORECASE)],
         "FEUR",
         0.5,
     ),
