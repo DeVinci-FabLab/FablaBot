@@ -43,7 +43,6 @@ from fablabot.helpers.state_store import JsonStateStore
 from fablabot.helpers.utils import (
     ensure_command_context,
     get_members_by_role,
-    get_or_fetch_member,
     is_valid_emoji,
     log_request,
     send_dm_to_member,
@@ -58,8 +57,6 @@ MESSAGES_STATE_FILE = Path("data/messages_state.json")
 REACTION_LOG_RETENTION = timedelta(days=30)
 ALLOWED_ROLES = ADMIN_ROLES | {RoleNames.BUREAU}
 MAIN_GUILD_ID = 1073721836782755862
-AUSTIN_ID = 585347569329373214
-FIFI_ID = 641386630581714976
 
 
 class MessageManagement(commands.Cog):
@@ -78,6 +75,7 @@ class MessageManagement(commands.Cog):
         - /msg preview: Preview the current draft.
         - /msg publish: Publish the draft to a channel.
         - /msg export: Export reaction history of a tracked message.
+        - /suggest: Send a suggestion via an interactive flow.
 
     Listeners:
         - on_message: Easter egg listener for specific message content.
@@ -627,7 +625,7 @@ class MessageManagement(commands.Cog):
             return
         if not isinstance(msg.channel, TextChannel | VoiceChannel | StageChannel | Thread):
             return
-        if not msg.channel.category or msg.channel.category.name in {"Bureau", "Annonces", "Chargés"}:
+        if not msg.channel.category or msg.channel.category.name in {"Bureau", "Annonces", "CODIR", "Validation", "Chargés"}:
             return
 
         for egg in EASTER_EGGS:
@@ -640,31 +638,6 @@ class MessageManagement(commands.Cog):
                 logger.info(f"Easter egg triggered by {msg.author} in {msg.channel}: {egg.keywords}")
 
                 break
-
-        from fablabot.guild_config import is_fifi_enabled, set_fifi_enabled
-
-        count = msg.content.lower().count("monster")
-        if count > 0 and is_fifi_enabled(msg.guild.id):
-            fifi = await get_or_fetch_member(msg.guild, FIFI_ID)
-            if fifi is not None:
-                await fifi.timeout(
-                    (fifi.timed_out_until or datetime.now(PARIS_TZ)) + timedelta(seconds=count * 20),
-                    reason="Monster detected in message",
-                )
-                logger.debug(f"Fifi timed out in guild {msg.guild.id} due to monster message by {msg.author}")
-
-        if "start fifi" in msg.content.lower() and msg.author.id == AUSTIN_ID:
-            set_fifi_enabled(msg.guild.id, enabled=True)
-            logger.debug(f"Fifi enabled in guild {msg.guild.id} by {msg.author}")
-            await msg.author.send("Fifi activé.")
-
-        if "stop fifi" in msg.content.lower() and msg.author.id == AUSTIN_ID:
-            set_fifi_enabled(msg.guild.id, enabled=False)
-            fifi = await get_or_fetch_member(msg.guild, FIFI_ID)
-            if fifi is not None:
-                await fifi.timeout(None, reason="Fifi command issued")
-            logger.debug(f"Fifi disabled in guild {msg.guild.id} by {msg.author}")
-            await msg.author.send("Fifi désactivé.")
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: RawReactionActionEvent) -> None:

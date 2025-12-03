@@ -13,8 +13,7 @@ logger = logging.getLogger(__name__)
 CONFIG_FILE = Path("data/guild_config.json")
 _GUILD_KEY_COMMANDS = "commands_channel_id"
 _GUILD_KEY_WELCOME = "welcome_verify_enabled"
-_GUILD_KEY_FIFI = "fifi_enabled"
-_GUILD_KEY: set[str] = {_GUILD_KEY_COMMANDS, _GUILD_KEY_WELCOME, _GUILD_KEY_FIFI}
+_GUILD_KEY: set[str] = {_GUILD_KEY_COMMANDS, _GUILD_KEY_WELCOME}
 _KEY_LOG = "log_channel_id"
 _GLOBAL_SECTION = "__global__"
 
@@ -143,27 +142,3 @@ def set_welcome_verify_enabled(guild_id: int, *, enabled: bool) -> None:
         enabled (bool): Whether to enable or disable the feature.
     """
     _update_entry(guild_id, **{_GUILD_KEY_WELCOME: bool(enabled)})
-
-
-def is_fifi_enabled(guild_id: int) -> bool:
-    """Check if Fifi easter egg is enabled for a specific guild.
-
-    Args:
-        guild_id (int): The ID of the guild to check.
-
-    Returns:
-        bool: True if Fifi easter egg is enabled, False otherwise.
-    """
-    entry = _load_all().get(str(guild_id), {})
-    value = entry.get(_GUILD_KEY_FIFI)
-    return bool(value) if isinstance(value, bool) else False
-
-
-def set_fifi_enabled(guild_id: int, *, enabled: bool) -> None:
-    """Set the Fifi easter egg status for a specific guild.
-
-    Args:
-        guild_id (int): The ID of the guild to set the status for.
-        enabled (bool): Whether to enable or disable the feature.
-    """
-    _update_entry(guild_id, **{_GUILD_KEY_FIFI: bool(enabled)})
