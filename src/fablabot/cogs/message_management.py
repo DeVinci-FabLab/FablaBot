@@ -43,7 +43,6 @@ from fablabot.helpers.state_store import JsonStateStore
 from fablabot.helpers.utils import (
     ensure_command_context,
     get_members_by_role,
-    get_or_fetch_member,
     is_valid_emoji,
     log_request,
     send_dm_to_member,
@@ -57,8 +56,7 @@ logger = logging.getLogger(__name__)
 MESSAGES_STATE_FILE = Path("data/messages_state.json")
 REACTION_LOG_RETENTION = timedelta(days=30)
 ALLOWED_ROLES = ADMIN_ROLES | {RoleNames.BUREAU}
-AUSTIN_ID = 585347569329373214
-PHILIPPINE_ID = 641386630581714976
+MAIN_GUILD_ID = 1073721836782755862
 
 
 class MessageManagement(commands.Cog):
@@ -77,6 +75,7 @@ class MessageManagement(commands.Cog):
         - /msg preview: Preview the current draft.
         - /msg publish: Publish the draft to a channel.
         - /msg export: Export reaction history of a tracked message.
+        - /suggest: Send a suggestion via an interactive flow.
 
     Listeners:
         - on_message: Easter egg listener for specific message content.
@@ -622,46 +621,23 @@ class MessageManagement(commands.Cog):
         """
         if msg.author.bot:
             return
+        if not msg.guild or msg.guild.id != MAIN_GUILD_ID:
+            return
         if not isinstance(msg.channel, TextChannel | VoiceChannel | StageChannel | Thread):
             return
-        if not msg.channel.category or msg.channel.category.name in {"Bureau", "Annonces", "Chargés"}:
+        if not msg.channel.category or msg.channel.category.name in {"Bureau", "Annonces", "CODIR", "Validation", "Chargés"}:
             return
 
         for egg in EASTER_EGGS:
             if any(pattern.search(msg.content) for pattern in egg.keywords) and random.random() < egg.probability:
-                await msg.channel.send(content=egg.response, reference=msg)
+                if egg.response:
+                    await msg.channel.send(content=egg.response, reference=msg)
                 if egg.reaction:
                     with contextlib.suppress(Exception):
                         await msg.add_reaction(egg.reaction)
                 logger.info(f"Easter egg triggered by {msg.author} in {msg.channel}: {egg.keywords}")
 
                 break
-
-        from fablabot.guild_config import is_philippine_bully_enabled, set_philippine_bully_enabled
-
-        assert msg.guild is not None
-        count = msg.content.lower().count("monster")
-        if count > 0 and is_philippine_bully_enabled(msg.guild.id):
-            philippine = await get_or_fetch_member(msg.guild, PHILIPPINE_ID)
-            if philippine is not None:
-                await philippine.timeout(
-                    (philippine.timed_out_until or datetime.now(PARIS_TZ)) + timedelta(minutes=count),
-                    reason="Monster detected in message",
-                )
-                logger.debug(f"Philippine timed out in guild {msg.guild.id} due to monster message by {msg.author}")
-
-        if "go bully philippine" in msg.content.lower() and msg.author.id == AUSTIN_ID:
-            set_philippine_bully_enabled(msg.guild.id, enabled=True)
-            logger.debug(f"Philippine Bully enabled in guild {msg.guild.id} by {msg.author}")
-            await msg.author.send("Philippine Bully activé.")
-
-        if "stop bullying philippine" in msg.content.lower() and msg.author.id == AUSTIN_ID:
-            set_philippine_bully_enabled(msg.guild.id, enabled=False)
-            philippine = await get_or_fetch_member(msg.guild, PHILIPPINE_ID)
-            if philippine is not None:
-                await philippine.timeout(None, reason="Bully command issued")
-            logger.debug(f"Philippine Bully disabled in guild {msg.guild.id} by {msg.author}")
-            await msg.author.send("Philippine Bully désactivé.")
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: RawReactionActionEvent) -> None:

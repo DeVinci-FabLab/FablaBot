@@ -35,7 +35,7 @@ EASTER_EGGS: list[EasterEggTrigger] = [
     EasterEggTrigger(
         [re.compile(r"autis[tm]e", flags=re.IGNORECASE)],
         "https://tenor.com/view/autism-autistic-spongebob-i%27m-autistic-spongebob-meme-gif-990745265488627503",
-        0.5,
+        1 / 3,
     ),
     EasterEggTrigger(
         [re.compile(r"contre nature", flags=re.IGNORECASE)],
@@ -43,9 +43,14 @@ EASTER_EGGS: list[EasterEggTrigger] = [
         1.0,
     ),
     EasterEggTrigger(
-        [re.compile(r"pas net", flags=re.IGNORECASE), re.compile(r"baptiste", flags=re.IGNORECASE)],
+        [re.compile(r"pas net", flags=re.IGNORECASE)],
         "https://tenor.com/view/baptiste-feu-fire-gif-13214452",
         1.0,
+    ),
+    EasterEggTrigger(
+        [re.compile(r"baptiste", flags=re.IGNORECASE)],
+        "https://tenor.com/view/baptiste-feu-fire-gif-13214452",
+        0.25,
     ),
     EasterEggTrigger(
         [
@@ -62,18 +67,18 @@ EASTER_EGGS: list[EasterEggTrigger] = [
     ),
     EasterEggTrigger(
         [re.compile(r"monster", flags=re.IGNORECASE)],
-        "# <<<< REDBULL",
-        0.25,
+        "Nous vous recommandons Royale Taurine ou Red Bull, c'est meilleur pour votre santé mentale",
+        0.01,
         "<:MonsterKiwi:1438645773947506829>",
     ),
     EasterEggTrigger(
         [re.compile(r"monster", flags=re.IGNORECASE)],
-        "Nous vous recommandons Royale Taurine, c'est meilleur pour votre santé",
-        0.25,
+        "",
+        0.2,
         "<:MonsterKiwi:1438645773947506829>",
     ),
     EasterEggTrigger(
-        [re.compile(r"(\s|^)quoi", flags=re.IGNORECASE)],
+        [re.compile(r"(\s|^)quoi\s*\?*$", flags=re.IGNORECASE)],
         "FEUR",
         0.5,
     ),
