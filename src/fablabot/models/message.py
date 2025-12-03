@@ -43,7 +43,7 @@ EASTER_EGGS: list[EasterEggTrigger] = [
         1.0,
     ),
     EasterEggTrigger(
-        [re.compile(r"pas net", flags=re.IGNORECASE), re.compile(r"baptiste", flags=re.IGNORECASE)],
+        [re.compile(r"pas net", flags=re.IGNORECASE)],
         "https://tenor.com/view/baptiste-feu-fire-gif-13214452",
         1.0,
     ),
