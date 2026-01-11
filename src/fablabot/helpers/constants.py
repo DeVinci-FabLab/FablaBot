@@ -24,10 +24,10 @@ class RoleNames:
     ADMIN_TEMP = "Admin -temp-"
     """Temporary administrator role."""
 
-    PRESIDENT = "Président.e"
+    PRESIDENT = "Président"
     """President role."""
 
-    VICE_PRESIDENT = "Vice-Président.e"
+    VICE_PRESIDENT = "Vice-Président"
     """Vice-president role."""
 
     SECRETARY = "Secrétaire Général"
