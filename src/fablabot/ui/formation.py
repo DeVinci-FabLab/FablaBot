@@ -2,18 +2,14 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import logging
+from copy import deepcopy
 from typing import TYPE_CHECKING, cast
 
 from discord import ButtonStyle, Embed, Interaction, TextStyle, ui
 from emoji import emojize
 
-from fablabot.helpers.constants import (
-    MAX_TRACKED_OPTIONS,
-    PARIS_TZ,
-    ErrorMessages,
-)
+from fablabot.helpers.constants import MAX_TRACKED_OPTIONS, PARIS_TZ, ErrorMessages
 from fablabot.helpers.formation import Emojis, parse_date_time, render_formation, render_message
 from fablabot.helpers.utils import is_valid_emoji, log_request
 from fablabot.models.formation import FmCommand, FmMessageDraft, Formation
@@ -37,6 +33,7 @@ class StartFmModal(ui.Modal, title="Commencer une annonce de formation"):
     Attributes:
         intro_input (ui.TextInput): Text input for the introduction.
         end_input (ui.TextInput): Text input for the conclusion.
+        request_forms_url_input (ui.TextInput): Optional text input for custom forms URL.
     """
 
     intro_input: ui.TextInput = ui.TextInput(
@@ -52,6 +49,13 @@ class StartFmModal(ui.Modal, title="Commencer une annonce de formation"):
         placeholder="Entrez la conclusion...",
         required=True,
         max_length=200,
+    )
+    request_forms_url_input: ui.TextInput = ui.TextInput(
+        label="URL du formulaire (optionnel)",
+        style=TextStyle.short,
+        placeholder="https://forms.office.com/e/MqVdQujzjf",
+        required=False,
+        max_length=500,
     )
 
     def __init__(self, cog: FormationManagement, role_id: int) -> None:
@@ -86,6 +90,7 @@ class StartFmModal(ui.Modal, title="Commencer une annonce de formation"):
 
         intro_body = self.intro_input.value.strip()
         end_body = self.end_input.value.strip()
+        custom_url = self.request_forms_url_input.value.strip() if self.request_forms_url_input.value else None
 
         draft = FmMessageDraft(
             header=header,
@@ -93,6 +98,7 @@ class StartFmModal(ui.Modal, title="Commencer une annonce de formation"):
             intro=intro_body,
             fms=[],
             end=end_body,
+            request_forms_url=custom_url if custom_url else "https://forms.office.com/e/MqVdQujzjf",
         )
         self.cog.set_guild_draft(interaction.guild.id, draft)
 
@@ -111,6 +117,7 @@ class EditTextModal(ui.Modal, title="Modifier le texte de l'annonce de formation
     Attributes:
         intro_input (ui.TextInput): Text input for the introduction.
         end_input (ui.TextInput): Text input for the conclusion.
+        request_forms_url_input (ui.TextInput): Optional text input for custom forms URL.
     """
 
     intro_input: ui.TextInput = ui.TextInput(
@@ -127,6 +134,13 @@ class EditTextModal(ui.Modal, title="Modifier le texte de l'annonce de formation
         required=True,
         max_length=200,
     )
+    request_forms_url_input: ui.TextInput = ui.TextInput(
+        label="URL du formulaire (optionnel)",
+        style=TextStyle.short,
+        placeholder="https://forms.office.com/e/MqVdQujzjf",
+        required=False,
+        max_length=500,
+    )
 
     def __init__(
         self,
@@ -134,6 +148,7 @@ class EditTextModal(ui.Modal, title="Modifier le texte de l'annonce de formation
         role_id: int,
         intro: str,
         end: str,
+        request_forms_url: str,
     ) -> None:
         """Initialize the StartFmModal.
 
@@ -142,12 +157,14 @@ class EditTextModal(ui.Modal, title="Modifier le texte de l'annonce de formation
             role_id (int): Role ID to mention in the formation message.
             intro (str): Old introduction text.
             end (str): Old conclusion text.
+            request_forms_url (str): Current request forms URL.
         """
         super().__init__()
         self.cog = cog
         self.role_id = role_id
         self.intro_input.default = intro
         self.end_input.default = end
+        self.request_forms_url_input.default = request_forms_url
 
     async def on_submit(self, interaction: Interaction) -> None:
         """Called when the modal is submitted.
@@ -169,11 +186,18 @@ class EditTextModal(ui.Modal, title="Modifier le texte de l'annonce de formation
         current_intro = draft.intro
         current_end = draft.end
         current_role_id = draft.role_id
+        current_url = draft.request_forms_url
 
         updated_intro = self.intro_input.value.strip()
         updated_end = self.end_input.value.strip()
+        updated_url = self.request_forms_url_input.value.strip() if self.request_forms_url_input.value else current_url
 
-        if updated_intro == current_intro and updated_end == current_end and self.role_id == current_role_id:
+        if (
+            updated_intro == current_intro
+            and updated_end == current_end
+            and self.role_id == current_role_id
+            and updated_url == current_url
+        ):
             await interaction.response.send_message("Aucune modification détectée.", ephemeral=True)
             return
 
@@ -183,6 +207,7 @@ class EditTextModal(ui.Modal, title="Modifier le texte de l'annonce de formation
             intro=updated_intro,
             fms=draft.fms,
             end=updated_end,
+            request_forms_url=updated_url,
         )
         self.cog.set_guild_draft(interaction.guild.id, draft)
 
@@ -270,6 +295,7 @@ class AddFmModal(ui.Modal, title="Ajouter une formation"):
             intro=draft.intro,
             fms=fms,
             end=draft.end,
+            request_forms_url=draft.request_forms_url,
         )
         self.cog.set_guild_draft(interaction.guild.id, draft)
 
@@ -813,6 +839,7 @@ class _EditFormationView(ui.View):
             intro=draft.intro,
             fms=fms,
             end=draft.end,
+            request_forms_url=draft.request_forms_url,
         )
         self.cog.set_guild_draft(interaction.guild.id, draft)
 

@@ -117,6 +117,7 @@ class FmMessageDraft:
         intro (str): Introduction text.
         fms (list[Formation]): List of Formation objects.
         end (str): Ending text.
+        request_forms_url (str): URL for the formation request form. Defaults to the Office Forms link.
     """
 
     header: str
@@ -129,6 +130,8 @@ class FmMessageDraft:
     """List of Formation objects."""
     end: str
     """Ending text."""
+    request_forms_url: str = "https://forms.office.com/e/MqVdQujzjf"
+    """URL for the formation request form."""
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the FmMessageDraft instance to a dictionary.
@@ -142,6 +145,7 @@ class FmMessageDraft:
             "intro": self.intro,
             "fms": [fm.to_dict() for fm in self.fms],
             "end": self.end,
+            "request_forms_url": self.request_forms_url,
         }
 
     @classmethod
@@ -160,6 +164,7 @@ class FmMessageDraft:
             intro=data.get("intro", ""),
             fms=[Formation(**fm) for fm in data.get("fms", [])],
             end=data.get("end", ""),
+            request_forms_url=data.get("request_forms_url", "https://forms.office.com/e/MqVdQujzjf"),
         )
 
 

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 import io
 import logging
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from discord.utils import get
@@ -19,7 +19,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_FM_REQUEST_FORMS = "https://forms.office.com/e/MqVdQujzjf"
 _THREE_QUARTERS_HOUR = 45
 _ONE_QUARTER_HOUR = 15
 
@@ -139,7 +138,7 @@ def render_formation(fm: Formation) -> str:
     lines.append(
         f"> {humanize_dt(fm.start_dt)}  – "  # noqa: RUF001
         f"{Emojis.get_clock_emoji(fm.start_dt)} {fm.duration}  – "  # noqa: RUF001
-        f"{Emojis.PEOPLE} {len(fm.registered_users)}/{fm.seats} places"
+        f"{Emojis.PEOPLE} {len(fm.registered_users)}/{fm.seats} places",
     )
     render_description = fm.description.replace("\n", "\n> ")
     if fm.description:
@@ -175,7 +174,7 @@ def render_message(draft: FmMessageDraft) -> str:
         f"{Emojis.ARROW_RIGHT} Pour s'inscrire, réagis avec les émojis des formations correspondantes.",
         f"{Emojis.WARNING} Si tu ne peux plus venir, n'oublie pas de retirer ta réaction pour libérer la place.",
         "",
-        f"Tu veux apprendre autre chose ? [**Propose une formation ici**]({_FM_REQUEST_FORMS})",
+        f"Tu veux apprendre autre chose ? [**Propose une formation ici**]({draft.request_forms_url})",
     ]
     lines.append("\n".join(end_lines))
     lines.append("")

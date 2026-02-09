@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import csv
-from datetime import datetime, timedelta
 import io
 import logging
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, override
 from warnings import deprecated
@@ -213,7 +213,13 @@ class FormationManagement(commands.Cog):
 
         if text:
             await interaction.response.send_modal(
-                fmui.EditTextModal(self, role.id if role else draft.role_id, draft.intro, draft.end),
+                fmui.EditTextModal(
+                    self,
+                    role.id if role else draft.role_id,
+                    draft.intro,
+                    draft.end,
+                    draft.request_forms_url,
+                ),
             )
             return
 
@@ -393,6 +399,7 @@ class FormationManagement(commands.Cog):
             intro=draft.intro,
             fms=[],
             end=draft.end,
+            request_forms_url=draft.request_forms_url,
         )
         self.set_guild_draft(interaction.guild.id, draft)
 
@@ -693,6 +700,7 @@ class FormationManagement(commands.Cog):
                 intro=pub.message.intro,
                 fms=fms,
                 end=pub.message.end,
+                request_forms_url=pub.message.request_forms_url,
             )
             self._set_last_published_in_guild(
                 guild_id,
@@ -908,6 +916,7 @@ class FormationManagement(commands.Cog):
             intro=intro,
             fms=fms,
             end=end,
+            request_forms_url=pub_msg.request_forms_url,
         )
         self._set_last_published_in_guild(
             guild_id,
