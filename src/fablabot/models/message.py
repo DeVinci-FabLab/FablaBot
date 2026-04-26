@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum, auto
+import os
 import re
 from typing import Any, Literal
 
 from fablabot.helpers.constants import RoleNames
 
 ANONYMOUS_ICON_URL = "https://e7.pngegg.com/pngimages/84/165/png-clipart-united-states-avatar-organization-information-user-avatar-service-computer-wallpaper-thumbnail.png"
+
+EASTER_EGGS_ENABLED = os.environ.get("EASTER_EGGS_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
 @dataclass

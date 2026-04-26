@@ -10,6 +10,7 @@ services:
       - DISCORD_TOKEN_FILE=/run/secrets/discord_token
       - GUILD_TOKEN_FILE=/run/secrets/guild_token
       - PERSONAL_ID_FILE=/run/secrets/personal_id
+      - EASTER_EGGS_ENABLED=false
     secrets:
       - discord_token
       - guild_token

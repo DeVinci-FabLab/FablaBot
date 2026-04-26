@@ -48,7 +48,7 @@ from fablabot.helpers.utils import (
     send_dm_to_member,
 )
 from fablabot.models.common import ReactionAction, ReactionEvent
-from fablabot.models.message import EASTER_EGGS, MessageDraft, MsgCommand, MsgReactionEvent, TrackedMessage
+from fablabot.models.message import EASTER_EGGS, EASTER_EGGS_ENABLED, MessageDraft, MsgCommand, MsgReactionEvent, TrackedMessage
 from fablabot.ui import mui
 
 logger = logging.getLogger(__name__)
@@ -619,6 +619,8 @@ class MessageManagement(commands.Cog):
         Args:
             msg (discord.Message): The message that was sent.
         """
+        if not EASTER_EGGS_ENABLED:
+            return
         if msg.author.bot:
             return
         if not msg.guild or msg.guild.id != MAIN_GUILD_ID:
