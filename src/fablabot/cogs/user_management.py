@@ -481,6 +481,8 @@ class UserManagement(commands.Cog):
         role_names = {role.name for role in member.roles}
         if target_role.name == RoleNames.SBIRE_BUREAU and RoleNames.BUREAU in role_names:
             return True
+        if target_role.name == RoleNames.AGENTS_MYFAB and RoleNames.BUREAU in role_names:
+            return True
         if target_role.name.startswith("Pôle "):
             suffix = target_role.name.split("Pôle ", 1)[1]
             if f"Respo {suffix}" in role_names:

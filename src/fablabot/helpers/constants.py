@@ -60,6 +60,9 @@ class RoleNames:
     SBIRE_BUREAU = "Sbire Bureau"
     """Office assistant role."""
 
+    AGENTS_MYFAB = "agents MyFab"
+    """MyFab agents role."""
+
     MEMBER_VERIFIED = "Membre ✓"
     """Verified member role."""
 
