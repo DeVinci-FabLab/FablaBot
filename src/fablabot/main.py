@@ -40,8 +40,10 @@ class DiscordGateway503Filter(logging.Filter):
 
         exception = record.exc_info[1]
 
+        from aiohttp import WSServerHandshakeError
+
         if (
-            exception.__class__.__name__ == "WSServerHandshakeError"
+            isinstance(exception, WSServerHandshakeError)
             and getattr(exception, "status", None) == 503
         ):
             retry_message = record.getMessage()
