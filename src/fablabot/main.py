@@ -31,6 +31,29 @@ DISCORD_TOKEN_FILE = os.environ.get("DISCORD_TOKEN_FILE") or ""
 with open(DISCORD_TOKEN_FILE) as f:
     DISCORD_TOKEN = f.read().strip()
 
+class DiscordGateway503Filter(logging.Filter):
+    """clean warning for gateway 503 error"""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.name != "discord.client" or not record.exc_info:
+            return True
+
+        exception = record.exc_info[1]
+
+        if (
+            exception.__class__.__name__ == "WSServerHandshakeError"
+            and getattr(exception, "status", None) == 503
+        ):
+            retry_message = record.getMessage()
+
+            logger.warning(
+                "Discord Gateway indisponible (503). %s",
+                retry_message,
+            )
+
+            return False
+
+        return True
 
 class Fablabot(commands.Bot):
     """Discord bot implementation for the DeVinci Fablab server."""
@@ -99,6 +122,9 @@ class Fablabot(commands.Bot):
 
 def main() -> None:
     """Run the bot using the token from the environment."""
+    discord_logger = logging.getLogger("discord.client")
+    discord_logger.addFilter(DiscordGateway503Filter())
+    
     logger.info("Starting FablaBot.")
     bot = Fablabot()
     logger.info("Running bot.")
