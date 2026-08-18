@@ -124,7 +124,7 @@ def main() -> None:
     """Run the bot using the token from the environment."""
     discord_logger = logging.getLogger("discord.client")
     discord_logger.addFilter(DiscordGateway503Filter())
-    
+
     logger.info("Starting FablaBot.")
     bot = Fablabot()
     logger.info("Running bot.")
