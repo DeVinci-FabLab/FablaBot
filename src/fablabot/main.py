@@ -35,7 +35,7 @@ class DiscordGateway503Filter(logging.Filter):
     """Filter Discord gateway 503 warnings into a cleaner message."""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        if record.name != "discord.client" or not record.exc_info:
+        if not record.exc_info:
             return True
 
         exception = record.exc_info[1]
