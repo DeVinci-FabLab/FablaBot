@@ -32,7 +32,7 @@ with open(DISCORD_TOKEN_FILE) as f:
     DISCORD_TOKEN = f.read().strip()
 
 class DiscordGateway503Filter(logging.Filter):
-    """clean warning for gateway 503 error"""
+    """Filter Discord gateway 503 warnings into a cleaner message."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         if record.name != "discord.client" or not record.exc_info:
