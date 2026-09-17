@@ -1,4 +1,4 @@
-﻿"""Message management commands for Discord Bot. Provides slash commands for sending and managing messages."""
+"""Message management commands for Discord Bot. Provides slash commands for sending and managing messages."""
 
 from __future__ import annotations
 
