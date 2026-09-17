@@ -33,6 +33,7 @@ from discord import (
     Thread,
     VoiceChannel,
     app_commands,
+    ui,
 )
 from discord.ext import commands
 
