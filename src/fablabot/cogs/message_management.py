@@ -195,9 +195,9 @@ class MessageManagement(commands.Cog):
             description="Envoie un message privé à plusieurs utilisateurs via un sélecteur.",
         )
     
-        @msg_group.command(
-        name="purge",
-        description="Supprime les messages d'un utilisateur (ADMIN ONLY)"
+    @msg_group.command(
+       name="purge",
+       description="Supprime les messages d'un utilisateur (ADMIN ONLY)"
     )
     @app_commands.describe(
         user="Utilisateur à purger (OBLIGATOIRE)",
