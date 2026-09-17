@@ -15,6 +15,7 @@ from typing import Any
 from warnings import deprecated
 
 from discord import (
+    ButtonStyle,
     CategoryChannel,
     DMChannel,
     Embed,
@@ -275,13 +276,12 @@ class MessageManagement(commands.Cog):
         channel_counts: dict[str, int] = {}
 
         for target_ch in target_channels:
-            try:
-                count_in_channel = sum(1 async for msg in target_ch.history(limit=None) if msg.author == user)
-                channel_counts[target_ch.name] = count_in_channel
-                total_found += count_in_channel
-            except Exception as e:
-                logger.warning(f"Could not count messages in {target_ch.name}: {e}")
-                channel_counts[target_ch.name] = "Erreur"
+            count_in_channel = 0
+            async for msg in target_ch.history(limit=None):
+                if msg.author == user:
+                    count_in_channel += 1
+            channel_counts[target_ch.name] = count_in_channel
+            total_found += count_in_channel
 
         if all_channels:
             channel_info = f"{len(target_channels)} canaux"
