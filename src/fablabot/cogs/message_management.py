@@ -312,7 +312,7 @@ class MessageManagement(commands.Cog):
                 super().__init__()
                 self.confirmed = False
 
-            @ui.button(label="Confirmer", style=ui.ButtonStyle.green)
+            @ui.button(label="Confirmer", style=ButtonStyle.green)
             async def confirm_button(self, button_interaction: Interaction, button: ui.Button) -> None:
                 if button_interaction.user != interaction.user:
                     await button_interaction.response.send_message("Vous n'êtes pas autorisé", ephemeral=True)
@@ -321,7 +321,7 @@ class MessageManagement(commands.Cog):
                 await button_interaction.response.defer()
                 self.stop()
 
-            @ui.button(label="Annuler", style=ui.ButtonStyle.red)
+            @ui.button(label="Annuler", style=ButtonStyle.red)
             async def cancel_button(self, button_interaction: Interaction, button: ui.Button) -> None:
                 if button_interaction.user != interaction.user:
                     await button_interaction.response.send_message("Vous n'êtes pas autorisé", ephemeral=True)
