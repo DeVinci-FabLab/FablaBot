@@ -143,243 +143,57 @@ class MessageManagement(commands.Cog):
         )
         await interaction.response.send_message(help_message, ephemeral=not show)
 
-        @msg_group.command(name="clear", description="Nettoie le salon actuel de ses derniers messages.")
-        @app_commands.describe(messages="Le nombre de messages à supprimer (par défaut 5)")
-        async def msg_clear(self, interaction: Interaction, *, messages: app_commands.Range[int, 1, 50] = 5) -> None:
-            """Clears the current channel of its last messages.
-    
-            Args:
-                interaction (Interaction): The Discord interaction context.
-                messages (app_commands.Range[int, 1, 50], optional): The number of messages to purge. Defaults to 5.
-            """
-            log_request(logger, "message.clear", interaction, messages=messages)
-            assert interaction.guild is not None
-            assert not isinstance(
-                interaction.channel,
-                ForumChannel | CategoryChannel | DMChannel | GroupChannel | None,
-            )
-            if not interaction.permissions.manage_messages:
-                logger.warning(f"Insufficient permissions for manage_messages: {interaction.user}")
-                await interaction.response.send_message(ErrorMessages.NO_PERMISSION_MANAGE_MESSAGES, ephemeral=True)
-                return
-    
-            from fablabot.guild_config import get_commands_channel_id, get_log_channel_id
-    
-            if (
-                interaction.channel.name.endswith("_bot")
-                or get_log_channel_id() == interaction.channel.id
-                or get_commands_channel_id(interaction.guild.id) == interaction.channel.id
-            ):
-                logger.warning(f"Attempt to clear {interaction.channel.name} channel")
-                await interaction.response.send_message(
-                    f"Vous ne pouvez pas nettoyer le salon {interaction.channel.mention}."
-                    f" Veuillez contacter le pôle numérique si nécessaire.",
-                    ephemeral=True,
-                )
-                return
-            await interaction.response.send_message("Nettoyage en cours...", ephemeral=True)
-            try:
-                deleted = await interaction.channel.purge(
-                    limit=messages,
-                    reason=f"With clear command by {interaction.user}",
-                )
-            except HTTPException:
-                logger.exception(f"HTTP error while purging {messages} messages in {interaction.channel}")
-                await interaction.edit_original_response(content=ErrorMessages.CHANNEL_CLEAR_FAILED)
-                return
-            logger.info(f"Deleted {len(deleted)} messages in channel {interaction.channel.name}")
-            await interaction.edit_original_response(content=f"{len(deleted)} messages supprimés avec succès !")
-    
-        @msg_group.command(
-            name="dm",
-            description="Envoie un message privé à plusieurs utilisateurs via un sélecteur.",
-        )
-    
-    @msg_group.command(
-       name="purge",
-       description="Supprime les messages d'un utilisateur (ADMIN ONLY)"
-    )
-    @app_commands.describe(
-        user="Utilisateur à purger (OBLIGATOIRE)",
-        count="Nombre de messages à supprimer (1-1000)",
-        channel="Canal spécifique (optionnel, sinon canal actuel)",
-        all_channels="Purger dans TOUS les canaux?",
-        reason="Raison de la suppression"
-    )
-    async def msg_purge(
-        self,
-        interaction: Interaction,
-        *,
-        user: Member,
-        count: app_commands.Range[int, 1, 1000],
-        channel: TextChannel | None = None,
-        all_channels: bool = False,
-        reason: str = "Non spécifiée"
-    ) -> None:
-        """Purge messages from a specific user with counting.
-        
+    @msg_group.command(name="clear", description="Nettoie le salon actuel de ses derniers messages.")
+    @app_commands.describe(messages="Le nombre de messages à supprimer (par défaut 5)")
+    async def msg_clear(self, interaction: Interaction, *, messages: app_commands.Range[int, 1, 50] = 5) -> None:
+        """Clears the current channel of its last messages.
+
         Args:
             interaction (Interaction): The Discord interaction context.
-            user (Member): User whose messages to purge (MANDATORY).
-            count (int): Number of messages to purge per channel.
-            channel (TextChannel | None): Optional specific channel.
-            all_channels (bool): If True, purge from ALL text channels.
-            reason (str): Reason for the purge.
+            messages (app_commands.Range[int, 1, 50], optional): The number of messages to purge. Defaults to 5.
         """
-        log_request(logger, "message.purge", interaction, user=user, count=count, channel=channel, all_channels=all_channels, reason=reason)
-        
-        # ===== PERMISSION CHECK =====
-        if not interaction.user.guild_permissions.administrator:
-            logger.warning(f"Non-admin user {interaction.user} tried to purge messages")
-            await interaction.response.send_message(
-                "Seuls les administrateurs peuvent utiliser cette commande",
-                ephemeral=True
-            )
-            return
-        
+        log_request(logger, "message.clear", interaction, messages=messages)
         assert interaction.guild is not None
-        
-        # ===== DETERMINE TARGET CHANNELS =====
-        target_channels: list[TextChannel] = []
-        
-        if all_channels:
-            target_channels = [ch for ch in interaction.guild.text_channels if isinstance(ch, TextChannel)]
-        elif channel:
-            target_channels = [channel]
-        else:
-            assert isinstance(interaction.channel, TextChannel)
-            target_channels = [interaction.channel]
-        
-        # ===== COUNT MESSAGES BEFORE PURGE =====
-        await interaction.response.send_message("Comptage des messages...", ephemeral=True)
-        
-        total_found = 0
-        channel_counts: dict[str, int] = {}
-        
-        for target_ch in target_channels:
-            try:
-                count_in_channel = sum(1 async for msg in target_ch.history(limit=None) if msg.author == user)
-                channel_counts[target_ch.name] = count_in_channel
-                total_found += count_in_channel
-            except Exception as e:
-                logger.warning(f"Could not count messages in {target_ch.name}: {e}")
-                channel_counts[target_ch.name] = "Erreur"
-        
-        # ===== BUILD CONFIRMATION MESSAGE =====
-        if all_channels:
-            channel_info = f"{len(target_channels)} canaux"
-        else:
-            channel_info = target_channels[0].mention if target_channels else "Unknown"
-        
-        confirm_embed = Embed(
-            title="Confirmation de suppression",
-            description=f"Supprimer jusqu'à {count} messages de {user.mention} dans {channel_info}?",
-            color=0xFF6B6B
+        assert not isinstance(
+            interaction.channel,
+            ForumChannel | CategoryChannel | DMChannel | GroupChannel | None,
         )
-        
-        # Comptage par canal
-        if all_channels or len(target_channels) > 1:
-            count_text = "\n".join([f"{ch}: {c} messages" for ch, c in channel_counts.items()])
-            confirm_embed.add_field(name="Comptage par canal", value=count_text, inline=False)
-        else:
-            confirm_embed.add_field(name="Messages trouvés", value=str(total_found), inline=False)
-        
-        confirm_embed.add_field(name="Raison", value=reason, inline=False)
-        
-        if all_channels:
-            confirm_embed.add_field(name="ATTENTION", value="Opération sur TOUS les canaux!", inline=False)
-        
-        confirm_embed.set_footer(text=f"Par {interaction.user}")
-        
-        # ===== CONFIRMATION VIEW =====
-        class ConfirmView(ui.View):
-            def __init__(self):
-                super().__init__()
-                self.confirmed = False
-            
-            @ui.button(label="Confirmer", style=ui.ButtonStyle.green)
-            async def confirm_button(self, button_interaction: Interaction, button: ui.Button) -> None:
-                if button_interaction.user != interaction.user:
-                    await button_interaction.response.send_message(
-                        "Vous n'êtes pas autorisé",
-                        ephemeral=True
-                    )
-                    return
-                self.confirmed = True
-                await button_interaction.response.defer()
-                self.stop()
-            
-            @ui.button(label="Annuler", style=ui.ButtonStyle.red)
-            async def cancel_button(self, button_interaction: Interaction, button: ui.Button) -> None:
-                if button_interaction.user != interaction.user:
-                    await button_interaction.response.send_message(
-                        "Vous n'êtes pas autorisé",
-                        ephemeral=True
-                    )
-                    return
-                self.confirmed = False
-                await button_interaction.response.defer()
-                self.stop()
-        
-        view = ConfirmView()
-        await interaction.followup.send(embed=confirm_embed, view=view, ephemeral=True)
-        
-        # ===== WAIT FOR CONFIRMATION =====
-        try:
-            await view.wait()
-        except Exception:
-            logger.exception(f"Error waiting for purge confirmation")
+        if not interaction.permissions.manage_messages:
+            logger.warning(f"Insufficient permissions for manage_messages: {interaction.user}")
+            await interaction.response.send_message(ErrorMessages.NO_PERMISSION_MANAGE_MESSAGES, ephemeral=True)
             return
-        
-        if not view.confirmed:
-            await interaction.followup.send("Suppression annulée", ephemeral=True)
+
+        from fablabot.guild_config import get_commands_channel_id, get_log_channel_id
+
+        if (
+            interaction.channel.name.endswith("_bot")
+            or get_log_channel_id() == interaction.channel.id
+            or get_commands_channel_id(interaction.guild.id) == interaction.channel.id
+        ):
+            logger.warning(f"Attempt to clear {interaction.channel.name} channel")
+            await interaction.response.send_message(
+                f"Vous ne pouvez pas nettoyer le salon {interaction.channel.mention}."
+                f" Veuillez contacter le pôle numérique si nécessaire.",
+                ephemeral=True,
+            )
             return
-        
-        # ===== EXECUTE PURGE =====
-        await interaction.followup.send("Suppression en cours...", ephemeral=True)
-        
-        total_deleted = 0
-        
+        await interaction.response.send_message("Nettoyage en cours...", ephemeral=True)
         try:
-            def check(msg):
-                return msg.author == user
-            
-            for target_ch in target_channels:
-                try:
-                    deleted = await target_ch.purge(
-                        limit=count,
-                        check=check,
-                        reason=f"Purge by {interaction.user}: {reason}"
-                    )
-                    total_deleted += len(deleted)
-                    logger.info(f"Purged {len(deleted)} messages from {user} in {target_ch.name}")
-                except HTTPException as e:
-                    logger.warning(f"Could not purge {target_ch.name}: {e}")
-                    continue
-            
-            # ===== SUCCESS RESPONSE =====
-            success_embed = Embed(
-                title="Suppression complétée",
-                description=f"{total_deleted} message(s) supprimé(s)",
-                color=0x51CF66
+            deleted = await interaction.channel.purge(
+                limit=messages,
+                reason=f"With clear command by {interaction.user}",
             )
-            success_embed.add_field(name="Utilisateur", value=user.mention, inline=True)
-            success_embed.add_field(name="Canaux", value=str(len(target_channels)), inline=True)
-            success_embed.add_field(name="Raison", value=reason, inline=False)
-            success_embed.set_footer(text=f"Par {interaction.user}")
-            
-            await interaction.followup.send(embed=success_embed, ephemeral=True)
-            
-            logger.info(
-                f"Purged {total_deleted} messages from {user} in {len(target_channels)} channel(s) "
-                f"(guild: {interaction.guild.id}) by {interaction.user}: {reason}"
-            )
-        
-        except Exception as e:
-            logger.exception(f"Error during purge")
-            await interaction.followup.send(f"Erreur: {str(e)}", ephemeral=True)
-    
-        
+        except HTTPException:
+            logger.exception(f"HTTP error while purging {messages} messages in {interaction.channel}")
+            await interaction.edit_original_response(content=ErrorMessages.CHANNEL_CLEAR_FAILED)
+            return
+        logger.info(f"Deleted {len(deleted)} messages in channel {interaction.channel.name}")
+        await interaction.edit_original_response(content=f"{len(deleted)} messages supprimés avec succès !")
+
+    @msg_group.command(
+        name="dm",
+        description="Envoie un message privé à plusieurs utilisateurs via un sélecteur.",
+    )
     async def msg_dm(self, interaction: Interaction) -> None:
         """Send a direct message to multiple users.
 
@@ -391,6 +205,184 @@ class MessageManagement(commands.Cog):
             return
 
         await interaction.response.send_modal(mui.BulkDMModal(self))
+
+    @msg_group.command(
+        name="purge",
+        description="Supprime les messages d'un utilisateur (ADMIN ONLY)",
+    )
+    @app_commands.describe(
+        user="Utilisateur à purger (OBLIGATOIRE)",
+        count="Nombre de messages à supprimer (1-1000)",
+        channel="Canal spécifique (optionnel, sinon canal actuel)",
+        all_channels="Purger dans TOUS les canaux?",
+        reason="Raison de la suppression",
+    )
+    async def msg_purge(
+        self,
+        interaction: Interaction,
+        *,
+        user: Member,
+        count: app_commands.Range[int, 1, 1000],
+        channel: TextChannel | None = None,
+        all_channels: bool = False,
+        reason: str = "Non spécifiée",
+    ) -> None:
+        """Purge messages from a specific user with counting.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            user (Member): User whose messages to purge (MANDATORY).
+            count (int): Number of messages to purge per channel.
+            channel (TextChannel | None): Optional specific channel.
+            all_channels (bool): If True, purge from ALL text channels.
+            reason (str): Reason for the purge.
+        """
+        log_request(
+            logger,
+            "message.purge",
+            interaction,
+            user=user,
+            count=count,
+            channel=channel,
+            all_channels=all_channels,
+            reason=reason,
+        )
+
+        if not interaction.user.guild_permissions.administrator:
+            logger.warning(f"Non-admin user {interaction.user} tried to purge messages")
+            await interaction.response.send_message(
+                "Seuls les administrateurs peuvent utiliser cette commande",
+                ephemeral=True,
+            )
+            return
+
+        assert interaction.guild is not None
+
+        target_channels: list[TextChannel] = []
+
+        if all_channels:
+            target_channels = [ch for ch in interaction.guild.text_channels if isinstance(ch, TextChannel)]
+        elif channel:
+            target_channels = [channel]
+        else:
+            assert isinstance(interaction.channel, TextChannel)
+            target_channels = [interaction.channel]
+
+        await interaction.response.send_message("Comptage des messages...", ephemeral=True)
+
+        total_found = 0
+        channel_counts: dict[str, int] = {}
+
+        for target_ch in target_channels:
+            try:
+                count_in_channel = sum(1 async for msg in target_ch.history(limit=None) if msg.author == user)
+                channel_counts[target_ch.name] = count_in_channel
+                total_found += count_in_channel
+            except Exception as e:
+                logger.warning(f"Could not count messages in {target_ch.name}: {e}")
+                channel_counts[target_ch.name] = "Erreur"
+
+        if all_channels:
+            channel_info = f"{len(target_channels)} canaux"
+        else:
+            channel_info = target_channels[0].mention if target_channels else "Unknown"
+
+        confirm_embed = Embed(
+            title="Confirmation de suppression",
+            description=f"Supprimer jusqu'à {count} messages de {user.mention} dans {channel_info}?",
+            color=0xFF6B6B,
+        )
+
+        if all_channels or len(target_channels) > 1:
+            count_text = "\n".join([f"{ch}: {c} messages" for ch, c in channel_counts.items()])
+            confirm_embed.add_field(name="Comptage par canal", value=count_text, inline=False)
+        else:
+            confirm_embed.add_field(name="Messages trouvés", value=str(total_found), inline=False)
+
+        confirm_embed.add_field(name="Raison", value=reason, inline=False)
+
+        if all_channels:
+            confirm_embed.add_field(name="ATTENTION", value="Opération sur TOUS les canaux!", inline=False)
+
+        confirm_embed.set_footer(text=f"Par {interaction.user}")
+
+        class ConfirmView(ui.View):
+            def __init__(self):
+                super().__init__()
+                self.confirmed = False
+
+            @ui.button(label="Confirmer", style=ui.ButtonStyle.green)
+            async def confirm_button(self, button_interaction: Interaction, button: ui.Button) -> None:
+                if button_interaction.user != interaction.user:
+                    await button_interaction.response.send_message("Vous n'êtes pas autorisé", ephemeral=True)
+                    return
+                self.confirmed = True
+                await button_interaction.response.defer()
+                self.stop()
+
+            @ui.button(label="Annuler", style=ui.ButtonStyle.red)
+            async def cancel_button(self, button_interaction: Interaction, button: ui.Button) -> None:
+                if button_interaction.user != interaction.user:
+                    await button_interaction.response.send_message("Vous n'êtes pas autorisé", ephemeral=True)
+                    return
+                self.confirmed = False
+                await button_interaction.response.defer()
+                self.stop()
+
+        view = ConfirmView()
+        await interaction.followup.send(embed=confirm_embed, view=view, ephemeral=True)
+
+        try:
+            await view.wait()
+        except Exception:
+            logger.exception("Error waiting for purge confirmation")
+            return
+
+        if not view.confirmed:
+            await interaction.followup.send("Suppression annulée", ephemeral=True)
+            return
+
+        await interaction.followup.send("Suppression en cours...", ephemeral=True)
+
+        total_deleted = 0
+
+        try:
+            def check(msg):
+                return msg.author == user
+
+            for target_ch in target_channels:
+                try:
+                    deleted = await target_ch.purge(
+                        limit=count,
+                        check=check,
+                        reason=f"Purge by {interaction.user}: {reason}",
+                    )
+                    total_deleted += len(deleted)
+                    logger.info(f"Purged {len(deleted)} messages from {user} in {target_ch.name}")
+                except HTTPException as e:
+                    logger.warning(f"Could not purge {target_ch.name}: {e}")
+                    continue
+
+            success_embed = Embed(
+                title="Suppression complétée",
+                description=f"{total_deleted} message(s) supprimé(s)",
+                color=0x51CF66,
+            )
+            success_embed.add_field(name="Utilisateur", value=user.mention, inline=True)
+            success_embed.add_field(name="Canaux", value=str(len(target_channels)), inline=True)
+            success_embed.add_field(name="Raison", value=reason, inline=False)
+            success_embed.set_footer(text=f"Par {interaction.user}")
+
+            await interaction.followup.send(embed=success_embed, ephemeral=True)
+
+            logger.info(
+                f"Purged {total_deleted} messages from {user} in {len(target_channels)} channel(s) "
+                f"(guild: {interaction.guild.id}) by {interaction.user}: {reason}"
+            )
+
+        except Exception as e:
+            logger.exception("Error during purge")
+            await interaction.followup.send(f"Erreur: {str(e)}", ephemeral=True)
 
     @msg_group.command(
         name="start",
