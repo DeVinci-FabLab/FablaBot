@@ -294,13 +294,22 @@ class MessageManagement(commands.Cog):
             color=0xFF6B6B,
         )
 
+        def fit_field_value(text: str, limit: int = 1024) -> str:
+            if len(text) <= limit:
+                return text
+            return text[: limit - 3] + "..."
+
         if all_channels or len(target_channels) > 1:
             count_text = "\n".join([f"{ch}: {c} messages" for ch, c in channel_counts.items()])
-            confirm_embed.add_field(name="Comptage par canal", value=count_text, inline=False)
+            confirm_embed.add_field(
+                name="Comptage par canal",
+                value=fit_field_value(count_text),
+                inline=False,
+            )
         else:
             confirm_embed.add_field(name="Messages trouvés", value=str(total_found), inline=False)
 
-        confirm_embed.add_field(name="Raison", value=reason, inline=False)
+        confirm_embed.add_field(name="Raison", value=fit_field_value(reason), inline=False)
 
         if all_channels:
             confirm_embed.add_field(name="ATTENTION", value="Opération sur TOUS les canaux!", inline=False)
