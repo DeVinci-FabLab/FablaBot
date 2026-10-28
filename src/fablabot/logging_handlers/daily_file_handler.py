@@ -1,8 +1,8 @@
-"""Daily rotating file handler with automatic cleanup of old log files."""
+"""Daily rotating file handler that also keeps one log file per server."""
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime
 import logging
 from pathlib import Path
 from typing import override
@@ -12,7 +12,6 @@ from discord import File
 from fablabot.helpers.constants import PARIS_TZ
 
 _LOG_PATH = "logs"
-_MAX_LOG_AGE_DAYS = 30
 
 
 class DailyFileHandler(logging.FileHandler):
@@ -20,7 +19,8 @@ class DailyFileHandler(logging.FileHandler):
 
     The log files are named using the pattern: YYYY-MM-DD.log
     The handler automatically switches to a new file when the date changes.
-    Log files older than MAX_LOG_AGE_DAYS are automatically deleted.
+    Lines tied to a server are also appended to ``guilds/<server id>/YYYY-MM-DD.log``.
+    No log file is ever deleted by the bot.
     """
 
     def __init__(
@@ -29,7 +29,6 @@ class DailyFileHandler(logging.FileHandler):
         log_dir: str = _LOG_PATH,
         level: int = logging.DEBUG,
         formatter: logging.Formatter,
-        max_age_days: int = _MAX_LOG_AGE_DAYS,
     ) -> None:
         """Initialize the daily file handler.
 
@@ -37,19 +36,15 @@ class DailyFileHandler(logging.FileHandler):
             log_dir (str): Directory where log files will be stored. Defaults to `LOG_PATH`.
             level (int): Logging level for this handler. Defaults to `logging.DEBUG`.
             formatter (logging.Formatter): Formatter for log messages.
-            max_age_days (int): Maximum age in days for log files. Older files will be deleted. Defaults to `MAX_LOG_AGE_DAYS`.
         """
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.current_date = datetime.now(PARIS_TZ).date()
-        self.max_age_days = max_age_days
 
         log_file = self.log_dir / f"{self.current_date}.log"
         super().__init__(log_file, mode="a", encoding="utf-8")
         self.setLevel(level)
         self.setFormatter(formatter)
-
-        self._cleanup_old_logs()
 
     @override
     def emit(self, record: logging.LogRecord) -> None:
@@ -66,40 +61,45 @@ class DailyFileHandler(logging.FileHandler):
             self.baseFilename = str(self.log_dir / f"{self.current_date}.log")
             self.stream = self._open()
 
-            self._cleanup_old_logs()
-
         super().emit(record)
 
-    async def export_logs(self, date_str: str) -> File | None:
-        """Export log file for the given date.
+        guild_id = getattr(record, "guild_id", None)
+        if guild_id is not None:
+            try:
+                path = self.guild_log_path(guild_id, self.current_date)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with path.open("a", encoding="utf-8") as guild_file:
+                    guild_file.write(self.format(record) + self.terminator)
+            except OSError:
+                self.handleError(record)
+
+    def guild_log_path(self, guild_id: int, day: date) -> Path:
+        """Locate the log file of one server for one day.
 
         Args:
-            date_str (str): The date for which to export logs in YYYY-MM-DD format.
+            guild_id (int): The server ID.
+            day (date): The day of the log file.
 
         Returns:
-            File | None: The Discord File object for the log file, or None if the file
+            Path: ``<log_dir>/guilds/<guild_id>/<day>.log``.
         """
-        log_file = self.log_dir / f"{date_str}.log"
+        return self.log_dir / "guilds" / str(guild_id) / f"{day.isoformat()}.log"
+
+    async def export_logs(self, guild_id: int, day: date) -> File | None:
+        """Export one server's log file for the given day.
+
+        The shared file is never opened: it holds every server's lines.
+
+        Args:
+            guild_id (int): The server whose lines are exported.
+            day (date): The day to export.
+
+        Returns:
+            File | None: The Discord File object for the server's log file, or None if there is none.
+        """
+        log_file = self.guild_log_path(guild_id, day)
 
         if log_file.exists():
-            return File(log_file, filename=f"{date_str}.log")
+            return File(log_file, filename=f"{day.isoformat()}.log")
 
         return None
-
-    def _cleanup_old_logs(self) -> None:
-        """Delete log files older than max_age_days."""
-        if not self.log_dir.exists():
-            return
-
-        cutoff_date = datetime.now(PARIS_TZ).date() - timedelta(days=self.max_age_days)
-
-        for log_file in self.log_dir.glob("*.log"):
-            try:
-                file_date_str = log_file.stem
-                file_date = datetime.strptime(file_date_str, "%Y-%m-%d").replace(tzinfo=PARIS_TZ).date()
-
-                if file_date < cutoff_date:
-                    log_file.unlink()
-                    logging.getLogger(__name__).info(f"Deleted old log file: {log_file.name}")
-            except (ValueError, OSError) as e:
-                logging.getLogger(__name__).warning(f"Could not process log file {log_file.name}: {e}")

@@ -91,7 +91,7 @@ class LogManagement(commands.Cog):
             "log",
             [
                 ("set <channel>", "Configurer le salon recevant les erreurs du bot sur ce serveur"),
-                ("export [date]", "Exporter les logs du jour ou d'une date donnée (format JJ/MM/AAAA)"),
+                ("export [date]", "Exporter les logs de ce serveur, du jour ou d'une date donnée (format JJ/MM/AAAA)"),
             ],
         )
         await interaction.response.send_message(help_message, ephemeral=not show)
@@ -141,13 +141,13 @@ class LogManagement(commands.Cog):
 
     @log_group.command(
         name="export",
-        description="Exporte les logs récents.",
+        description="Exporte les logs récents de ce serveur.",
     )
     @app_commands.describe(
         date="Date des logs à exporter (format : JJ/MM/AAAA). Si non spécifié, les logs d'aujourd'hui seront exportés.",
     )
     async def log_export(self, interaction: Interaction, *, date: str | None = None) -> None:
-        """Export recent logs.
+        """Export this server's recent logs.
 
         Args:
             interaction (Interaction): The Discord interaction context.
@@ -157,11 +157,13 @@ class LogManagement(commands.Cog):
             logger,
             "log.export",
             interaction,
-            log_details={"date": date},
+            log_details=None,
             required_roles=ADMIN_ROLES | {RoleNames.DIGITAL_MANAGER, RoleNames.DIGITAL_POLE},
         ):
             return
 
+        assert interaction.guild is not None
+        guild = interaction.guild
         file_log_handler = getattr(self.bot, "file_log_handler", None)
         if not isinstance(file_log_handler, DailyFileHandler):
             logger.error("DailyFileHandler is not initialized on the bot.")
@@ -172,32 +174,26 @@ class LogManagement(commands.Cog):
             return
 
         if date:
-            parsed = _parse_export_date(date)
-            if parsed is None:
+            dt = _parse_export_date(date)
+            if dt is None:
+                logger.warning(f"[log.export] refused kind=invalid_date guild_id={guild.id} user_id={interaction.user.id}")
                 await interaction.response.send_message(
                     "Date invalide. Format attendu : JJ/MM/AAAA (exemple : 28/10/2026).",
                     ephemeral=True,
                 )
                 return
-            dt = parsed
         else:
             dt = datetime.now(tz=PARIS_TZ)
 
-        date_str = dt.strftime("%Y-%m-%d")
-        file = await file_log_handler.export_logs(date_str)
+        file = await file_log_handler.export_logs(guild.id, dt.date())
+        day_text = dt.strftime("%d/%m/%Y")
+        logger.info(f"[log.export] guild_id={guild.id} user_id={interaction.user.id} found={file is not None}")
 
         if file is None:
-            await interaction.response.send_message(
-                f"Aucun fichier de logs trouvé pour la date {dt.strftime('%d/%m/%Y')}.",
-                ephemeral=True,
-            )
+            await interaction.response.send_message(f"Aucun log de ce serveur pour le {day_text}.", ephemeral=True)
             return
 
-        await interaction.response.send_message(
-            f"Voici les logs du {dt.strftime('%d/%m/%Y')} :",
-            file=file,
-            ephemeral=True,
-        )
+        await interaction.response.send_message(f"Voici les logs de ce serveur du {day_text} :", file=file, ephemeral=True)
 
     # endregion Log Slash Commands Group
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -36,7 +37,9 @@ def _allow_command():  # noqa: ANN202
 
 
 async def test_log_export_sends_file_ephemeral(cog, handler) -> None:  # noqa: ANN001
-    (handler.log_dir / "2026-10-27.log").write_text("line\n", encoding="utf-8")
+    path = handler.guild_log_path(1234, date(2026, 10, 27))
+    path.parent.mkdir(parents=True)
+    path.write_text("line\n", encoding="utf-8")
     interaction = make_interaction()
 
     await LogManagement.log_export.callback(cog, interaction, date="27/10/2026")
@@ -53,7 +56,24 @@ async def test_log_export_missing_file_is_ephemeral(cog) -> None:  # noqa: ANN00
     await LogManagement.log_export.callback(cog, interaction, date="01/01/2020")
 
     interaction.response.send_message.assert_awaited_once()
-    assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+    args = interaction.response.send_message.await_args
+    assert args.kwargs["ephemeral"] is True
+    assert "Aucun log de ce serveur" in args.args[0]
+
+
+async def test_log_export_does_not_log_the_typed_date(cog, caplog) -> None:
+    """The typed date reaches neither the command context details nor the log records."""
+    interaction = make_interaction()
+    typed = "27/10/2026\nforged"
+
+    with (
+        caplog.at_level(logging.DEBUG),
+        patch("fablabot.cogs.log_management.ensure_command_context", AsyncMock(return_value=True)) as ensure,
+    ):
+        await LogManagement.log_export.callback(cog, interaction, date=typed)
+
+    assert "27/10/2026" not in str(ensure.await_args.kwargs.get("log_details"))
+    assert typed not in caplog.text
 
 
 @pytest.mark.parametrize("bad", ["31/02/2026", "2026-10-27", "hier", "27/10"])
