@@ -80,15 +80,18 @@ def payload_guild_id(event: str, data: object) -> int | None:
         data: The event payload.
 
     Returns:
-        The server ID, or None for a non-dict payload, no server or a non-numeric value.
+        The server ID, or None for a non-dict payload, no server or a value that is not a plain server ID.
     """
     if not isinstance(data, dict):
         return None
     raw = data.get("id") if event in _GUILD_EVENTS else data.get("guild_id")
     if isinstance(raw, int) and not isinstance(raw, bool):
-        return raw
+        return raw if raw >= 0 else None
     if isinstance(raw, str) and raw.isascii() and raw.isdigit():
-        return int(raw)
+        try:
+            return int(raw)
+        except ValueError:  # a run of thousands of digits exceeds Python's int conversion limit
+            return None
     return None
 
 

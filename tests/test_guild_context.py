@@ -115,6 +115,8 @@ def test_formatter_keeps_traceback_and_defaults_guild_field() -> None:
         ("MESSAGE_CREATE", {"channel_id": "5"}, None),
         ("MESSAGE_CREATE", [1, 2], None),
         ("MESSAGE_CREATE", {"guild_id": "abc"}, None),
+        ("MESSAGE_CREATE", {"guild_id": "9" * 5000}, None),
+        ("MESSAGE_CREATE", {"guild_id": -5}, None),
     ],
 )
 def test_payload_guild_id_reads_guild_id_and_guild_events(event: str, data: object, expected: int | None) -> None:
