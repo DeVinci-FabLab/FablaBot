@@ -7,3 +7,8 @@
 # Compiled caches from the host add nothing to the image.
 **/__pycache__
 **/*.pyc
+# Untracked leftovers under src/ stay out too.
+**/*.egg-info
+**/.env
+**/*.env
+**/*.secret
