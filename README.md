@@ -45,7 +45,7 @@ echo -n 'my_discord_token' > secrets/discord_token.secret
 ALLOWED_GUILD_IDS=111111111111111111,222222222222222222
 ```
 
-- When it is empty, the bot only keeps servers owned by the application owner when it joins them. At start, it stays in the servers it is already in and logs a warning.
+- When it is empty, the bot keeps serving the servers it is in at start and logs a warning. After that, it only stays in a server it joins if the application owner, or an admin or developer of its team, owns it.
 - A malformed value stops the bot at start.
 
 To keep other people from adding the bot to their servers, set these in the [Developer Portal](https://discord.com/developers/applications):
