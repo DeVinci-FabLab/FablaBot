@@ -430,7 +430,7 @@ class ChannelManagement(commands.Cog):
         Args:
             msg (Message): The deleted message.
         """
-        logger.debug(f"Message {msg} deleted")
+        logger.debug(f"Message {msg.id} deleted")
         if not isinstance(msg.channel, TextChannel):
             logger.debug(f"Message {msg.id} deleted in non-text channel {msg.channel}")
             return
@@ -438,12 +438,13 @@ class ChannelManagement(commands.Cog):
             logger.debug(f"Message {msg.id} deleted wasn't sent by a bot, ignoring")
             return
 
-        from fablabot.guild_config import get_commands_channel_id, get_log_channel_id
+        from fablabot.guild_config import get_commands_channel_id
+        from fablabot.helpers.log_channels import is_log_channel
 
         assert msg.guild is not None
         if (
             not msg.channel.name.endswith("_bot")
-            and get_log_channel_id() != msg.channel.id
+            and not is_log_channel(msg.guild.id, msg.channel.id)
             and get_commands_channel_id(msg.guild.id) != msg.channel.id
         ):
             return
@@ -453,7 +454,7 @@ class ChannelManagement(commands.Cog):
             async for entry in msg.guild.audit_logs(limit=1, action=AuditLogAction.message_delete):
                 deleter = entry.user
                 assert isinstance(deleter, Member)
-                logger.warning(f"Bot message {msg.id} deleted in channel {msg.channel.name!r} by {deleter.name!r}")
+                logger.warning(f"Bot message {msg.id} deleted in channel {msg.channel.name!r} by deleter_id={deleter.id}")
                 try:
                     await msg.channel.send(
                         f"{codir_mention}Un message a été supprimé par {deleter.mention} :\n>>> {msg.content}",
@@ -482,11 +483,12 @@ class ChannelManagement(commands.Cog):
         if not isinstance(channel, TextChannel):
             return
 
-        from fablabot.guild_config import get_commands_channel_id, get_log_channel_id
+        from fablabot.guild_config import get_commands_channel_id
+        from fablabot.helpers.log_channels import is_log_channel
 
         if (
             not channel.name.endswith("_bot")
-            and get_log_channel_id() != channel.id
+            and not is_log_channel(guild.id, channel.id)
             and get_commands_channel_id(guild.id) != channel.id
         ):
             return
@@ -497,7 +499,8 @@ class ChannelManagement(commands.Cog):
                 deleter = entry.user
                 assert isinstance(deleter, Member)
                 logger.warning(
-                    f"Message with ID {payload.message_id} not found in channel {channel.name}. Deleted by {deleter.name!r}.",
+                    f"Message with ID {payload.message_id} not found in channel {channel.name}. "
+                    f"Deleted by deleter_id={deleter.id}.",
                 )
                 try:
                     await channel.send(
@@ -518,7 +521,7 @@ class ChannelManagement(commands.Cog):
             before (VoiceState): The voice state before the change.
             after (VoiceState): The voice state after the change.
         """
-        logger.debug(f"voice_state_update: user={member} id={member.id} before={before.channel} after={after.channel}")
+        logger.debug(f"voice_state_update: user_id={member.id} before={before.channel} after={after.channel}")
         if isinstance(after.channel, VoiceChannel):
             task = self.remove_tasks.pop(after.channel.id, None)
             if task:

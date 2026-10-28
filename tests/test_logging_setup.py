@@ -19,10 +19,13 @@ def test_configure_logging_drops_discord_debug_traces() -> None:
     saved_root_level = root.level
     saved_discord_level = discord_logger.level
     discord_logger.setLevel(logging.NOTSET)
+    bot = MagicMock()
     added: list[logging.Handler] = []
     try:
-        handlers = configure_logging(MagicMock())
+        handlers = configure_logging(bot)
         added.extend(handlers)
+        for call in bot.loop.create_task.call_args_list:
+            call.args[0].close()
         logging.getLogger("discord.http").debug("SECRET-HTTP-BODY")
         logging.getLogger("fablabot.probe").debug("bot-debug-kept")
         for handler in handlers:

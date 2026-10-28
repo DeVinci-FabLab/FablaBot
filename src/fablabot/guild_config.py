@@ -4,18 +4,22 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fablabot.helpers.state_store import JsonStateStore
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
 CONFIG_FILE = Path("data/guild_config.json")
 _GUILD_KEY_COMMANDS = "commands_channel_id"
 _GUILD_KEY_WELCOME = "welcome_verify_enabled"
-_GUILD_KEY: set[str] = {_GUILD_KEY_COMMANDS, _GUILD_KEY_WELCOME}
 _KEY_LOG = "log_channel_id"
-_GLOBAL_SECTION = "__global__"
+_GUILD_KEY: set[str] = {_GUILD_KEY_COMMANDS, _GUILD_KEY_WELCOME, _KEY_LOG}
+# Instance-wide log channel of older releases: read to migrate it, never written.
+_LEGACY_SECTION = "__global__"
 
 _config_store = JsonStateStore(logger, CONFIG_FILE)
 
@@ -44,14 +48,14 @@ def _save_all(data: dict[str, dict[str, Any]]) -> None:
     _config_store.save()
 
 
-def _update_entry(guild_id: int | None, **updates: int | bool | None) -> None:
-    """Update the configuration entry for a specific guild or the global section.
+def _update_entry(guild_id: int, **updates: int | bool | None) -> None:
+    """Update the configuration entry for a specific guild.
 
     Args:
-        guild_id (int | None): The ID of the guild to update.
+        guild_id (int): The ID of the guild to update.
         **updates (int | bool | None): Key-value pairs to update in the guild's configuration.
     """
-    key = _GLOBAL_SECTION if guild_id is None else str(guild_id)
+    key = str(guild_id)
     data = _load_all()
     entry = dict(data.get(key, {}))
     entry = {k: v for k, v in entry.items() if k in _GUILD_KEY}
@@ -97,27 +101,64 @@ def set_commands_channel_id(guild_id: int, channel_id: int | None) -> None:
     _update_entry(guild_id, **{_GUILD_KEY_COMMANDS: channel_id})
 
 
-def get_log_channel_id() -> int | None:
-    """Retrieve the log channel ID from the global configuration.
-
-    Returns:
-        int | None: The log channel ID if it exists, otherwise None.
-    """
-    data = _load_all()
-    entry = data.get(_GLOBAL_SECTION, {})
-    value = entry.get(_KEY_LOG)
-    if isinstance(value, int):
-        return int(value)
-    return None
-
-
-def set_log_channel_id(channel_id: int) -> None:
-    """Set the log channel ID.
+def get_log_channel_id(guild_id: int) -> int | None:
+    """Retrieve the log channel ID of a specific guild.
 
     Args:
+        guild_id (int): The ID of the guild to retrieve the log channel ID for.
+
+    Returns:
+        int | None: The log channel ID if the guild has one, otherwise None.
+    """
+    entry = _load_all().get(str(guild_id), {})
+    value = entry.get(_KEY_LOG)
+    return int(value) if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def set_log_channel_id(guild_id: int, channel_id: int) -> None:
+    """Set the log channel ID of a specific guild.
+
+    Args:
+        guild_id (int): The ID of the guild to set the log channel for.
         channel_id (int): The channel ID to set.
     """
-    _update_entry(None, **{_KEY_LOG: channel_id})
+    _update_entry(guild_id, **{_KEY_LOG: channel_id})
+
+
+def get_legacy_log_channel_id() -> int | None:
+    """Retrieve the instance-wide log channel that older releases stored.
+
+    Returns:
+        int | None: The legacy log channel ID if the file still holds one, otherwise None.
+    """
+    value = _load_all().get(_LEGACY_SECTION, {}).get(_KEY_LOG)
+    return int(value) if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def migrate_legacy_log_channel(guild_of_channel: Callable[[int], int | None]) -> int | None:
+    """Give the legacy log channel to the guild that owns it, unless that guild already has one.
+
+    The legacy entry stays in the file so an older release still finds it.
+
+    Args:
+        guild_of_channel (Callable[[int], int | None]): Resolves a channel ID to its guild ID, or None.
+
+    Returns:
+        int | None: The guild ID that received the channel, or None when nothing was written.
+    """
+    channel_id = get_legacy_log_channel_id()
+    if channel_id is None:
+        return None
+    guild_id = guild_of_channel(channel_id)
+    if guild_id is None:
+        logger.warning(f"Legacy log channel not found (channel_id={channel_id}): not migrated, kept in place.")
+        return None
+    if get_log_channel_id(guild_id) is not None:
+        logger.debug(f"Legacy log channel already migrated or replaced (guild_id={guild_id}).")
+        return None
+    set_log_channel_id(guild_id, channel_id)
+    logger.info(f"Legacy log channel migrated (guild_id={guild_id}, channel_id={channel_id}); legacy entry kept.")
+    return guild_id
 
 
 def is_welcome_verify_enabled(guild_id: int) -> bool:

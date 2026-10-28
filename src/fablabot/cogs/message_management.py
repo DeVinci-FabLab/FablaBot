@@ -160,15 +160,16 @@ class MessageManagement(commands.Cog):
             ForumChannel | CategoryChannel | DMChannel | GroupChannel | None,
         )
         if not interaction.permissions.manage_messages:
-            logger.warning(f"Insufficient permissions for manage_messages: {interaction.user}")
+            logger.warning(f"Insufficient permissions for manage_messages: user_id={interaction.user.id}")
             await interaction.response.send_message(ErrorMessages.NO_PERMISSION_MANAGE_MESSAGES, ephemeral=True)
             return
 
-        from fablabot.guild_config import get_commands_channel_id, get_log_channel_id
+        from fablabot.guild_config import get_commands_channel_id
+        from fablabot.helpers.log_channels import is_log_channel
 
         if (
             interaction.channel.name.endswith("_bot")
-            or get_log_channel_id() == interaction.channel.id
+            or is_log_channel(interaction.guild.id, interaction.channel.id)
             or get_commands_channel_id(interaction.guild.id) == interaction.channel.id
         ):
             logger.warning(f"Attempt to clear {interaction.channel.name} channel")
@@ -250,7 +251,7 @@ class MessageManagement(commands.Cog):
         )
 
         if not interaction.user.guild_permissions.administrator:
-            logger.warning(f"Non-admin user {interaction.user} tried to purge messages")
+            logger.warning(f"Non-admin user_id={interaction.user.id} tried to purge messages")
             await interaction.response.send_message(
                 "Seuls les administrateurs peuvent utiliser cette commande",
                 ephemeral=True,
@@ -368,7 +369,7 @@ class MessageManagement(commands.Cog):
                         reason=f"Purge by {interaction.user}: {reason}",
                     )
                     total_deleted += len(deleted)
-                    logger.info(f"Purged {len(deleted)} messages from {user} in {target_ch.name}")
+                    logger.info(f"Purged {len(deleted)} messages from target_id={user.id} in {target_ch.name}")
                 except HTTPException as e:
                     logger.warning(f"Could not purge {target_ch.name}: {e}")
                     continue
@@ -386,8 +387,8 @@ class MessageManagement(commands.Cog):
             await interaction.followup.send(embed=success_embed, ephemeral=True)
 
             logger.info(
-                f"Purged {total_deleted} messages from {user} in {len(target_channels)} channel(s) "
-                f"(guild: {interaction.guild.id}) by {interaction.user}: {reason}"
+                f"Purged {total_deleted} messages from target_id={user.id} in {len(target_channels)} channel(s) "
+                f"(guild: {interaction.guild.id}) by user_id={interaction.user.id}: {reason}"
             )
 
         except Exception as e:
@@ -433,7 +434,7 @@ class MessageManagement(commands.Cog):
 
         message_id = self._parse_message_id(message)
         if message_id is None:
-            logger.warning(f"Invalid message id provided to /msg follow by {interaction.user}")
+            logger.warning(f"Invalid message id provided to /msg follow by user_id={interaction.user.id}")
             await interaction.response.send_message(ErrorMessages.INVALID_MESSAGE_ID, ephemeral=True)
             return
 
@@ -832,7 +833,7 @@ class MessageManagement(commands.Cog):
                 if egg.reaction:
                     with contextlib.suppress(Exception):
                         await msg.add_reaction(egg.reaction)
-                logger.info(f"Easter egg triggered by {msg.author} in {msg.channel}: {egg.keywords}")
+                logger.info(f"Easter egg triggered by author_id={msg.author.id} in {msg.channel}: {egg.keywords}")
 
                 break
 

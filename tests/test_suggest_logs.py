@@ -115,8 +115,9 @@ async def test_role_refusal_without_identity_logs_no_user(caplog: pytest.LogCapt
     assert str(USER_ID) not in caplog.text
 
 
-def test_log_request_default_keeps_identity(caplog: pytest.LogCaptureFixture) -> None:
+def test_log_request_logs_caller_id_not_name(caplog: pytest.LogCaptureFixture) -> None:
+    """The caller shows up by ID only."""
     caplog.set_level(logging.DEBUG)
     log_request(logging.getLogger("test"), "x", make_interaction(), key="v")
-    assert f"user={USER_NAME}" in caplog.text
-    assert f"id={USER_ID}" in caplog.text
+    assert f"user_id={USER_ID}" in caplog.text
+    assert USER_NAME not in caplog.text

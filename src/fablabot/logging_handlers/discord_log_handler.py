@@ -1,34 +1,39 @@
-"""Discord log handler for logging messages to a specific Discord channel."""
+"""Discord log handler posting each error in the log channel of the server it came from."""
 
+import contextvars
 import io
 import logging
 from typing import override
 
-from discord import File, TextChannel
+from discord import AllowedMentions, File, HTTPException, TextChannel
 from discord.ext import commands
 
 from fablabot.guild_config import get_log_channel_id
 from fablabot.helpers.constants import MAX_MSG_CHARS
 
+logger = logging.getLogger(__name__)
+
 _CLEAR = "\u001b[0m"
 _RED = "\u001b[31m"
 _UNDERLINE = "\u001b[4m"
 _CYAN = "\u001b[34m"
+_ZERO_WIDTH_SPACE = "​"
 
 
 class DiscordLogHandler(logging.Handler):
-    """An logging handler that posts messages to a Discord channel."""
+    """A logging handler that posts messages to the log channel of their server."""
 
-    def __init__(self, bot: commands.Bot, level: int = logging.ERROR) -> None:
+    def __init__(self, bot: commands.Bot, level: int = logging.ERROR, *, operator_channel_id: int | None = None) -> None:
         """Initializes the DiscordLogHandler.
 
         Args:
             bot (commands.Bot): The bot instance to use for sending log messages.
             level (int): The logging level for this handler.
+            operator_channel_id (int | None): The channel receiving errors tied to no server, if any.
         """
         super().__init__()
         self.bot = bot
-        self.log_channel_id = get_log_channel_id() or 0
+        self.operator_channel_id = operator_channel_id
         # ANSI escape code formatter for colored log output in Discord
         ansi_log_format = (
             f"{_RED}[%(levelname)s]{_CLEAR} {_CYAN}{_UNDERLINE}%(module)s.%(funcName)s{_CLEAR}{_CYAN}:{_CLEAR} %(message)s"
@@ -38,41 +43,69 @@ class DiscordLogHandler(logging.Handler):
 
     @override
     def emit(self, record: logging.LogRecord) -> None:
-        """Sends a log message to the Discord channel.
+        """Posts a log record to the channel of its server.
 
         Args:
             record (logging.LogRecord): The log record to send.
         """
-        msg = self.format(record)
-        self.bot.loop.create_task(self._send(msg))
+        # A blank context keeps the send task's own lines out of the record's server.
+        self.bot.loop.create_task(
+            self._send(getattr(record, "guild_id", None), self.format(record)),
+            context=contextvars.Context(),
+        )
 
-    def set_log_channel(self, channel: TextChannel | int) -> None:
-        """Update the log channel destination.
+    def destination(self, guild_id: int | None) -> TextChannel | None:
+        """Find the channel allowed to receive a record.
 
         Args:
-            channel (TextChannel | int): Channel instance or channel id receiving logs.
+            guild_id (int | None): The server the record is tied to, or None.
+
+        Returns:
+            TextChannel | None: The operator channel for a record tied to no server; the server's
+                own log channel otherwise, only when it belongs to that server. None if neither applies.
         """
-        if isinstance(channel, TextChannel):
-            self.log_channel_id = channel.id
-        else:
-            self.log_channel_id = channel
+        if guild_id is None:
+            if self.operator_channel_id is None:
+                return None
+            channel = self.bot.get_channel(self.operator_channel_id)
+            return channel if isinstance(channel, TextChannel) else None
+        channel_id = get_log_channel_id(guild_id)
+        if channel_id is None:
+            return None
+        channel = self.bot.get_channel(channel_id)
+        if isinstance(channel, TextChannel) and channel.guild.id == guild_id:
+            return channel
+        return None
 
-    async def _send(self, message: str) -> None:
-        """Sends a log message to the Discord channel.
+    async def _send(self, guild_id: int | None, message: str) -> None:
+        """Sends a log message to the channel allowed to receive it.
 
         Args:
+            guild_id (int | None): The server the message is tied to, or None.
             message (str): The message to send.
         """
-        channel = self.bot.get_channel(self.log_channel_id)
-        if not isinstance(channel, TextChannel):
+        channel = self.destination(guild_id)
+        if channel is None:
             return
-        log_message = f"```ansi\n{message}\n```"
+        # A run of three or more backticks would close the code block: break every backtick with a zero-width space.
+        safe = message.replace("`", f"`{_ZERO_WIDTH_SPACE}")
+        log_message = f"```ansi\n{safe}\n```"
         file_obj: io.BytesIO | None = None
         if len(log_message) > MAX_MSG_CHARS:
             file_obj = io.BytesIO(log_message.encode("utf-8"))
             log_message = "Log message too long, see attached file."
 
-        if file_obj:
-            await channel.send(log_message, file=File(file_obj, filename="log.txt"))
-        else:
-            await channel.send(log_message)
+        try:
+            if file_obj:
+                await channel.send(
+                    log_message,
+                    file=File(file_obj, filename="log.txt"),
+                    allowed_mentions=AllowedMentions.none(),
+                )
+            else:
+                await channel.send(log_message, allowed_mentions=AllowedMentions.none())
+        except RecursionError:
+            raise
+        except Exception as exc:  # whatever the failure, it is logged below ERROR: a failed post never loops
+            status = f"HTTP {exc.status}" if isinstance(exc, HTTPException) else type(exc).__name__
+            logger.warning(f"Could not post a log line (guild_id={guild_id}, channel_id={channel.id}): {status}")

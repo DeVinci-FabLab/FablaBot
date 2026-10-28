@@ -55,6 +55,25 @@ To keep other people from adding the bot to their servers, set these in the [Dev
 
 To copy a server ID, enable Developer Mode in Discord (User Settings, Advanced), then right-click the server and choose Copy Server ID.
 
+#### Log channels
+
+Each server picks its log channel with `/log set` and receives its own errors only.
+
+`OPERATOR_LOG_CHANNEL_ID` holds one channel ID and receives the errors that belong to no server. Pick a channel only the bot's administrators can read: those errors come from every server's tasks.
+
+```bash
+OPERATOR_LOG_CHANNEL_ID=888888888888888888
+```
+
+- When it is empty, those errors stay in the log files.
+- A malformed value is ignored, with a warning at start.
+
+Log files live in `logs/`:
+
+- `logs/<date>.log` holds every line, stays on the host and is never sent.
+- `logs/guilds/<server ID>/<date>.log` holds one server's lines. `/log export` sends that file to that server only.
+- The bot deletes no log file.
+
 ### Running the project
 
 To run the code, you can then use:
