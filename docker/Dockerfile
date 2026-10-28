@@ -20,19 +20,20 @@ RUN pip install --no-cache-dir uv
 # Development stage
 FROM base AS development
 
-# Copy only pyproject.toml for installing dependencies
-COPY pyproject.toml .
-# Install in development mode with dev dependencies
-RUN uv pip install --system .
+# The lock file pins the dependencies, dev group included.
+COPY pyproject.toml uv.lock ./
+# The source is mounted by compose.dev.yml, so only the dependencies are installed.
+RUN uv sync --locked --no-install-project
 
 # Production stage
 FROM base AS production
 
-# Copy all project files
+# The build context is only the files the allow-list in .dockerignore lets through.
 COPY . .
 
-# Install the application
-RUN uv pip install --system .
+# Locked runtime dependencies are installed at build time, so the container starts offline.
+RUN uv sync --locked --no-dev --no-editable
+ENV PATH="/app/.venv/bin:$PATH"
 
-# Run the main module
-CMD ["uv", "run", "-m", "fablabot.main"]
+# Run from the built environment, nothing is resolved at start.
+CMD ["python", "-m", "fablabot.main"]
