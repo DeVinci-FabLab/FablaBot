@@ -244,3 +244,16 @@ async def test_guild_back_from_an_outage_is_reconciled() -> None:
     assert (GUILD_ID, HOLDER_ID) in cog.deop_tasks
     holder.remove_roles.assert_not_awaited()
     _stop(cog)
+
+
+@pytest.mark.parametrize("entry", [[], None, "x"], ids=["list", "null", "string"])
+async def test_start_resets_a_malformed_guild_entry(caplog: pytest.LogCaptureFixture, entry: object) -> None:
+    _write_state({str(GUILD_ID): entry, str(OTHER_GUILD_ID): _record(OTHER_GUILD_ID, HOLDER_ID, NOW)[str(OTHER_GUILD_ID)]})
+    guild, _holder, _temp = _holder_guild()
+
+    _stop(await _start(guild))
+
+    assert str(GUILD_ID) not in _saved()
+    assert str(OTHER_GUILD_ID) in _saved()
+    errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+    assert any(f"guild_id={GUILD_ID}" in m for m in errors)

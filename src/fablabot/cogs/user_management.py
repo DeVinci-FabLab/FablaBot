@@ -494,8 +494,14 @@ class UserManagement(commands.Cog):
         member cache is complete; with a partial cache the member may hold the role unseen, so the
         record gets its timer and ``_expire`` asks Discord when it fires (now, if the time has passed).
         """
-        entries = self._op_store.state.get(str(guild.id))
-        if not isinstance(entries, dict):
+        state = self._op_store.state
+        entries = state.get(str(guild.id))
+        if str(guild.id) in state and not isinstance(entries, dict):
+            logger.error(f"Op state entry is not a mapping; reset guild_id={guild.id}")
+            state.pop(str(guild.id))
+            self._op_store.save()
+            return
+        if entries is None:
             return
         holder_ids = {member.id for member in admin_role.members}
         for key in list(entries):
@@ -520,7 +526,10 @@ class UserManagement(commands.Cog):
 
     def _record_op(self, guild_id: int, member_id: int, expiry: OpExpiry) -> None:
         """Persist the expiry of a member's op on one guild, replacing any previous one."""
-        self._op_store.ensure_guild(guild_id)[str(member_id)] = expiry.to_dict()
+        entries = self._op_store.ensure_guild(guild_id)
+        if not isinstance(entries, dict):
+            entries = self._op_store.state[str(guild_id)] = {}
+        entries[str(member_id)] = expiry.to_dict()
         self._op_store.save()
 
     def _clear_op(self, guild_id: int, member_id: int) -> None:

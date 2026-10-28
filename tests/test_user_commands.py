@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 import json
 import logging
 from pathlib import Path
@@ -23,7 +23,7 @@ STATE_FILE = Path("data/temp_admin_state.json")
 
 
 @pytest.fixture(autouse=True)
-def _fixed_clock_and_context():  # noqa: ANN202
+def _fixed_clock_and_context():
     with (
         patch.object(user_management, "_utcnow", return_value=NOW),
         patch.object(user_management, "ensure_command_context", AsyncMock(return_value=True)),
@@ -32,7 +32,7 @@ def _fixed_clock_and_context():  # noqa: ANN202
 
 
 @pytest.fixture
-async def cog():  # noqa: ANN201
+async def cog():
     instance = UserManagement(MagicMock())
     yield instance
     for task in instance.deop_tasks.values():
@@ -228,3 +228,26 @@ async def test_help_explains_op_scope_and_self_rule(cog: UserManagement) -> None
     assert "durée limitée" in text
     assert "/fm" in text
     assert "soi-même" in text
+
+
+# -- A malformed guild entry in the op state does not block op --
+
+
+@pytest.mark.parametrize("entry", [[], None, "x"], ids=["list", "null", "string"])
+async def test_op_works_after_start_on_a_malformed_guild_entry(entry: object) -> None:
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    STATE_FILE.write_text(json.dumps({str(GUILD_ID): entry}), encoding="utf-8")
+    server = Server(RoleNames.PRESIDENT)
+    bot = MagicMock()
+    bot.guilds = [server.guild]
+    cog = UserManagement(bot)
+    await cog.on_ready()
+
+    interaction = await _op(cog, server, server.target)
+
+    server.target.add_roles.assert_awaited_once()
+    assert str(TARGET_ID) in json.loads(STATE_FILE.read_text(encoding="utf-8"))[str(GUILD_ID)]
+    assert (GUILD_ID, TARGET_ID) in cog.deop_tasks
+    interaction.response.send_message.assert_awaited_once()
+    for task in cog.deop_tasks.values():
+        task.cancel()
