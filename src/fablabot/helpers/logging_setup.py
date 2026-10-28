@@ -40,5 +40,7 @@ def configure_logging(bot: commands.Bot) -> tuple[DiscordLogHandler, DailyFileHa
     root_logger.addHandler(console_handler)
     root_logger.addHandler(file_handler)
     root_logger.addHandler(discord_handler)
+    # discord.py's DEBUG traces carry the bodies the bot sends, so keep them out of the file.
+    logging.getLogger("discord").setLevel(logging.INFO)
 
     return discord_handler, file_handler

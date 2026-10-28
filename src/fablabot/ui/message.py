@@ -1,4 +1,4 @@
-﻿"""User interface components for message-related features."""
+"""User interface components for message-related features."""
 
 from __future__ import annotations
 
@@ -146,7 +146,7 @@ class BulkDMModal(ui.Modal, title="Envoyer un MP à plusieurs utilisateurs"):
 
         guild_id = interaction.guild.id if interaction.guild else None
         logger.info(
-            f"BulkDMModal submitted user={interaction.user} guild_id={guild_id} message_input={self.message_input.value}",
+            f"BulkDMModal submitted user={interaction.user} guild_id={guild_id}",
         )
         await interaction.response.defer(thinking=True)
         followup_mes = await interaction.followup.send("Sélection des membres en cours...", wait=True)
@@ -207,8 +207,7 @@ class StartMessageModal(ui.Modal, title="Préparer un message"):
         """
         assert interaction.guild is not None
         logger.info(
-            f"StartMessageModal submitted user={interaction.user} guild_id={interaction.guild.id} "
-            f"content_input={self.content_input.value}",
+            f"StartMessageModal submitted user={interaction.user} guild_id={interaction.guild.id}",
         )
         draft = MessageDraft(content=self.content_input.value.strip(), reactions=[])
         self.cog.set_draft(interaction.guild.id, draft)
@@ -260,8 +259,7 @@ class _ReactionMessageInputModal(ui.Modal, title="Message à envoyer"):
         message_content = self.message_input.value.strip()
         logger.info(
             f"Reaction modal submitted user={interaction.user} guild_id={self.guild_id} emoji={self.reaction.emoji} "
-            f"action={self.reaction.action_type} target_id={self.reaction.target_id} target_name={self.reaction.target_name} "
-            f"content={message_content!r}",
+            f"action={self.reaction.action_type} target_id={self.reaction.target_id} target_name={self.reaction.target_name}",
         )
         self.reaction.message_content = message_content
 
@@ -856,10 +854,7 @@ class _SuggestionModal(ui.Modal, title="Envoyer une suggestion"):
         """
         config = SUGGESTION_OPTIONS[self.recipient_key]
         suggestion_text = self.suggestion_input.value
-        user_label = interaction.user if not self.anonymous_flag else "Anonymous"
-        logger.info(
-            f"[{config.command_name}]: user={user_label} suggestion_text={suggestion_text}",
-        )
+        logger.info(f"[{config.command_name}]: suggestion submitted")
 
         assert interaction.guild is not None
         author = interaction.user
@@ -879,25 +874,24 @@ class _SuggestionModal(ui.Modal, title="Envoyer une suggestion"):
                 icon_url=ANONYMOUS_ICON_URL,
             )
 
-        success = await self._send_suggestion(interaction.guild, embed, config, author.id if not self.anonymous_flag else None)
+        success = await self._send_suggestion(interaction.guild, embed, config)
 
         if not success:
             await interaction.response.send_message(config.error_message, ephemeral=True)
             return
 
-        logger.info(f"Suggestion submitted guild_id={interaction.guild.id} user={user_label} command={config.command_name}")
+        logger.info(f"Suggestion submitted guild_id={interaction.guild.id} command={config.command_name}")
 
         await interaction.response.edit_message(content=config.success_message, view=None)
 
     @staticmethod
-    async def _send_suggestion(guild: Guild, embed: Embed, config: SuggestionConfig, user_id: int | None) -> bool:
+    async def _send_suggestion(guild: Guild, embed: Embed, config: SuggestionConfig) -> bool:
         """Send a suggestion to responsible members and channel.
 
         Args:
             guild (Guild): The guild where the suggestion is made.
             embed (Embed): The suggestion embed to send.
             config (SuggestionConfig): The suggestion configuration.
-            user_id (int | None): The ID of the user making the suggestion.
 
         Returns:
             bool: True if at least one recipient received the suggestion, False otherwise.
@@ -917,7 +911,7 @@ class _SuggestionModal(ui.Modal, title="Envoyer une suggestion"):
             try:
                 await channel.send(embed=embed)
             except Exception:
-                logger.exception(f"Failed to send suggestion from user {user_id or 'Anonymous'} to channel {channel.id}.")
+                logger.exception(f"Failed to send suggestion to channel {channel.id}.")
 
         return True
 
@@ -978,10 +972,6 @@ class SuggestionView(ui.View):
 
         assert interaction.message is not None
 
-        user_label = interaction.user if not self.anonymous else "Anonymous"
-        logger.info(
-            f"Opening suggestion modal user={user_label} recipient_key={self.selected_recipient} anonymous={self.anonymous}",
-        )
         modal = _SuggestionModal(
             cog=self.cog,
             recipient_key=self.selected_recipient,

@@ -453,7 +453,7 @@ class ChannelManagement(commands.Cog):
             async for entry in msg.guild.audit_logs(limit=1, action=AuditLogAction.message_delete):
                 deleter = entry.user
                 assert isinstance(deleter, Member)
-                logger.warning(f"Message deleted in channel {msg.channel.name!r} by {deleter.name!r} : {msg.content}")
+                logger.warning(f"Bot message {msg.id} deleted in channel {msg.channel.name!r} by {deleter.name!r}")
                 try:
                     await msg.channel.send(
                         f"{codir_mention}Un message a été supprimé par {deleter.mention} :\n>>> {msg.content}",
