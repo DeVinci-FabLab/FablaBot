@@ -175,3 +175,28 @@ async def test_unreadable_state_fails_closed(caplog: pytest.LogCaptureFixture, p
 
     holder.remove_roles.assert_awaited_once()
     assert [r for r in caplog.records if r.levelname == "ERROR"]
+
+
+async def test_op_landing_during_the_sweep_keeps_its_record_and_timer() -> None:
+    guild, holder, _temp = _holder_guild()
+    due = NOW + timedelta(minutes=30)
+    cog_box: list[UserManagement] = []
+
+    async def op_lands_during_removal(*_args: object, **_kwargs: object) -> None:
+        # A /user op served while the removal is awaited: the record and the timer exist, the cache does not show the role yet.
+        cog = cog_box[0]
+        cog._record_op(GUILD_ID, 777, user_management.OpExpiry(due, 123))  # noqa: SLF001
+        cog._arm_deop(GUILD_ID, 777, due)  # noqa: SLF001
+
+    holder.remove_roles = AsyncMock(side_effect=op_lands_during_removal)
+    bot = MagicMock()
+    bot.guilds = [guild]
+    cog = UserManagement(bot)
+    cog_box.append(cog)
+
+    await cog.on_ready()
+
+    assert str(777) in _saved()[str(GUILD_ID)]
+    assert (GUILD_ID, 777) in cog.deop_tasks
+    _stop(cog)
+

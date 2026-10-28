@@ -464,11 +464,17 @@ class UserManagement(commands.Cog):
 
         entries = self._op_store.state.get(str(guild.id))
         if isinstance(entries, dict):
-            for key in [k for k in entries if not k.isdigit() or int(k) not in holders]:
+            # A record with a live timer belongs to an op that started while the removals above were awaited.
+            for key in [k for k in entries if not k.isdigit() or not self._is_live(guild.id, int(k), holders)]:
                 entries.pop(key)
             if not entries:
                 self._op_store.state.pop(str(guild.id))
             self._op_store.save()
+
+    def _is_live(self, guild_id: int, member_id: int, holders: dict[int, Member]) -> bool:
+        """Tell whether a member's op is still running: they hold the role or a live timer waits for them."""
+        task = self.deop_tasks.get((guild_id, member_id))
+        return member_id in holders or (task is not None and not task.done())
 
     def _record_op(self, guild_id: int, member_id: int, expiry: OpExpiry) -> None:
         """Persist the expiry of a member's op on one guild, replacing any previous one."""
