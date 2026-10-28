@@ -146,7 +146,7 @@ class BulkDMModal(ui.Modal, title="Envoyer un MP à plusieurs utilisateurs"):
 
         guild_id = interaction.guild.id if interaction.guild else None
         logger.info(
-            f"BulkDMModal submitted user={interaction.user} guild_id={guild_id} message_input={self.message_input.value}",
+            f"BulkDMModal submitted user={interaction.user} guild_id={guild_id}",
         )
         await interaction.response.defer(thinking=True)
         followup_mes = await interaction.followup.send("Sélection des membres en cours...", wait=True)
@@ -207,8 +207,7 @@ class StartMessageModal(ui.Modal, title="Préparer un message"):
         """
         assert interaction.guild is not None
         logger.info(
-            f"StartMessageModal submitted user={interaction.user} guild_id={interaction.guild.id} "
-            f"content_input={self.content_input.value}",
+            f"StartMessageModal submitted user={interaction.user} guild_id={interaction.guild.id}",
         )
         draft = MessageDraft(content=self.content_input.value.strip(), reactions=[])
         self.cog.set_draft(interaction.guild.id, draft)
@@ -260,8 +259,7 @@ class _ReactionMessageInputModal(ui.Modal, title="Message à envoyer"):
         message_content = self.message_input.value.strip()
         logger.info(
             f"Reaction modal submitted user={interaction.user} guild_id={self.guild_id} emoji={self.reaction.emoji} "
-            f"action={self.reaction.action_type} target_id={self.reaction.target_id} target_name={self.reaction.target_name} "
-            f"content={message_content!r}",
+            f"action={self.reaction.action_type} target_id={self.reaction.target_id} target_name={self.reaction.target_name}",
         )
         self.reaction.message_content = message_content
 
