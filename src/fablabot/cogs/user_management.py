@@ -9,6 +9,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 import logging
 from pathlib import Path
+from typing import Literal
 from warnings import deprecated
 
 from discord import Guild, HTTPException, Interaction, Member, NotFound, Role, User, app_commands
@@ -19,7 +20,14 @@ from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames
 from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.safe_discord_operations import safe_add_roles, safe_remove_roles
 from fablabot.helpers.state_store import JsonStateStore
-from fablabot.helpers.utils import ensure_command_context, escape_md, format_member_mention, format_role_mention
+from fablabot.helpers.utils import (
+    RefusalKind,
+    ensure_command_context,
+    escape_md,
+    format_member_mention,
+    format_role_mention,
+    log_refusal,
+)
 from fablabot.models.user import OpExpiry
 from fablabot.ui import uui
 
@@ -27,6 +35,16 @@ logger = logging.getLogger(__name__)
 
 OP_STATE_FILE = Path("data/temp_admin_state.json")
 EXPIRY_RETRY_DELAY = timedelta(seconds=60)
+
+_SELF_OP_REFUSED = "Vous ne pouvez pas vous op vous-même : un autre membre du staff doit le faire."
+_TEMP_ROLE_REFUSED = f"Le rôle {RoleNames.ADMIN_TEMP} se donne uniquement avec `/user op`, qui fixe sa durée."
+_SELF_ADD_REFUSED = "Vous ne pouvez pas vous donner un rôle vous-même : un autre membre du staff doit le faire."
+_ADD_REFUSALS = {
+    RefusalKind.MISSING_RIGHT: ErrorMessages.NO_PERMISSION_ADD_ROLE,
+    RefusalKind.TEMP_ROLE_OUTSIDE_OP: _TEMP_ROLE_REFUSED,
+    RefusalKind.SELF_TARGET: _SELF_ADD_REFUSED,
+}
+_REMOVE_REFUSALS = {RefusalKind.MISSING_RIGHT: ErrorMessages.NO_PERMISSION_REMOVE_ROLE}
 
 
 def _utcnow() -> datetime:
@@ -100,9 +118,16 @@ class UserManagement(commands.Cog):
             "Commandes de gestion des utilisateurs",
             "user",
             [
-                ("op <user>", "Donner des droits admin temporaires à un utilisateur"),
-                ("deop <user>", "Retirer des droits admin temporaires à un utilisateur"),
-                ("add_role <user> <role>", "Ajouter un rôle à un utilisateur"),
+                (
+                    "op <user> <reason> [time]",
+                    f"Donner le rôle {RoleNames.ADMIN_TEMP} pour une durée limitée (5 minutes par défaut, 90 au plus). "
+                    "Il n'ouvre que les commandes qui le nomment, aujourd'hui /fm. On ne peut pas s'op soi-même",
+                ),
+                ("deop <user>", f"Retirer le rôle {RoleNames.ADMIN_TEMP} avant la fin de sa durée"),
+                (
+                    "add_role <user> <role>",
+                    f"Ajouter un rôle à un utilisateur, jamais à soi-même ({RoleNames.ADMIN_TEMP} se donne avec op)",
+                ),
                 ("remove_role <user> <role>", "Retirer un rôle à un utilisateur"),
                 ("add_roles <role>", "Ajouter un rôle à plusieurs utilisateurs via un sélecteur"),
                 ("remove_roles <role>", "Retirer un rôle à plusieurs utilisateurs via un sélecteur"),
@@ -153,14 +178,11 @@ class UserManagement(commands.Cog):
             )
             return
         assert isinstance(interaction.user, Member)
-        if not self._can_assign_role(interaction.user, admin_role) and RoleNames.DIGITAL_MANAGER not in (
-            r.name for r in interaction.user.roles
-        ):
-            logger.warning(f"Unauthorized op attempt by {interaction.user}")
-            await interaction.response.send_message(
-                ErrorMessages.INSUFFICIENT_PERMISSIONS,
-                ephemeral=True,
-            )
+        if not self._can_op(interaction.user, admin_role):
+            await self._refuse(interaction, "user.op", RefusalKind.MISSING_RIGHT, ErrorMessages.INSUFFICIENT_PERMISSIONS)
+            return
+        if member.id == interaction.user.id:
+            await self._refuse(interaction, "user.op", RefusalKind.SELF_TARGET, _SELF_OP_REFUSED)
             return
 
         success, error = await safe_add_roles(
@@ -209,14 +231,8 @@ class UserManagement(commands.Cog):
             )
             return
         assert isinstance(interaction.user, Member)
-        if not self._can_assign_role(interaction.user, admin_role) and RoleNames.DIGITAL_MANAGER not in (
-            r.name for r in interaction.user.roles
-        ):
-            logger.warning(f"Unauthorized deop attempt by {interaction.user}")
-            await interaction.response.send_message(
-                ErrorMessages.INSUFFICIENT_PERMISSIONS,
-                ephemeral=True,
-            )
+        if not self._can_op(interaction.user, admin_role):
+            await self._refuse(interaction, "user.deop", RefusalKind.MISSING_RIGHT, ErrorMessages.INSUFFICIENT_PERMISSIONS)
             return
 
         key = (interaction.guild.id, member.id)
@@ -262,12 +278,10 @@ class UserManagement(commands.Cog):
         if not await ensure_command_context(logger, "user.add_role", interaction, log_details={"target": member, "role": role}):
             return
 
-        if not self._can_assign_role(interaction.user, role):
-            logger.warning(f"Unauthorized add_role by {interaction.user}")
-            await interaction.response.send_message(
-                ErrorMessages.NO_PERMISSION_ADD_ROLE,
-                ephemeral=True,
-            )
+        assert isinstance(interaction.user, Member)
+        kind = self.assignment_refusal(interaction.user, member, role, action="add")
+        if kind is not None:
+            await self._refuse(interaction, "user.add_role", kind, _ADD_REFUSALS[kind])
             return
 
         success, error = await safe_add_roles(logger, member, role, reason=f"Add with add_role command by {interaction.user}")
@@ -305,12 +319,10 @@ class UserManagement(commands.Cog):
         ):
             return
 
-        if not self._can_assign_role(interaction.user, role):
-            logger.warning(f"Unauthorized remove_role by {interaction.user}")
-            await interaction.response.send_message(
-                ErrorMessages.NO_PERMISSION_REMOVE_ROLE,
-                ephemeral=True,
-            )
+        assert isinstance(interaction.user, Member)
+        kind = self.assignment_refusal(interaction.user, member, role, action="remove")
+        if kind is not None:
+            await self._refuse(interaction, "user.remove_role", kind, _REMOVE_REFUSALS[kind])
             return
 
         success, error = await safe_remove_roles(
@@ -659,6 +671,44 @@ class UserManagement(commands.Cog):
         await channel.send(text)
 
     # -- Permission Checks --
+
+    @staticmethod
+    async def _refuse(interaction: Interaction, command_name: str, kind: RefusalKind, text: str) -> None:
+        """Log a refusal by kind and tell the caller privately."""
+        log_refusal(logger, command_name, interaction, kind)
+        await interaction.response.send_message(text, ephemeral=True)
+
+    @staticmethod
+    def _can_op(user: Member, admin_role: Role) -> bool:
+        """Checks if the member may op or deop: a permanent admin role or the digital manager role."""
+        return UserManagement._can_assign_role(user, admin_role) or RoleNames.DIGITAL_MANAGER in (r.name for r in user.roles)
+
+    @staticmethod
+    def assignment_refusal(
+        actor: Member,
+        target: Member | None,
+        role: Role,
+        *,
+        action: Literal["add", "remove"],
+    ) -> RefusalKind | None:
+        """Tell why ``actor`` may not give ``role`` to (or take it from) ``target``, or None when allowed.
+
+        Args:
+            actor (Member): The member acting, with their current roles.
+            target (Member | None): The member targeted; None to check the role alone.
+            role (Role): The role to give or take.
+            action (Literal["add", "remove"]): Whether the role is given or taken.
+
+        Returns:
+            RefusalKind | None: The first reason to refuse, or None.
+        """
+        if not UserManagement._can_assign_role(actor, role):
+            return RefusalKind.MISSING_RIGHT
+        if action == "add" and role.name == RoleNames.ADMIN_TEMP:
+            return RefusalKind.TEMP_ROLE_OUTSIDE_OP
+        if action == "add" and target is not None and target.id == actor.id:
+            return RefusalKind.SELF_TARGET
+        return None
 
     @staticmethod
     def _can_assign_role(user: User | Member, target_role: Role) -> bool:
