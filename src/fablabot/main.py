@@ -19,6 +19,7 @@ from fablabot.cogs import (
     UserManagement,
     WelcomeManagement,
 )
+from fablabot.helpers.guild_access import GuildAccessPolicy, GuildAccessTree
 from fablabot.helpers.logging_setup import configure_logging
 
 if TYPE_CHECKING:
@@ -72,8 +73,11 @@ class Fablabot(commands.Bot):
             - reactions: for handling message reactions
             - message_content: for reading message content
         """
+        # Parsed before the base class so a malformed list stops the process before login.
+        policy = GuildAccessPolicy.from_env()
         super().__init__(
             command_prefix=commands.when_mentioned,
+            tree_cls=GuildAccessTree,
             allowed_contexts=AppCommandContext(guild=True, dm_channel=False),
             intents=Intents(
                 guilds=True,
@@ -85,6 +89,7 @@ class Fablabot(commands.Bot):
                 message_content=True,
             ),
         )
+        self.guild_access: GuildAccessPolicy = policy
         self.discord_log_handler: DiscordLogHandler | None = None
         self.file_log_handler: DailyFileHandler | None = None
         logger.info("Bot initialized")

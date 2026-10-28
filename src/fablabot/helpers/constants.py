@@ -79,6 +79,9 @@ ADMIN_ROLES = {
 class ErrorMessages:
     """Standard error messages."""
 
+    GUILD_NOT_ALLOWED = "Ce bot n'est pas disponible ici."
+    """Command used from a server outside the allow-list, or from a DM."""
+
     # Permission errors
     INSUFFICIENT_PERMISSIONS = "Permissions insuffisantes."
     """User lacks required permissions."""
