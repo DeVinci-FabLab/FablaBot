@@ -13,8 +13,10 @@ from discord import (
     HTTPException,
     Interaction,
     Member,
+    Message,
     Role,
     TextChannel,
+    User,
     VoiceChannel,
 )
 from discord.utils import get
@@ -63,6 +65,21 @@ def log_refusal(
     logger.warning(f"[{command_name}] refused kind={kind} guild_id={interaction.guild_id}{who}")
 
 
+def _log_value(key: str, value: Any) -> str:
+    """Render one log keyword, naming Discord members and messages by ID only.
+
+    Args:
+        key (str): The keyword name.
+        value (Any): The keyword value.
+
+    Returns:
+        str: ``key_id=<id>`` for a member, user or message, ``key=<value>`` otherwise.
+    """
+    if isinstance(value, Member | User | Message):
+        return f"{key}_id={value.id}"
+    return f"{key}={value}"
+
+
 def log_request(
     logger: Logger,
     command_name: str,
@@ -80,9 +97,9 @@ def log_request(
         log_identity (bool): Whether to log the invoking user. Disable it for commands that promise anonymity.
         **kwargs (Any): Additional details to log.
     """
-    details = " ".join(f"{k}={v}" for k, v in kwargs.items())
+    details = " ".join(_log_value(k, v) for k, v in kwargs.items())
     if log_identity:
-        logger.info(f"[{command_name}]: user={interaction.user!s} id={interaction.user.id} {details}")
+        logger.info(f"[{command_name}]: user_id={interaction.user.id} {details}")
     else:
         logger.info(f"[{command_name}]: guild_id={interaction.guild_id} {details}")
 
@@ -294,16 +311,16 @@ async def send_dm_to_member(
     Returns:
         bool: True if the message was sent successfully, False otherwise.
     """
-    logger.debug(f"Preparing {dm_type} DM for guild {guild.id} user {member}.")
+    logger.debug(f"Preparing {dm_type} DM for guild {guild.id} user {member.id}.")
 
     if member.bot:
         return False
 
     if not await _can_dm_user(member):
-        logger.error(f"Cannot DM user {member.id} ({member.name!r}) in guild {guild.id}; skipping {dm_type} DM.")
+        logger.error(f"Cannot DM user {member.id} in guild {guild.id}; skipping {dm_type} DM.")
         return False
 
-    logger.debug(f"Resolved member {member.id} ({member.display_name}) for {dm_type} DM in guild {guild.id}.")
+    logger.debug(f"Resolved member {member.id} for {dm_type} DM in guild {guild.id}.")
 
     try:
         if embed is not None:
@@ -311,10 +328,10 @@ async def send_dm_to_member(
         else:
             await member.send(message_content)
     except Exception:
-        logger.exception(f"Failed to send {dm_type} DM to user {member} in guild {guild.id}.")
+        logger.exception(f"Failed to send {dm_type} DM to user {member.id} in guild {guild.id}.")
         return False
 
-    logger.info(f"Sent {dm_type} DM to user {member} in guild {guild.id}.")
+    logger.info(f"Sent {dm_type} DM to user {member.id} in guild {guild.id}.")
     return True
 
 

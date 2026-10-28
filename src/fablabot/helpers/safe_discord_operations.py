@@ -42,10 +42,10 @@ async def safe_add_roles(
     try:
         await member.add_roles(*roles, reason=reason)
     except Forbidden:
-        logger.exception(f"Forbidden to add roles {roles} to {member}")
+        logger.exception(f"Forbidden to add roles {roles} to member_id={member.id}")
         return False, ErrorMessages.ROLE_ADD_FAILED
     except HTTPException:
-        logger.exception(f"HTTP error while adding roles {roles} to {member}")
+        logger.exception(f"HTTP error while adding roles {roles} to member_id={member.id}")
         return False, ErrorMessages.HTTP_ERROR.format(
             operation=f"l'ajout des rôles {', '.join(role.name for role in roles)} à {format_member_mention(member)}",
         )
@@ -72,10 +72,10 @@ async def safe_remove_roles(
     try:
         await member.remove_roles(*roles, reason=reason)
     except Forbidden:
-        logger.exception(f"Forbidden to remove roles {roles} from {member}")
+        logger.exception(f"Forbidden to remove roles {roles} from member_id={member.id}")
         return False, ErrorMessages.ROLE_REMOVE_FAILED
     except HTTPException:
-        logger.exception(f"HTTP error while removing roles {roles} from {member}")
+        logger.exception(f"HTTP error while removing roles {roles} from member_id={member.id}")
         return False, ErrorMessages.HTTP_ERROR.format(
             operation=f"le retrait des rôles {', '.join(role.name for role in roles)} à {format_member_mention(member)}",
         )

@@ -19,6 +19,7 @@ async def test_deleted_bot_message_log_has_no_body(caplog: pytest.LogCaptureFixt
     """The warning names channel and deleter, the channel notice keeps the body."""
     deleter = MagicMock(spec=Member)
     deleter.name = "moderator_name"
+    deleter.id = 42
     deleter.mention = "<@42>"
     entry = MagicMock()
     entry.user = deleter
@@ -45,6 +46,7 @@ async def test_deleted_bot_message_log_has_no_body(caplog: pytest.LogCaptureFixt
 
     assert SECRET_BODY not in caplog.text
     assert "'commandes_bot'" in caplog.text
-    assert "'moderator_name'" in caplog.text
+    assert "deleter_id=42" in caplog.text
+    assert "moderator_name" not in caplog.text
     channel.send.assert_awaited_once()
     assert SECRET_BODY in channel.send.call_args.args[0]
