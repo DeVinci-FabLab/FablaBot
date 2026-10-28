@@ -149,6 +149,29 @@ async def test_send_failure_logs_a_warning_and_never_reposts(caplog: pytest.LogC
     assert caplog.records[0].getMessage() == f"Could not post a log line (guild_id={GUILD_A}, channel_id={CHANNEL_A}): HTTP 403"
 
 
+async def test_send_failure_of_any_kind_logs_a_warning_and_never_reposts(caplog: pytest.LogCaptureFixture) -> None:
+    """A post that fails for a reason other than HTTP is logged once as a warning, never as an error."""
+    guild_config.set_log_channel_id(GUILD_A, CHANNEL_A)
+    channel = _channel(CHANNEL_A, GUILD_A)
+    channel.send.side_effect = RuntimeError("closed session")
+    handler = DiscordLogHandler(_bot(channel))
+    with caplog.at_level(logging.DEBUG):
+        await handler._send(GUILD_A, "boom")  # noqa: SLF001
+    assert channel.send.await_count == 1
+    assert [r.levelno for r in caplog.records] == [logging.WARNING]
+    assert f"guild_id={GUILD_A}" in caplog.records[0].getMessage()
+
+
+async def test_send_failure_lets_a_recursion_error_through() -> None:
+    """A RecursionError is not swallowed by the send failure handler."""
+    guild_config.set_log_channel_id(GUILD_A, CHANNEL_A)
+    channel = _channel(CHANNEL_A, GUILD_A)
+    channel.send.side_effect = RecursionError()
+    handler = DiscordLogHandler(_bot(channel))
+    with pytest.raises(RecursionError):
+        await handler._send(GUILD_A, "boom")  # noqa: SLF001
+
+
 def test_send_task_runs_outside_the_record_guild() -> None:
     """The send task starts from a blank context, so its own lines belong to no guild."""
     bot = MagicMock()

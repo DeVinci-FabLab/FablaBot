@@ -104,6 +104,8 @@ class DiscordLogHandler(logging.Handler):
                 )
             else:
                 await channel.send(log_message, allowed_mentions=AllowedMentions.none())
-        except HTTPException as exc:
-            # WARNING stays below this handler's ERROR threshold, so a failed post never loops.
-            logger.warning(f"Could not post a log line (guild_id={guild_id}, channel_id={channel.id}): HTTP {exc.status}")
+        except RecursionError:
+            raise
+        except Exception as exc:  # whatever the failure, it is logged below ERROR: a failed post never loops
+            status = f"HTTP {exc.status}" if isinstance(exc, HTTPException) else type(exc).__name__
+            logger.warning(f"Could not post a log line (guild_id={guild_id}, channel_id={channel.id}): {status}")
