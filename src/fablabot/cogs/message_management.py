@@ -357,6 +357,7 @@ class MessageManagement(commands.Cog):
         total_deleted = 0
 
         try:
+
             def check(msg):
                 return msg.author == user
 
@@ -788,7 +789,14 @@ class MessageManagement(commands.Cog):
         Args:
             interaction (Interaction): The Discord interaction context.
         """
-        await ensure_command_context(logger, "suggest", interaction, enforce_commands_channel=False)
+        if not await ensure_command_context(
+            logger,
+            "suggest",
+            interaction,
+            enforce_commands_channel=False,
+            log_identity=False,
+        ):
+            return
         view = mui.SuggestionView(self)
         await interaction.response.send_message(
             "Veuillez choisir le destinataire et si vous souhaitez rester anonyme, puis cliquez sur 'Rédiger la suggestion'.",

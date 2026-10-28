@@ -27,9 +27,17 @@ main = "fablabot.main:main"
 [dependency-groups]
 dev = [
   "pdoc>=15.0.3",
+  "pytest>=9.2.0",
+  "pytest-asyncio>=1.4.1",
   "ruff>=0.12.9",
   "typing-extensions>=4.15.0",
 ]
+
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
+asyncio_mode = "auto"
+pythonpath = ["src"]
+testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 128

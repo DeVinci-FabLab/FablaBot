@@ -32,17 +32,28 @@ _REGIONAL_INDICATOR_START = 0x1F1E6
 _REGIONAL_INDICATOR_END = 0x1F1FF
 
 
-def log_request(logger: Logger, command_name: str, interaction: Interaction, **kwargs: Any) -> None:
+def log_request(
+    logger: Logger,
+    command_name: str,
+    interaction: Interaction,
+    *,
+    log_identity: bool = True,
+    **kwargs: Any,
+) -> None:
     """Logs a request made to a command.
 
     Args:
         logger (Logger): The logger of the cog.
         command_name (str): The name of the command.
         interaction (Interaction): The Discord interaction context of the command invocation.
+        log_identity (bool): Whether to log the invoking user. Disable it for commands that promise anonymity.
         **kwargs (Any): Additional details to log.
     """
     details = " ".join(f"{k}={v}" for k, v in kwargs.items())
-    logger.info(f"[{command_name}]: user={interaction.user!s} id={interaction.user.id} {details}")
+    if log_identity:
+        logger.info(f"[{command_name}]: user={interaction.user!s} id={interaction.user.id} {details}")
+    else:
+        logger.info(f"[{command_name}]: guild_id={interaction.guild_id} {details}")
 
 
 async def _is_in_allowed_channel(logger: Logger, interaction: Interaction) -> bool:
@@ -113,13 +124,14 @@ async def _is_in_allowed_channel(logger: Logger, interaction: Interaction) -> bo
     return True
 
 
-async def _check_has_role(logger: Logger, interaction: Interaction, roles: set[str]) -> bool:
+async def _check_has_role(logger: Logger, interaction: Interaction, roles: set[str], *, log_identity: bool = True) -> bool:
     """Check if the interaction user has any of the specified roles.
 
     Args:
         logger (Logger): The logger of the cog.
         interaction (Interaction): The Discord interaction context of the command invocation.
         roles (set[str]): The set of role names to check.
+        log_identity (bool): Whether the refusal line names the user.
 
     Returns:
         bool: True if the user has any of the roles, False otherwise.
@@ -135,9 +147,8 @@ async def _check_has_role(logger: Logger, interaction: Interaction, roles: set[s
     assert isinstance(interaction.user, Member)
     member_role_names = {role.name for role in interaction.user.roles}
     if not member_role_names & roles:
-        logger.warning(
-            f"User {interaction.user} doesn't have any of the roles {', '.join(roles)} in the guild {interaction.guild.id}",
-        )
+        who = f"User {interaction.user}" if log_identity else "User"
+        logger.warning(f"{who} doesn't have any of the roles {', '.join(roles)} in the guild {interaction.guild.id}")
         msg = f"Il est requis d'avoir au moins l'un des rôles suivants pour utiliser cette commande : {', '.join(roles)}."
         await interaction.response.send_message(
             msg,
@@ -155,6 +166,7 @@ async def ensure_command_context(
     log_details: Mapping[str, Any] | None = None,
     required_roles: set[str] | None = None,
     enforce_commands_channel: bool = True,
+    log_identity: bool = True,
 ) -> bool:
     """Log a command execution and run shared context checks.
 
@@ -165,16 +177,17 @@ async def ensure_command_context(
         log_details (Mapping[str, Any] | None): Optional contextual details to log.
         required_roles (set[str] | None): Required role names; skipped when None.
         enforce_commands_channel (bool): Whether to enforce the configured commands channel.
+        log_identity (bool): Whether the logs name the invoking user. Disable it for anonymous flows.
 
     Returns:
         bool: ``True`` when all checks pass, ``False`` otherwise.
     """
-    log_request(logger, command_name, interaction, **(log_details or {}))
+    log_request(logger, command_name, interaction, log_identity=log_identity, **(log_details or {}))
 
     if enforce_commands_channel and not await _is_in_allowed_channel(logger, interaction):
         return False
 
-    if required_roles is not None and not await _check_has_role(logger, interaction, required_roles):
+    if required_roles is not None and not await _check_has_role(logger, interaction, required_roles, log_identity=log_identity):
         return False
 
     return True
