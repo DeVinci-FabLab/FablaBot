@@ -639,6 +639,7 @@ class UserManagement(commands.Cog):
             logger.error(f"Failed to remove temporary admin role guild_id={guild.id} member_id={member.id}; record kept")
             await self._post_op_notice(
                 guild,
+                member.id,
                 expiry,
                 f"Impossible de retirer le rôle {RoleNames.ADMIN_TEMP} à {format_member_mention(member)} : {error}",
             )
@@ -647,7 +648,7 @@ class UserManagement(commands.Cog):
         self._clear_op(guild.id, member.id)
         logger.info(f"Revoked temporary admin at expiry guild_id={guild.id} member_id={member.id}")
         notice = f"Droits admin temporaires retirés de {format_member_mention(member)} : durée écoulée."
-        await self._post_op_notice(guild, expiry, notice)
+        await self._post_op_notice(guild, member.id, expiry, notice)
 
     @staticmethod
     async def _find_member(guild: Guild, member_id: int) -> Member | None:
@@ -676,11 +677,13 @@ class UserManagement(commands.Cog):
             return None
 
     @staticmethod
-    async def _post_op_notice(guild: Guild, expiry: OpExpiry, text: str) -> None:
+    async def _post_op_notice(guild: Guild, member_id: int, expiry: OpExpiry, text: str) -> None:
         """Post an op notice in the channel where the op was run; log only when it is gone."""
         channel = guild.get_channel(expiry.channel_id)
         if channel is None or not hasattr(channel, "send"):
-            logger.warning(f"Op channel {expiry.channel_id} gone in guild_id={guild.id}; notice not posted")
+            logger.warning(
+                f"Op channel {expiry.channel_id} gone in guild_id={guild.id} member_id={member_id}; notice not posted",
+            )
             return
         await channel.send(text)
 

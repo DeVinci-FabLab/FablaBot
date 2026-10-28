@@ -373,3 +373,19 @@ async def test_deop_does_not_erase_an_op_made_while_it_was_in_flight(cog: UserMa
     assert _saved()[str(GUILD_A)][str(TARGET_ID)]["expires_at"] == "2026-10-28T16:01:00+00:00"
     assert cog.deop_tasks[GUILD_A, TARGET_ID] is newer
     assert not newer.done()
+
+
+async def test_expiry_with_the_op_channel_gone_logs_the_member(cog: UserManagement, caplog: pytest.LogCaptureFixture) -> None:
+    guild, target, caller = _server(GUILD_A)
+    await _op(cog, guild, caller, target, 5)
+    target.roles.append(guild.roles[0])
+    cog.bot.get_guild = MagicMock(return_value=guild)
+    guild.get_channel.return_value = None
+
+    with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=5)):
+        await cog._expire(GUILD_A, TARGET_ID)  # noqa: SLF001
+
+    lines = [r.getMessage() for r in caplog.records if "gone" in r.getMessage()]
+    assert len(lines) == 1
+    assert f"guild_id={GUILD_A}" in lines[0]
+    assert f"member_id={TARGET_ID}" in lines[0]
