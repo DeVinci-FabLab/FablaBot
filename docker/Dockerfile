@@ -35,5 +35,8 @@ COPY . .
 RUN uv sync --locked --no-dev --no-editable
 ENV PATH="/app/.venv/bin:$PATH"
 
+# Python as PID 1 ignores SIGTERM, so docker stop sends SIGINT and the bot exits at once.
+STOPSIGNAL SIGINT
+
 # Run from the built environment, nothing is resolved at start.
 CMD ["python", "-m", "fablabot.main"]
