@@ -9,8 +9,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import discord
 from discord import InteractionType
+from discord.ext import commands
 import pytest
 
+from fablabot.cogs.guild_access import GuildAccess
 from fablabot.helpers.constants import ErrorMessages
 from fablabot.helpers.guild_access import (
     ALLOWED_GUILD_IDS_ENV,
@@ -156,3 +158,185 @@ def test_bot_refuses_to_start_on_malformed_list(fablabot_main: ModuleType, monke
     monkeypatch.setenv(ALLOWED_GUILD_IDS_ENV, "abc")
     with pytest.raises(ValueError, match=ALLOWED_GUILD_IDS_ENV):
         fablabot_main.Fablabot()
+
+
+OWNER_ID = 555555555555555555
+STRANGER_ID = 666666666666666666
+WRONG_LIST = 999999999999999999
+COG_NAMES = (
+    "ChannelManagement",
+    "FormationManagement",
+    "LogManagement",
+    "MessageManagement",
+    "UserManagement",
+    "WelcomeManagement",
+)
+
+
+def _guild(guild_id: int, owner_id: int | None = STRANGER_ID) -> MagicMock:
+    """Build a stub guild with an awaitable ``leave``."""
+    guild = MagicMock(spec=discord.Guild)
+    guild.id = guild_id
+    guild.owner_id = owner_id
+    guild.leave = AsyncMock()
+    return guild
+
+
+def _cog(allowed: set[int], guilds: list[MagicMock] | None = None, owner_id: int = OWNER_ID) -> GuildAccess:
+    """Build the real cog on a stub bot whose application owner is ``owner_id``."""
+    bot = MagicMock()
+    bot.guild_access = GuildAccessPolicy(frozenset(allowed))
+    bot.guilds = guilds or []
+
+    async def is_owner(user: discord.Object) -> bool:
+        """Answer like ``Bot.is_owner`` for the stub owner."""
+        return user.id == owner_id
+
+    bot.is_owner = AsyncMock(side_effect=is_owner)
+    return GuildAccess(bot)
+
+
+async def test_join_unlisted_guild_leaves(caplog: pytest.LogCaptureFixture) -> None:
+    """An unlisted guild is left without looking up its owner."""
+    cog = _cog({LISTED})
+    guild = _guild(UNLISTED)
+    with caplog.at_level(logging.INFO):
+        await cog.on_guild_join(guild)
+    guild.leave.assert_awaited_once()
+    assert "not_allowed" in caplog.text
+    assert f"guild_id={UNLISTED}" in caplog.text
+    cog.bot.is_owner.assert_not_awaited()
+
+
+async def test_join_listed_guild_stays() -> None:
+    """A listed guild is kept."""
+    cog = _cog({LISTED})
+    guild = _guild(LISTED)
+    await cog.on_guild_join(guild)
+    guild.leave.assert_not_awaited()
+    assert cog.bot.guild_access.is_served(LISTED)
+
+
+async def test_join_owner_guild_unlisted_still_leaves() -> None:
+    """With a non-empty list, owning the guild does not keep it."""
+    cog = _cog({LISTED})
+    guild = _guild(UNLISTED, owner_id=OWNER_ID)
+    await cog.on_guild_join(guild)
+    guild.leave.assert_awaited_once()
+
+
+async def test_join_empty_list_owner_guild_stays_and_is_served() -> None:
+    """With an empty list, a guild owned by the application owner is kept and served."""
+    cog = _cog(set())
+    guild = _guild(UNLISTED, owner_id=OWNER_ID)
+    await cog.on_guild_join(guild)
+    guild.leave.assert_not_awaited()
+    assert cog.bot.guild_access.is_served(UNLISTED)
+
+
+async def test_join_empty_list_unproven_leaves(caplog: pytest.LogCaptureFixture) -> None:
+    """With an empty list, a guild of another owner is left and not served."""
+    cog = _cog(set())
+    guild = _guild(UNLISTED)
+    with caplog.at_level(logging.INFO):
+        await cog.on_guild_join(guild)
+    guild.leave.assert_awaited_once()
+    assert "owner_not_proven" in caplog.text
+    assert not cog.bot.guild_access.is_served(UNLISTED)
+
+
+async def test_join_empty_list_owner_check_fails_leaves() -> None:
+    """With an empty list, a failed owner lookup counts as not proven."""
+    cog = _cog(set())
+    cog.bot.is_owner.side_effect = discord.HTTPException(MagicMock(status=500), "x")
+    guild = _guild(UNLISTED, owner_id=OWNER_ID)
+    await cog.on_guild_join(guild)
+    guild.leave.assert_awaited_once()
+    assert not cog.bot.guild_access.is_served(UNLISTED)
+
+
+async def test_ready_leaves_unlisted_only(caplog: pytest.LogCaptureFixture) -> None:
+    """At start, only the unlisted guild is left, and the summary counts it."""
+    listed, unlisted = _guild(LISTED), _guild(UNLISTED)
+    cog = _cog({LISTED}, [listed, unlisted])
+    with caplog.at_level(logging.INFO):
+        await cog.on_ready()
+    listed.leave.assert_not_awaited()
+    unlisted.leave.assert_awaited_once()
+    assert "1 IDs listed, in 2 guilds, leaving 1" in caplog.text
+
+
+async def test_ready_guard_leaves_none_when_list_matches_nothing(caplog: pytest.LogCaptureFixture) -> None:
+    """A list that matches no current guild leaves none and logs an error."""
+    first, second = _guild(LISTED), _guild(UNLISTED)
+    cog = _cog({WRONG_LIST}, [first, second])
+    with caplog.at_level(logging.INFO):
+        await cog.on_ready()
+    first.leave.assert_not_awaited()
+    second.leave.assert_not_awaited()
+    errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert any(ALLOWED_GUILD_IDS_ENV in r.getMessage() for r in errors)
+    assert not cog.bot.guild_access.is_served(LISTED)
+
+
+async def test_ready_empty_list_stays_serves_and_warns(caplog: pytest.LogCaptureFixture) -> None:
+    """With an empty list, the bot stays, serves every guild and warns about unproven owners."""
+    owned, other = _guild(LISTED, owner_id=OWNER_ID), _guild(UNLISTED)
+    cog = _cog(set(), [owned, other])
+    with caplog.at_level(logging.INFO):
+        await cog.on_ready()
+    owned.leave.assert_not_awaited()
+    other.leave.assert_not_awaited()
+    assert cog.bot.guild_access.is_served(LISTED)
+    assert cog.bot.guild_access.is_served(UNLISTED)
+    assert f"{ALLOWED_GUILD_IDS_ENV} is empty" in caplog.text
+    staying = [r.getMessage() for r in caplog.records if "without proof of ownership" in r.getMessage()]
+    assert len(staying) == 1
+    assert f"guild_id={UNLISTED}" in staying[0]
+
+
+async def test_ready_empty_list_owner_check_fails_stays() -> None:
+    """With an empty list, a failed owner lookup keeps the guild and serves it."""
+    guild = _guild(LISTED, owner_id=OWNER_ID)
+    cog = _cog(set(), [guild])
+    cog.bot.is_owner.side_effect = discord.HTTPException(MagicMock(status=500), "x")
+    await cog.on_ready()
+    guild.leave.assert_not_awaited()
+    assert cog.bot.guild_access.is_served(LISTED)
+
+
+async def test_leave_failure_logged_and_continues(caplog: pytest.LogCaptureFixture) -> None:
+    """A failed leave is logged with the guild ID, the next guild is still left."""
+    failing, next_one, listed = _guild(UNLISTED), _guild(TOLERATED), _guild(LISTED)
+    failing.leave.side_effect = discord.HTTPException(MagicMock(status=500), "x")
+    cog = _cog({LISTED}, [failing, next_one, listed])
+    with caplog.at_level(logging.INFO):
+        await cog.on_ready()
+    next_one.leave.assert_awaited_once()
+    errors = [r.getMessage() for r in caplog.records if r.levelno == logging.ERROR]
+    assert any(f"guild_id={UNLISTED}" in message for message in errors)
+    assert not cog.bot.guild_access.is_served(UNLISTED)
+
+
+async def test_ready_again_reconciles_new_guild() -> None:
+    """A second ready leaves a guild added since the first."""
+    cog = _cog({LISTED}, [_guild(LISTED)])
+    await cog.on_ready()
+    late = _guild(UNLISTED)
+    cog.bot.guilds.append(late)
+    await cog.on_ready()
+    late.leave.assert_awaited_once()
+
+
+async def test_setup_hook_loads_guild_access(fablabot_main: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The real setup hook loads the access cog with both listeners."""
+    monkeypatch.setenv(ALLOWED_GUILD_IDS_ENV, str(LISTED))
+    monkeypatch.setattr(fablabot_main, "configure_logging", lambda _bot: (None, None))
+    for name in COG_NAMES:
+        monkeypatch.setattr(fablabot_main, name, type(name, (commands.Cog,), {}))
+    bot = fablabot_main.Fablabot()
+    bot.tree.sync = AsyncMock()
+    await bot.setup_hook()
+    cog = bot.get_cog("GuildAccess")
+    assert isinstance(cog, GuildAccess)
+    assert {name for name, _ in cog.get_listeners()} >= {"on_guild_join", "on_ready"}

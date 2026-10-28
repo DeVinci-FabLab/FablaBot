@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from fablabot.cogs import (
     ChannelManagement,
     FormationManagement,
+    GuildAccess,
     LogManagement,
     MessageManagement,
     UserManagement,
@@ -101,6 +102,7 @@ class Fablabot(commands.Bot):
 
         self.tree.clear_commands(guild=None)
         for cog in (
+            GuildAccess(self),
             ChannelManagement(self),
             FormationManagement(self),
             LogManagement(self),
