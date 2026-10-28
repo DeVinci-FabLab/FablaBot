@@ -3,14 +3,26 @@
 from __future__ import annotations
 
 import logging
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from discord import ButtonStyle, Interaction, Member, Role, ui
 
 from fablabot.helpers.safe_discord_operations import safe_add_roles, safe_remove_roles
-from fablabot.helpers.utils import escape_md, format_member_mention, format_role_mention, get_members_by_role
+from fablabot.helpers.utils import (
+    RefusalKind,
+    escape_md,
+    format_member_mention,
+    format_role_mention,
+    get_members_by_role,
+    log_refusal,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
+
+RIGHT_LOST_MESSAGE = "Vous n'avez plus les droits pour cette action. Rien n'a été modifié."
 
 
 class BulkRoleAssignmentView(ui.View):
@@ -23,6 +35,7 @@ class BulkRoleAssignmentView(ui.View):
         followup_id: int,
         *,
         action: Literal["add", "remove"],
+        check: Callable[[Member, Member | None], RefusalKind | None],
     ) -> None:
         """Initialize the view for bulk role assignment/removal.
 
@@ -31,12 +44,15 @@ class BulkRoleAssignmentView(ui.View):
             user (Member): The member initiating the role assignment.
             followup_id (int): The ID of the follow-up message to edit with results.
             action (Literal["add", "remove"]): "add" to add the role, "remove" to remove it.
+            check (Callable[[Member, Member | None], RefusalKind | None]): Why the clicking member may not act on a
+                target (None for the role alone), or None when allowed; run again on Confirm.
         """
         super().__init__(timeout=None)
         self.role = role
         self.user = user
         self.followup_id = followup_id
         self.action = action
+        self.check = check
 
     @ui.select(cls=ui.UserSelect, placeholder="Sélectionne les membres...", min_values=1, max_values=25)
     async def select_members(self, interaction: Interaction, _select: ui.UserSelect) -> None:
@@ -52,7 +68,7 @@ class BulkRoleAssignmentView(ui.View):
 
     @ui.button(label="Confirmer", style=ButtonStyle.primary)
     async def confirm_button(self, interaction: Interaction, button: ui.Button) -> None:
-        """Confirm the bulk role assignment/removal.
+        """Confirm the bulk role assignment/removal, after checking the clicker's rights again.
 
         Args:
             interaction (Interaction): The Discord interaction triggered by the confirm button.
@@ -62,45 +78,21 @@ class BulkRoleAssignmentView(ui.View):
         if not members:
             await interaction.response.send_message("Aucun membre sélectionné.", ephemeral=True)
             return
+        assert isinstance(interaction.user, Member)
+        if self.check(interaction.user, None) is not None:
+            log_refusal(logger, f"user.{self.action}_roles", interaction, RefusalKind.RIGHT_LOST)
+            await interaction.response.send_message(RIGHT_LOST_MESSAGE, ephemeral=True)
+            return
 
         logger.info(f"Bulk role confirm user={interaction.user} role={self.role} action={self.action} members={members}")
         self.select_members.disabled = True
         button.disabled = True
         await interaction.response.edit_message(view=self)
 
-        modified: list[Member] = []
-        already: list[Member] = []
-        failed: list[Member] = []
-
-        if self.action == "add":
-            for m in members:
-                if self.role in m.roles:
-                    logger.info(f"User {m} already has role {self.role}")
-                    already.append(m)
-                    continue
-
-                success, _error = await safe_add_roles(logger, m, self.role, reason=f"Bulk add by {self.user}")
-                if success:
-                    modified.append(m)
-                else:
-                    failed.append(m)
-
-        elif self.action == "remove":
-            for m in members:
-                if self.role not in m.roles:
-                    logger.info(f"User {m} does not have role {self.role}")
-                    already.append(m)
-                    continue
-
-                success, _error = await safe_remove_roles(logger, m, self.role, reason=f"Bulk remove by {self.user}")
-                if success:
-                    modified.append(m)
-                else:
-                    failed.append(m)
-
-        logger.info(
-            f"Members to {self.action} role={self.role} members={members} success={modified} already={already} failed={failed}",
-        )
+        refused = [m for m in members if self.check(interaction.user, m) is not None]
+        if refused:
+            log_refusal(logger, f"user.{self.action}_roles", interaction, RefusalKind.SELF_TARGET)
+        modified, already, failed = await self._apply([m for m in members if m not in refused])
 
         action_str = {"add": "Ajouté", "remove": "Retiré"}
         already_str = {"add": "présent", "remove": "absent"}
@@ -112,25 +104,50 @@ class BulkRoleAssignmentView(ui.View):
             lines.append(f"Déjà {already_str[self.action]} chez : {', '.join(format_member_mention(m) for m in already)}")
         if failed:
             lines.append(f"Échec : {', '.join(format_member_mention(m) for m in failed)}")
+        if refused:
+            lines.append(f"Refusé (soi-même) : {', '.join(format_member_mention(m) for m in refused)}")
 
         await interaction.followup.edit_message(self.followup_id, content="\n".join(lines))
         await interaction.delete_original_response()
 
+    async def _apply(self, members: list[Member]) -> tuple[list[Member], list[Member], list[Member]]:
+        """Give or take the role for each member.
+
+        Args:
+            members (list[Member]): The members to act on.
+
+        Returns:
+            tuple[list[Member], list[Member], list[Member]]: Members changed, already in the wanted state, and failed.
+        """
+        modified: list[Member] = []
+        already: list[Member] = []
+        failed: list[Member] = []
+        for m in members:
+            if (self.role in m.roles) == (self.action == "add"):
+                already.append(m)
+                continue
+            if self.action == "add":
+                success, _error = await safe_add_roles(logger, m, self.role, reason=f"Bulk add by {self.user}")
+            else:
+                success, _error = await safe_remove_roles(logger, m, self.role, reason=f"Bulk remove by {self.user}")
+            (modified if success else failed).append(m)
+        logger.info(
+            f"Members to {self.action} role={self.role} success={modified} already={already} failed={failed}",
+        )
+        return modified, already, failed
+
 
 class MultiRoleSelectorView(ui.View):
-    """View for multi role selection."""
+    """View for multi role selection; the result replaces the private selector message."""
 
-    def __init__(
-        self,
-        followup_id: int,
-    ) -> None:
+    def __init__(self, *, check: Callable[[Member], bool]) -> None:
         """Initialize the view for multi role selection.
 
         Args:
-            followup_id (int): The ID of the follow-up message to edit with results.
+            check (Callable[[Member], bool]): Whether the clicking member may still list members; run on Confirm.
         """
         super().__init__(timeout=None)
-        self.followup_id = followup_id
+        self.check = check
 
     @ui.select(cls=ui.RoleSelect, placeholder="Sélectionne les rôles...", min_values=1, max_values=25)
     async def select_roles(self, interaction: Interaction, _select: ui.RoleSelect) -> None:
@@ -145,8 +162,8 @@ class MultiRoleSelectorView(ui.View):
             await interaction.response.defer()
 
     @ui.button(label="Confirmer", style=ButtonStyle.primary)
-    async def confirm_button(self, interaction: Interaction, button: ui.Button) -> None:
-        """Confirm the multi role selection.
+    async def confirm_button(self, interaction: Interaction, button: ui.Button) -> None:  # noqa: ARG002
+        """Confirm the multi role selection, after checking the clicker's rights again.
 
         Args:
             interaction (Interaction): The Discord interaction triggered by the confirm button.
@@ -156,12 +173,13 @@ class MultiRoleSelectorView(ui.View):
         if not roles:
             await interaction.response.send_message("Aucun rôle sélectionné.", ephemeral=True)
             return
+        assert isinstance(interaction.user, Member)
+        if not self.check(interaction.user):
+            log_refusal(logger, "user.with_roles", interaction, RefusalKind.RIGHT_LOST)
+            await interaction.response.send_message(RIGHT_LOST_MESSAGE, ephemeral=True)
+            return
 
         logger.info(f"Roles selected user={interaction.user} roles={roles}")
-
-        self.select_roles.disabled = True
-        button.disabled = True
-        await interaction.response.edit_message(view=self)
 
         assert interaction.guild is not None
         members: set[Member] = set(interaction.guild.members)
@@ -182,5 +200,4 @@ class MultiRoleSelectorView(ui.View):
             lines.append("_(Aucun membre)_")
         lines.extend(f"- {format_member_mention(m)}" for m in members)
 
-        await interaction.followup.edit_message(self.followup_id, content="\n".join(lines))
-        await interaction.delete_original_response()
+        await interaction.response.edit_message(content="\n".join(lines), view=None)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 import re
 from typing import TYPE_CHECKING, Any, overload
 
@@ -30,6 +31,36 @@ _COMMANDS_CHANNEL_NAME = "commandes_bot"
 _DISCORD_EMOJI_RE = re.compile(r"^<a?:\w+:\d+>$")
 _REGIONAL_INDICATOR_START = 0x1F1E6
 _REGIONAL_INDICATOR_END = 0x1F1FF
+
+
+class RefusalKind(StrEnum):
+    """Why a command refused its caller, as written in the refusal log line."""
+
+    MISSING_RIGHT = "missing_right"
+    SELF_TARGET = "self_target"
+    TEMP_ROLE_OUTSIDE_OP = "temp_role_outside_op"
+    RIGHT_LOST = "right_lost_before_confirm"
+
+
+def log_refusal(
+    logger: Logger,
+    command_name: str,
+    interaction: Interaction,
+    kind: RefusalKind,
+    *,
+    log_identity: bool = True,
+) -> None:
+    """Log a refused command by kind, with Discord IDs only and never a name.
+
+    Args:
+        logger (Logger): The logger of the cog.
+        command_name (str): The name of the command.
+        interaction (Interaction): The Discord interaction context of the command invocation.
+        kind (RefusalKind): Why the command was refused.
+        log_identity (bool): Whether to log the caller's ID. Disable it for commands that promise anonymity.
+    """
+    who = f" user_id={interaction.user.id}" if log_identity else ""
+    logger.warning(f"[{command_name}] refused kind={kind} guild_id={interaction.guild_id}{who}")
 
 
 def log_request(
@@ -124,11 +155,19 @@ async def _is_in_allowed_channel(logger: Logger, interaction: Interaction) -> bo
     return True
 
 
-async def _check_has_role(logger: Logger, interaction: Interaction, roles: set[str], *, log_identity: bool = True) -> bool:
+async def _check_has_role(
+    logger: Logger,
+    command_name: str,
+    interaction: Interaction,
+    roles: set[str],
+    *,
+    log_identity: bool = True,
+) -> bool:
     """Check if the interaction user has any of the specified roles.
 
     Args:
         logger (Logger): The logger of the cog.
+        command_name (str): The name of the command, for the refusal line.
         interaction (Interaction): The Discord interaction context of the command invocation.
         roles (set[str]): The set of role names to check.
         log_identity (bool): Whether the refusal line names the user.
@@ -147,8 +186,7 @@ async def _check_has_role(logger: Logger, interaction: Interaction, roles: set[s
     assert isinstance(interaction.user, Member)
     member_role_names = {role.name for role in interaction.user.roles}
     if not member_role_names & roles:
-        who = f"User {interaction.user}" if log_identity else "User"
-        logger.warning(f"{who} doesn't have any of the roles {', '.join(roles)} in the guild {interaction.guild.id}")
+        log_refusal(logger, command_name, interaction, RefusalKind.MISSING_RIGHT, log_identity=log_identity)
         msg = f"Il est requis d'avoir au moins l'un des rôles suivants pour utiliser cette commande : {', '.join(roles)}."
         await interaction.response.send_message(
             msg,
@@ -187,10 +225,13 @@ async def ensure_command_context(
     if enforce_commands_channel and not await _is_in_allowed_channel(logger, interaction):
         return False
 
-    if required_roles is not None and not await _check_has_role(logger, interaction, required_roles, log_identity=log_identity):
-        return False
-
-    return True
+    return required_roles is None or await _check_has_role(
+        logger,
+        command_name,
+        interaction,
+        required_roles,
+        log_identity=log_identity,
+    )
 
 
 def is_valid_emoji(emoji: str) -> bool:

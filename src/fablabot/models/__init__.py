@@ -11,6 +11,7 @@ from fablabot.models.message import (
     MsgReactionEvent,
     TrackedMessage,
 )
+from fablabot.models.user import OpExpiry
 
 __all__ = [
     "ANONYMOUS_ICON_URL",
@@ -22,6 +23,7 @@ __all__ = [
     "MessageDraft",
     "MsgCommand",
     "MsgReactionEvent",
+    "OpExpiry",
     "PublishedMessage",
     "ReactionAction",
     "ReactionEvent",
