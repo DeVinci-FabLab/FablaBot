@@ -176,7 +176,7 @@ class LogManagement(commands.Cog):
         if date:
             dt = _parse_export_date(date)
             if dt is None:
-                logger.warning(f"[log.export] refused kind=invalid_date guild_id={guild.id} user_id={interaction.user.id}")
+                logger.info(f"[log.export] refused kind=malformed_date guild_id={guild.id} user_id={interaction.user.id}")
                 await interaction.response.send_message(
                     "Date invalide. Format attendu : JJ/MM/AAAA (exemple : 28/10/2026).",
                     ephemeral=True,
@@ -187,7 +187,7 @@ class LogManagement(commands.Cog):
 
         file = await file_log_handler.export_logs(guild.id, dt.date())
         day_text = dt.strftime("%d/%m/%Y")
-        logger.info(f"[log.export] guild_id={guild.id} user_id={interaction.user.id} found={file is not None}")
+        logger.info(f"Log export (guild_id={guild.id}, date={dt.date().isoformat()}, found={'yes' if file else 'no'})")
 
         if file is None:
             await interaction.response.send_message(f"Aucun log de ce serveur pour le {day_text}.", ephemeral=True)

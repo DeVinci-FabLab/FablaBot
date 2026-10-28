@@ -91,6 +91,40 @@ async def test_log_export_rejects_bad_date(cog, caplog, bad) -> None:  # noqa: A
     assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
 
 
+@pytest.mark.parametrize(
+    ("typed", "found", "expected"),
+    [
+        ("27/10/2026", True, "Log export (guild_id=1234, date=2026-10-27, found=yes)"),
+        ("01/01/2020", False, "Log export (guild_id=1234, date=2020-01-01, found=no)"),
+    ],
+)
+async def test_log_export_logs_server_date_and_outcome(cog, handler, caplog, typed, found, expected) -> None:  # noqa: ANN001
+    if found:
+        path = handler.guild_log_path(1234, date(2026, 10, 27))
+        path.parent.mkdir(parents=True)
+        path.write_text("line\n", encoding="utf-8")
+
+    with caplog.at_level(logging.DEBUG):
+        await LogManagement.log_export.callback(cog, make_interaction(), date=typed)
+
+    records = [r for r in caplog.records if r.getMessage() == expected]
+    assert len(records) == 1
+    assert records[0].levelno == logging.INFO
+
+
+async def test_log_export_refusal_logs_malformed_date_at_info(cog, caplog) -> None:  # noqa: ANN001
+    interaction = make_interaction(user_id=418003123456789012, guild_id=1234)
+
+    with caplog.at_level(logging.DEBUG):
+        await LogManagement.log_export.callback(cog, interaction, date="hier\nforged")
+
+    expected = "[log.export] refused kind=malformed_date guild_id=1234 user_id=418003123456789012"
+    records = [r for r in caplog.records if r.getMessage() == expected]
+    assert len(records) == 1
+    assert records[0].levelno == logging.INFO
+    assert "forged" not in caplog.text
+
+
 async def test_log_help_shows_accepted_date_format(cog) -> None:  # noqa: ANN001
     interaction = make_interaction()
 
