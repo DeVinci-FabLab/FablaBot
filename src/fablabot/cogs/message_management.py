@@ -164,11 +164,12 @@ class MessageManagement(commands.Cog):
             await interaction.response.send_message(ErrorMessages.NO_PERMISSION_MANAGE_MESSAGES, ephemeral=True)
             return
 
-        from fablabot.guild_config import get_commands_channel_id, get_log_channel_id
+        from fablabot.guild_config import get_commands_channel_id
+        from fablabot.helpers.log_channels import is_log_channel
 
         if (
             interaction.channel.name.endswith("_bot")
-            or get_log_channel_id() == interaction.channel.id
+            or is_log_channel(interaction.guild.id, interaction.channel.id)
             or get_commands_channel_id(interaction.guild.id) == interaction.channel.id
         ):
             logger.warning(f"Attempt to clear {interaction.channel.name} channel")

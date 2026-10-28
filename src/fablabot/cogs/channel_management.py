@@ -438,12 +438,13 @@ class ChannelManagement(commands.Cog):
             logger.debug(f"Message {msg.id} deleted wasn't sent by a bot, ignoring")
             return
 
-        from fablabot.guild_config import get_commands_channel_id, get_log_channel_id
+        from fablabot.guild_config import get_commands_channel_id
+        from fablabot.helpers.log_channels import is_log_channel
 
         assert msg.guild is not None
         if (
             not msg.channel.name.endswith("_bot")
-            and get_log_channel_id() != msg.channel.id
+            and not is_log_channel(msg.guild.id, msg.channel.id)
             and get_commands_channel_id(msg.guild.id) != msg.channel.id
         ):
             return
@@ -482,11 +483,12 @@ class ChannelManagement(commands.Cog):
         if not isinstance(channel, TextChannel):
             return
 
-        from fablabot.guild_config import get_commands_channel_id, get_log_channel_id
+        from fablabot.guild_config import get_commands_channel_id
+        from fablabot.helpers.log_channels import is_log_channel
 
         if (
             not channel.name.endswith("_bot")
-            and get_log_channel_id() != channel.id
+            and not is_log_channel(guild.id, channel.id)
             and get_commands_channel_id(guild.id) != channel.id
         ):
             return

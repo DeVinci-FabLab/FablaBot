@@ -7,7 +7,7 @@ from typing import override
 from discord import File, TextChannel
 from discord.ext import commands
 
-from fablabot.guild_config import get_log_channel_id
+from fablabot.guild_config import get_legacy_log_channel_id
 from fablabot.helpers.constants import MAX_MSG_CHARS
 
 _CLEAR = "\u001b[0m"
@@ -28,7 +28,7 @@ class DiscordLogHandler(logging.Handler):
         """
         super().__init__()
         self.bot = bot
-        self.log_channel_id = get_log_channel_id() or 0
+        self.log_channel_id = get_legacy_log_channel_id() or 0
         # ANSI escape code formatter for colored log output in Discord
         ansi_log_format = (
             f"{_RED}[%(levelname)s]{_CLEAR} {_CYAN}{_UNDERLINE}%(module)s.%(funcName)s{_CLEAR}{_CYAN}:{_CLEAR} %(message)s"

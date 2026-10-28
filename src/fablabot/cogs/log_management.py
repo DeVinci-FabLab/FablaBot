@@ -6,14 +6,14 @@ from datetime import datetime
 import logging
 from warnings import deprecated
 
-from discord import Interaction, TextChannel, app_commands
+from discord import Interaction, TextChannel, abc, app_commands
 from discord.ext import commands
 
-from fablabot.guild_config import set_log_channel_id
+from fablabot.guild_config import get_log_channel_id, migrate_legacy_log_channel, set_log_channel_id
 from fablabot.helpers.constants import ADMIN_ROLES, PARIS_TZ, RoleNames
 from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.utils import ensure_command_context, format_channel_mention
-from fablabot.logging_handlers import DailyFileHandler, DiscordLogHandler
+from fablabot.logging_handlers import DailyFileHandler
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,23 @@ class LogManagement(commands.Cog):
         self.bot = bot
         logger.info("LogManagement initialized")
 
+    def _guild_of_channel(self, channel_id: int) -> int | None:
+        """Resolve a channel ID to the ID of its guild through the bot cache.
+
+        Args:
+            channel_id (int): The channel to look up.
+
+        Returns:
+            int | None: The guild ID, or None when the channel is not a cached guild channel.
+        """
+        channel = self.bot.get_channel(channel_id)
+        return channel.guild.id if isinstance(channel, abc.GuildChannel) else None
+
+    @commands.Cog.listener()
+    async def on_ready(self) -> None:
+        """Give the legacy instance-wide log channel to the server that owns it."""
+        migrate_legacy_log_channel(self._guild_of_channel)
+
     # region ====== Log Slash Commands Group ======
     log_group = app_commands.Group(name="log", description="Configuration des logs du bot")
 
@@ -73,7 +90,7 @@ class LogManagement(commands.Cog):
             "Commandes de gestion des logs",
             "log",
             [
-                ("set <channel>", "Configurer le salon recevant les logs du bot"),
+                ("set <channel>", "Configurer le salon recevant les erreurs du bot sur ce serveur"),
                 ("export [date]", "Exporter les logs du jour ou d'une date donnée (format JJ/MM/AAAA)"),
             ],
         )
@@ -81,7 +98,7 @@ class LogManagement(commands.Cog):
 
     @log_group.command(
         name="set",
-        description="Configure le salon recevant les logs du bot en cas d'erreur.",
+        description="Configure le salon recevant les erreurs du bot sur ce serveur.",
     )
     @app_commands.describe(channel="Salon textuel qui recevra les logs du bot.")
     async def log_set(self, interaction: Interaction, *, channel: TextChannel) -> None:
@@ -95,36 +112,27 @@ class LogManagement(commands.Cog):
             logger,
             "log.set",
             interaction,
-            log_details={"channel": channel.name, "channel_id": channel.id},
+            log_details={"channel_id": channel.id},
             required_roles=ADMIN_ROLES,
         ):
             return
 
-        discord_log_handler = getattr(self.bot, "discord_log_handler", None)
-        if not isinstance(discord_log_handler, DiscordLogHandler):
-            logger.error("DiscordLogHandler is not initialized on the bot.")
-            await interaction.response.send_message(
-                "Le gestionnaire de logs n'est pas initialisé sur ce bot.",
-                ephemeral=True,
-            )
-            return
-
-        previous_id = discord_log_handler.log_channel_id
-        if previous_id == channel.id:
-            await interaction.response.send_message(
-                f"{channel.mention} est déjà configuré comme salon de logs.",
-                ephemeral=True,
-            )
+        assert interaction.guild is not None
+        guild = interaction.guild
+        if channel.guild.id != guild.id:
+            logger.warning(f"[log.set] refused kind=other_guild_channel guild_id={guild.id} user_id={interaction.user.id}")
+            await interaction.response.send_message("Ce salon n'appartient pas à ce serveur.", ephemeral=True)
             return
 
         previous_channel: TextChannel | None = None
-        maybe_previous = self.bot.get_channel(previous_id)
-        if isinstance(maybe_previous, TextChannel):
-            previous_channel = maybe_previous
+        previous_id = get_log_channel_id(guild.id)
+        if previous_id is not None:
+            maybe_previous = guild.get_channel(previous_id)
+            if isinstance(maybe_previous, TextChannel):
+                previous_channel = maybe_previous
 
-        discord_log_handler.set_log_channel(channel)
-        set_log_channel_id(channel.id)
-        logger.info(msg=f"Log channel set to {channel} (id={channel.id}) by {interaction.user} (id={interaction.user.id})")
+        set_log_channel_id(guild.id, channel.id)
+        logger.info(f"Log channel set (guild_id={guild.id}, channel_id={channel.id}, user_id={interaction.user.id})")
 
         confirmation = f"Les logs seront désormais envoyés dans {format_channel_mention(channel)}."
         if previous_channel is not None:
