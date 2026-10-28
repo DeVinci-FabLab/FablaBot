@@ -487,7 +487,8 @@ class UserManagement(commands.Cog):
         if expiry is None or expiry.expires_at > _utcnow():
             return
         guild = self.bot.get_guild(guild_id)
-        if guild is None:
+        if guild is None or guild.unavailable or not guild.chunked:
+            # A guild still loading has no roles or members yet: a missing one would read as "gone".
             logger.warning(f"Guild unreachable at op expiry guild_id={guild_id} member_id={member_id}; record kept")
             return
         admin_role = get(guild.roles, name=RoleNames.ADMIN_TEMP)

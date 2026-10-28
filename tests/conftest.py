@@ -131,6 +131,7 @@ def make_guild(guild_id: int, roles: list[MagicMock], members: list[MagicMock], 
     guild = MagicMock(spec=Guild)
     guild.id = guild_id
     guild.unavailable = False
+    guild.chunked = True
     guild.roles = roles
     guild.members = members
     guild.get_member = lambda member_id: next((m for m in members if m.id == member_id), None)

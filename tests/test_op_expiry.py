@@ -226,3 +226,27 @@ async def test_timer_that_wakes_before_the_clock_is_due_waits_again(cog: UserMan
     assert len(sleeps) == 2
     target.remove_roles.assert_awaited_once()
     assert str(TARGET_ID) not in _saved().get(str(GUILD_A), {})
+
+
+@pytest.mark.parametrize("state", ["unavailable", "not_chunked"])
+async def test_expiry_keeps_record_while_the_guild_is_not_ready(
+    cog: UserManagement, caplog: pytest.LogCaptureFixture, state: str
+) -> None:
+    guild, target, caller = _server(GUILD_A)
+    await _op(cog, guild, caller, target, 31)
+    target.roles.append(guild.roles[0])
+    if state == "unavailable":
+        stub = make_guild(GUILD_A, [], [])
+        stub.unavailable = True
+    else:
+        stub = make_guild(GUILD_A, list(guild.roles), [])
+        stub.chunked = False
+    cog.bot.get_guild = MagicMock(return_value=stub)
+
+    with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=31)):
+        await cog._expire(GUILD_A, TARGET_ID)  # noqa: SLF001
+
+    assert str(TARGET_ID) in _saved()[str(GUILD_A)]
+    target.remove_roles.assert_not_awaited()
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any(f"guild_id={GUILD_A}" in m and f"member_id={TARGET_ID}" in m and "record kept" in m for m in warnings)
