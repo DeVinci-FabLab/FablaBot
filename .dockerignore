@@ -1,0 +1,8 @@
+# Allow-list: a new local file stays out of the image unless listed here.
+*
+!src
+!pyproject.toml
+!uv.lock
+!README.md
+# Compiled caches from the host add nothing to the image.
+**/__pycache__
