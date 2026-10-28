@@ -37,8 +37,14 @@ async def _run_flow(caplog: pytest.LogCaptureFixture, *, anonymous: bool, send_e
     await MessageManagement.suggest.callback(cog, interaction)
 
     view = SuggestionView(cog)
-    view.selected_recipient = key
-    view.anonymous = anonymous
+    view.recipient_select._values = [key]  # noqa: SLF001 - discord.py exposes no public setter for a select choice
+    await view.recipient_select.callback(interaction)
+    # Anonymous takes one click; signed takes two, so the toggle callback runs in both cases.
+    await view.anonymity_button.callback(interaction)
+    if not anonymous:
+        await view.anonymity_button.callback(interaction)
+    assert view.selected_recipient == key
+    assert view.anonymous is anonymous
     interaction.message = MagicMock()
     await view.open_modal_button.callback(interaction)
     modal = interaction.response.send_modal.call_args.args[0]
