@@ -45,6 +45,8 @@ _ADD_REFUSALS = {
     RefusalKind.SELF_TARGET: _SELF_ADD_REFUSED,
 }
 _REMOVE_REFUSALS = {RefusalKind.MISSING_RIGHT: ErrorMessages.NO_PERMISSION_REMOVE_ROLE}
+# Same audience as the other staff tools (/msg): the member lists it shows are personal data.
+_WITH_ROLES_ALLOWED = ADMIN_ROLES | {RoleNames.BUREAU}
 
 
 def _utcnow() -> datetime:
@@ -357,18 +359,21 @@ class UserManagement(commands.Cog):
             return
 
         assert isinstance(interaction.user, Member)
-        if not self._can_assign_role(interaction.user, role):
-            logger.warning(f"Unauthorized add_roles by {interaction.user}")
-            await interaction.response.send_message(
-                ErrorMessages.NO_PERMISSION_ADD_ROLE,
-                ephemeral=True,
-            )
+        kind = self.assignment_refusal(interaction.user, None, role, action="add")
+        if kind is not None:
+            await self._refuse(interaction, "user.add_roles", kind, _ADD_REFUSALS[kind])
             return
 
         await interaction.response.defer(thinking=True)
         followup_mes = await interaction.followup.send("Sélection des membres en cours...", wait=True)
 
-        view = uui.BulkRoleAssignmentView(role, interaction.user, followup_mes.id, action="add")
+        view = uui.BulkRoleAssignmentView(
+            role,
+            interaction.user,
+            followup_mes.id,
+            action="add",
+            check=lambda actor, target: self.assignment_refusal(actor, target, role, action="add"),
+        )
         await interaction.followup.send(
             f"Sélectionnez les membres à qui ajouter {escape_md(role.name)} puis cliquez sur **Confirmer**.",
             view=view,
@@ -391,18 +396,21 @@ class UserManagement(commands.Cog):
             return
 
         assert isinstance(interaction.user, Member)
-        if not self._can_assign_role(interaction.user, role):
-            logger.warning(f"Unauthorized remove_roles by {interaction.user}")
-            await interaction.response.send_message(
-                ErrorMessages.NO_PERMISSION_REMOVE_ROLE,
-                ephemeral=True,
-            )
+        kind = self.assignment_refusal(interaction.user, None, role, action="remove")
+        if kind is not None:
+            await self._refuse(interaction, "user.remove_roles", kind, _REMOVE_REFUSALS[kind])
             return
 
         await interaction.response.defer(thinking=True)
         followup_mes = await interaction.followup.send("Sélection des membres en cours...", wait=True)
 
-        view = uui.BulkRoleAssignmentView(role, interaction.user, followup_mes.id, action="remove")
+        view = uui.BulkRoleAssignmentView(
+            role,
+            interaction.user,
+            followup_mes.id,
+            action="remove",
+            check=lambda actor, target: self.assignment_refusal(actor, target, role, action="remove"),
+        )
         await interaction.followup.send(
             f"Sélectionnez les membres à qui retirer {escape_md(role.name)} puis cliquez sur **Confirmer**.",
             view=view,
@@ -419,14 +427,11 @@ class UserManagement(commands.Cog):
         Args:
             interaction (Interaction): The Discord interaction context.
         """
-        if not await ensure_command_context(logger, "user.with_roles", interaction):
+        if not await ensure_command_context(logger, "user.with_roles", interaction, required_roles=_WITH_ROLES_ALLOWED):
             return
 
-        await interaction.response.defer(thinking=True)
-        followup_mes = await interaction.followup.send("Sélection des rôles en cours...", wait=True)
-
-        view = uui.MultiRoleSelectorView(followup_mes.id)
-        await interaction.followup.send(
+        view = uui.MultiRoleSelectorView(check=lambda actor: bool({r.name for r in actor.roles} & _WITH_ROLES_ALLOWED))
+        await interaction.response.send_message(
             "Sélectionnez les rôles que vous recherchez puis cliquez sur **Confirmer**.",
             view=view,
             ephemeral=True,
