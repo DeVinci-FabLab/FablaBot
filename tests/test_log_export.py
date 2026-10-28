@@ -98,7 +98,8 @@ async def test_log_export_rejects_bad_date(cog, caplog, bad) -> None:  # noqa: A
         ("01/01/2020", False, "Log export (guild_id=1234, date=2020-01-01, found=no)"),
     ],
 )
-async def test_log_export_logs_server_date_and_outcome(cog, handler, caplog, typed, found, expected) -> None:  # noqa: ANN001
+async def test_log_export_logs_server_date_and_outcome(cog, handler, caplog, typed, found, expected) -> None:
+    """The export logs the server, the parsed date and whether a file was found, at INFO."""
     if found:
         path = handler.guild_log_path(1234, date(2026, 10, 27))
         path.parent.mkdir(parents=True)
@@ -112,7 +113,8 @@ async def test_log_export_logs_server_date_and_outcome(cog, handler, caplog, typ
     assert records[0].levelno == logging.INFO
 
 
-async def test_log_export_refusal_logs_malformed_date_at_info(cog, caplog) -> None:  # noqa: ANN001
+async def test_log_export_refusal_logs_malformed_date_at_info(cog, caplog) -> None:
+    """A malformed date is refused with an INFO line that holds IDs only, never the typed text."""
     interaction = make_interaction(user_id=418003123456789012, guild_id=1234)
 
     with caplog.at_level(logging.DEBUG):
