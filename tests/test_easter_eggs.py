@@ -31,11 +31,7 @@ REMOVED_WORDS = [
 SRC = Path(message_management.__file__).parent.parent
 
 
-# The guild the old handler was pinned to: removed words must stay silent even there.
-FORMER_GUILD_ID = 1073721836782755862
-
-
-def make_message(content: str, guild_id: int = FORMER_GUILD_ID) -> MagicMock:
+def make_message(content: str, guild_id: int = 987654321) -> MagicMock:
     msg = MagicMock(spec=Message)
     msg.content = content
     msg.author = MagicMock(spec=Member)
@@ -66,15 +62,7 @@ async def test_removed_words_get_no_reply(cog: MessageManagement, content: str) 
     msg.add_reaction.assert_not_called()
 
 
-async def test_remaining_easter_egg_still_replies(cog: MessageManagement) -> None:
-    msg = make_message("ce n'est pas sorcier")
-
-    await cog.on_message(msg)
-
-    msg.channel.send.assert_awaited_once()
-
-
-async def test_handler_does_not_gate_on_a_fixed_guild(cog: MessageManagement) -> None:
+async def test_remaining_easter_egg_replies_on_any_guild(cog: MessageManagement) -> None:
     msg = make_message("ce n'est pas sorcier", guild_id=987654321)
 
     await cog.on_message(msg)
