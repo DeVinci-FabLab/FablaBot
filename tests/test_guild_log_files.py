@@ -157,3 +157,14 @@ async def test_export_end_to_end_guild_b_never_gets_guild_a_lines() -> None:
     assert "line-of-b" in content
     assert "secret-of-a" not in content
     assert Path("logs", "guilds", str(GUILD_A)).exists()
+
+
+def test_unencodable_guild_line_does_not_raise_to_the_caller(handler, probe) -> None:
+    """A record that cannot be written to the guild file is reported by the handler, never raised to the caller."""
+    probe.handlers[:] = [handler]  # pytest's capture handler re-raises handler errors by design
+    with guild_log_context(GUILD_A):
+        probe.info("name=\ud800")
+        probe.info("%s %s", "a")
+        probe.info("still-logged")
+
+    assert "still-logged" in handler.guild_log_path(GUILD_A, _today()).read_text(encoding="utf-8")

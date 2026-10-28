@@ -70,7 +70,9 @@ class DailyFileHandler(logging.FileHandler):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 with path.open("a", encoding="utf-8") as guild_file:
                     guild_file.write(self.format(record) + self.terminator)
-            except OSError:
+            except RecursionError:
+                raise
+            except Exception:  # logging must never raise to its caller
                 self.handleError(record)
 
     def guild_log_path(self, guild_id: int, day: date) -> Path:
