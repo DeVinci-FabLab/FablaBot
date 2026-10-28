@@ -18,6 +18,21 @@ from fablabot.logging_handlers import DailyFileHandler, DiscordLogHandler
 logger = logging.getLogger(__name__)
 
 
+def _parse_export_date(raw: str) -> datetime | None:
+    """Parse a date typed as DD/MM/YYYY.
+
+    Args:
+        raw (str): The date as typed by the user.
+
+    Returns:
+        datetime | None: The date at midnight in Paris time, or None if it is malformed.
+    """
+    try:
+        return datetime.strptime(raw, "%d/%m/%Y").replace(tzinfo=PARIS_TZ)
+    except ValueError:
+        return None
+
+
 class LogManagement(commands.Cog):
     """Cog to register log management commands.
 
@@ -59,7 +74,7 @@ class LogManagement(commands.Cog):
             "log",
             [
                 ("set <channel>", "Configurer le salon recevant les logs du bot"),
-                ("export [date]", "Exporter les logs du jour ou d'une date donnée (format YYYY-MM-DD)"),
+                ("export [date]", "Exporter les logs du jour ou d'une date donnée (format JJ/MM/AAAA)"),
             ],
         )
         await interaction.response.send_message(help_message, ephemeral=not show)
@@ -121,7 +136,7 @@ class LogManagement(commands.Cog):
         description="Exporte les logs récents.",
     )
     @app_commands.describe(
-        date="Date des logs à exporter (format : DD/MM/YYYY). Si non spécifié, les logs d'aujourd'hui seront exportés.",
+        date="Date des logs à exporter (format : JJ/MM/AAAA). Si non spécifié, les logs d'aujourd'hui seront exportés.",
     )
     async def log_export(self, interaction: Interaction, *, date: str | None = None) -> None:
         """Export recent logs.
@@ -149,8 +164,14 @@ class LogManagement(commands.Cog):
             return
 
         if date:
-            d, m, y = map(int, date.split("/"))
-            dt = datetime(y, m, d, tzinfo=PARIS_TZ)
+            parsed = _parse_export_date(date)
+            if parsed is None:
+                await interaction.response.send_message(
+                    "Date invalide. Format attendu : JJ/MM/AAAA (exemple : 28/10/2026).",
+                    ephemeral=True,
+                )
+                return
+            dt = parsed
         else:
             dt = datetime.now(tz=PARIS_TZ)
 
@@ -167,6 +188,7 @@ class LogManagement(commands.Cog):
         await interaction.response.send_message(
             f"Voici les logs du {dt.strftime('%d/%m/%Y')} :",
             file=file,
+            ephemeral=True,
         )
 
     # endregion Log Slash Commands Group
