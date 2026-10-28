@@ -59,7 +59,7 @@ async def _confirm_bulk(server: Server, view: object, *members: MagicMock) -> Ma
     return click
 
 
-# -- Bulk assignment (E4, E5, E6) --
+# -- Bulk assignment --
 
 
 async def test_bulk_add_refuses_temp_role_at_command(caplog: pytest.LogCaptureFixture) -> None:
@@ -114,7 +114,7 @@ async def test_bulk_confirm_after_losing_rights_changes_nothing(caplog: pytest.L
     assert lines == [f"[user.add_roles] refused kind=right_lost_before_confirm guild_id={GUILD_ID} user_id={CALLER_ID}"]
 
 
-# -- Role search (E6, E7, E8) --
+# -- Role search --
 
 
 @pytest.mark.parametrize("roles", [(), (RoleNames.ADMIN_TEMP,), ("F - Laser",)], ids=["none", "temp-only", "trainer"])

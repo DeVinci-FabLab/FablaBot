@@ -86,7 +86,7 @@ async def _op(cog: UserManagement, server: Server, member: MagicMock, minutes: i
     return interaction
 
 
-# -- Temporary role alone gives nothing here (E2) --
+# -- Temporary role alone gives nothing here --
 
 
 @pytest.mark.parametrize(
@@ -133,7 +133,7 @@ async def test_temp_admin_only_deop_leaves_expiry_untouched(cog: UserManagement)
     assert (GUILD_ID, TARGET_ID) in cog.deop_tasks
 
 
-# -- The temporary role is given by op only (E4) --
+# -- The temporary role is given by op only --
 
 
 async def test_add_role_refuses_temp_role_and_points_to_op(cog: UserManagement, caplog: pytest.LogCaptureFixture) -> None:
@@ -148,7 +148,7 @@ async def test_add_role_refuses_temp_role_and_points_to_op(cog: UserManagement, 
     assert any("kind=temp_role_outside_op" in line for line in _refusal_lines(caplog))
 
 
-# -- No self-grant (E5, D2 = A) --
+# -- No self-grant --
 
 
 async def test_add_role_to_self_is_refused(cog: UserManagement, caplog: pytest.LogCaptureFixture) -> None:
@@ -190,7 +190,7 @@ async def test_deop_self_is_allowed(cog: UserManagement) -> None:
     server.caller.remove_roles.assert_awaited_once()
 
 
-# -- Other roles keep their rights while opped (E3) --
+# -- Other roles keep their rights while opped --
 
 
 async def test_opped_trainings_manager_still_gives_trainer_roles(cog: UserManagement) -> None:
@@ -202,7 +202,7 @@ async def test_opped_trainings_manager_still_gives_trainer_roles(cog: UserManage
     server.target.add_roles.assert_awaited_once()
 
 
-# -- Refusal lines (E9) --
+# -- Refusal lines --
 
 
 async def test_refusal_lines_carry_ids_but_no_name(cog: UserManagement, caplog: pytest.LogCaptureFixture) -> None:
@@ -216,7 +216,7 @@ async def test_refusal_lines_carry_ids_but_no_name(cog: UserManagement, caplog: 
     assert all(CALLER_NAME not in r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING)
 
 
-# -- Help (E23) --
+# -- Help --
 
 
 async def test_help_explains_op_scope_and_self_rule(cog: UserManagement) -> None:
