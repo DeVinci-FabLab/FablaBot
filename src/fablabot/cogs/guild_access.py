@@ -26,6 +26,8 @@ class GuildAccess(commands.Cog):
             bot (Fablabot): The bot carrying the access policy.
         """
         self.bot = bot
+        # Guilds present at the first ready predate this process; later ones went through the join rule.
+        self._first_ready_done = False
 
     async def _owner_owns(self, guild: discord.Guild) -> bool:
         """Tell whether the application owner (or a team admin or developer) owns the guild.
@@ -74,10 +76,23 @@ class GuildAccess(commands.Cog):
         if policy.allowed:
             if guild.id not in policy.allowed:
                 await self._leave(guild, "not_allowed")
-        elif await self._owner_owns(guild):
-            policy.tolerated.add(guild.id)
         else:
-            await self._leave(guild, "owner_not_proven")
+            await self._admit_or_leave(guild)
+
+    async def _admit_or_leave(self, guild: discord.Guild) -> bool:
+        """Apply the empty-list join rule: keep a guild owned by the application owner, else leave.
+
+        Args:
+            guild (discord.Guild): The guild to decide on.
+
+        Returns:
+            bool: True when the guild is left.
+        """
+        if await self._owner_owns(guild):
+            self.bot.guild_access.tolerated.add(guild.id)
+            return False
+        await self._leave(guild, "owner_not_proven")
+        return True
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
@@ -92,11 +107,16 @@ class GuildAccess(commands.Cog):
                 "set it to the guild IDs this instance serves.",
             )
             for guild in guilds:
-                policy.tolerated.add(guild.id)
-                if not await self._owner_owns(guild):
-                    logger.warning(
-                        f"Staying in guild without proof of ownership: allow-list empty (guild_id={guild.id})",
-                    )
+                if not self._first_ready_done:
+                    # Only at start: ready also fires after a reconnect, and a guild refused since
+                    # (failed leave, or joined while disconnected) must not become served then.
+                    policy.tolerated.add(guild.id)
+                    if not await self._owner_owns(guild):
+                        logger.warning(
+                            f"Staying in guild without proof of ownership: allow-list empty (guild_id={guild.id})",
+                        )
+                elif guild.id not in policy.tolerated and await self._admit_or_leave(guild):
+                    leaving += 1
         elif guilds and not any(guild.id in policy.allowed for guild in guilds):
             # A list matching nothing is more likely a typo than a wish to leave everywhere, and a
             # departure is costly to undo: commands stay refused by the tree.
@@ -110,4 +130,5 @@ class GuildAccess(commands.Cog):
             for guild in unlisted:
                 await self._leave(guild, "not_allowed")
 
+        self._first_ready_done = True
         logger.info(f"Guild allow-list: {len(policy.allowed)} IDs listed, in {len(guilds)} guilds, leaving {leaving}.")

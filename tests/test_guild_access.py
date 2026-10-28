@@ -328,6 +328,44 @@ async def test_ready_again_reconciles_new_guild() -> None:
     late.leave.assert_awaited_once()
 
 
+async def test_ready_again_empty_list_leaves_unproven_new_guild() -> None:
+    """With an empty list, a later ready leaves a new guild whose owner is not proven."""
+    owned = _guild(LISTED, owner_id=OWNER_ID)
+    cog = _cog(set(), [owned])
+    await cog.on_ready()
+    late = _guild(UNLISTED)
+    cog.bot.guilds.append(late)
+    await cog.on_ready()
+    late.leave.assert_awaited_once()
+    owned.leave.assert_not_awaited()
+    assert cog.bot.guild_access.is_served(LISTED)
+    assert not cog.bot.guild_access.is_served(UNLISTED)
+
+
+async def test_ready_again_empty_list_keeps_new_owned_guild() -> None:
+    """With an empty list, a later ready serves a new guild owned by the application owner."""
+    cog = _cog(set(), [_guild(LISTED)])
+    await cog.on_ready()
+    late = _guild(UNLISTED, owner_id=OWNER_ID)
+    cog.bot.guilds.append(late)
+    await cog.on_ready()
+    late.leave.assert_not_awaited()
+    assert cog.bot.guild_access.is_served(UNLISTED)
+
+
+async def test_ready_again_empty_list_retries_failed_leave() -> None:
+    """A guild refused on join but not left is not served by a later ready, and the leave is retried."""
+    cog = _cog(set())
+    await cog.on_ready()
+    stuck = _guild(UNLISTED)
+    stuck.leave.side_effect = discord.HTTPException(MagicMock(status=500), "x")
+    await cog.on_guild_join(stuck)
+    cog.bot.guilds.append(stuck)
+    await cog.on_ready()
+    assert stuck.leave.await_count == 2
+    assert not cog.bot.guild_access.is_served(UNLISTED)
+
+
 async def test_setup_hook_loads_guild_access(fablabot_main: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
     """The real setup hook loads the access cog with both listeners."""
     monkeypatch.setenv(ALLOWED_GUILD_IDS_ENV, str(LISTED))
