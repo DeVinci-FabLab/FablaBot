@@ -59,7 +59,7 @@ To copy a server ID, enable Developer Mode in Discord (User Settings, Advanced),
 
 Each server picks its log channel with `/log set` and receives its own errors only.
 
-`OPERATOR_LOG_CHANNEL_ID` holds one channel ID and receives the errors that belong to no server:
+`OPERATOR_LOG_CHANNEL_ID` holds one channel ID and receives the errors that belong to no server. Pick a channel only the bot's administrators can read: those errors come from every server's tasks.
 
 ```bash
 OPERATOR_LOG_CHANNEL_ID=888888888888888888
