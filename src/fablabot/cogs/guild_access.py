@@ -73,6 +73,8 @@ class GuildAccess(commands.Cog):
             guild (discord.Guild): The guild the bot joined.
         """
         policy = self.bot.guild_access
+        # A fresh join starts over: a guild tolerated at start and re-added since is judged again.
+        policy.tolerated.discard(guild.id)
         if policy.allowed:
             if guild.id not in policy.allowed:
                 await self._leave(guild, "not_allowed")

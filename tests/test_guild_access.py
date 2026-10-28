@@ -366,6 +366,17 @@ async def test_ready_again_empty_list_retries_failed_leave() -> None:
     assert not cog.bot.guild_access.is_served(UNLISTED)
 
 
+async def test_join_empty_list_forgets_tolerated_guild_when_leave_fails() -> None:
+    """A guild tolerated at start and re-added by a stranger is not served when the leave fails."""
+    guild = _guild(UNLISTED)
+    cog = _cog(set(), [guild])
+    await cog.on_ready()
+    assert cog.bot.guild_access.is_served(UNLISTED)
+    guild.leave.side_effect = discord.HTTPException(MagicMock(status=500), "x")
+    await cog.on_guild_join(guild)
+    assert not cog.bot.guild_access.is_served(UNLISTED)
+
+
 async def test_setup_hook_loads_guild_access(fablabot_main: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
     """The real setup hook loads the access cog with both listeners."""
     monkeypatch.setenv(ALLOWED_GUILD_IDS_ENV, str(LISTED))
