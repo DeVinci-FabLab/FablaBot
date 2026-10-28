@@ -72,6 +72,10 @@ class UserManagement(commands.Cog):
         self.bot = bot
         self.deop_tasks: dict[tuple[int, int], asyncio.Task[None]] = {}
         self._op_store = JsonStateStore(logger, OP_STATE_FILE)
+        if not isinstance(self._op_store.state, dict):
+            # Fail closed: with no readable expiry, every holder is removed at start.
+            logger.error(f"Op expiry state in {OP_STATE_FILE} is not a mapping; ignored")
+            self._op_store.state = {}
         """state structure: ``{"<guild_id>": {"<member_id>": {"expires_at": iso8601 with offset, "channel_id": int}}}``"""
         logger.info("UserManagement initialized")
 
@@ -421,6 +425,51 @@ class UserManagement(commands.Cog):
     # region ====== Helpers ======
     # -- Scheduling --
 
+    @commands.Cog.listener()
+    async def on_ready(self) -> None:
+        """Replay recorded op expiries on every guild the bot sees.
+
+        Discord sends ``on_ready`` again after some reconnects, so this is idempotent: a running
+        timer is kept, a record is never duplicated. Unavailable guilds keep their records.
+        """
+        for guild in self.bot.guilds:
+            if not guild.unavailable:
+                await self._reconcile_guild(guild)
+
+    async def _reconcile_guild(self, guild: Guild) -> None:
+        """Remove the temporary role from holders with no future expiry, arm the others, drop stale records."""
+        admin_role = get(guild.roles, name=RoleNames.ADMIN_TEMP)
+        if admin_role is None:
+            return
+        holders = {member.id: member for member in admin_role.members}
+        for member in holders.values():
+            expiry = self._load_op(guild.id, member.id)
+            if expiry is not None and expiry.expires_at > _utcnow():
+                task = self.deop_tasks.get((guild.id, member.id))
+                if task is None or task.done():
+                    self._arm_deop(guild.id, member.id, expiry.expires_at)
+                continue
+            cause = "no recorded expiry" if expiry is None else "expiry passed"
+            success, _error = await safe_remove_roles(
+                logger,
+                member,
+                admin_role,
+                reason=f"Temporary admin role removed at bot start: {cause}",
+            )
+            if not success:
+                logger.error(f"Failed to remove temporary admin role at start guild_id={guild.id} member_id={member.id}")
+                continue
+            logger.warning(f"Removed temporary admin role at start ({cause}) guild_id={guild.id} member_id={member.id}")
+            self._clear_op(guild.id, member.id)
+
+        entries = self._op_store.state.get(str(guild.id))
+        if isinstance(entries, dict):
+            for key in [k for k in entries if not k.isdigit() or int(k) not in holders]:
+                entries.pop(key)
+            if not entries:
+                self._op_store.state.pop(str(guild.id))
+            self._op_store.save()
+
     def _record_op(self, guild_id: int, member_id: int, expiry: OpExpiry) -> None:
         """Persist the expiry of a member's op on one guild, replacing any previous one."""
         self._op_store.ensure_guild(guild_id)[str(member_id)] = expiry.to_dict()
@@ -443,7 +492,10 @@ class UserManagement(commands.Cog):
             OpExpiry | None: The expiry, or None when absent or unreadable (logged as an error).
         """
         entries = self._op_store.state.get(str(guild_id))
-        raw = entries.get(str(member_id)) if isinstance(entries, dict) else None
+        if entries is not None and not isinstance(entries, dict):
+            logger.error(f"Unreadable op expiries for guild_id={guild_id}; treated as absent")
+            return None
+        raw = entries.get(str(member_id)) if entries else None
         if raw is None:
             return None
         try:
