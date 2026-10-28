@@ -229,3 +229,18 @@ async def test_start_with_partial_member_cache_ends_a_past_op_of_a_member_the_ca
     assert str(GUILD_ID) not in _saved() or "999" not in _saved()[str(GUILD_ID)]
     _stop(cog)
 
+
+async def test_guild_back_from_an_outage_is_reconciled() -> None:
+    due = NOW + timedelta(minutes=12)
+    _write_state(_record(GUILD_ID, HOLDER_ID, due))
+    guild, holder, _temp = _holder_guild()
+    guild.unavailable = True
+    cog = await _start(guild)
+    assert not cog.deop_tasks
+
+    guild.unavailable = False
+    await cog.on_guild_available(guild)
+
+    assert (GUILD_ID, HOLDER_ID) in cog.deop_tasks
+    holder.remove_roles.assert_not_awaited()
+    _stop(cog)

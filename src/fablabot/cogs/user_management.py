@@ -436,6 +436,11 @@ class UserManagement(commands.Cog):
             if not guild.unavailable:
                 await self._reconcile_guild(guild)
 
+    @commands.Cog.listener()
+    async def on_guild_available(self, guild: Guild) -> None:
+        """Reconcile a guild that comes back from an outage, or reaches the bot after ``on_ready``."""
+        await self._reconcile_guild(guild)
+
     async def _reconcile_guild(self, guild: Guild) -> None:
         """Remove the temporary role from holders with no future expiry, arm the others, drop stale records."""
         admin_role = get(guild.roles, name=RoleNames.ADMIN_TEMP)
