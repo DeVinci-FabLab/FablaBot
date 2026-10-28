@@ -47,9 +47,7 @@ def _make_tree(policy: GuildAccessPolicy) -> GuildAccessTree:
     return GuildAccessTree(client)
 
 
-def _interaction(
-    guild_id: int | None, kind: InteractionType = InteractionType.application_command
-) -> MagicMock:
+def _interaction(guild_id: int | None, kind: InteractionType = InteractionType.application_command) -> MagicMock:
     """Build a stub interaction from ``guild_id`` with an awaitable reply."""
     interaction = MagicMock()
     interaction.guild_id = guild_id
