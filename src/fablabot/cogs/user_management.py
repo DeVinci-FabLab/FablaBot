@@ -458,9 +458,14 @@ class UserManagement(commands.Cog):
             task.cancel()
 
     async def _deop_later(self, guild_id: int, member_id: int, expires_at: datetime) -> None:
-        """Wait until the recorded time, then end the op."""
+        """Wait until the recorded time, then end the op.
+
+        The wait is measured on the loop's monotonic clock while the recorded time is a wall-clock
+        time, so a wake-up before the wall clock reaches it sleeps again instead of giving up.
+        """
         try:
-            await asyncio.sleep(_delay_until(expires_at))
+            while (delay := _delay_until(expires_at)) > 0:
+                await asyncio.sleep(delay)
             await self._expire(guild_id, member_id)
         except asyncio.CancelledError:
             logger.debug(f"Deop timer cancelled guild_id={guild_id} member_id={member_id}")

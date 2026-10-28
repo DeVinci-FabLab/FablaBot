@@ -197,3 +197,32 @@ def test_op_expiry_round_trips_and_rejects_naive_time() -> None:
 def test_delay_counts_from_the_stored_time() -> None:
     assert user_management._delay_until(NOW + timedelta(minutes=7)) == 420  # noqa: SLF001
     assert user_management._delay_until(NOW - timedelta(minutes=7)) == 0  # noqa: SLF001
+
+
+
+async def test_timer_that_wakes_before_the_clock_is_due_waits_again(cog: UserManagement) -> None:
+    guild, target, caller = _server(GUILD_A)
+    target.roles.append(guild.roles[0])
+    cog.bot.get_guild = MagicMock(return_value=guild)
+    expires_at = NOW + timedelta(milliseconds=5)
+    cog._record_op(GUILD_A, TARGET_ID, OpExpiry(expires_at=expires_at, channel_id=OP_CHANNEL_ID))  # noqa: SLF001
+    clock = {"now": NOW}
+    real_sleep = asyncio.sleep
+    sleeps: list[float] = []
+
+    async def early_wake(delay: float) -> None:
+        sleeps.append(delay)
+        if len(sleeps) > 1:
+            clock["now"] = expires_at
+        await real_sleep(0)
+
+    with (
+        patch.object(user_management, "_utcnow", side_effect=lambda: clock["now"]),
+        patch.object(user_management.asyncio, "sleep", early_wake),
+    ):
+        cog._arm_deop(GUILD_A, TARGET_ID, expires_at)  # noqa: SLF001
+        await cog.deop_tasks[GUILD_A, TARGET_ID]
+
+    assert len(sleeps) == 2
+    target.remove_roles.assert_awaited_once()
+    assert str(TARGET_ID) not in _saved().get(str(GUILD_A), {})
