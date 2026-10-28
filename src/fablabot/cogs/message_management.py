@@ -58,7 +58,6 @@ logger = logging.getLogger(__name__)
 MESSAGES_STATE_FILE = Path("data/messages_state.json")
 REACTION_LOG_RETENTION = timedelta(days=30)
 ALLOWED_ROLES = ADMIN_ROLES | {RoleNames.BUREAU}
-MAIN_GUILD_ID = 1073721836782755862
 
 
 class MessageManagement(commands.Cog):
@@ -819,7 +818,7 @@ class MessageManagement(commands.Cog):
             return
         if msg.author.bot:
             return
-        if not msg.guild or msg.guild.id != MAIN_GUILD_ID:
+        if not msg.guild:
             return
         if not isinstance(msg.channel, TextChannel | VoiceChannel | StageChannel | Thread):
             return

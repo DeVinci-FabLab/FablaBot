@@ -36,24 +36,9 @@ EASTER_EGGS: list[EasterEggTrigger] = [
         1.0,
     ),
     EasterEggTrigger(
-        [re.compile(r"autis[tm]e", flags=re.IGNORECASE)],
-        "https://tenor.com/view/autism-autistic-spongebob-i%27m-autistic-spongebob-meme-gif-990745265488627503",
-        1 / 3,
-    ),
-    EasterEggTrigger(
         [re.compile(r"contre nature", flags=re.IGNORECASE)],
         "https://tenor.com/view/lpj-gif-7210529",
         1.0,
-    ),
-    EasterEggTrigger(
-        [re.compile(r"pas net", flags=re.IGNORECASE)],
-        "https://tenor.com/view/baptiste-feu-fire-gif-13214452",
-        1.0,
-    ),
-    EasterEggTrigger(
-        [re.compile(r"baptiste", flags=re.IGNORECASE)],
-        "https://tenor.com/view/baptiste-feu-fire-gif-13214452",
-        0.25,
     ),
     EasterEggTrigger(
         [
