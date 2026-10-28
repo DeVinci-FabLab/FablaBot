@@ -87,8 +87,8 @@ class DiscordLogHandler(logging.Handler):
         channel = self.destination(guild_id)
         if channel is None:
             return
-        # A run of three backticks would close the code block: break it with a zero-width space.
-        safe = message.replace("```", f"`{_ZERO_WIDTH_SPACE}``")
+        # A run of three or more backticks would close the code block: break every backtick with a zero-width space.
+        safe = message.replace("`", f"`{_ZERO_WIDTH_SPACE}")
         log_message = f"```ansi\n{safe}\n```"
         file_obj: io.BytesIO | None = None
         if len(log_message) > MAX_MSG_CHARS:

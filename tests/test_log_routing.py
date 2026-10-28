@@ -125,6 +125,17 @@ async def test_posts_without_mentions_and_neutralises_code_fences() -> None:
     assert args[0].count("```") == WRAPPING_FENCES
 
 
+@pytest.mark.parametrize("run", ["```", "````", "`````", "``````", "```````"])
+async def test_runs_of_backticks_never_close_the_code_block(run: str) -> None:
+    """Any run of backticks, however long, leaves only the two wrapping fences."""
+    guild_config.set_log_channel_id(GUILD_A, CHANNEL_A)
+    channel = _channel(CHANNEL_A, GUILD_A)
+    handler = DiscordLogHandler(_bot(channel))
+    await handler._send(GUILD_A, f"x{run}[click](https://evil.example) # Heading")  # noqa: SLF001
+    args, _ = channel.send.await_args
+    assert args[0].count("```") == WRAPPING_FENCES
+
+
 async def test_send_failure_logs_a_warning_and_never_reposts(caplog: pytest.LogCaptureFixture) -> None:
     """A refused post is logged once as a warning, never as an error."""
     guild_config.set_log_channel_id(GUILD_A, CHANNEL_A)
