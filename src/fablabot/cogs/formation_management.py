@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import csv
+from datetime import datetime, timedelta
 import io
 import logging
-from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, override
 from warnings import deprecated
@@ -32,6 +32,7 @@ from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.state_store import JsonStateStore
 from fablabot.helpers.utils import ensure_command_context, is_valid_emoji
+from fablabot.logging_handlers import guild_log_context
 from fablabot.models import FmCommand, FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
 from fablabot.ui import fmui
 
@@ -662,54 +663,55 @@ class FormationManagement(commands.Cog):
 
         for guild_id_str in self._state_store.state:
             guild_id = int(guild_id_str)
-            guild = self.bot.get_guild(guild_id)
-            if not guild:
-                continue
-
-            pub = self._get_last_published_in_guild(guild_id)
-            if not pub:
-                continue
-
-            fms = list(pub.message.fms)
-            if not fms:
-                continue
-
-            send_contacts: str = format_respo_contacts(guild)
-
-            for fm in fms:
-                if fm.notified_at_start:
+            with guild_log_context(guild_id):
+                guild = self.bot.get_guild(guild_id)
+                if not guild:
                     continue
 
-                if not fm.notified_hour_before and notification_window_start <= fm.start_dt <= notification_window_end:
-                    await notify_trainer_before_formation(guild, fm, send_contacts, moment="hour_before")
-                    await notify_responsible_before_formation(guild, fm, moment="hour_before")
-                    await notify_participants_before_formation(guild, fm, send_contacts)
-
-                    fm.notified_hour_before = True
+                pub = self._get_last_published_in_guild(guild_id)
+                if not pub:
                     continue
 
-                if start_window_start <= fm.start_dt <= start_window_end:
-                    await notify_trainer_before_formation(guild, fm, send_contacts, moment="start")
-                    await notify_responsible_before_formation(guild, fm, moment="start")
+                fms = list(pub.message.fms)
+                if not fms:
+                    continue
 
-                    fm.notified_at_start = True
+                send_contacts: str = format_respo_contacts(guild)
 
-            updated_pub_msg = FmMessageDraft(
-                header=pub.message.header,
-                role_id=pub.message.role_id,
-                intro=pub.message.intro,
-                fms=fms,
-                end=pub.message.end,
-                request_forms_url=pub.message.request_forms_url,
-            )
-            self._set_last_published_in_guild(
-                guild_id,
-                PublishedMessage(
-                    message_id=pub.message_id,
-                    channel_id=pub.channel_id,
-                    message=updated_pub_msg,
-                ),
-            )
+                for fm in fms:
+                    if fm.notified_at_start:
+                        continue
+
+                    if not fm.notified_hour_before and notification_window_start <= fm.start_dt <= notification_window_end:
+                        await notify_trainer_before_formation(guild, fm, send_contacts, moment="hour_before")
+                        await notify_responsible_before_formation(guild, fm, moment="hour_before")
+                        await notify_participants_before_formation(guild, fm, send_contacts)
+
+                        fm.notified_hour_before = True
+                        continue
+
+                    if start_window_start <= fm.start_dt <= start_window_end:
+                        await notify_trainer_before_formation(guild, fm, send_contacts, moment="start")
+                        await notify_responsible_before_formation(guild, fm, moment="start")
+
+                        fm.notified_at_start = True
+
+                updated_pub_msg = FmMessageDraft(
+                    header=pub.message.header,
+                    role_id=pub.message.role_id,
+                    intro=pub.message.intro,
+                    fms=fms,
+                    end=pub.message.end,
+                    request_forms_url=pub.message.request_forms_url,
+                )
+                self._set_last_published_in_guild(
+                    guild_id,
+                    PublishedMessage(
+                        message_id=pub.message_id,
+                        channel_id=pub.channel_id,
+                        message=updated_pub_msg,
+                    ),
+                )
 
     @_check_upcoming_formations.before_loop
     async def _before_check_upcoming_formations(self) -> None:
