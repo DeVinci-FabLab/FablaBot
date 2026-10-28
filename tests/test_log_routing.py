@@ -273,6 +273,8 @@ def test_configure_logging_turns_operator_off_without_attribution(monkeypatch: p
         handlers = configure_logging(bot)
         added.extend(handlers)
         operator_channel_id = handlers[0].operator_channel_id
+        for call in bot.loop.create_task.call_args_list:
+            call.args[0].close()
         for handler in handlers:
             handler.flush()
         content = (Path("logs") / f"{datetime.now(PARIS_TZ).date()}.log").read_text(encoding="utf-8")
