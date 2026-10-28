@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from conftest import make_guild, make_interaction, make_member, make_role
-from discord import Forbidden
+from discord import Forbidden, HTTPException, NotFound
 import pytest
 
 from fablabot.cogs import user_management
@@ -199,7 +199,6 @@ def test_delay_counts_from_the_stored_time() -> None:
     assert user_management._delay_until(NOW - timedelta(minutes=7)) == 0  # noqa: SLF001
 
 
-
 async def test_timer_that_wakes_before_the_clock_is_due_waits_again(cog: UserManagement) -> None:
     guild, target, caller = _server(GUILD_A)
     target.roles.append(guild.roles[0])
@@ -228,24 +227,123 @@ async def test_timer_that_wakes_before_the_clock_is_due_waits_again(cog: UserMan
     assert str(TARGET_ID) not in _saved().get(str(GUILD_A), {})
 
 
-@pytest.mark.parametrize("state", ["unavailable", "not_chunked"])
-async def test_expiry_keeps_record_while_the_guild_is_not_ready(
-    cog: UserManagement, caplog: pytest.LogCaptureFixture, state: str
+async def test_expiry_keeps_record_and_asks_for_a_retry_while_the_guild_is_unavailable(
+    cog: UserManagement, caplog: pytest.LogCaptureFixture
 ) -> None:
     guild, target, caller = _server(GUILD_A)
     await _op(cog, guild, caller, target, 31)
     target.roles.append(guild.roles[0])
-    if state == "unavailable":
-        stub = make_guild(GUILD_A, [], [])
-        stub.unavailable = True
-    else:
-        stub = make_guild(GUILD_A, list(guild.roles), [])
-        stub.chunked = False
-    cog.bot.get_guild = MagicMock(return_value=stub)
+    guild.unavailable = True
+    cog.bot.get_guild = MagicMock(return_value=guild)
 
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=31)):
-        await cog._expire(GUILD_A, TARGET_ID)  # noqa: SLF001
+        settled = await cog._expire(GUILD_A, TARGET_ID)  # noqa: SLF001
 
+    assert settled is False
+    assert str(TARGET_ID) in _saved()[str(GUILD_A)]
+    target.remove_roles.assert_not_awaited()
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any(f"guild_id={GUILD_A}" in m and f"member_id={TARGET_ID}" in m and "record kept" in m for m in warnings)
+
+
+async def test_timer_waits_and_tries_again_until_the_guild_is_back(cog: UserManagement) -> None:
+    guild, target, _caller = _server(GUILD_A)
+    target.roles.append(guild.roles[0])
+    guild.unavailable = True
+    cog.bot.get_guild = MagicMock(return_value=guild)
+    cog._record_op(GUILD_A, TARGET_ID, OpExpiry(expires_at=NOW, channel_id=OP_CHANNEL_ID))  # noqa: SLF001
+    clock = {"now": NOW}
+    real_sleep = asyncio.sleep
+    sleeps: list[float] = []
+
+    async def guild_comes_back(delay: float) -> None:
+        sleeps.append(delay)
+        guild.unavailable = False
+        clock["now"] += timedelta(seconds=delay)
+        await real_sleep(0)
+
+    with (
+        patch.object(user_management, "_utcnow", side_effect=lambda: clock["now"]),
+        patch.object(user_management.asyncio, "sleep", guild_comes_back),
+    ):
+        cog._arm_deop(GUILD_A, TARGET_ID, NOW)  # noqa: SLF001
+        await cog.deop_tasks[GUILD_A, TARGET_ID]
+
+    assert sleeps == [60.0]
+    target.remove_roles.assert_awaited_once()
+    assert str(TARGET_ID) not in _saved().get(str(GUILD_A), {})
+    assert cog.deop_tasks == {}
+
+
+async def test_expiry_removes_the_role_of_a_cached_member_in_a_guild_whose_cache_looks_incomplete(
+    cog: UserManagement,
+) -> None:
+    guild, target, caller = _server(GUILD_A)
+    await _op(cog, guild, caller, target, 31)
+    target.roles.append(guild.roles[0])
+    guild.chunked = False
+    cog.bot.get_guild = MagicMock(return_value=guild)
+
+    with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=31)):
+        settled = await cog._expire(GUILD_A, TARGET_ID)  # noqa: SLF001
+
+    assert settled is True
+    target.remove_roles.assert_awaited_once()
+    guild.fetch_member.assert_not_awaited()
+    assert str(TARGET_ID) not in _saved().get(str(GUILD_A), {})
+
+
+async def test_expiry_asks_discord_for_a_member_missing_from_an_incomplete_cache(cog: UserManagement) -> None:
+    guild, target, caller = _server(GUILD_A)
+    await _op(cog, guild, caller, target, 31)
+    target.roles.append(guild.roles[0])
+    guild.chunked = False
+    guild.members.remove(target)
+    guild.fetch_member = AsyncMock(return_value=target)
+    cog.bot.get_guild = MagicMock(return_value=guild)
+
+    with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=31)):
+        settled = await cog._expire(GUILD_A, TARGET_ID)  # noqa: SLF001
+
+    assert settled is True
+    guild.fetch_member.assert_awaited_once_with(TARGET_ID)
+    target.remove_roles.assert_awaited_once()
+    assert str(TARGET_ID) not in _saved().get(str(GUILD_A), {})
+
+
+async def test_expiry_clears_quietly_a_member_discord_does_not_know(
+    cog: UserManagement, caplog: pytest.LogCaptureFixture
+) -> None:
+    guild, target, caller = _server(GUILD_A)
+    await _op(cog, guild, caller, target, 31)
+    guild.chunked = False
+    guild.members.remove(target)
+    guild.fetch_member = AsyncMock(side_effect=NotFound(MagicMock(status=404), "unknown member"))
+    cog.bot.get_guild = MagicMock(return_value=guild)
+
+    with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=31)):
+        settled = await cog._expire(GUILD_A, TARGET_ID)  # noqa: SLF001
+
+    assert settled is True
+    assert str(TARGET_ID) not in _saved().get(str(GUILD_A), {})
+    assert not [r for r in caplog.records if r.levelname == "ERROR"]
+
+
+async def test_expiry_keeps_record_and_asks_for_a_retry_when_discord_cannot_say_who_the_member_is(
+    cog: UserManagement, caplog: pytest.LogCaptureFixture
+) -> None:
+    guild, target, caller = _server(GUILD_A)
+    await _op(cog, guild, caller, target, 31)
+    target.roles.append(guild.roles[0])
+    guild.chunked = False
+    guild.members.remove(target)
+    guild.fetch_member = AsyncMock(side_effect=HTTPException(MagicMock(status=503), "unavailable"))
+    cog.bot.get_guild = MagicMock(return_value=guild)
+
+    with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=31)):
+        settled = await cog._expire(GUILD_A, TARGET_ID)  # noqa: SLF001
+
+    assert settled is False
     assert str(TARGET_ID) in _saved()[str(GUILD_A)]
     target.remove_roles.assert_not_awaited()
     warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]

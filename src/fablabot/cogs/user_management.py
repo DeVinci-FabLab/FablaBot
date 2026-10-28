@@ -11,7 +11,7 @@ import logging
 from pathlib import Path
 from warnings import deprecated
 
-from discord import Guild, Interaction, Member, Role, User, app_commands
+from discord import Guild, HTTPException, Interaction, Member, NotFound, Role, User, app_commands
 from discord.ext import commands
 from discord.utils import get
 
@@ -26,6 +26,7 @@ from fablabot.ui import uui
 logger = logging.getLogger(__name__)
 
 OP_STATE_FILE = Path("data/temp_admin_state.json")
+EXPIRY_RETRY_DELAY = timedelta(seconds=60)
 
 
 def _utcnow() -> datetime:
@@ -467,11 +468,17 @@ class UserManagement(commands.Cog):
 
         The wait is measured on the loop's monotonic clock while the recorded time is a wall-clock
         time, so a wake-up before the wall clock reaches it sleeps again instead of giving up.
+        While the guild cannot be acted on (an outage, a member Discord has not answered for), the
+        timer keeps the record and tries again every ``EXPIRY_RETRY_DELAY``, so the role does not
+        outlive the outage until the next start.
         """
         try:
-            while (delay := _delay_until(expires_at)) > 0:
-                await asyncio.sleep(delay)
-            await self._expire(guild_id, member_id)
+            while True:
+                while (delay := _delay_until(expires_at)) > 0:
+                    await asyncio.sleep(delay)
+                if await self._expire(guild_id, member_id):
+                    return
+                expires_at = _utcnow() + EXPIRY_RETRY_DELAY
         except asyncio.CancelledError:
             logger.debug(f"Deop timer cancelled guild_id={guild_id} member_id={member_id}")
             raise
@@ -481,30 +488,46 @@ class UserManagement(commands.Cog):
             if self.deop_tasks.get((guild_id, member_id)) is asyncio.current_task():
                 self.deop_tasks.pop((guild_id, member_id))
 
-    async def _expire(self, guild_id: int, member_id: int) -> None:
+    async def _expire(self, guild_id: int, member_id: int) -> bool:
         """End a member's op on one guild if its recorded time has come.
 
         Removes the role, then forgets the record (a crash in between leaves an orphan record,
         cleared later), then posts the notice in the op channel. A failed removal keeps the record
-        for the next start and posts a failure notice instead.
+        for the next start and posts a failure notice instead. An unavailable guild, or a member
+        Discord could not be asked about, keeps the record and asks the caller to try again.
+
+        Returns:
+            bool: False when the caller should wait and call again, True when there is nothing left to retry.
         """
         expiry = self._load_op(guild_id, member_id)
         if expiry is None or expiry.expires_at > _utcnow():
-            return
+            return True
         guild = self.bot.get_guild(guild_id)
-        if guild is None or guild.unavailable or not guild.chunked:
-            # A guild still loading has no roles or members yet: a missing one would read as "gone".
+        if guild is None or guild.unavailable:
             logger.warning(f"Guild unreachable at op expiry guild_id={guild_id} member_id={member_id}; record kept")
-            return
+            # An unavailable guild comes back; one the bot is not in does not.
+            return guild is None
         admin_role = get(guild.roles, name=RoleNames.ADMIN_TEMP)
-        member = guild.get_member(member_id)
-        if admin_role is None or member is None or admin_role not in member.roles:
+        if admin_role is None:
             self._clear_op(guild_id, member_id)
-            return
+            return True
+        try:
+            member = await self._find_member(guild, member_id)
+        except HTTPException:
+            logger.warning(f"Member lookup failed at op expiry guild_id={guild_id} member_id={member_id}; record kept")
+            return False
+        if member is None or admin_role not in member.roles:
+            self._clear_op(guild_id, member_id)
+            return True
 
+        await self._revoke_at_expiry(guild, member, admin_role, expiry)
+        return True
+
+    async def _revoke_at_expiry(self, guild: Guild, member: Member, admin_role: Role, expiry: OpExpiry) -> None:
+        """Take the temporary admin role off a member at expiry and tell the op channel how it went."""
         success, error = await safe_remove_roles(logger, member, admin_role, reason="Scheduled removal of temporary admin role")
         if not success:
-            logger.error(f"Failed to remove temporary admin role guild_id={guild_id} member_id={member_id}; record kept")
+            logger.error(f"Failed to remove temporary admin role guild_id={guild.id} member_id={member.id}; record kept")
             await self._post_op_notice(
                 guild,
                 expiry,
@@ -512,10 +535,36 @@ class UserManagement(commands.Cog):
             )
             return
 
-        self._clear_op(guild_id, member_id)
-        logger.info(f"Revoked temporary admin at expiry guild_id={guild_id} member_id={member_id}")
+        self._clear_op(guild.id, member.id)
+        logger.info(f"Revoked temporary admin at expiry guild_id={guild.id} member_id={member.id}")
         notice = f"Droits admin temporaires retirés de {format_member_mention(member)} : durée écoulée."
         await self._post_op_notice(guild, expiry, notice)
+
+    @staticmethod
+    async def _find_member(guild: Guild, member_id: int) -> Member | None:
+        """Find a guild member, asking Discord when the cache cannot say the member is gone.
+
+        A cached member is used as is. A missing one is read as gone only when the guild's member
+        cache is complete: `Guild.chunked` compares a member count that can drift, so otherwise
+        Discord is asked.
+
+        Args:
+            guild (Guild): The guild to look in.
+            member_id (int): The member's Discord ID.
+
+        Returns:
+            Member | None: The member, or None when they are no longer in the guild.
+
+        Raises:
+            HTTPException: Discord could not answer (anything but "unknown member").
+        """
+        member = guild.get_member(member_id)
+        if member is not None or guild.chunked:
+            return member
+        try:
+            return await guild.fetch_member(member_id)
+        except NotFound:
+            return None
 
     @staticmethod
     async def _post_op_notice(guild: Guild, expiry: OpExpiry, text: str) -> None:
