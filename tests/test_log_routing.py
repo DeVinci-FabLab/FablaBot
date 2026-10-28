@@ -198,6 +198,43 @@ def test_configure_logging_tags_file_lines_and_keeps_one_line_per_entry() -> Non
     assert f"guild_id={GUILD_A}" in lines[0]
 
 
+def test_configure_logging_posts_errors_only() -> None:
+    """The Discord handler built by ``configure_logging`` posts an error and never a warning or an info line."""
+    root = logging.getLogger()
+    saved_handlers = list(root.handlers)
+    saved_level = root.level
+    discord_logger = logging.getLogger("discord")
+    saved_discord_level = discord_logger.level
+    bot = MagicMock()
+    bot._connection.parsers = {"INTERACTION_CREATE": lambda _data: None}  # noqa: SLF001
+    added: list[logging.Handler] = []
+    try:
+        handlers = configure_logging(bot)
+        added.extend(handlers)
+        bot.loop.create_task.reset_mock()
+        probe = logging.getLogger("fablabot.probe")
+        probe.info("an info line")
+        probe.warning("a warning line")
+        posted_below_error = bot.loop.create_task.call_count
+        probe.error("an error line")
+        posted_with_error = bot.loop.create_task.call_count
+        for call in bot.loop.create_task.call_args_list:
+            call.args[0].close()
+    finally:
+        for handler in list(root.handlers):
+            root.removeHandler(handler)
+        for handler in added:
+            handler.close()
+        for handler in saved_handlers:
+            root.addHandler(handler)
+        root.setLevel(saved_level)
+        discord_logger.setLevel(saved_discord_level)
+
+    assert handlers[0].level == logging.ERROR
+    assert posted_below_error == 0
+    assert posted_with_error == 1
+
+
 def test_configure_logging_turns_operator_off_without_attribution(monkeypatch: pytest.MonkeyPatch) -> None:
     """When the parser table cannot be wrapped, the operator channel stays off and an error says so."""
     monkeypatch.setenv(log_channels.OPERATOR_LOG_CHANNEL_ENV, str(OPERATOR))
