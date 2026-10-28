@@ -32,7 +32,7 @@ FROM base AS production
 COPY . .
 
 # Locked runtime dependencies are installed at build time, so the container starts offline.
-RUN uv sync --locked --no-dev --no-editable
+RUN uv sync --locked --no-dev --no-editable --no-cache
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Python as PID 1 ignores SIGTERM, so docker stop sends SIGINT and the bot exits at once.
