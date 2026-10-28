@@ -67,9 +67,9 @@ class RoleNames:
     """Verified member role."""
 
 
+# The temporary role is left out on purpose: it opens only the commands that name it (today /fm).
 ADMIN_ROLES = {
     RoleNames.ADMIN,
-    RoleNames.ADMIN_TEMP,
     RoleNames.PRESIDENT,
     RoleNames.VICE_PRESIDENT,
     RoleNames.SECRETARY,
