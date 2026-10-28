@@ -8,6 +8,7 @@ services:
     restart: unless-stopped
     environment:
       - DISCORD_TOKEN_FILE=/run/secrets/discord_token
+      - ALLOWED_GUILD_IDS=${ALLOWED_GUILD_IDS:-}
       - EASTER_EGGS_ENABLED=false
     secrets:
       - discord_token

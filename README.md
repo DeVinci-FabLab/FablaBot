@@ -37,12 +37,30 @@ mkdir secrets
 echo -n 'my_discord_token' > secrets/discord_token.secret
 ```
 
+#### Allowed servers
+
+`ALLOWED_GUILD_IDS` holds the IDs of the servers the bot may serve, separated by commas:
+
+```bash
+ALLOWED_GUILD_IDS=111111111111111111,222222222222222222
+```
+
+- When it is empty, the bot only keeps servers owned by the application owner when it joins them. At start, it stays in the servers it is already in and logs a warning.
+- A malformed value stops the bot at start.
+
+To keep other people from adding the bot to their servers, set these in the [Developer Portal](https://discord.com/developers/applications):
+
+1. Installation: set Install Link to None and uncheck User Install.
+2. Bot: turn Public Bot off.
+
+To copy a server ID, enable Developer Mode in Discord (User Settings, Advanced), then right-click the server and choose Copy Server ID.
+
 ### Running the project
 
 To run the code, you can then use:
 
 ```bash
-DISCORD_TOKEN_FILE=secrets/discord_token.secret uv run main
+DISCORD_TOKEN_FILE=secrets/discord_token.secret ALLOWED_GUILD_IDS=<your server ID> uv run main
 ```
 
 ## Documentation
