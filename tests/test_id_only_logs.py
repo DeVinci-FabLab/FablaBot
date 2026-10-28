@@ -7,7 +7,7 @@ import re
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from conftest import make_interaction
-from discord import Forbidden, Member, TextChannel
+from discord import Forbidden, Member, TextChannel, ui
 import pytest
 
 from fablabot.cogs import message_management
@@ -119,3 +119,43 @@ async def test_easter_egg_line_logs_author_id_not_name(caplog: pytest.LogCapture
         await MessageManagement(MagicMock()).on_message(msg)
     assert "author_id=4242" in caplog.text
     assert NAME not in caplog.text
+
+
+async def test_msg_purge_logs_the_purged_member_as_target_and_the_caller_as_user(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The purge lines name the purged member as ``target_id`` and only the caller as ``user_id``."""
+    caplog.set_level(logging.DEBUG)
+
+    async def confirm(self, _timeout=None) -> bool:
+        """Answer the confirmation view as if the caller pressed the confirm button."""
+        self.confirmed = True
+        return False
+
+    async def no_history(**_kwargs):
+        """Yield no message."""
+        return
+        yield
+
+    monkeypatch.setattr(ui.View, "wait", confirm)
+    interaction = make_interaction()
+    interaction.user.guild_permissions.administrator = True
+    channel = MagicMock(spec=TextChannel)
+    channel.name = "salon"
+    channel.history = no_history
+    channel.purge = AsyncMock(return_value=[MagicMock(), MagicMock()])
+
+    await MessageManagement.msg_purge.callback(
+        MessageManagement(MagicMock()),
+        interaction,
+        user=_member(),
+        count=5,
+        channel=channel,
+    )
+
+    purged = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Purged")]
+    assert len(purged) == 2  # noqa: PLR2004
+    assert all("target_id=4242" in line for line in purged)
+    assert [line.count("user_id=418003123456789012") for line in purged] == [0, 1]
+    assert not any("user_id=4242" in line for line in purged)

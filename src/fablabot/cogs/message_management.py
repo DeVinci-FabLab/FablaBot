@@ -369,7 +369,7 @@ class MessageManagement(commands.Cog):
                         reason=f"Purge by {interaction.user}: {reason}",
                     )
                     total_deleted += len(deleted)
-                    logger.info(f"Purged {len(deleted)} messages from user_id={user.id} in {target_ch.name}")
+                    logger.info(f"Purged {len(deleted)} messages from target_id={user.id} in {target_ch.name}")
                 except HTTPException as e:
                     logger.warning(f"Could not purge {target_ch.name}: {e}")
                     continue
@@ -387,7 +387,7 @@ class MessageManagement(commands.Cog):
             await interaction.followup.send(embed=success_embed, ephemeral=True)
 
             logger.info(
-                f"Purged {total_deleted} messages from user_id={user.id} in {len(target_channels)} channel(s) "
+                f"Purged {total_deleted} messages from target_id={user.id} in {len(target_channels)} channel(s) "
                 f"(guild: {interaction.guild.id}) by user_id={interaction.user.id}: {reason}"
             )
 
