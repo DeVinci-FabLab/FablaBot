@@ -214,6 +214,8 @@ class UserManagement(commands.Cog):
             )
             return
 
+        key = (interaction.guild.id, member.id)
+        timer_before = self.deop_tasks.get(key)
         success, error = await safe_remove_roles(
             logger,
             member,
@@ -224,8 +226,11 @@ class UserManagement(commands.Cog):
             await interaction.response.send_message(error, ephemeral=True)
             return
 
-        self._cancel_deop(interaction.guild.id, member.id)
-        self._clear_op(interaction.guild.id, member.id)
+        # An op run while the removal was in flight owns a new timer and record: leave both alone.
+        timer_now = self.deop_tasks.get(key)
+        if timer_now is None or timer_now is timer_before:
+            self._cancel_deop(*key)
+            self._clear_op(*key)
 
         logger.info(f"Revoked temporary admin from {member}")
         await interaction.response.defer(thinking=True)

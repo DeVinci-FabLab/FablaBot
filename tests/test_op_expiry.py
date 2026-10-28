@@ -250,3 +250,28 @@ async def test_expiry_keeps_record_while_the_guild_is_not_ready(
     target.remove_roles.assert_not_awaited()
     warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
     assert any(f"guild_id={GUILD_A}" in m and f"member_id={TARGET_ID}" in m and "record kept" in m for m in warnings)
+
+
+async def test_deop_does_not_erase_an_op_made_while_it_was_in_flight(cog: UserManagement) -> None:
+    guild, target, caller = _server(GUILD_A)
+    await _op(cog, guild, caller, target, 30)
+    gate = asyncio.Event()
+
+    async def gated_remove(*_args: object, **_kwargs: object) -> None:
+        await gate.wait()
+
+    target.remove_roles = AsyncMock(side_effect=gated_remove)
+    deop = asyncio.create_task(UserManagement.user_deop.callback(cog, _interaction(guild, caller), member=target))
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert not deop.done()
+
+    with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=1)):
+        await _op(cog, guild, caller, target, 60)
+    newer = cog.deop_tasks[GUILD_A, TARGET_ID]
+    gate.set()
+    await deop
+
+    assert _saved()[str(GUILD_A)][str(TARGET_ID)]["expires_at"] == "2026-10-28T16:01:00+00:00"
+    assert cog.deop_tasks[GUILD_A, TARGET_ID] is newer
+    assert not newer.done()
