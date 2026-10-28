@@ -5,13 +5,9 @@ services:
     restart: unless-stopped
     environment:
       - DISCORD_TOKEN_FILE=/run/secrets/discord_token
-      - GUILD_TOKEN_FILE=/run/secrets/guild_token
-      - PERSONAL_ID_FILE=/run/secrets/personal_id
       - EASTER_EGGS_ENABLED=false
     secrets:
       - discord_token
-      - guild_token
-      - personal_id
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
     volumes:
@@ -21,7 +17,3 @@ services:
 secrets:
   discord_token:
     file: ./secrets/discord_token.secret
-  guild_token:
-    file: ./secrets/guild_token.secret
-  personal_id:
-    file: ./secrets/personal_id.secret

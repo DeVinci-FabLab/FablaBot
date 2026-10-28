@@ -22,25 +22,19 @@ uv sync
 
 ### Environment variables
 
-You will need to create a `secrets/` folder into the project root directory and add three files:
+You will need to create a `secrets/` folder into the project root directory and add one file:
 
 - `secrets/discord_token.secret`
-- `secrets/guild_token.secret`
-- `secrets/personal_id.secret`
 
-Here are some commands to help you create those:
+Here are some commands to help you create it:
 
 ```bash
 mkdir secrets
 ```
 
 ```bash
-# Token for authenticating with the Discord API
+# Token for authenticating with the Discord API (https://discord.com/developers/applications)
 echo -n 'my_discord_token' > secrets/discord_token.secret
-# ID of the Discord guild (server) to connect to (DeVinci Fablab) [Unused ?]
-echo -n 'my_personal_id' > secrets/personal_id.secret
-# Personal user ID for the Discord bot or user (https://discord.com/developers/applications) [Unused ?]
-echo -n 'my_guild_token' > secrets/guild_token.secret
 ```
 
 ### Running the project
@@ -48,7 +42,7 @@ echo -n 'my_guild_token' > secrets/guild_token.secret
 To run the code, you can then use:
 
 ```bash
-uv run src/main.py
+DISCORD_TOKEN_FILE=secrets/discord_token.secret uv run main
 ```
 
 ## Documentation

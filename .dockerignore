@@ -1,0 +1,14 @@
+# Allow-list: a new local file stays out of the image unless listed here.
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!src/
+# Compiled caches from the host add nothing to the image.
+**/__pycache__
+**/*.pyc
+# Untracked leftovers under src/ stay out too.
+**/*.egg-info
+**/.env
+**/*.env
+**/*.secret

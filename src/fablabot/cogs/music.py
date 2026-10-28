@@ -1,3 +1,0 @@
-"""Handles music commands."""
-
-# TODO
