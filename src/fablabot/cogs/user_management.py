@@ -6,20 +6,43 @@ Provides slash commands for temporary admin and role assignments.
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 import logging
+from pathlib import Path
 from warnings import deprecated
 
-from discord import Interaction, Member, Role, User, app_commands
+from discord import Guild, Interaction, Member, Role, User, app_commands
 from discord.ext import commands
 from discord.utils import get
 
 from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames
 from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.safe_discord_operations import safe_add_roles, safe_remove_roles
+from fablabot.helpers.state_store import JsonStateStore
 from fablabot.helpers.utils import ensure_command_context, escape_md, format_member_mention, format_role_mention
+from fablabot.models.user import OpExpiry
 from fablabot.ui import uui
 
 logger = logging.getLogger(__name__)
+
+OP_STATE_FILE = Path("data/temp_admin_state.json")
+
+
+def _utcnow() -> datetime:
+    """Return the current time, timezone-aware (patched in tests)."""
+    return datetime.now(UTC)
+
+
+def _delay_until(expires_at: datetime) -> float:
+    """Return the seconds left before ``expires_at``, never negative.
+
+    Args:
+        expires_at (datetime): Timezone-aware due time.
+
+    Returns:
+        float: Seconds to wait.
+    """
+    return max(0.0, (expires_at - _utcnow()).total_seconds())
 
 
 class UserManagement(commands.Cog):
@@ -46,7 +69,9 @@ class UserManagement(commands.Cog):
             bot (commands.Bot): The bot instance.
         """
         self.bot = bot
-        self.deop_tasks: dict[int, asyncio.Task[None]] = {}
+        self.deop_tasks: dict[tuple[int, int], asyncio.Task[None]] = {}
+        self._op_store = JsonStateStore(logger, OP_STATE_FILE)
+        """state structure: ``{"<guild_id>": {"<member_id>": {"expires_at": iso8601 with offset, "channel_id": int}}}``"""
         logger.info("UserManagement initialized")
 
     # region ====== User Slash Commands Group ======
@@ -143,11 +168,10 @@ class UserManagement(commands.Cog):
             await interaction.response.send_message(error, ephemeral=True)
             return
 
-        old_task = self.deop_tasks.pop(member.id, None)
-        if old_task:
-            old_task.cancel()
-        task = asyncio.create_task(self._schedule_deop(interaction, member, time, admin_role))
-        self.deop_tasks[member.id] = task
+        # Role first, then record: a crash in between leaves a holder with no record, removed at start.
+        expiry = OpExpiry(expires_at=_utcnow() + timedelta(minutes=time), channel_id=interaction.channel_id or 0)
+        self._record_op(interaction.guild.id, member.id, expiry)
+        self._arm_deop(interaction.guild.id, member.id, expiry.expires_at)
         logger.info(f"Granted {member} temporary admin for {time} minutes for reason: {reason}")
         await interaction.response.send_message(
             f"{codir_role.mention} Droits admin donnés à {format_member_mention(member)} pour {time} minutes. "
@@ -200,9 +224,8 @@ class UserManagement(commands.Cog):
             await interaction.response.send_message(error, ephemeral=True)
             return
 
-        task = self.deop_tasks.pop(member.id, None)
-        if task:
-            task.cancel()
+        self._cancel_deop(interaction.guild.id, member.id)
+        self._clear_op(interaction.guild.id, member.id)
 
         logger.info(f"Revoked temporary admin from {member}")
         await interaction.response.defer(thinking=True)
@@ -392,44 +415,105 @@ class UserManagement(commands.Cog):
     # region ====== Helpers ======
     # -- Scheduling --
 
-    async def _schedule_deop(
-        self,
-        interaction: Interaction,
-        member: Member,
-        time: int,
-        admin_role: Role,
-    ) -> None:
-        """Schedule removal of temporary admin role after timeout.
+    def _record_op(self, guild_id: int, member_id: int, expiry: OpExpiry) -> None:
+        """Persist the expiry of a member's op on one guild, replacing any previous one."""
+        self._op_store.ensure_guild(guild_id)[str(member_id)] = expiry.to_dict()
+        self._op_store.save()
 
-        Args:
-            interaction (Interaction): The interaction that triggered the deop.
-            member (Member): The user to remove the role from.
-            time (int): The time in minutes to wait before removing the role.
-            admin_role (Role): The admin role to remove.
+    def _clear_op(self, guild_id: int, member_id: int) -> None:
+        """Forget the expiry of a member's op on one guild, if any."""
+        entries = self._op_store.state.get(str(guild_id))
+        if not isinstance(entries, dict) or str(member_id) not in entries:
+            return
+        entries.pop(str(member_id))
+        if not entries:
+            self._op_store.state.pop(str(guild_id))
+        self._op_store.save()
+
+    def _load_op(self, guild_id: int, member_id: int) -> OpExpiry | None:
+        """Read the recorded expiry of a member's op on one guild.
+
+        Returns:
+            OpExpiry | None: The expiry, or None when absent or unreadable (logged as an error).
         """
-        logger.debug(f"Scheduling deop for {member} after {time} minutes")
+        entries = self._op_store.state.get(str(guild_id))
+        raw = entries.get(str(member_id)) if isinstance(entries, dict) else None
+        if raw is None:
+            return None
         try:
-            await asyncio.sleep(time * 60)
-            if member.id in self.deop_tasks:
-                success, error = await safe_remove_roles(
-                    logger,
-                    member,
-                    admin_role,
-                    reason="Scheduled removal of temporary admin role",
-                )
-                if not success:
-                    await interaction.followup.send(str(error))
-                    return
+            return OpExpiry.from_dict(raw)
+        except (TypeError, ValueError):
+            logger.exception(f"Unreadable op expiry guild_id={guild_id} member_id={member_id}; treated as absent")
+            return None
 
-                logger.info(f"Revoked temporary admin from {member} after {time} minutes")
-                await interaction.followup.send(
-                    f"Droits admin retirés de {format_member_mention(member)} après {time} minutes.",
-                )
-            self.deop_tasks.pop(member.id, None)
+    def _arm_deop(self, guild_id: int, member_id: int, expires_at: datetime) -> None:
+        """Start the one timer of a member's op on one guild, replacing any running one."""
+        self._cancel_deop(guild_id, member_id)
+        self.deop_tasks[guild_id, member_id] = asyncio.create_task(self._deop_later(guild_id, member_id, expires_at))
+
+    def _cancel_deop(self, guild_id: int, member_id: int) -> None:
+        """Cancel the timer of a member's op on one guild, if any."""
+        task = self.deop_tasks.pop((guild_id, member_id), None)
+        if task:
+            task.cancel()
+
+    async def _deop_later(self, guild_id: int, member_id: int, expires_at: datetime) -> None:
+        """Wait until the recorded time, then end the op."""
+        try:
+            await asyncio.sleep(_delay_until(expires_at))
+            await self._expire(guild_id, member_id)
         except asyncio.CancelledError:
-            logger.info(f"Deop timer cancelled for {member}")
+            logger.debug(f"Deop timer cancelled guild_id={guild_id} member_id={member_id}")
+            raise
         except Exception:
-            logger.exception(f"Error in deop task for {member}:")
+            logger.exception(f"Error in deop timer guild_id={guild_id} member_id={member_id}")
+        finally:
+            if self.deop_tasks.get((guild_id, member_id)) is asyncio.current_task():
+                self.deop_tasks.pop((guild_id, member_id))
+
+    async def _expire(self, guild_id: int, member_id: int) -> None:
+        """End a member's op on one guild if its recorded time has come.
+
+        Removes the role, then forgets the record (a crash in between leaves an orphan record,
+        cleared later), then posts the notice in the op channel. A failed removal keeps the record
+        for the next start and posts a failure notice instead.
+        """
+        expiry = self._load_op(guild_id, member_id)
+        if expiry is None or expiry.expires_at > _utcnow():
+            return
+        guild = self.bot.get_guild(guild_id)
+        if guild is None:
+            logger.warning(f"Guild unreachable at op expiry guild_id={guild_id} member_id={member_id}; record kept")
+            return
+        admin_role = get(guild.roles, name=RoleNames.ADMIN_TEMP)
+        member = guild.get_member(member_id)
+        if admin_role is None or member is None or admin_role not in member.roles:
+            self._clear_op(guild_id, member_id)
+            return
+
+        success, error = await safe_remove_roles(logger, member, admin_role, reason="Scheduled removal of temporary admin role")
+        if not success:
+            logger.error(f"Failed to remove temporary admin role guild_id={guild_id} member_id={member_id}; record kept")
+            await self._post_op_notice(
+                guild,
+                expiry,
+                f"Impossible de retirer le rôle {RoleNames.ADMIN_TEMP} à {format_member_mention(member)} : {error}",
+            )
+            return
+
+        self._clear_op(guild_id, member_id)
+        logger.info(f"Revoked temporary admin at expiry guild_id={guild_id} member_id={member_id}")
+        notice = f"Droits admin temporaires retirés de {format_member_mention(member)} : durée écoulée."
+        await self._post_op_notice(guild, expiry, notice)
+
+    @staticmethod
+    async def _post_op_notice(guild: Guild, expiry: OpExpiry, text: str) -> None:
+        """Post an op notice in the channel where the op was run; log only when it is gone."""
+        channel = guild.get_channel(expiry.channel_id)
+        if channel is None or not hasattr(channel, "send"):
+            logger.warning(f"Op channel {expiry.channel_id} gone in guild_id={guild.id}; notice not posted")
+            return
+        await channel.send(text)
 
     # -- Permission Checks --
 
