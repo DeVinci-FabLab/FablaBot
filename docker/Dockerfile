@@ -28,13 +28,6 @@ RUN uv pip install --system .
 # Production stage
 FROM base AS production
 
-# Install Selenium dependencies
-RUN apk add --no-cache chromium chromium-chromedriver
-
-# Set Chrome options for containerized environment
-ENV CHROME_BIN=/usr/bin/chromium-browser \
-    CHROME_PATH=/usr/lib/chromium/
-
 # Copy all project files
 COPY . .
 
