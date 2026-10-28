@@ -462,19 +462,39 @@ class UserManagement(commands.Cog):
             logger.warning(f"Removed temporary admin role at start ({cause}) guild_id={guild.id} member_id={member.id}")
             self._clear_op(guild.id, member.id)
 
-        entries = self._op_store.state.get(str(guild.id))
-        if isinstance(entries, dict):
-            # A record with a live timer belongs to an op that started while the removals above were awaited.
-            for key in [k for k in entries if not k.isdigit() or not self._is_live(guild.id, int(k), holders)]:
-                entries.pop(key)
-            if not entries:
-                self._op_store.state.pop(str(guild.id))
-            self._op_store.save()
+        self._sweep_stale_records(guild, admin_role)
 
-    def _is_live(self, guild_id: int, member_id: int, holders: dict[int, Member]) -> bool:
-        """Tell whether a member's op is still running: they hold the role or a live timer waits for them."""
-        task = self.deop_tasks.get((guild_id, member_id))
-        return member_id in holders or (task is not None and not task.done())
+    def _sweep_stale_records(self, guild: Guild, admin_role: Role) -> None:
+        """Drop this guild's records of ops that are over, and arm the ones the cache cannot vouch for.
+
+        A record is kept when its member holds the role or a live timer waits for them (an op that
+        started while the removals were awaited). Otherwise it is dropped only when the guild's
+        member cache is complete; with a partial cache the member may hold the role unseen, so the
+        record gets its timer and ``_expire`` asks Discord when it fires (now, if the time has passed).
+        """
+        entries = self._op_store.state.get(str(guild.id))
+        if not isinstance(entries, dict):
+            return
+        holder_ids = {member.id for member in admin_role.members}
+        for key in list(entries):
+            if not key.isdigit():
+                entries.pop(key)
+                continue
+            member_id = int(key)
+            task = self.deop_tasks.get((guild.id, member_id))
+            if member_id in holder_ids or (task is not None and not task.done()):
+                continue
+            if guild.chunked:
+                entries.pop(key)
+                continue
+            expiry = self._load_op(guild.id, member_id)
+            if expiry is None:
+                entries.pop(key)
+            else:
+                self._arm_deop(guild.id, member_id, max(expiry.expires_at, _utcnow()))
+        if not entries:
+            self._op_store.state.pop(str(guild.id))
+        self._op_store.save()
 
     def _record_op(self, guild_id: int, member_id: int, expiry: OpExpiry) -> None:
         """Persist the expiry of a member's op on one guild, replacing any previous one."""

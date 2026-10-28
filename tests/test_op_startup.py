@@ -200,3 +200,32 @@ async def test_op_landing_during_the_sweep_keeps_its_record_and_timer() -> None:
     assert (GUILD_ID, 777) in cog.deop_tasks
     _stop(cog)
 
+
+async def test_start_with_partial_member_cache_keeps_future_record_and_arms_it() -> None:
+    due = NOW + timedelta(minutes=12)
+    _write_state(_record(GUILD_ID, 999, due))
+    guild, _holder, _temp = _holder_guild()
+    guild.chunked = False
+
+    with patch.object(UserManagement, "_arm_deop") as arm:
+        await _start(guild)
+
+    arm.assert_called_once_with(GUILD_ID, 999, due)
+    assert str(999) in _saved()[str(GUILD_ID)]
+
+
+async def test_start_with_partial_member_cache_ends_a_past_op_of_a_member_the_cache_misses() -> None:
+    _write_state(_record(GUILD_ID, 999, NOW - timedelta(minutes=1)))
+    guild, _holder, temp = _holder_guild()
+    guild.chunked = False
+    missing = make_member(999, temp)
+    temp.members.remove(missing)  # holds the role on Discord, absent from the cache
+    guild.fetch_member = AsyncMock(return_value=missing)
+
+    cog = await _start(guild)
+    await cog.deop_tasks[GUILD_ID, 999]
+
+    missing.remove_roles.assert_awaited_once()
+    assert str(GUILD_ID) not in _saved() or "999" not in _saved()[str(GUILD_ID)]
+    _stop(cog)
+
