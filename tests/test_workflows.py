@@ -137,3 +137,14 @@ def test_the_release_pull_request_gets_the_check() -> None:
     assert "if: ${{ needs.release.outputs.pr != '' }}" in job
     assert "release-please--branches--*) ;;" in job
     assert 'gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"' in job
+
+
+def test_latest_moves_only_with_a_release() -> None:
+    """No tag is written in CD.yml: the tag script picks them from the release job's outputs."""
+    text = _read("CD.yml")
+    assert "fablabot:" not in text
+    build = _job("build-and-push-image")
+    assert "RELEASE_CREATED: ${{ needs.release.outputs.created }}" in build
+    assert "VERSION: ${{ needs.release.outputs.version }}" in build
+    assert "run: bash .github/scripts/image-tags.sh" in build
+    assert "tags: ${{ steps.tags.outputs.tags }}" in build
