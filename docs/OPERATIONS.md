@@ -2,7 +2,7 @@
 
 This guide is for whoever hosts and runs a FablaBot instance. It covers deploying the image,
 adding and removing servers, the Discord Developer Portal settings, the roles the bot expects, and
-the problems seen in production. Commands for members and staff are in the user guide.
+the problems seen in production. Commands for members and staff are in the [user guide](USERGUIDE.md).
 
 ## Deployment model
 
@@ -114,7 +114,8 @@ Leaving guild: not_allowed (guild_id=333333333333333333)
 ```
 
 Two other cases are logged on purpose. When `ALLOWED_GUILD_IDS` is empty, the bot keeps the servers it is
-in and logs a warning; when it is set but matches none of the current servers, the bot leaves none
+already in at start and logs a warning, but leaves any server that invites it later unless the
+application owner owns it (`Leaving guild: owner_not_proven`); when it is set but matches none of the current servers, the bot leaves none
 and logs an error ("check the IDs"). A malformed value stops the bot at start.
 
 ## Remove a server

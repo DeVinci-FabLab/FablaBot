@@ -85,7 +85,7 @@ DISCORD_TOKEN_FILE=secrets/discord_token.secret ALLOWED_GUILD_IDS=<your server I
 ## Documentation
 
 We **highly recommend** you to read the user guide before using the bot. It will help you understand the bot's features
-and how to use them. You can find the user guide [here](./docs/user-guide.md).
+and how to use them. You can find the user guide [here](./docs/USERGUIDE.md).
 
 Whoever hosts an instance should read the [operator guide](./docs/OPERATIONS.md): deployment, adding and removing servers, Developer Portal settings and troubleshooting.
 
