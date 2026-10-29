@@ -139,11 +139,21 @@ The allow-list still decides which servers are served; these settings keep stran
 ## Roles
 
 The bot looks roles up by name, and the names are fixed today in `src/fablabot/helpers/constants.py`
-(`RoleNames`): `Président`, `Vice-Président`, `Secrétaire Général`, `Administrateur`, `Bureau`,
-`Sbire Bureau`, `agent MyFab`, `Membre ✓` and `Admin -temp-`. A server must have roles with these exact
-names. Commands that need an admin accept `Administrateur`, `Président`, `Vice-Président` and
-`Secrétaire Général` (`ADMIN_ROLES`, same file); `Admin -temp-` is left out on purpose. Per-server role
-names are planned and not available yet.
+(`RoleNames`, the full list). A server needs roles with these exact names:
+
+| Role | Used for |
+| --- | --- |
+| `CoDir` | Required: `/user op` refuses with "Rôles administratifs manquants sur le serveur." without it; also used by the welcome, channel and training flows |
+| `Admin -temp-` | Required by `/user op` (see Temporary admin) |
+| `Administrateur`, `Président`, `Vice-Président`, `Secrétaire Général` | Admin roles (`ADMIN_ROLES`, same file) |
+| `Bureau`, `Sbire Bureau` | Bureau permissions (messages, `/user` with roles); `Bureau` members can hand out `Sbire Bureau` and `agent MyFab` |
+| `Pôle Numérique` | Allowed to use `/log` with the admin roles and `Respo Numérique` |
+| `Respo Communication`, `Respo Event`, `Respo Formation`, `Respo Numérique`, `Respo Partenariat`, `Respo Projet` | Area managers, who receive the matching suggestions and trainings |
+| `agent MyFab`, `Membre ✓` | MyFab agents; verified members (welcome flow) |
+
+Commands that need an admin accept `Administrateur`, `Président`, `Vice-Président` and
+`Secrétaire Général`; `Admin -temp-` is left out on purpose. Per-server role names are planned and not
+available yet.
 
 ## Commands channel
 
