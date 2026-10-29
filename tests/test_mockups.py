@@ -104,6 +104,7 @@ def test_embed_parts() -> None:
     }
     out = message_html({"embeds": [embed]})
     assert "border-left-color:#ff8800" in out
+    assert "border-left-color:#00ff00" in message_html({"embeds": [{"color": 0x00FF00}]})
     assert '<div class="embed-author">Auteur</div>' in out
     assert '<div class="embed-title">Titre</div>' in out
     assert "Texte" in out
