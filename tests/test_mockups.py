@@ -195,6 +195,14 @@ def test_modal_puts_one_field_per_line() -> None:
     assert sum(line.startswith('<div class="field">') for line in lines) == 2
 
 
+def test_markdown_does_not_run_inside_a_link_target() -> None:
+    """A mention or an emphasis marker in a link target stays text, so the href holds none of their markup."""
+    out = markdown("[x](https://a/<@1>/_b_/c) <@1>", {1: "Cam"})
+    assert '<a href="https://a/&lt;@1&gt;/_b_/c">x</a>' in out
+    assert out.count('<span class="mention">@Cam</span>') == 1
+    assert "<em>" not in out
+
+
 async def test_modal_is_captured() -> None:
     """A modal sent through the capture becomes one modal entry."""
     capture = Capture()

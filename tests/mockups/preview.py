@@ -91,8 +91,12 @@ _MENTION = re.compile(r"&lt;(@&amp;|@!?|#)(\d+)&gt;")
 
 
 def _inline(text: str, names: Mapping[int, str]) -> str:
-    """Render one line of Discord inline markdown; ``text`` is already escaped."""
+    """Render one line of Discord inline markdown; ``text`` is already escaped.
+
+    Code spans and link targets are set aside first, so no other rule runs inside them.
+    """
     codes: list[str] = []
+    targets: list[str] = []
 
     def keep_code(match: re.Match[str]) -> str:
         codes.append(f"<code>{match[1]}</code>")
@@ -103,13 +107,18 @@ def _inline(text: str, names: Mapping[int, str]) -> str:
         name = names.get(int(match[2]), "inconnu")
         return f'<span class="mention">{sigil}{html.escape(name)}</span>'
 
+    def keep_target(match: re.Match[str]) -> str:
+        targets.append(match[2])
+        return f'<a href="\x01{len(targets) - 1}\x01">{match[1]}</a>'
+
     text = _CODE.sub(keep_code, text)
-    text = _LINK.sub(r'<a href="\2">\1</a>', text)
+    text = _LINK.sub(keep_target, text)
     text = _BOLD.sub(r"<strong>\1</strong>", text)
     text = _UNDERLINE.sub(r"<u>\1</u>", text)
     text = _ITALIC.sub(r"<em>\1</em>", text)
     text = _STRIKE.sub(r"<s>\1</s>", text)
     text = _MENTION.sub(mention, text)
+    text = re.sub(r"\x01(\d+)\x01", lambda m: targets[int(m[1])], text)
     return re.sub(r"\x00(\d+)\x00", lambda m: codes[int(m[1])], text)
 
 
