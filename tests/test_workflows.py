@@ -12,7 +12,7 @@ VERSION_COMMENT = re.compile(r"^\s+# v\d+(\.\d+){0,2}$")
 def _uses_lines() -> list[tuple[str, str, str]]:
     """List every `uses:` line as (file name, ref, trailing text)."""
     found: list[tuple[str, str, str]] = []
-    for path in sorted(WORKFLOWS.glob("*.yml")):
+    for path in sorted([*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml")]):
         for line in path.read_text(encoding="utf-8").splitlines():
             match = USES.match(line)
             if match:
