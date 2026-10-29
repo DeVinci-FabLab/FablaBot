@@ -5,6 +5,7 @@ from __future__ import annotations
 from http import HTTPStatus
 import logging
 import os
+import sys
 from typing import TYPE_CHECKING, Any, override
 
 from discord import Intents
@@ -29,6 +30,7 @@ from fablabot.helpers.command_sync import (
 )
 from fablabot.helpers.guild_access import GuildAccessPolicy, GuildAccessTree
 from fablabot.helpers.logging_setup import configure_logging
+from fablabot.helpers.startup_checks import TOKEN_FILE_ENV, StartupError, check_runtime_access
 from fablabot.helpers.state_store import JsonStateStore
 
 if TYPE_CHECKING:
@@ -36,10 +38,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 load_dotenv()
-
-DISCORD_TOKEN_FILE = os.environ.get("DISCORD_TOKEN_FILE") or ""
-with open(DISCORD_TOKEN_FILE) as f:
-    DISCORD_TOKEN = f.read().strip()
 
 
 class DiscordGateway503Filter(logging.Filter):
@@ -153,14 +151,19 @@ class Fablabot(commands.Bot):
 
 
 def main() -> None:
-    """Run the bot using the token from the environment."""
+    """Check that the bot can start, then run it with the token from the environment."""
+    try:
+        token = check_runtime_access(os.environ.get(TOKEN_FILE_ENV))
+    except StartupError as error:
+        sys.exit("\n".join(f"Cannot start: {problem}" for problem in error.problems))
+
     discord_logger = logging.getLogger("discord.client")
     discord_logger.addFilter(DiscordGateway503Filter())
 
     logger.info("Starting FablaBot.")
     bot = Fablabot()
     logger.info("Running bot.")
-    bot.run(DISCORD_TOKEN)
+    bot.run(token)
 
 
 if __name__ == "__main__":
