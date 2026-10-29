@@ -6,9 +6,11 @@ the problems seen in production. Commands for members and staff are in the [user
 
 ## Deployment model
 
-CI builds the image `ghcr.io/devinci-fablab/fablabot:latest` on every push to `main`. A merge is not
-a deploy: the host must redeploy the stack (pull the image, recreate the container) to run the new
-version.
+Every push to `main` publishes `:edge` and `:sha-<commit>`. `:latest`, `:X.Y.Z` and `:X.Y` move only
+when the release pull request is merged (see the [README](../README.md#releases), "Releases").
+Production follows `:latest`; a test server can follow `:edge`. A merge is not a deploy: the host
+must redeploy the stack (pull the image, recreate the container) to run the new version. In Komodo,
+the production container is named `fablabot`.
 
 Example `compose.yml` (the repository's `compose.yml` is the reference):
 
@@ -38,7 +40,8 @@ secrets:
 | `DISCORD_TOKEN_FILE` | Path of the file holding the bot token (`src/fablabot/main.py:32`). |
 | `ALLOWED_GUILD_IDS` | Server IDs the bot may serve, comma-separated, no quotes, no spaces. |
 | `OPERATOR_LOG_CHANNEL_ID` | Optional. Channel receiving errors that belong to no server. Pick a channel only the bot's administrators can read: those errors come from every server's tasks. |
-| `data/` volume | Per-server settings and the temporary-admin expiries (`data/temp_admin_state.json`). |
+| `DEV_GUILD_ID` | Optional, development bot only. Syncs the commands to this one server and leaves global commands alone. Never set on the production bot. |
+| `data/` volume | Per-server settings, the temporary-admin expiries (`data/temp_admin_state.json`) and the fingerprint of the last command sync (`data/command_sync_state.json`; delete it to force a sync). |
 | `logs/` volume | `logs/<date>.log` (every line, never sent) and `logs/guilds/<server ID>/<date>.log` (one server's lines). |
 
 ### Before every redeploy
@@ -71,6 +74,25 @@ Archive `logs/` and `data/` first.
 Never purge logs. Since the per-server log change, the bot deletes no log file. How long to keep them
 is a decision for the association (GDPR), not for the bot.
 
+### Releasing and redeploying
+
+1. Merge the release pull request `chore(main): release X.Y.Z`.
+2. Wait for the "Build and Push Docker Image" run to finish green: `:latest` is then `:X.Y.Z`.
+3. Archive `logs/` and `data/`, as in "Before every redeploy".
+4. Redeploy the stack in Komodo.
+5. Check the start in the log, as usual.
+
+The production stack stays on `:latest`; a test server can follow `:edge`.
+
+### Rolling back
+
+Set the stack's image to the `:X.Y.Z` of the previous release, or to `:sha-<commit>`. Images from before
+the first release use `:<commit sha>`. Read the changelog entries in between for changes to `data/`,
+then redeploy. Go back to `:latest` once a fixed release is out.
+
+After a rollback, delete `data/command_sync_state.json` before upgrading again (see "This command is
+outdated"). The [README](../README.md#rolling-back) has the same steps under "Rolling back".
+
 ## Find a server ID
 
 1. In Discord, open User Settings, Advanced, and enable Developer Mode.
@@ -100,6 +122,9 @@ Order matters: the allow-list comes before the invite, otherwise the bot joins a
    included. Discord refuses to add or remove a role that sits above the bot's own.
 4. In the commands channel (see below), run `/log set` and pick the channel that receives this
    server's errors.
+5. In Server Settings, Integrations, show each staff group to the roles that use it, as in the
+   [README](../README.md#staff-commands-in-the-slash-menu), "Staff commands in the slash menu". Until
+   then, only members with the Administrator permission see the staff commands.
 
 At the next start, the log shows one summary line:
 
@@ -156,6 +181,10 @@ Commands that need an admin accept `Administrateur`, `Président`, `Vice-Présid
 `Secrétaire Général`; `Admin -temp-` is left out on purpose. Per-server role names are planned and not
 available yet.
 
+The slash menu shows each staff group only to server administrators and to the roles allowed in
+Integrations (README, "Staff commands in the slash menu"). The menu is a display setting; the bot
+checks the roles above when a command runs.
+
 ## Commands channel
 
 Commands only run in one text channel per server.
@@ -186,9 +215,18 @@ At every start, the bot checks each holder of `Admin -temp-` (`cogs/user_managem
 
 ## "This command is outdated"
 
-Commands are synced to Discord at every start (`main.py`, `setup_hook`). If Discord shows "This command
-is outdated" after a redeploy, the client still holds the old list: reload it with Ctrl+R (Windows,
-Linux) or Cmd+R (macOS).
+Commands are synced to Discord only when they changed since the last sync
+(`data/command_sync_state.json`); a redeploy without command changes sends nothing. After a change,
+clients still holding the old list show this message: reload with Ctrl+R (Windows, Linux) or Cmd+R
+(macOS). The same reload makes the menu show or hide a staff group after its Integrations settings
+change.
+
+To force a sync: stop the stack, delete `data/command_sync_state.json`, start it. Do it after rolling
+back to an older image, before upgrading again. The file only records the last sync; it holds no
+member data.
+
+The log tells which case applies: `Commands synced (8, global).` after a sync, and
+`Commands unchanged, sync skipped (global).` when nothing changed.
 
 ## Troubleshooting
 
@@ -204,3 +242,8 @@ Linux) or Cmd+R (macOS).
 | `Missing roles ... for guild ...` in the log | The server lacks a role name the bot expects | Create the role with the exact name (see Roles). |
 | "This command is outdated" | The client holds an old command list | Reload Discord (Ctrl/Cmd+R). |
 | No errors reach the operator channel | `OPERATOR_LOG_CHANNEL_ID` is empty or malformed (warning at start) | Set a valid channel ID; they stay in `logs/<date>.log` meanwhile. |
+| A staff member no longer sees their commands | Their role is not allowed on that command in Integrations, or their client holds the old list | Add the role as in the README table, then reload Discord. |
+| A member sees a staff group | `@everyone` is allowed on that command in Integrations, or a role they hold was added at the top of the page | Remove that entry; leave the Roles & Members section at the top alone. |
+| A changed command does not show after a redeploy | The record matches while Discord holds other commands (another instance with the same token, or a rollback) | Delete `data/command_sync_state.json` and restart. |
+| Bot stops at start with `DEV_GUILD_ID: ...` | Malformed ID, or a server outside `ALLOWED_GUILD_IDS` | Digits only, and list the server; or unset it on the production bot. |
+| A release's image build failed | The tag exists but `:latest` did not move | Re-run the failed jobs of that run (re-running all jobs publishes `:edge` only). |
