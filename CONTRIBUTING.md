@@ -33,6 +33,49 @@ uv run --group dev ruff format src tests
 uv run --group dev ruff check --fix src tests
 ```
 
+## Preview a screen as an image
+
+A screen the bot sends can be rendered as a Discord-like image before it ships.
+The screens run the bot's real command or view code with sample data, so a change to the bot shows in its image.
+The browser comes from the `mockups` group, which the bot, CI and the Docker image never install.
+
+Install the browser once, about 100 MB:
+
+```bash
+uv run --group mockups playwright install chromium --only-shell
+```
+
+Render every screen, or only the ones you name, to dark and light PNG at 390 px (phone) and 900 px (desktop), so 4 PNG per screen:
+
+```bash
+uv run --group mockups python -m tests.mockups --out <folder> [screen ...]
+```
+
+`--html-only` skips the browser and `--width 500` replaces both widths.
+
+To add a screen, write a function in `tests/mockups/screens.py` that runs the real command or view, and register it in `SCREENS`.
+Then write its snapshot and read the diff before you commit it:
+
+```bash
+MOCKUP_SNAPSHOTS=update uv run --group dev pytest -q tests/test_mockups.py
+```
+
+To sketch a screen no code produces yet, write a JSON file and pass it with `--payload`.
+`names` maps a mention's id to its name, and each `sent` item is a Discord API `message` or `modal`:
+
+```json
+{"names": {"42": "Camille"}, "sent": [{"message": {"content": "Bonjour <@42>", "ephemeral": true}}]}
+```
+
+To capture one HTML page at one width, run `uv run --group mockups python -m tests.mockups --shot page.html out.png 390`.
+
+Limits to keep in mind:
+
+- The font is the system one, so line wrapping is approximate.
+- Open text menus are drawn as a list, which Discord shows only on click.
+- A modal is centred on a phone, where Discord fills the screen.
+- CI checks the snapshots, not the images.
+
 ## Type errors and the baseline
 
 `.basedpyright/baseline.json` records the type errors that predate the check. A new error fails it. Fix it, or add `# pyright: ignore[<rule>]` followed by a short reason.
