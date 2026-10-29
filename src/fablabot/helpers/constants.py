@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from zoneinfo import ZoneInfo
 
+from discord import Permissions
+
 PARIS_TZ = ZoneInfo("Europe/Paris")
 MAX_MSG_CHARS = 1900
 MAX_TRACKED_OPTIONS = 25
@@ -74,6 +76,19 @@ ADMIN_ROLES = {
     RoleNames.VICE_PRESIDENT,
     RoleNames.SECRETARY,
 }
+
+
+def staff_default_permissions() -> Permissions:
+    """Return the default permissions of a staff command group, which hide it from members.
+
+    An empty set means only server administrators see the group until one of them allows a role on it in
+    Server Settings > Integrations. It only hides commands in the slash menu: the role check of each command
+    still decides who may run it.
+
+    Returns:
+        Permissions: An empty permission set.
+    """
+    return Permissions.none()
 
 
 class ErrorMessages:

@@ -16,7 +16,7 @@ from discord import Guild, HTTPException, Interaction, Member, NotFound, Role, U
 from discord.ext import commands
 from discord.utils import get
 
-from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames
+from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames, staff_default_permissions
 from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.safe_discord_operations import safe_add_roles, safe_remove_roles
 from fablabot.helpers.state_store import JsonStateStore
@@ -102,7 +102,9 @@ class UserManagement(commands.Cog):
     # region ====== User Slash Commands Group ======
     # -- Help & Admin Access --
 
-    user_group = app_commands.Group(name="user", description="Gestion des utilisateurs")
+    user_group = app_commands.Group(
+        name="user", description="Gestion des utilisateurs", default_permissions=staff_default_permissions()
+    )
 
     @user_group.command(
         name="help",
