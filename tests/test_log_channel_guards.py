@@ -95,7 +95,7 @@ async def test_log_set_does_not_touch_the_legacy_entry() -> None:
     path = guild_config.Path("data/guild_config.json")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"__global__": {"log_channel_id": CHANNEL_A}}), encoding="utf-8")
-    guild_config._config_store = JsonStateStore(guild_config.logger, path)  # noqa: SLF001
+    guild_config._config_store = JsonStateStore(guild_config.logger, path)
     interaction = make_interaction(guild_id=GUILD_B)
 
     with patch("fablabot.cogs.log_management.ensure_command_context", AsyncMock(return_value=True)):

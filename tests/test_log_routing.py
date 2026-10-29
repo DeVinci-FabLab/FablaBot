@@ -66,7 +66,7 @@ async def test_guild_error_goes_to_its_own_log_channel() -> None:
     guild_config.set_log_channel_id(GUILD_A, CHANNEL_A)
     channel = _channel(CHANNEL_A, GUILD_A)
     handler = DiscordLogHandler(_bot(channel))
-    await handler._send(GUILD_A, "boom")  # noqa: SLF001
+    await handler._send(GUILD_A, "boom")
     channel.send.assert_awaited_once()
 
 
@@ -74,7 +74,7 @@ async def test_guild_error_without_log_channel_is_not_posted() -> None:
     """A guild with no log channel gets nothing posted anywhere."""
     channel = _channel(CHANNEL_A, GUILD_A)
     handler = DiscordLogHandler(_bot(channel))
-    await handler._send(GUILD_B, "boom")  # noqa: SLF001
+    await handler._send(GUILD_B, "boom")
     channel.send.assert_not_awaited()
 
 
@@ -83,7 +83,7 @@ async def test_guild_error_never_posted_to_a_channel_of_another_guild() -> None:
     guild_config.set_log_channel_id(GUILD_B, CHANNEL_A)
     channel = _channel(CHANNEL_A, GUILD_A)
     handler = DiscordLogHandler(_bot(channel))
-    await handler._send(GUILD_B, "boom")  # noqa: SLF001
+    await handler._send(GUILD_B, "boom")
     channel.send.assert_not_awaited()
 
 
@@ -91,7 +91,7 @@ async def test_guild_error_never_goes_to_operator_channel() -> None:
     """An error of a guild with no log channel stays out of the operator channel."""
     operator = _channel(OPERATOR, GUILD_B)
     handler = DiscordLogHandler(_bot(operator), operator_channel_id=OPERATOR)
-    await handler._send(GUILD_B, "boom")  # noqa: SLF001
+    await handler._send(GUILD_B, "boom")
     operator.send.assert_not_awaited()
 
 
@@ -99,7 +99,7 @@ async def test_guildless_error_goes_to_operator_channel() -> None:
     """An error tied to no guild is posted in the operator channel."""
     operator = _channel(OPERATOR, GUILD_A)
     handler = DiscordLogHandler(_bot(operator), operator_channel_id=OPERATOR)
-    await handler._send(None, "boom")  # noqa: SLF001
+    await handler._send(None, "boom")
     operator.send.assert_awaited_once()
 
 
@@ -108,7 +108,7 @@ async def test_guildless_error_without_operator_is_not_posted() -> None:
     guild_config.set_log_channel_id(GUILD_A, CHANNEL_A)
     channel = _channel(CHANNEL_A, GUILD_A)
     handler = DiscordLogHandler(_bot(channel))
-    await handler._send(None, "boom")  # noqa: SLF001
+    await handler._send(None, "boom")
     channel.send.assert_not_awaited()
 
 
@@ -117,7 +117,7 @@ async def test_posts_without_mentions_and_neutralises_code_fences() -> None:
     guild_config.set_log_channel_id(GUILD_A, CHANNEL_A)
     channel = _channel(CHANNEL_A, GUILD_A)
     handler = DiscordLogHandler(_bot(channel))
-    await handler._send(GUILD_A, "a ```evil``` @everyone")  # noqa: SLF001
+    await handler._send(GUILD_A, "a ```evil``` @everyone")
     args, kwargs = channel.send.await_args
     mentions = kwargs["allowed_mentions"]
     assert isinstance(mentions, AllowedMentions)
@@ -131,7 +131,7 @@ async def test_runs_of_backticks_never_close_the_code_block(run: str) -> None:
     guild_config.set_log_channel_id(GUILD_A, CHANNEL_A)
     channel = _channel(CHANNEL_A, GUILD_A)
     handler = DiscordLogHandler(_bot(channel))
-    await handler._send(GUILD_A, f"x{run}[click](https://evil.example) # Heading")  # noqa: SLF001
+    await handler._send(GUILD_A, f"x{run}[click](https://evil.example) # Heading")
     args, _ = channel.send.await_args
     assert args[0].count("```") == WRAPPING_FENCES
 
@@ -143,7 +143,7 @@ async def test_send_failure_logs_a_warning_and_never_reposts(caplog: pytest.LogC
     channel.send.side_effect = HTTPException(MagicMock(status=403), "x")
     handler = DiscordLogHandler(_bot(channel))
     with caplog.at_level(logging.DEBUG):
-        await handler._send(GUILD_A, "boom")  # noqa: SLF001
+        await handler._send(GUILD_A, "boom")
     assert channel.send.await_count == 1
     assert [r.levelno for r in caplog.records] == [logging.WARNING]
     assert caplog.records[0].getMessage() == f"Could not post a log line (guild_id={GUILD_A}, channel_id={CHANNEL_A}): HTTP 403"
@@ -156,7 +156,7 @@ async def test_send_failure_of_any_kind_logs_a_warning_and_never_reposts(caplog:
     channel.send.side_effect = RuntimeError("closed session")
     handler = DiscordLogHandler(_bot(channel))
     with caplog.at_level(logging.DEBUG):
-        await handler._send(GUILD_A, "boom")  # noqa: SLF001
+        await handler._send(GUILD_A, "boom")
     assert channel.send.await_count == 1
     assert [r.levelno for r in caplog.records] == [logging.WARNING]
     assert f"guild_id={GUILD_A}" in caplog.records[0].getMessage()
@@ -169,7 +169,7 @@ async def test_send_failure_lets_a_recursion_error_through() -> None:
     channel.send.side_effect = RecursionError()
     handler = DiscordLogHandler(_bot(channel))
     with pytest.raises(RecursionError):
-        await handler._send(GUILD_A, "boom")  # noqa: SLF001
+        await handler._send(GUILD_A, "boom")
 
 
 def test_send_task_runs_outside_the_record_guild() -> None:
@@ -197,12 +197,12 @@ def test_configure_logging_tags_file_lines_and_keeps_one_line_per_entry() -> Non
         logging.getLogger("fablabot.probe").info("x\ny")
 
     bot = MagicMock()
-    bot._connection.parsers = {"INTERACTION_CREATE": parser}  # noqa: SLF001
+    bot._connection.parsers = {"INTERACTION_CREATE": parser}
     added: list[logging.Handler] = []
     try:
         handlers = configure_logging(bot)
         added.extend(handlers)
-        bot._connection.parsers["INTERACTION_CREATE"]({"guild_id": str(GUILD_A)})  # noqa: SLF001
+        bot._connection.parsers["INTERACTION_CREATE"]({"guild_id": str(GUILD_A)})
         for handler in handlers:
             handler.flush()
         content = (Path("logs") / f"{datetime.now(PARIS_TZ).date()}.log").read_text(encoding="utf-8")
@@ -229,7 +229,7 @@ def test_configure_logging_posts_errors_only() -> None:
     discord_logger = logging.getLogger("discord")
     saved_discord_level = discord_logger.level
     bot = MagicMock()
-    bot._connection.parsers = {"INTERACTION_CREATE": lambda _data: None}  # noqa: SLF001
+    bot._connection.parsers = {"INTERACTION_CREATE": lambda _data: None}
     added: list[logging.Handler] = []
     try:
         handlers = configure_logging(bot)
@@ -267,7 +267,7 @@ def test_configure_logging_turns_operator_off_without_attribution(monkeypatch: p
     discord_logger = logging.getLogger("discord")
     saved_discord_level = discord_logger.level
     bot = MagicMock()
-    bot._connection.parsers = {}  # noqa: SLF001
+    bot._connection.parsers = {}
     added: list[logging.Handler] = []
     try:
         handlers = configure_logging(bot)
@@ -298,9 +298,9 @@ async def test_formation_loop_tags_each_guild_turn() -> None:
     bot = MagicMock()
     bot.get_guild.side_effect = lambda guild_id: MagicMock(id=guild_id)
     cog = FormationManagement(bot)
-    cog._check_upcoming_formations.cancel()  # noqa: SLF001
-    cog._state_store.state.clear()  # noqa: SLF001
-    cog._state_store.state.update({str(GUILD_A): {}, str(GUILD_B): {}})  # noqa: SLF001
+    cog._check_upcoming_formations.cancel()
+    cog._state_store.state.clear()
+    cog._state_store.state.update({str(GUILD_A): {}, str(GUILD_B): {}})
 
     def failing(_guild_id: int) -> None:
         """Log an error from inside the guild's turn."""
@@ -321,7 +321,7 @@ async def test_formation_loop_tags_each_guild_turn() -> None:
     target.addHandler(capture)
     try:
         with patch.object(cog, "_get_last_published_in_guild", side_effect=lambda gid: failing(gid)):
-            await cog._check_upcoming_formations.coro(cog)  # noqa: SLF001
+            await cog._check_upcoming_formations.coro(cog)
     finally:
         target.removeHandler(capture)
     assert seen == [GUILD_A, GUILD_B]

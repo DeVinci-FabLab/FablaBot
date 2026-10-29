@@ -23,7 +23,7 @@ STATE_FILE = Path("data/temp_admin_state.json")
 
 
 @pytest.fixture(autouse=True)
-def _fixed_clock():  # noqa: ANN202
+def _fixed_clock():
     with patch.object(user_management, "_utcnow", return_value=NOW):
         yield
 
@@ -63,6 +63,7 @@ def _stop(cog: UserManagement) -> None:
 
 
 async def test_start_removes_holder_without_record(caplog: pytest.LogCaptureFixture) -> None:
+    """Start removes the role from a holder with no record."""
     caplog.set_level(logging.DEBUG)
     guild, holder, temp = _holder_guild()
 
@@ -76,6 +77,7 @@ async def test_start_removes_holder_without_record(caplog: pytest.LogCaptureFixt
 
 
 async def test_start_removes_holder_with_past_expiry_and_clears_record() -> None:
+    """Start removes the role from a holder whose expiry has passed and clears the record."""
     _write_state(_record(GUILD_ID, HOLDER_ID, NOW - timedelta(minutes=1)))
     guild, holder, _temp = _holder_guild()
 
@@ -86,6 +88,7 @@ async def test_start_removes_holder_with_past_expiry_and_clears_record() -> None
 
 
 async def test_start_keeps_future_holder_until_stored_time() -> None:
+    """Start keeps a holder whose expiry is ahead until the stored time."""
     due = NOW + timedelta(minutes=12)
     _write_state(_record(GUILD_ID, HOLDER_ID, due))
     guild, holder, _temp = _holder_guild()
@@ -98,6 +101,7 @@ async def test_start_keeps_future_holder_until_stored_time() -> None:
 
 
 async def test_restart_and_reconnect_keep_one_timer_and_the_record() -> None:
+    """A restart or reconnect keeps one timer and the record."""
     _write_state(_record(GUILD_ID, HOLDER_ID, NOW + timedelta(minutes=12)))
     guild, holder, _temp = _holder_guild()
 
@@ -115,6 +119,7 @@ async def test_restart_and_reconnect_keep_one_timer_and_the_record() -> None:
 
 
 async def test_start_clears_records_of_members_without_the_role() -> None:
+    """Start clears the records of members who no longer hold the role."""
     _write_state(_record(GUILD_ID, 999, NOW + timedelta(minutes=12)))
     guild, _holder, _temp = _holder_guild()
 
@@ -124,6 +129,7 @@ async def test_start_clears_records_of_members_without_the_role() -> None:
 
 
 async def test_start_keeps_records_of_unreachable_guilds() -> None:
+    """Start keeps the records of guilds it cannot reach."""
     state = _record(OTHER_GUILD_ID, HOLDER_ID, NOW - timedelta(minutes=1))
     _write_state(state)
     guild, _holder, _temp = _holder_guild()
@@ -136,6 +142,7 @@ async def test_start_keeps_records_of_unreachable_guilds() -> None:
 
 
 async def test_start_ignores_guild_without_temp_role(caplog: pytest.LogCaptureFixture) -> None:
+    """Start ignores a guild that has no temporary role."""
     caplog.set_level(logging.DEBUG)
     member = make_member(HOLDER_ID)
     guild = make_guild(GUILD_ID, [make_role("Membre")], [member])
@@ -146,6 +153,7 @@ async def test_start_ignores_guild_without_temp_role(caplog: pytest.LogCaptureFi
 
 
 async def test_failed_start_removal_keeps_record(caplog: pytest.LogCaptureFixture) -> None:
+    """A failed removal at start keeps the record."""
     _write_state(_record(GUILD_ID, HOLDER_ID, NOW - timedelta(minutes=1)))
     guild, holder, _temp = _holder_guild()
     holder.remove_roles = AsyncMock(side_effect=Forbidden(MagicMock(status=403), "missing permissions"))
@@ -168,6 +176,7 @@ async def test_failed_start_removal_keeps_record(caplog: pytest.LogCaptureFixtur
     ids=["not-json", "not-a-mapping", "bad-time", "naive-time"],
 )
 async def test_unreadable_state_fails_closed(caplog: pytest.LogCaptureFixture, payload: str) -> None:
+    """An unreadable state file fails closed."""
     _write_state(payload)
     guild, holder, _temp = _holder_guild()
 
@@ -178,6 +187,7 @@ async def test_unreadable_state_fails_closed(caplog: pytest.LogCaptureFixture, p
 
 
 async def test_op_landing_during_the_sweep_keeps_its_record_and_timer() -> None:
+    """An op landing during the sweep keeps its record and timer."""
     guild, holder, _temp = _holder_guild()
     due = NOW + timedelta(minutes=30)
     cog_box: list[UserManagement] = []
@@ -185,8 +195,8 @@ async def test_op_landing_during_the_sweep_keeps_its_record_and_timer() -> None:
     async def op_lands_during_removal(*_args: object, **_kwargs: object) -> None:
         # A /user op served while the removal is awaited: the record and the timer exist, the cache does not show the role yet.
         cog = cog_box[0]
-        cog._record_op(GUILD_ID, 777, user_management.OpExpiry(due, 123))  # noqa: SLF001
-        cog._arm_deop(GUILD_ID, 777, due)  # noqa: SLF001
+        cog._record_op(GUILD_ID, 777, user_management.OpExpiry(due, 123))
+        cog._arm_deop(GUILD_ID, 777, due)
 
     holder.remove_roles = AsyncMock(side_effect=op_lands_during_removal)
     bot = MagicMock()
@@ -202,6 +212,7 @@ async def test_op_landing_during_the_sweep_keeps_its_record_and_timer() -> None:
 
 
 async def test_start_with_partial_member_cache_keeps_future_record_and_arms_it() -> None:
+    """With a partial member cache, start keeps a future record and arms its timer."""
     due = NOW + timedelta(minutes=12)
     _write_state(_record(GUILD_ID, 999, due))
     guild, _holder, _temp = _holder_guild()
@@ -215,6 +226,7 @@ async def test_start_with_partial_member_cache_keeps_future_record_and_arms_it()
 
 
 async def test_start_with_partial_member_cache_ends_a_past_op_of_a_member_the_cache_misses() -> None:
+    """With a partial member cache, start ends a past op of a member the cache misses."""
     _write_state(_record(GUILD_ID, 999, NOW - timedelta(minutes=1)))
     guild, _holder, temp = _holder_guild()
     guild.chunked = False
@@ -231,6 +243,7 @@ async def test_start_with_partial_member_cache_ends_a_past_op_of_a_member_the_ca
 
 
 async def test_guild_back_from_an_outage_is_reconciled() -> None:
+    """A guild back from an outage is reconciled."""
     due = NOW + timedelta(minutes=12)
     _write_state(_record(GUILD_ID, HOLDER_ID, due))
     guild, holder, _temp = _holder_guild()
@@ -248,6 +261,7 @@ async def test_guild_back_from_an_outage_is_reconciled() -> None:
 
 @pytest.mark.parametrize("entry", [[], None, "x"], ids=["list", "null", "string"])
 async def test_start_resets_a_malformed_guild_entry(caplog: pytest.LogCaptureFixture, entry: object) -> None:
+    """Start resets a malformed guild entry."""
     _write_state({str(GUILD_ID): entry, str(OTHER_GUILD_ID): _record(OTHER_GUILD_ID, HOLDER_ID, NOW)[str(OTHER_GUILD_ID)]})
     guild, _holder, _temp = _holder_guild()
 

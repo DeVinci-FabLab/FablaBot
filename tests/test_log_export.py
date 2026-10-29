@@ -6,15 +6,15 @@ from datetime import date
 import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from conftest import make_interaction
 import pytest
 
 from fablabot.cogs.log_management import LogManagement
 from fablabot.logging_handlers import DailyFileHandler
-from conftest import make_interaction
 
 
 @pytest.fixture
-def handler(tmp_path):  # noqa: ANN001, ANN201
+def handler(tmp_path):
     """Real daily file handler writing under a temporary directory."""
     file_handler = DailyFileHandler(log_dir=str(tmp_path / "logs"), formatter=logging.Formatter())
     yield file_handler
@@ -22,7 +22,7 @@ def handler(tmp_path):  # noqa: ANN001, ANN201
 
 
 @pytest.fixture
-def cog(handler):  # noqa: ANN001, ANN201
+def cog(handler):
     """Log cog whose bot carries the real file handler."""
     bot = MagicMock()
     bot.file_log_handler = handler
@@ -30,13 +30,14 @@ def cog(handler):  # noqa: ANN001, ANN201
 
 
 @pytest.fixture(autouse=True)
-def _allow_command():  # noqa: ANN202
+def _allow_command():
     """Let every caller through the role check."""
     with patch("fablabot.cogs.log_management.ensure_command_context", AsyncMock(return_value=True)):
         yield
 
 
-async def test_log_export_sends_file_ephemeral(cog, handler) -> None:  # noqa: ANN001
+async def test_log_export_sends_file_ephemeral(cog, handler) -> None:
+    """The export sends the day's file as an ephemeral reply."""
     path = handler.guild_log_path(1234, date(2026, 10, 27))
     path.parent.mkdir(parents=True)
     path.write_text("line\n", encoding="utf-8")
@@ -50,7 +51,8 @@ async def test_log_export_sends_file_ephemeral(cog, handler) -> None:  # noqa: A
     assert kwargs["ephemeral"] is True
 
 
-async def test_log_export_missing_file_is_ephemeral(cog) -> None:  # noqa: ANN001
+async def test_log_export_missing_file_is_ephemeral(cog) -> None:
+    """A day without a log file gets an ephemeral notice."""
     interaction = make_interaction()
 
     await LogManagement.log_export.callback(cog, interaction, date="01/01/2020")
@@ -77,7 +79,8 @@ async def test_log_export_does_not_log_the_typed_date(cog, caplog) -> None:
 
 
 @pytest.mark.parametrize("bad", ["31/02/2026", "2026-10-27", "hier", "27/10"])
-async def test_log_export_rejects_bad_date(cog, caplog, bad) -> None:  # noqa: ANN001
+async def test_log_export_rejects_bad_date(cog, caplog, bad) -> None:
+    """A malformed date is refused with the accepted format, and nothing is logged as an error."""
     interaction = make_interaction()
 
     with caplog.at_level(logging.DEBUG):
@@ -98,7 +101,7 @@ async def test_log_export_rejects_bad_date(cog, caplog, bad) -> None:  # noqa: A
         ("01/01/2020", False, "Log export (guild_id=1234, date=2020-01-01, found=no)"),
     ],
 )
-async def test_log_export_logs_server_date_and_outcome(cog, handler, caplog, typed, found, expected) -> None:
+async def test_log_export_logs_server_date_and_outcome(cog, handler, caplog, typed, found, expected) -> None:  # noqa: PLR0913 - pytest fixtures and parameters
     """The export logs the server, the parsed date and whether a file was found, at INFO."""
     if found:
         path = handler.guild_log_path(1234, date(2026, 10, 27))
@@ -127,7 +130,8 @@ async def test_log_export_refusal_logs_malformed_date_at_info(cog, caplog) -> No
     assert "forged" not in caplog.text
 
 
-async def test_log_help_shows_accepted_date_format(cog) -> None:  # noqa: ANN001
+async def test_log_help_shows_accepted_date_format(cog) -> None:
+    """The log help shows the accepted date format."""
     interaction = make_interaction()
 
     await LogManagement.log_help.callback(cog, interaction)

@@ -17,7 +17,7 @@ CALLER_ID, TARGET_ID, OTHER_ID = 418003123456789012, 501, 502
 
 
 @pytest.fixture(autouse=True)
-def _commands_channel_ok():  # noqa: ANN202
+def _commands_channel_ok():
     """Skip the commands-channel check so the real role check runs."""
     with patch("fablabot.helpers.utils._is_in_allowed_channel", AsyncMock(return_value=True)):
         yield
@@ -27,6 +27,7 @@ class Server:
     """A guild with staff roles, a caller holding ``caller_roles`` and two other members."""
 
     def __init__(self, *caller_roles: str) -> None:
+        """Build the server with the caller holding ``caller_roles``."""
         names = (RoleNames.ADMIN_TEMP, RoleNames.PRESIDENT, RoleNames.BUREAU, "F - Laser", *user_management.ADMIN_ROLES)
         self.roles = {name: make_role(name, role_id=i) for i, name in enumerate(dict.fromkeys(names))}
         self.caller = make_member(CALLER_ID, *(self.roles[n] for n in caller_roles))
@@ -35,6 +36,7 @@ class Server:
         self.guild = make_guild(GUILD_ID, list(self.roles.values()), [self.caller, self.target, self.other])
 
     def interaction(self) -> MagicMock:
+        """Return an interaction made by the caller in this server."""
         interaction = make_interaction(guild_id=GUILD_ID)
         interaction.guild = self.guild
         interaction.user = self.caller
@@ -53,7 +55,8 @@ async def _open_bulk(server: Server, role_name: str, action: str) -> tuple[Magic
 
 
 async def _confirm_bulk(server: Server, view: object, *members: MagicMock) -> MagicMock:
-    view.select_members._values = list(members)  # noqa: SLF001 - discord.py exposes no public setter for a selection
+    # discord.py exposes no public setter for a selection
+    view.select_members._values = list(members)
     click = server.interaction()
     await view.confirm_button.callback(click)
     return click
@@ -63,6 +66,7 @@ async def _confirm_bulk(server: Server, view: object, *members: MagicMock) -> Ma
 
 
 async def test_bulk_add_refuses_temp_role_at_command(caplog: pytest.LogCaptureFixture) -> None:
+    """Adding the temporary role in bulk is refused at the command and points to the op command."""
     caplog.set_level(logging.DEBUG)
     server = Server(RoleNames.PRESIDENT)
 
@@ -75,6 +79,7 @@ async def test_bulk_add_refuses_temp_role_at_command(caplog: pytest.LogCaptureFi
 
 
 async def test_bulk_add_skips_self_and_lists_it_as_refused(caplog: pytest.LogCaptureFixture) -> None:
+    """A bulk add skips the caller and lists them as refused."""
     caplog.set_level(logging.DEBUG)
     server = Server(RoleNames.PRESIDENT)
     _interaction, view = await _open_bulk(server, "F - Laser", "add")
@@ -90,6 +95,7 @@ async def test_bulk_add_skips_self_and_lists_it_as_refused(caplog: pytest.LogCap
 
 
 async def test_bulk_remove_from_self_is_allowed() -> None:
+    """A bulk remove may target the caller."""
     server = Server(RoleNames.PRESIDENT, "F - Laser")
     _interaction, view = await _open_bulk(server, "F - Laser", "remove")
 
@@ -99,6 +105,7 @@ async def test_bulk_remove_from_self_is_allowed() -> None:
 
 
 async def test_bulk_confirm_after_losing_rights_changes_nothing(caplog: pytest.LogCaptureFixture) -> None:
+    """Confirming a bulk change after losing rights changes no role."""
     caplog.set_level(logging.DEBUG)
     server = Server(RoleNames.PRESIDENT)
     _interaction, view = await _open_bulk(server, "F - Laser", "add")
@@ -119,6 +126,7 @@ async def test_bulk_confirm_after_losing_rights_changes_nothing(caplog: pytest.L
 
 @pytest.mark.parametrize("roles", [(), (RoleNames.ADMIN_TEMP,), ("F - Laser",)], ids=["none", "temp-only", "trainer"])
 async def test_with_roles_refuses_non_staff(roles: tuple[str, ...]) -> None:
+    """The role search is refused to callers outside the staff."""
     server = Server(*roles)
     interaction = server.interaction()
 
@@ -130,6 +138,7 @@ async def test_with_roles_refuses_non_staff(roles: tuple[str, ...]) -> None:
 
 @pytest.mark.parametrize("role", [RoleNames.PRESIDENT, RoleNames.BUREAU], ids=["president", "bureau"])
 async def test_with_roles_list_is_private(role: str) -> None:
+    """The role search answers privately and lists the members holding the role."""
     server = Server(role)
     server.roles["F - Laser"].members.extend([server.target])
     interaction = server.interaction()
@@ -142,7 +151,8 @@ async def test_with_roles_list_is_private(role: str) -> None:
     interaction.response.defer.assert_not_awaited()
     interaction.followup.send.assert_not_awaited()
 
-    view.select_roles._values = [server.roles["F - Laser"]]  # noqa: SLF001 - no public setter for a selection
+    # discord.py exposes no public setter for a selection
+    view.select_roles._values = [server.roles["F - Laser"]]
     click = server.interaction()
     await view.confirm_button.callback(click)
 
@@ -153,6 +163,7 @@ async def test_with_roles_list_is_private(role: str) -> None:
 
 
 async def test_with_roles_confirm_after_losing_rights_lists_nothing(caplog: pytest.LogCaptureFixture) -> None:
+    """Confirming a role search after losing rights lists nothing."""
     caplog.set_level(logging.DEBUG)
     server = Server(RoleNames.BUREAU)
     interaction = server.interaction()
@@ -160,7 +171,8 @@ async def test_with_roles_confirm_after_losing_rights_lists_nothing(caplog: pyte
     view = interaction.response.send_message.await_args.kwargs["view"]
     server.caller.roles.clear()
 
-    view.select_roles._values = [server.roles["F - Laser"]]  # noqa: SLF001 - no public setter for a selection
+    # discord.py exposes no public setter for a selection
+    view.select_roles._values = [server.roles["F - Laser"]]
     click = server.interaction()
     await view.confirm_button.callback(click)
 

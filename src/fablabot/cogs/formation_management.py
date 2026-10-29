@@ -252,7 +252,7 @@ class FormationManagement(commands.Cog):
         seats="Nombre de places",
         excusable="Absences excusables ?",
     )
-    async def fm_add(
+    async def fm_add(  # noqa: PLR0913 - one parameter per slash command option
         self,
         interaction: Interaction,
         *,
@@ -806,7 +806,7 @@ class FormationManagement(commands.Cog):
         task = asyncio.create_task(_delayed())
         self._pending_update_tasks[guild_id] = task
 
-    async def _update_published_message(self, guild_id: int) -> None:
+    async def _update_published_message(self, guild_id: int) -> None:  # noqa: PLR0912, PLR0915 - split once formations have tests
         """Update the published message to reflect current registrations."""
         pub = self._get_last_published_in_guild(guild_id)
         if not pub:

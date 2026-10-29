@@ -162,12 +162,12 @@ class MultiRoleSelectorView(ui.View):
             await interaction.response.defer()
 
     @ui.button(label="Confirmer", style=ButtonStyle.primary)
-    async def confirm_button(self, interaction: Interaction, button: ui.Button) -> None:  # noqa: ARG002
+    async def confirm_button(self, interaction: Interaction, _button: ui.Button) -> None:
         """Confirm the multi role selection, after checking the clicker's rights again.
 
         Args:
             interaction (Interaction): The Discord interaction triggered by the confirm button.
-            button (ui.Button): The button that was clicked.
+            _button (ui.Button): The button that was clicked.
         """
         roles: list[Role] = [r for r in self.select_roles.values if isinstance(r, Role)]
         if not roles:

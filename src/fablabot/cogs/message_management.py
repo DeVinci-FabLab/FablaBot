@@ -219,7 +219,7 @@ class MessageManagement(commands.Cog):
         all_channels="Purger dans TOUS les canaux?",
         reason="Raison de la suppression",
     )
-    async def msg_purge(
+    async def msg_purge(  # noqa: PLR0912, PLR0913, PLR0915 - one parameter per option; split once purge has tests
         self,
         interaction: Interaction,
         *,
@@ -322,7 +322,7 @@ class MessageManagement(commands.Cog):
                 self.confirmed = False
 
             @ui.button(label="Confirmer", style=ButtonStyle.green)
-            async def confirm_button(self, button_interaction: Interaction, button: ui.Button) -> None:
+            async def confirm_button(self, button_interaction: Interaction, _button: ui.Button) -> None:
                 if button_interaction.user != interaction.user:
                     await button_interaction.response.send_message("Vous n'êtes pas autorisé", ephemeral=True)
                     return
@@ -331,7 +331,7 @@ class MessageManagement(commands.Cog):
                 self.stop()
 
             @ui.button(label="Annuler", style=ButtonStyle.red)
-            async def cancel_button(self, button_interaction: Interaction, button: ui.Button) -> None:
+            async def cancel_button(self, button_interaction: Interaction, _button: ui.Button) -> None:
                 if button_interaction.user != interaction.user:
                     await button_interaction.response.send_message("Vous n'êtes pas autorisé", ephemeral=True)
                     return
@@ -393,7 +393,7 @@ class MessageManagement(commands.Cog):
 
         except Exception as e:
             logger.exception("Error during purge")
-            await interaction.followup.send(f"Erreur: {str(e)}", ephemeral=True)
+            await interaction.followup.send(f"Erreur: {e!s}", ephemeral=True)
 
     @msg_group.command(
         name="start",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib
 import logging
-from types import ModuleType
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import discord
@@ -21,6 +21,9 @@ from fablabot.helpers.guild_access import (
     parse_allowed_guild_ids,
 )
 
+if TYPE_CHECKING:
+    from types import ModuleType
+
 LISTED = 111111111111111111
 UNLISTED = 222222222222222222
 TOLERATED = 333333333333333333
@@ -29,7 +32,7 @@ USER_NAME = "kevin_secret_name"
 
 
 @pytest.fixture
-def fablabot_main(tmp_path, monkeypatch) -> ModuleType:  # noqa: ANN001
+def fablabot_main(tmp_path, monkeypatch) -> ModuleType:
     """Import ``fablabot.main`` with a fake token file in place."""
     token = tmp_path / "token"
     token.write_text("fake-token")

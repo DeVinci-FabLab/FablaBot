@@ -33,6 +33,7 @@ def _fixed_clock_and_context():
 
 @pytest.fixture
 async def cog():
+    """Build the cog and cancel its timers afterwards."""
     instance = UserManagement(MagicMock())
     yield instance
     for task in instance.deop_tasks.values():
@@ -43,6 +44,7 @@ class Server:
     """One guild with every role the tests need, a caller holding ``caller_roles`` and a target."""
 
     def __init__(self, *caller_roles: str) -> None:
+        """Build a server whose caller holds the given roles."""
         self.roles = {
             name: make_role(name, role_id=i)
             for i, name in enumerate(
@@ -62,6 +64,7 @@ class Server:
         self.guild = make_guild(GUILD_ID, list(self.roles.values()), [self.caller, self.target])
 
     def interaction(self) -> MagicMock:
+        """Return an interaction made by the caller in this guild."""
         interaction = make_interaction(guild_id=GUILD_ID)
         interaction.guild = self.guild
         interaction.user = self.caller
@@ -96,6 +99,7 @@ async def _op(cog: UserManagement, server: Server, member: MagicMock, minutes: i
 async def test_temp_admin_only_cannot_grant_op_or_deop(
     cog: UserManagement, caplog: pytest.LogCaptureFixture, command: str
 ) -> None:
+    """A caller with only the temporary role cannot grant op or deop."""
     caplog.set_level(logging.DEBUG)
     server = Server(RoleNames.ADMIN_TEMP)
     interaction = server.interaction()
@@ -119,6 +123,7 @@ async def test_temp_admin_only_cannot_grant_op_or_deop(
 
 
 async def test_temp_admin_only_deop_leaves_expiry_untouched(cog: UserManagement) -> None:
+    """A refused deop from a temporary admin leaves the expiry untouched."""
     server = Server(RoleNames.PRESIDENT)
     await _op(cog, server, server.target)
     before = STATE_FILE.read_text(encoding="utf-8")
@@ -137,6 +142,7 @@ async def test_temp_admin_only_deop_leaves_expiry_untouched(cog: UserManagement)
 
 
 async def test_add_role_refuses_temp_role_and_points_to_op(cog: UserManagement, caplog: pytest.LogCaptureFixture) -> None:
+    """Adding the temporary role is refused and the reply points to op."""
     caplog.set_level(logging.DEBUG)
     server = Server(RoleNames.PRESIDENT)
     interaction = server.interaction()
@@ -152,6 +158,7 @@ async def test_add_role_refuses_temp_role_and_points_to_op(cog: UserManagement, 
 
 
 async def test_add_role_to_self_is_refused(cog: UserManagement, caplog: pytest.LogCaptureFixture) -> None:
+    """Adding a role to oneself is refused."""
     caplog.set_level(logging.DEBUG)
     server = Server(RoleNames.PRESIDENT)
     interaction = server.interaction()
@@ -164,6 +171,7 @@ async def test_add_role_to_self_is_refused(cog: UserManagement, caplog: pytest.L
 
 
 async def test_op_self_is_refused_even_for_digital_manager(cog: UserManagement) -> None:
+    """Opping oneself is refused even for a digital manager."""
     server = Server(RoleNames.DIGITAL_MANAGER)
     interaction = await _op(cog, server, server.caller)
 
@@ -173,6 +181,7 @@ async def test_op_self_is_refused_even_for_digital_manager(cog: UserManagement) 
 
 
 async def test_remove_role_from_self_is_allowed(cog: UserManagement) -> None:
+    """Removing a role from oneself is allowed."""
     server = Server(RoleNames.PRESIDENT, "F - Laser")
     interaction = server.interaction()
 
@@ -182,6 +191,7 @@ async def test_remove_role_from_self_is_allowed(cog: UserManagement) -> None:
 
 
 async def test_deop_self_is_allowed(cog: UserManagement) -> None:
+    """Deopping oneself is allowed."""
     server = Server(RoleNames.PRESIDENT, RoleNames.ADMIN_TEMP)
     interaction = server.interaction()
 
@@ -194,6 +204,7 @@ async def test_deop_self_is_allowed(cog: UserManagement) -> None:
 
 
 async def test_opped_trainings_manager_still_gives_trainer_roles(cog: UserManagement) -> None:
+    """An opped trainings manager can still give trainer roles."""
     server = Server(RoleNames.ADMIN_TEMP, RoleNames.TRAININGS_MANAGER)
     interaction = server.interaction()
 
@@ -206,6 +217,7 @@ async def test_opped_trainings_manager_still_gives_trainer_roles(cog: UserManage
 
 
 async def test_refusal_lines_carry_ids_but_no_name(cog: UserManagement, caplog: pytest.LogCaptureFixture) -> None:
+    """Refusal log lines carry ids but no names."""
     caplog.set_level(logging.DEBUG)
     server = Server(RoleNames.ADMIN_TEMP)
 
@@ -220,6 +232,7 @@ async def test_refusal_lines_carry_ids_but_no_name(cog: UserManagement, caplog: 
 
 
 async def test_help_explains_op_scope_and_self_rule(cog: UserManagement) -> None:
+    """The help text explains the op scope and the self rule."""
     interaction = make_interaction()
 
     await UserManagement.user_help.callback(cog, interaction)
@@ -235,6 +248,7 @@ async def test_help_explains_op_scope_and_self_rule(cog: UserManagement) -> None
 
 @pytest.mark.parametrize("entry", [[], None, "x"], ids=["list", "null", "string"])
 async def test_op_works_after_start_on_a_malformed_guild_entry(entry: object) -> None:
+    """Op works after a start on a malformed guild entry."""
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     STATE_FILE.write_text(json.dumps({str(GUILD_ID): entry}), encoding="utf-8")
     server = Server(RoleNames.PRESIDENT)

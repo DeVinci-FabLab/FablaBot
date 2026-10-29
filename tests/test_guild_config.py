@@ -112,7 +112,7 @@ def test_migration_is_idempotent(config_file: Callable[[dict | None], Path], mon
     guild_config.migrate_legacy_log_channel(resolver)
 
     save = MagicMock()
-    monkeypatch.setattr(guild_config._config_store, "save", save)  # noqa: SLF001
+    monkeypatch.setattr(guild_config._config_store, "save", save)
 
     assert guild_config.migrate_legacy_log_channel(resolver) is None
     save.assert_not_called()

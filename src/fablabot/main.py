@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from http import HTTPStatus
 import logging
 import os
 from typing import TYPE_CHECKING, Any, override
@@ -33,10 +34,19 @@ DISCORD_TOKEN_FILE = os.environ.get("DISCORD_TOKEN_FILE") or ""
 with open(DISCORD_TOKEN_FILE) as f:
     DISCORD_TOKEN = f.read().strip()
 
+
 class DiscordGateway503Filter(logging.Filter):
     """Filter Discord gateway 503 warnings into a cleaner message."""
 
     def filter(self, record: logging.LogRecord) -> bool:
+        """Replace a gateway 503 handshake error with one warning and drop the original record.
+
+        Args:
+            record (logging.LogRecord): The log record being filtered.
+
+        Returns:
+            bool: False for a gateway 503 record, True for any other.
+        """
         if not record.exc_info:
             return True
 
@@ -46,7 +56,7 @@ class DiscordGateway503Filter(logging.Filter):
 
         if (
             isinstance(exception, WSServerHandshakeError)
-            and getattr(exception, "status", None) == 503
+            and getattr(exception, "status", None) == HTTPStatus.SERVICE_UNAVAILABLE
         ):
             retry_message = record.getMessage()
 
@@ -58,6 +68,7 @@ class DiscordGateway503Filter(logging.Filter):
             return False
 
         return True
+
 
 class Fablabot(commands.Bot):
     """Discord bot implementation for the DeVinci Fablab server."""
