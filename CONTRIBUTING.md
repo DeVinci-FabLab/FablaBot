@@ -45,7 +45,9 @@ Do not run `--writebaseline` to hide a new error. It is only for a basedpyright 
 
 - Titles follow Conventional Commits, for example `fix(log): ...`, since the title becomes the squash commit.
 - One maintainer approval is needed to merge.
-- A push to `main` runs the check, then builds and publishes `ghcr.io/devinci-fablab/fablabot:latest` and `:<commit sha>`. A red check publishes nothing.
+- The title also decides the next version: `feat:` bumps the minor number; `fix:`, `perf:`, `deps:`, `revert:` and `docs:` bump the patch number and appear in the changelog. `build:`, `ci:`, `chore:`, `test:`, `refactor:` and `style:` do not start a release on their own.
+- A push to `main` runs the check, then builds and publishes `ghcr.io/devinci-fablab/fablabot:edge` and `:sha-<commit>`. A red check publishes nothing.
+- `:latest` moves only when the release pull request is merged; the README's Releases section explains the steps.
 - Publishing does not restart a running bot. The deployment is updated by hand.
 
 ## Dependency updates
