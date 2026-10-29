@@ -66,7 +66,7 @@ def write_pages(screens: Mapping[str, Screen], out: Path, widths: Sequence[int])
 
 
 def shoot(jobs: Sequence[tuple[str, Path, int]]) -> None:
-    """Capture each (html text or file URI, png path, width) with the pinned headless browser, offline."""
+    """Capture each (html text or file URI, png path, width) with the pinned headless browser, offline and with script off."""
     try:
         # The browser group is installed only where PNGs are made, never in CI, so the checker may not find it.
         from playwright.sync_api import Error, sync_playwright  # pyright: ignore[reportMissingImports]
@@ -86,7 +86,12 @@ def shoot(jobs: Sequence[tuple[str, Path, int]]) -> None:
         except Error as exc:
             raise PreviewError(NO_BROWSER) from exc
         for source, png, width in jobs:
-            context = browser.new_context(viewport={"width": width, "height": 200}, device_scale_factor=2)
+            context = browser.new_context(
+                viewport={"width": width, "height": 200},
+                device_scale_factor=2,
+                java_script_enabled=False,
+                service_workers="block",
+            )
             context.route("**/*", local_only)
             tab = context.new_page()
             if source.startswith("file://"):

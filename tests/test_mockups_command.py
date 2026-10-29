@@ -179,6 +179,73 @@ def test_screens_are_built_away_from_the_repository(tmp_path: Path, monkeypatch:
     assert sorted(path.name for path in repo.iterdir()) == []
 
 
+def test_pages_run_without_script_and_without_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each capture context turns script and service workers off, so no page can open a WebSocket or fetch."""
+    contexts: list[dict[str, object]] = []
+
+    class Tab:
+        """A page that captures nothing."""
+
+        def goto(self, url: str) -> None:
+            """Load a page."""
+
+        def screenshot(self, **kwargs: object) -> None:
+            """Take a picture."""
+
+    class Context:
+        """A browser context that records how it was made."""
+
+        def route(self, pattern: str, handler: object) -> None:
+            """Register the request filter."""
+
+        def new_page(self) -> Tab:
+            """Open a tab."""
+            return Tab()
+
+        def close(self) -> None:
+            """Close the context."""
+
+    class Browser:
+        """A browser that records every context it makes."""
+
+        def new_context(self, **kwargs: object) -> Context:
+            """Make a context."""
+            contexts.append(kwargs)
+            return Context()
+
+        def close(self) -> None:
+            """Close the browser."""
+
+    class Chromium:
+        """A browser type that launches the recorder."""
+
+        def launch(self) -> Browser:
+            """Start the browser."""
+            return Browser()
+
+    class Session:
+        """A started library session."""
+
+        chromium = Chromium()
+
+        def __enter__(self) -> Self:
+            """Open the session."""
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            """Close the session."""
+
+    fake = types.ModuleType("playwright.sync_api")
+    fake.Error = Exception  # pyright: ignore[reportAttributeAccessIssue]  # a bare module stands in for the library
+    fake.sync_playwright = Session  # pyright: ignore[reportAttributeAccessIssue]  # a bare module stands in for the library
+    monkeypatch.setitem(sys.modules, "playwright", types.ModuleType("playwright"))
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", fake)
+    assert command.main(["--shot", "page.html", "out.png", "390"]) == 0
+    assert len(contexts) == 1
+    assert contexts[0]["java_script_enabled"] is False
+    assert contexts[0]["service_workers"] == "block"
+
+
 def test_contributing_explains_the_preview() -> None:
     """CONTRIBUTING has a section with the install, render and snapshot-update commands."""
     text = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
