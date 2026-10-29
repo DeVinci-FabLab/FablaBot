@@ -97,3 +97,10 @@ def test_a_malformed_commit_publishes_nothing(tmp_path: Path, sha: str) -> None:
     assert run.returncode == 1
     assert "Not a commit SHA" in run.stderr
     assert output == ""
+
+
+def test_the_reference_stack_follows_releases_by_hand() -> None:
+    """compose.yml runs :latest, which only a release moves, and no compose file asks for automatic updates."""
+    assert f"image: {IMAGE}:latest\n" in (ROOT / "compose.yml").read_text(encoding="utf-8")
+    for path in sorted(ROOT.glob("compose*.yml")):
+        assert "watchtower" not in path.read_text(encoding="utf-8").lower(), path.name
