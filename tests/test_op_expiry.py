@@ -25,7 +25,7 @@ STATE_FILE = Path("data/temp_admin_state.json")
 
 
 @pytest.fixture(autouse=True)
-def _fixed_clock_and_context():  # noqa: ANN202
+def _fixed_clock_and_context():
     """Freeze the clock and let every caller through the shared context check."""
     with (
         patch.object(user_management, "_utcnow", return_value=NOW),
@@ -35,7 +35,7 @@ def _fixed_clock_and_context():  # noqa: ANN202
 
 
 @pytest.fixture
-async def cog():  # noqa: ANN201
+async def cog():
     """User cog over a stub bot; its timers are cancelled at teardown."""
     bot = MagicMock()
     instance = UserManagement(bot)
@@ -74,6 +74,7 @@ def _saved() -> dict:
 
 
 async def test_op_records_expiry_before_replying(cog: UserManagement) -> None:
+    """An op is recorded with its expiry before the reply goes out."""
     guild, target, caller = _server(GUILD_A)
     interaction = _interaction(guild, caller)
     seen: list[dict] = []
@@ -87,6 +88,7 @@ async def test_op_records_expiry_before_replying(cog: UserManagement) -> None:
 
 
 async def test_reop_replaces_expiry_and_keeps_one_timer(cog: UserManagement) -> None:
+    """Opping again replaces the expiry and leaves a single timer."""
     guild, target, caller = _server(GUILD_A)
     await _op(cog, guild, caller, target, 30)
     first = cog.deop_tasks[(GUILD_A, TARGET_ID)]
@@ -100,6 +102,7 @@ async def test_reop_replaces_expiry_and_keeps_one_timer(cog: UserManagement) -> 
 
 
 async def test_expiry_removes_role_clears_record_and_posts_in_op_channel(cog: UserManagement) -> None:
+    """Expiry removes the role, clears the record and posts in the op channel."""
     guild, target, caller = _server(GUILD_A)
     interaction = await _op(cog, guild, caller, target, 90)
     temp = guild.roles[0]
@@ -107,7 +110,7 @@ async def test_expiry_removes_role_clears_record_and_posts_in_op_channel(cog: Us
     cog.bot.get_guild = MagicMock(return_value=guild)
 
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=90)):
-        await cog._expire(GUILD_A, TARGET_ID)  # noqa: SLF001
+        await cog._expire(GUILD_A, TARGET_ID)
 
     target.remove_roles.assert_awaited_once()
     assert str(TARGET_ID) not in _saved().get(str(GUILD_A), {})
@@ -118,32 +121,35 @@ async def test_expiry_removes_role_clears_record_and_posts_in_op_channel(cog: Us
 
 
 async def test_expiry_twice_posts_one_notice(cog: UserManagement) -> None:
+    """An expiry that runs twice posts one notice."""
     guild, target, caller = _server(GUILD_A)
     await _op(cog, guild, caller, target, 5)
     target.roles.append(guild.roles[0])
     cog.bot.get_guild = MagicMock(return_value=guild)
 
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=5)):
-        await cog._expire(GUILD_A, TARGET_ID)  # noqa: SLF001
-        await cog._expire(GUILD_A, TARGET_ID)  # noqa: SLF001
+        await cog._expire(GUILD_A, TARGET_ID)
+        await cog._expire(GUILD_A, TARGET_ID)
 
     guild.get_channel.return_value.send.assert_awaited_once()
 
 
 async def test_expiry_for_member_who_left_clears_record_quietly(cog: UserManagement, caplog: pytest.LogCaptureFixture) -> None:
+    """A member who left has the record cleared without a notice."""
     guild, target, caller = _server(GUILD_A)
     await _op(cog, guild, caller, target, 5)
     guild.members.remove(target)
     cog.bot.get_guild = MagicMock(return_value=guild)
 
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=5)):
-        await cog._expire(GUILD_A, TARGET_ID)  # noqa: SLF001
+        await cog._expire(GUILD_A, TARGET_ID)
 
     assert str(TARGET_ID) not in _saved().get(str(GUILD_A), {})
     assert not [r for r in caplog.records if r.levelname == "ERROR"]
 
 
 async def test_failed_expiry_keeps_record_and_warns_op_channel(cog: UserManagement, caplog: pytest.LogCaptureFixture) -> None:
+    """A failed expiry keeps the record and warns the op channel."""
     guild, target, caller = _server(GUILD_A)
     await _op(cog, guild, caller, target, 5)
     target.roles.append(guild.roles[0])
@@ -151,7 +157,7 @@ async def test_failed_expiry_keeps_record_and_warns_op_channel(cog: UserManageme
     cog.bot.get_guild = MagicMock(return_value=guild)
 
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=5)):
-        await cog._expire(GUILD_A, TARGET_ID)  # noqa: SLF001
+        await cog._expire(GUILD_A, TARGET_ID)
 
     assert str(TARGET_ID) in _saved()[str(GUILD_A)]
     guild.get_channel.return_value.send.assert_awaited_once()
@@ -160,6 +166,7 @@ async def test_failed_expiry_keeps_record_and_warns_op_channel(cog: UserManageme
 
 
 async def test_deop_cancels_timer_and_clears_record(cog: UserManagement) -> None:
+    """Deopping cancels the timer and clears the record."""
     guild, target, caller = _server(GUILD_A)
     await _op(cog, guild, caller, target, 30)
     task = cog.deop_tasks[(GUILD_A, TARGET_ID)]
@@ -173,6 +180,7 @@ async def test_deop_cancels_timer_and_clears_record(cog: UserManagement) -> None
 
 
 async def test_servers_are_kept_apart(cog: UserManagement) -> None:
+    """Ops on one server never touch another server's records."""
     guild_a, target_a, caller_a = _server(GUILD_A)
     guild_b, target_b, caller_b = _server(GUILD_B)
     await _op(cog, guild_a, caller_a, target_a, 30)
@@ -188,6 +196,7 @@ async def test_servers_are_kept_apart(cog: UserManagement) -> None:
 
 
 def test_op_expiry_round_trips_and_rejects_naive_time() -> None:
+    """An expiry survives a round trip and a time without timezone is rejected."""
     expiry = OpExpiry(expires_at=NOW, channel_id=OP_CHANNEL_ID)
     assert OpExpiry.from_dict(expiry.to_dict()) == expiry
     with pytest.raises(ValueError, match="timezone"):
@@ -195,16 +204,18 @@ def test_op_expiry_round_trips_and_rejects_naive_time() -> None:
 
 
 def test_delay_counts_from_the_stored_time() -> None:
-    assert user_management._delay_until(NOW + timedelta(minutes=7)) == 420  # noqa: SLF001
-    assert user_management._delay_until(NOW - timedelta(minutes=7)) == 0  # noqa: SLF001
+    """The delay counts from the stored time and never goes below zero."""
+    assert user_management._delay_until(NOW + timedelta(minutes=7)) == 420
+    assert user_management._delay_until(NOW - timedelta(minutes=7)) == 0
 
 
 async def test_timer_that_wakes_before_the_clock_is_due_waits_again(cog: UserManagement) -> None:
+    """A timer that wakes before the clock is due waits again."""
     guild, target, caller = _server(GUILD_A)
     target.roles.append(guild.roles[0])
     cog.bot.get_guild = MagicMock(return_value=guild)
     expires_at = NOW + timedelta(milliseconds=5)
-    cog._record_op(GUILD_A, TARGET_ID, OpExpiry(expires_at=expires_at, channel_id=OP_CHANNEL_ID))  # noqa: SLF001
+    cog._record_op(GUILD_A, TARGET_ID, OpExpiry(expires_at=expires_at, channel_id=OP_CHANNEL_ID))
     clock = {"now": NOW}
     real_sleep = asyncio.sleep
     sleeps: list[float] = []
@@ -219,7 +230,7 @@ async def test_timer_that_wakes_before_the_clock_is_due_waits_again(cog: UserMan
         patch.object(user_management, "_utcnow", side_effect=lambda: clock["now"]),
         patch.object(user_management.asyncio, "sleep", early_wake),
     ):
-        cog._arm_deop(GUILD_A, TARGET_ID, expires_at)  # noqa: SLF001
+        cog._arm_deop(GUILD_A, TARGET_ID, expires_at)
         await cog.deop_tasks[GUILD_A, TARGET_ID]
 
     assert len(sleeps) == 2
@@ -230,6 +241,7 @@ async def test_timer_that_wakes_before_the_clock_is_due_waits_again(cog: UserMan
 async def test_expiry_keeps_record_and_asks_for_a_retry_while_the_guild_is_unavailable(
     cog: UserManagement, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """While the guild is unavailable, expiry keeps the record and asks for a retry."""
     guild, target, caller = _server(GUILD_A)
     await _op(cog, guild, caller, target, 31)
     target.roles.append(guild.roles[0])
@@ -237,7 +249,7 @@ async def test_expiry_keeps_record_and_asks_for_a_retry_while_the_guild_is_unava
     cog.bot.get_guild = MagicMock(return_value=guild)
 
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=31)):
-        settled = await cog._expire(GUILD_A, TARGET_ID)  # noqa: SLF001
+        settled = await cog._expire(GUILD_A, TARGET_ID)
 
     assert settled is False
     assert str(TARGET_ID) in _saved()[str(GUILD_A)]
@@ -247,11 +259,12 @@ async def test_expiry_keeps_record_and_asks_for_a_retry_while_the_guild_is_unava
 
 
 async def test_timer_waits_and_tries_again_until_the_guild_is_back(cog: UserManagement) -> None:
+    """The timer waits and tries again until the guild is back."""
     guild, target, _caller = _server(GUILD_A)
     target.roles.append(guild.roles[0])
     guild.unavailable = True
     cog.bot.get_guild = MagicMock(return_value=guild)
-    cog._record_op(GUILD_A, TARGET_ID, OpExpiry(expires_at=NOW, channel_id=OP_CHANNEL_ID))  # noqa: SLF001
+    cog._record_op(GUILD_A, TARGET_ID, OpExpiry(expires_at=NOW, channel_id=OP_CHANNEL_ID))
     clock = {"now": NOW}
     real_sleep = asyncio.sleep
     sleeps: list[float] = []
@@ -266,7 +279,7 @@ async def test_timer_waits_and_tries_again_until_the_guild_is_back(cog: UserMana
         patch.object(user_management, "_utcnow", side_effect=lambda: clock["now"]),
         patch.object(user_management.asyncio, "sleep", guild_comes_back),
     ):
-        cog._arm_deop(GUILD_A, TARGET_ID, NOW)  # noqa: SLF001
+        cog._arm_deop(GUILD_A, TARGET_ID, NOW)
         await cog.deop_tasks[GUILD_A, TARGET_ID]
 
     assert sleeps == [60.0]
@@ -278,6 +291,7 @@ async def test_timer_waits_and_tries_again_until_the_guild_is_back(cog: UserMana
 async def test_expiry_removes_the_role_of_a_cached_member_in_a_guild_whose_cache_looks_incomplete(
     cog: UserManagement,
 ) -> None:
+    """A cached member loses the role even when the guild cache looks incomplete."""
     guild, target, caller = _server(GUILD_A)
     await _op(cog, guild, caller, target, 31)
     target.roles.append(guild.roles[0])
@@ -285,7 +299,7 @@ async def test_expiry_removes_the_role_of_a_cached_member_in_a_guild_whose_cache
     cog.bot.get_guild = MagicMock(return_value=guild)
 
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=31)):
-        settled = await cog._expire(GUILD_A, TARGET_ID)  # noqa: SLF001
+        settled = await cog._expire(GUILD_A, TARGET_ID)
 
     assert settled is True
     target.remove_roles.assert_awaited_once()
@@ -294,6 +308,7 @@ async def test_expiry_removes_the_role_of_a_cached_member_in_a_guild_whose_cache
 
 
 async def test_expiry_asks_discord_for_a_member_missing_from_an_incomplete_cache(cog: UserManagement) -> None:
+    """A member missing from an incomplete cache is fetched from Discord."""
     guild, target, caller = _server(GUILD_A)
     await _op(cog, guild, caller, target, 31)
     target.roles.append(guild.roles[0])
@@ -303,7 +318,7 @@ async def test_expiry_asks_discord_for_a_member_missing_from_an_incomplete_cache
     cog.bot.get_guild = MagicMock(return_value=guild)
 
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=31)):
-        settled = await cog._expire(GUILD_A, TARGET_ID)  # noqa: SLF001
+        settled = await cog._expire(GUILD_A, TARGET_ID)
 
     assert settled is True
     guild.fetch_member.assert_awaited_once_with(TARGET_ID)
@@ -314,6 +329,7 @@ async def test_expiry_asks_discord_for_a_member_missing_from_an_incomplete_cache
 async def test_expiry_clears_quietly_a_member_discord_does_not_know(
     cog: UserManagement, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """A member Discord does not know has the record cleared without a notice."""
     guild, target, caller = _server(GUILD_A)
     await _op(cog, guild, caller, target, 31)
     guild.chunked = False
@@ -322,7 +338,7 @@ async def test_expiry_clears_quietly_a_member_discord_does_not_know(
     cog.bot.get_guild = MagicMock(return_value=guild)
 
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=31)):
-        settled = await cog._expire(GUILD_A, TARGET_ID)  # noqa: SLF001
+        settled = await cog._expire(GUILD_A, TARGET_ID)
 
     assert settled is True
     assert str(TARGET_ID) not in _saved().get(str(GUILD_A), {})
@@ -332,6 +348,7 @@ async def test_expiry_clears_quietly_a_member_discord_does_not_know(
 async def test_expiry_keeps_record_and_asks_for_a_retry_when_discord_cannot_say_who_the_member_is(
     cog: UserManagement, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """When Discord cannot say who the member is, expiry keeps the record and asks for a retry."""
     guild, target, caller = _server(GUILD_A)
     await _op(cog, guild, caller, target, 31)
     target.roles.append(guild.roles[0])
@@ -341,7 +358,7 @@ async def test_expiry_keeps_record_and_asks_for_a_retry_when_discord_cannot_say_
     cog.bot.get_guild = MagicMock(return_value=guild)
 
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=31)):
-        settled = await cog._expire(GUILD_A, TARGET_ID)  # noqa: SLF001
+        settled = await cog._expire(GUILD_A, TARGET_ID)
 
     assert settled is False
     assert str(TARGET_ID) in _saved()[str(GUILD_A)]
@@ -351,6 +368,7 @@ async def test_expiry_keeps_record_and_asks_for_a_retry_when_discord_cannot_say_
 
 
 async def test_deop_does_not_erase_an_op_made_while_it_was_in_flight(cog: UserManagement) -> None:
+    """A deop does not erase an op made while it was in flight."""
     guild, target, caller = _server(GUILD_A)
     await _op(cog, guild, caller, target, 30)
     gate = asyncio.Event()
@@ -376,6 +394,7 @@ async def test_deop_does_not_erase_an_op_made_while_it_was_in_flight(cog: UserMa
 
 
 async def test_expiry_with_the_op_channel_gone_logs_the_member(cog: UserManagement, caplog: pytest.LogCaptureFixture) -> None:
+    """With the op channel gone, expiry logs the member instead."""
     guild, target, caller = _server(GUILD_A)
     await _op(cog, guild, caller, target, 5)
     target.roles.append(guild.roles[0])
@@ -383,7 +402,7 @@ async def test_expiry_with_the_op_channel_gone_logs_the_member(cog: UserManageme
     guild.get_channel.return_value = None
 
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=5)):
-        await cog._expire(GUILD_A, TARGET_ID)  # noqa: SLF001
+        await cog._expire(GUILD_A, TARGET_ID)
 
     lines = [r.getMessage() for r in caplog.records if "gone" in r.getMessage()]
     assert len(lines) == 1
