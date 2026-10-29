@@ -99,6 +99,74 @@ To run the code, you can then use:
 DISCORD_TOKEN_FILE=secrets/discord_token.secret ALLOWED_GUILD_IDS=<your server ID> uv run main
 ```
 
+## Deployment
+
+The production image runs the bot as the unprivileged user `10001:10001`, from start to stop. It writes only to `data/` and `logs/` (the two volumes) and to a heartbeat file in `/tmp`. `compose.yml` is the reference stack; on top of the image, it takes away what the bot does not need:
+
+```yaml
+    read_only: true
+    tmpfs:
+      - /tmp:size=1m,mode=1777,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+```
+
+- `read_only` mounts the image read-only; `/tmp` is a 1 MB in-memory folder, for the heartbeat only.
+- `cap_drop` removes every Linux capability, and `no-new-privileges` stops any process from gaining rights.
+
+At start, before connecting, the bot checks that it can read and write every folder and file under `data/` and `logs/`, and read the token file. Otherwise it stops with one line per problem, for example `Cannot start: data/ is not writable by uid 10001.`, and Docker restarts it until the problem is fixed. It writes and deletes nothing meanwhile.
+
+The container reports `healthy` while the bot is connected to Discord, and `unhealthy` when its last heartbeat is more than 90 seconds old. It is a status only: nothing restarts the bot on its own.
+
+To check an image locally (needs Docker): `sh docker/check-image.sh`. It builds the image with planted secrets, then checks its user, its content, the start messages, and that nothing is written outside `data/`, `logs/` and `/tmp`.
+
+### Moving a host to the non-root image
+
+Volumes and the token file written by an older image belong to root. Do this once, on the host, before the first redeploy on the non-root image:
+
+1. Stop the stack.
+2. Archive `data/` and `logs/` into a private folder and compare the file counts. Never delete either folder.
+
+   ```bash
+   VOLUMES_PATH=/path/to/volumes  # the value the stack uses
+   STAMP=$(date +%Y%m%d-%H%M)
+   sudo mkdir -p "$VOLUMES_PATH/fablabot/archive" && sudo chmod 700 "$VOLUMES_PATH/fablabot/archive"
+   for dir in data logs; do
+     sudo tar -czf "$VOLUMES_PATH/fablabot/archive/$dir-$STAMP.tar.gz" -C "$VOLUMES_PATH/fablabot" "$dir"
+     sudo chmod 600 "$VOLUMES_PATH/fablabot/archive/$dir-$STAMP.tar.gz"
+     echo "$dir: $(sudo tar -tzf "$VOLUMES_PATH/fablabot/archive/$dir-$STAMP.tar.gz" | grep -vc '/$') archived, $(sudo find "$VOLUMES_PATH/fablabot/$dir" -type f | wc -l) on disk"
+   done
+   ```
+
+3. Give both folders to the bot's user. Leave `archive/` as it is.
+
+   ```bash
+   sudo chown -R 10001:10001 "$VOLUMES_PATH/fablabot/data" "$VOLUMES_PATH/fablabot/logs"
+   ```
+
+4. Let the bot's user read the token file, the one named under `secrets: discord_token: file:` in the stack.
+
+   ```bash
+   sudo chown 10001:10001 /path/to/discord_token.secret && sudo chmod 400 /path/to/discord_token.secret
+   ```
+
+5. Add the seven lines above to the bot's service in the stack.
+6. Redeploy the stack.
+7. Check the start. The first command prints `0`. The second prints `starting`, then `healthy` within two minutes.
+
+   ```bash
+   docker logs fablabot-prod 2>&1 | grep -c 'Cannot start'
+   docker inspect --format '{{.State.Health.Status}}' fablabot-prod
+   ```
+
+   Use your stack's container name if it is not `fablabot-prod`. A `Cannot start:` line names the folder, file or setting to fix; once fixed, the bot starts at its next restart.
+
+To roll back, set the image back to the previous `:<commit sha>` tag and restore the stack as it was before step 5. The older image runs as root and reads the volumes without a `chown` back, but root without capabilities cannot write files owned by 10001: the seven lines must go with it.
+
+After restoring an archive, run step 3 again: `tar` run as root restores the files as root.
+
 ## Documentation
 
 We **highly recommend** you to read the user guide before using the bot. It will help you understand the bot's features
