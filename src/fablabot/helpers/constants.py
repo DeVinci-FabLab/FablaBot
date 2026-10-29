@@ -105,6 +105,18 @@ class ErrorMessages:
     ROLE_NOT_FOUND = "Impossible de trouver le(s) rôle(s) {role_name} sur ce serveur."
     """Role not found on server."""
 
+    ROLE_REQUIRED = (
+        "Cette commande est réservée aux membres ayant l'un des rôles suivants : {roles}. "
+        "Demandez ce rôle au staff (Bureau) du serveur."
+    )
+    """Refusal for a member without the required role, with the next step."""
+
+    WRONG_COMMANDS_CHANNEL = (
+        "Vous ne pouvez pas utiliser de commandes en dehors du salon {channel}. "
+        "Rendez-vous dans ce salon, ou demandez au staff de changer le salon de commandes."
+    )
+    """Refusal for a command used outside the commands channel, with the next step."""
+
     MEMBER_NOT_FOUND = "Impossible de trouver le membre avec le nom {member_name}."
     """Member not found by name."""
 
