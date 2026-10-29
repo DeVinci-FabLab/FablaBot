@@ -92,6 +92,16 @@ async def test_beats_only_while_connected(bot) -> None:
     assert bot.heartbeat_file.stat().st_mtime == pytest.approx(old)
 
 
+async def test_loop_beat_renews_the_file(bot) -> None:
+    """One loop iteration moves the heartbeat forward."""
+    await bot.on_resumed()
+    bot.heartbeat_file.touch()
+    old = time.time() - 100
+    os.utime(bot.heartbeat_file, (old, old))
+    await bot.heartbeat()
+    assert bot.heartbeat_file.stat().st_mtime > old + 50
+
+
 async def test_no_beat_after_close(bot, monkeypatch) -> None:
     """A closed client never beats, even if the gateway flag is still set."""
     await bot.on_resumed()
