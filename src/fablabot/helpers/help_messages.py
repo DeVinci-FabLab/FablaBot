@@ -43,5 +43,6 @@ def build_help_message(
         lines.append("")
         lines.append(_ensure_sentence(footer))
     lines.append("")
+    lines.append("Une idée ou un problème ? Utilisez `/suggest` pour en faire part au staff.")
     lines.append("Assurez-vous d'avoir les permissions nécessaires pour utiliser ces commandes.")
     return "\n".join(lines)

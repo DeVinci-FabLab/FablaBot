@@ -53,7 +53,7 @@ To keep other people from adding the bot to their servers, set these in the [Dev
 1. Installation: set Install Link to None and uncheck User Install.
 2. Bot: turn Public Bot off.
 
-To copy a server ID, enable Developer Mode in Discord (User Settings, Advanced), then right-click the server and choose Copy Server ID.
+To copy a server ID, enable Developer Mode in Discord (User Settings, Advanced), then right-click the server and choose Copy Server ID. The [operator guide](./docs/OPERATIONS.md) has the full steps to add or remove a server.
 
 #### Log channels
 
@@ -72,7 +72,24 @@ Log files live in `logs/`:
 
 - `logs/<date>.log` holds every line, stays on the host and is never sent.
 - `logs/guilds/<server ID>/<date>.log` holds one server's lines. `/log export` sends that file to that server only.
-- The bot deletes no log file.
+- The bot deletes no log file. See the [operator guide](./docs/OPERATIONS.md) for archiving before a redeploy.
+
+#### Slash commands
+
+At start, the bot sends its slash commands to Discord only when they changed since the last sync. It keeps a fingerprint of the last sync in `data/command_sync_state.json`.
+
+- To force a sync, stop the bot, delete that file and start it again.
+- After rolling back to an older image, delete that file before you upgrade again: the older image syncs at every start without updating it.
+
+`DEV_GUILD_ID` holds one server ID, for a development bot only. When it is set, the bot syncs its commands to that server alone, where they show at once, and leaves the global commands as they are.
+
+```bash
+DEV_GUILD_ID=111111111111111111
+```
+
+- Use a separate Discord application for the development bot, one that never synced without `DEV_GUILD_ID`: otherwise each command shows twice on that server.
+- Never set it on the production bot: its commands would stop updating on every other server.
+- The server must be in `ALLOWED_GUILD_IDS` when that list is set. A malformed value, or a server outside the list, stops the bot at start.
 
 ### Running the project
 
@@ -110,7 +127,9 @@ On each server, a member with the Administrator permission shows each group to t
 ## Documentation
 
 We **highly recommend** you to read the user guide before using the bot. It will help you understand the bot's features
-and how to use them. You can find the user guide [here](./docs/user-guide.md).
+and how to use them. You can find the user guide [here](./docs/USERGUIDE.md).
+
+Whoever hosts an instance should read the [operator guide](./docs/OPERATIONS.md): deployment, adding and removing servers, Developer Portal settings and troubleshooting.
 
 ### Building the technical documentation
 
@@ -124,39 +143,61 @@ You can then open the `docs/index.html` file in your browser to view the codebas
 
 Add the `--help` flag to this command to see available options.
 
+## Releases
+
+Each release has a version `vX.Y.Z`, a GitHub release and an entry in `CHANGELOG.md`. The version is set in `pyproject.toml`; each release copies it to `uv.lock` and `.release-please-manifest.json`, and a test checks that the three agree. Images are published to `ghcr.io/devinci-fablab/fablabot`:
+
+| Tag | Moves when | Use it for |
+| --- | --- | --- |
+| `:latest`, `:X.Y.Z`, `:X.Y` | a release is published | production |
+| `:edge`, `:sha-<commit>` | every push to `main`, once the check passes | a test server, or trying one commit |
+
+Images published before the first release keep their `:<commit sha>` tags.
+
+### Making a release
+
+1. Every push to `main` updates one pull request titled `chore(main): release X.Y.Z`. It holds the next version and its changelog, worked out from the commit titles on `main`: `fix:` bumps Z, `feat:` bumps Y, and below 1.0.0 a breaking change (`feat!:`) bumps Y as well.
+2. The check runs on that pull request too. Review it and merge it like any other.
+3. The merge tags `vX.Y.Z`, publishes the GitHub release, and builds the image under `:latest`, `:X.Y.Z`, `:X.Y`, `:edge` and `:sha-<commit>`.
+4. Publishing does not restart a running bot. Redeploy the stack (pull the image, recreate the container) to run the release.
+
+If the image build of a release fails, the tag exists but `:latest` has not moved. Open that run in the Actions tab and choose "Re-run failed jobs": re-running all jobs would publish `:edge` only.
+
+If the build stops with "The release is not this commit", the release was cut for an earlier merge than the push being built. Nothing is published for that run, so `:latest` stays on the previous release. The tag exists without an image; the next release publishes normally.
+
+### Rolling back
+
+Set the stack's image to the previous release, `ghcr.io/devinci-fablab/fablabot:X.Y.Z`, or to one commit with `:sha-<commit>`, and redeploy. Read the changelog entries in between first: a release that changed the files in `data/` says so there. Go back to `:latest` once a fixed release is out.
+
+### Repository settings
+
+Releases need two settings, once, by a repository admin:
+
+- Settings, Actions, General, Workflow permissions: tick "Allow GitHub Actions to create and approve pull requests", so the release pull request can be opened. No workflow approves pull requests. Each job asks for its own permissions, so the default should be "Read repository contents and packages permissions".
+- Settings, General, Pull Requests, Allow squash merging: set the default commit message to "Pull request title", since the release reads the squash commit titles.
+
+A pull request opened by a workflow does not start other workflows, so the release workflow starts the check on the release pull request itself. A required `check` status is met without a personal token.
+
 ## Roadmap
 
-The library is still in active development. The next feature and bug resolutions are listed in
+The bot is still in active development. The next feature and bug resolutions are listed in
 the [Project](https://github.com/orgs/DeVinci-FabLab/projects/5/views/2) section of the GitHub repository.
 
 ## Security Policy
 
-Consider reading our [SECURITY](https://github.com/MorganKryze/ConsoleAppVisuals/blob/main/.github/SECURITY.md) policy
-to know more about how we handle security issues and how to report them. You will also find the stable versions of the
-project.
+Please do not report security issues in a public issue. Use GitHub's private
+[vulnerability reporting](https://github.com/DeVinci-FabLab/FablaBot/security/advisories/new) instead, and we will
+answer there.
 
 ## Acknowledgments
 
-Consider reading
-the [ACKNOWLEDGMENTS](https://github.com/MorganKryze/ConsoleAppVisuals/blob/main/.github/ACKNOWLEDGMENTS.md) file. It's
-a testament to the collaborative effort that has gone into improving and refining our library. We're deeply grateful to
-all our contributors for their invaluable input and the significant difference they've made to the project.
-
-It also lists the open source projects that have been used to build this library until now.
+Thanks to everyone who has contributed to the bot: see the
+[contributors](https://github.com/DeVinci-FabLab/FablaBot/graphs/contributors) page.
 
 ## Contributing
 
-Contributions are what make the open source community such an amazing place to learn, inspire, and create. Any
-contributions you make are **greatly appreciated**. To do so, follow the steps described in
-the [CONTRIBUTING](https://github.com/MorganKryze/ConsoleAppVisuals/blob/main/.github/CONTRIBUTING.md) file.
-
-We are always open for feedback and discussions. If you are using our library and want to share your use case, or if you
-have any suggestions for improvement, please feel free
-to [open an issue](https://github.com/MorganKryze/ConsoleAppVisuals/issues)
-or [open a discussion](https://github.com/MorganKryze/ConsoleAppVisuals/discussions) on our GitHub repository. Your
-input helps us understand possible use cases and make necessary improvements.
-
-Do not hesitate to **star** and **share** the project if you like it!
+To contribute, follow the steps in the [CONTRIBUTING](./CONTRIBUTING.md) file. Questions, bugs and ideas are welcome as
+[issues](https://github.com/DeVinci-FabLab/FablaBot/issues).
 
 ## License
 
