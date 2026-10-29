@@ -74,6 +74,13 @@ Log files live in `logs/`:
 - `logs/guilds/<server ID>/<date>.log` holds one server's lines. `/log export` sends that file to that server only.
 - The bot deletes no log file.
 
+#### Slash commands
+
+At start, the bot sends its slash commands to Discord only when they changed since the last sync. It keeps a fingerprint of the last sync in `data/command_sync_state.json`.
+
+- To force a sync, stop the bot, delete that file and start it again.
+- After rolling back to an older image, delete that file before you upgrade again: the older image syncs at every start without updating it.
+
 ### Running the project
 
 To run the code, you can then use:

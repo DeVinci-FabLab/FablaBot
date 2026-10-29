@@ -2,16 +2,32 @@
 
 from __future__ import annotations
 
+import importlib
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 from discord import Guild, Member, Role, TextChannel, ui
 import pytest
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 
 @pytest.fixture(autouse=True)
 def _isolated_cwd(tmp_path, monkeypatch) -> None:
     """Run every test from an empty temporary directory so nothing lands in ``data/`` or ``logs/``."""
     monkeypatch.chdir(tmp_path)
+
+
+@pytest.fixture
+def fablabot_main(tmp_path, monkeypatch) -> ModuleType:
+    """Import ``fablabot.main`` with a fake token file in place."""
+    token = tmp_path / "token"
+    token.write_text("fake-token")
+    monkeypatch.setenv("DISCORD_TOKEN_FILE", str(token))
+    import fablabot.main
+
+    return importlib.reload(fablabot.main)
 
 
 def make_interaction(

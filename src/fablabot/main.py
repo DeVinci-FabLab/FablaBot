@@ -21,8 +21,10 @@ from fablabot.cogs import (
     UserManagement,
     WelcomeManagement,
 )
+from fablabot.helpers.command_sync import COMMAND_SYNC_STATE_FILE, sync_commands_if_changed
 from fablabot.helpers.guild_access import GuildAccessPolicy, GuildAccessTree
 from fablabot.helpers.logging_setup import configure_logging
+from fablabot.helpers.state_store import JsonStateStore
 
 if TYPE_CHECKING:
     from fablabot.logging_handlers import DailyFileHandler, DiscordLogHandler
@@ -124,9 +126,9 @@ class Fablabot(commands.Bot):
             await self.add_cog(cog)
             logger.info(f"Loaded cog {cog.__class__.__name__}.")
 
-        # Synchronisation globale des commandes
-        await self.tree.sync()
-        logger.info("Commands synced.")
+        await sync_commands_if_changed(
+            self.tree, JsonStateStore(logger, COMMAND_SYNC_STATE_FILE), application_id=self.application_id
+        )
 
     @override
     async def on_command_error(self, ctx: commands.Context[Any], exception: Exception) -> None:
