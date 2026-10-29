@@ -56,8 +56,12 @@ def _in_commands_channel():  # noqa: ANN202
 
 
 REFUSED = {
-    "channel.text_delete": lambda i: ChannelManagement.text_delete.callback(MagicMock(), i, channel=MagicMock(spec=TextChannel)),
-    "channel.vocal_delete": lambda i: ChannelManagement.vocal_delete.callback(MagicMock(), i, channel=MagicMock(spec=VoiceChannel)),
+    "channel.text_delete": lambda i: ChannelManagement.text_delete.callback(
+        MagicMock(), i, channel=MagicMock(spec=TextChannel)
+    ),
+    "channel.vocal_delete": lambda i: ChannelManagement.vocal_delete.callback(
+        MagicMock(), i, channel=MagicMock(spec=VoiceChannel)
+    ),
     "log.set": lambda i: LogManagement.log_set.callback(MagicMock(), i, channel=MagicMock(spec=TextChannel)),
     "log.export": lambda i: LogManagement.log_export.callback(MagicMock(), i, date=None),
     "welcome.verify": lambda i: WelcomeManagement.welcome_verify.callback(MagicMock(), i, enable=True),
@@ -79,7 +83,7 @@ async def test_temp_admin_only_is_refused(command: str) -> None:
     interaction.response.send_message.assert_awaited_once()
     args = interaction.response.send_message.await_args
     assert args.kwargs["ephemeral"] is True
-    assert "Il est requis d'avoir" in args.args[0]
+    assert "Demandez ce rôle au staff" in args.args[0]
     interaction.response.defer.assert_not_awaited()
 
 
