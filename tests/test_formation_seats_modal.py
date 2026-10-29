@@ -15,6 +15,8 @@ from fablabot.ui import formation
     ("typed", "expected"),
     [
         ("2h - 12", None),
+        ("2h - 1", None),
+        ("2h - 500", None),
         ("2h - abc", ErrorMessages.INVALID_SEATS),
         ("2h - 0", ErrorMessages.INVALID_SEATS),
         ("2h - 501", ErrorMessages.INVALID_SEATS),
@@ -39,7 +41,7 @@ async def test_duration_seats_modal_replies_as_before(typed: str, expected: str 
 
     if expected is None:
         view.refresh_main_message.assert_awaited_once_with(interaction)
-        assert view.updated_formation.seats == 12
+        assert view.updated_formation.seats == int(typed.split("-")[1])
         assert view.updated_formation.duration == "2h"
         interaction.response.send_message.assert_not_awaited()
     else:
