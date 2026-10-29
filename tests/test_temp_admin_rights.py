@@ -79,7 +79,7 @@ async def test_temp_admin_only_is_refused(command: str) -> None:
     interaction.response.send_message.assert_awaited_once()
     args = interaction.response.send_message.await_args
     assert args.kwargs["ephemeral"] is True
-    assert "Il est requis d'avoir" in args.args[0]
+    assert "Demandez ce rôle au staff" in args.args[0]
     interaction.response.defer.assert_not_awaited()
 
 
