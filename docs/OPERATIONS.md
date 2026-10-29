@@ -18,6 +18,13 @@ services:
     image: ghcr.io/devinci-fablab/fablabot:latest
     container_name: fablabot-prod
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=1m,mode=1777,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     environment:
       - DISCORD_TOKEN_FILE=/run/secrets/discord_token
       - ALLOWED_GUILD_IDS=${ALLOWED_GUILD_IDS:-}
@@ -33,9 +40,11 @@ secrets:
     file: ./secrets/discord_token.secret
 ```
 
+The image runs as `10001:10001`; the volumes and the token file must belong to that user (see "Moving a host to the non-root image" below, and the [README](../README.md#moving-a-host-to-the-non-root-image)).
+
 | Setting | Role |
 | --- | --- |
-| `DISCORD_TOKEN_FILE` | Path of the file holding the bot token (`src/fablabot/main.py:32`). |
+| `DISCORD_TOKEN_FILE` | Path of the file holding the bot token. Read at start, before connecting; must be readable by 10001. |
 | `ALLOWED_GUILD_IDS` | Server IDs the bot may serve, comma-separated, no quotes, no spaces. |
 | `OPERATOR_LOG_CHANNEL_ID` | Optional. Channel receiving errors that belong to no server. Pick a channel only the bot's administrators can read: those errors come from every server's tasks. |
 | `data/` volume | Per-server settings and the temporary-admin expiries (`data/temp_admin_state.json`). |
@@ -51,19 +60,20 @@ Archive `logs/` and `data/` first.
    mkdir -p ~/fablabot-archive && chmod 700 ~/fablabot-archive
    ```
 
-2. Archive both folders and restrict the file:
+2. Archive both folders and restrict the file. The files belong to 10001 and some are `600`, so the
+   commands run with `sudo`. Never `chown` the archive folder.
 
    ```bash
    STAMP=$(date +%Y%m%d-%H%M%S)
-   tar -czf ~/fablabot-archive/fablabot-$STAMP.tar.gz -C "$VOLUMES_PATH/fablabot" data logs
-   chmod 600 ~/fablabot-archive/fablabot-$STAMP.tar.gz
+   sudo tar -czf ~/fablabot-archive/fablabot-$STAMP.tar.gz -C "$VOLUMES_PATH/fablabot" data logs
+   sudo chmod 600 ~/fablabot-archive/fablabot-$STAMP.tar.gz
    ```
 
 3. Check the file counts match:
 
    ```bash
-   tar -tzf ~/fablabot-archive/fablabot-$STAMP.tar.gz | grep -vc '/$'
-   find "$VOLUMES_PATH/fablabot/data" "$VOLUMES_PATH/fablabot/logs" -type f | wc -l
+   sudo tar -tzf ~/fablabot-archive/fablabot-$STAMP.tar.gz | grep -vc '/$'
+   sudo find "$VOLUMES_PATH/fablabot/data" "$VOLUMES_PATH/fablabot/logs" -type f | wc -l
    ```
 
 4. Redeploy the stack.
@@ -170,6 +180,32 @@ So on a new server, create a text channel named `commandes_bot`.
 `/log set` picks the channel that receives the server's errors. `/log export` sends that server's log
 file to that server only.
 
+## Moving to the non-root image
+
+The image runs as `10001:10001`. Volumes and the token file written by an older image belong to root, so
+a host moves once, before the first redeploy on the non-root image: archive `data/` and `logs/`, give
+both folders and the token file to `10001`, add the hardening lines to the stack (the example under
+"Deployment model"), redeploy and check the start. The steps, in order, are in the
+[README](../README.md#moving-a-host-to-the-non-root-image), "Moving a host to the non-root image".
+
+A host not yet moved stops at start with `Cannot start: data/ is not writable by uid 10001.` and
+Docker restarts it until the volume is fixed. No data is lost; the bot is down meanwhile.
+
+Rolling back needs two things together: the previous image tag (`:<commit sha>`) and the stack without
+the hardening lines. The older image runs as root, and root without capabilities cannot write files
+owned by 10001. After a rollback, give the folders back to `10001` before redeploying the non-root
+image. Archive `data/` and `logs/` first; never delete them.
+
+## Health status
+
+The container is `healthy` while the bot is connected to Discord, and `unhealthy` after 90 seconds
+without a heartbeat (the bot is blocked, or Discord is unreachable). It is a status only: nothing
+restarts the bot on its own. To read the last checks:
+
+```bash
+docker inspect --format '{{json .State.Health}}' fablabot
+```
+
 ## Temporary admin
 
 `/user op` gives the `Admin -temp-` role for a limited time (5 minutes by default); `/user deop` removes it
@@ -201,6 +237,10 @@ Linux) or Cmd+R (macOS).
 | "Vous ne pouvez pas utiliser de commandes en dehors du salon ..." | The command ran outside the commands channel | Use the channel named in the message. |
 | "Le salon de commandes du bot n'est pas configuré sur ce serveur." | No stored channel and no `commandes_bot` channel | Create a text channel named `commandes_bot`. |
 | A `/user op` role is not added or removed (403) | The bot's role is below `Admin -temp-` | Move the bot's role above it. |
+| Bot restarts in a loop with `Cannot start: data/ is not writable by uid 10001.` | The volume still belongs to root, or a file under it does | `sudo chown -R 10001:10001` the folder named, then wait for the restart. |
+| `Cannot start: the token file ... is not readable by uid 10001` | The token file belongs to root | `sudo chown 10001:10001 <file> && sudo chmod 400 <file>`. |
+| Status `unhealthy`, the bot answers | The stack has `read_only` without the `/tmp` tmpfs (an ERROR names the heartbeat file) | Add the `tmpfs` line. |
+| After a rollback, registrations are lost | The older image runs as root without capabilities | Restore the stack without the hardening lines. |
 | `Missing roles ... for guild ...` in the log | The server lacks a role name the bot expects | Create the role with the exact name (see Roles). |
 | "This command is outdated" | The client holds an old command list | Reload Discord (Ctrl/Cmd+R). |
 | No errors reach the operator channel | `OPERATOR_LOG_CHANNEL_ID` is empty or malformed (warning at start) | Set a valid channel ID; they stay in `logs/<date>.log` meanwhile. |
