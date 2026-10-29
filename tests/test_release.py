@@ -11,6 +11,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 IMAGE = "ghcr.io/devinci-fablab/fablabot"
 SHA = "0123456789abcdef0123456789abcdef01234567"
+EARLIER_SHA = "89abcdef0123456789abcdef0123456789abcdef"
 
 
 def _pyproject() -> dict:
@@ -74,7 +75,7 @@ def test_a_push_to_main_publishes_edge_and_its_commit(tmp_path: Path) -> None:
 
 def test_a_release_also_moves_latest_and_its_version_tags(tmp_path: Path) -> None:
     """A release adds :latest, :X.Y.Z and :X.Y, and labels the image with its version."""
-    run, output = _run_tags(tmp_path, GITHUB_SHA=SHA, RELEASE_CREATED="true", VERSION="0.2.0")
+    run, output = _run_tags(tmp_path, GITHUB_SHA=SHA, RELEASE_CREATED="true", VERSION="0.2.0", RELEASE_SHA=SHA)
     assert run.returncode == 0, run.stderr
     assert output == (
         f"tags<<EOF\n{IMAGE}:edge\n{IMAGE}:sha-{SHA}\n{IMAGE}:latest\n{IMAGE}:0.2.0\n{IMAGE}:0.2\nEOF\nversion=0.2.0\n"
@@ -84,10 +85,26 @@ def test_a_release_also_moves_latest_and_its_version_tags(tmp_path: Path) -> Non
 @pytest.mark.parametrize("version", ["", "0.2", "v0.2.0", "0.2.0-rc.1", "0.2.0\nx", "0.2.0; true"])
 def test_a_malformed_release_version_publishes_nothing(tmp_path: Path, version: str) -> None:
     """A release whose version is not X.Y.Z stops the build before any tag is written."""
-    run, output = _run_tags(tmp_path, GITHUB_SHA=SHA, RELEASE_CREATED="true", VERSION=version)
+    run, output = _run_tags(tmp_path, GITHUB_SHA=SHA, RELEASE_CREATED="true", VERSION=version, RELEASE_SHA=SHA)
     assert run.returncode == 1
     assert "Not a release version" in run.stderr
     assert output == ""
+
+
+@pytest.mark.parametrize("release_sha", ["", "0123456", SHA.upper(), f"{SHA}0", f"{SHA}\nx", EARLIER_SHA])
+def test_a_release_of_another_commit_publishes_nothing(tmp_path: Path, release_sha: str) -> None:
+    """The release can be an earlier merge than the pushed commit; the build then stops before any tag is written."""
+    run, output = _run_tags(tmp_path, GITHUB_SHA=SHA, RELEASE_CREATED="true", VERSION="0.2.0", RELEASE_SHA=release_sha)
+    assert run.returncode == 1
+    assert "The release is not this commit" in run.stderr
+    assert output == ""
+
+
+def test_a_push_without_a_release_ignores_the_release_commit(tmp_path: Path) -> None:
+    """Only a release is tied to its commit: another commit in RELEASE_SHA changes nothing without one."""
+    run, output = _run_tags(tmp_path, GITHUB_SHA=SHA, RELEASE_CREATED="", VERSION="", RELEASE_SHA=EARLIER_SHA)
+    assert run.returncode == 0, run.stderr
+    assert output == f"tags<<EOF\n{IMAGE}:edge\n{IMAGE}:sha-{SHA}\nEOF\nversion=edge\n"
 
 
 @pytest.mark.parametrize("sha", ["", "0123456", SHA.upper(), f"{SHA}0"])

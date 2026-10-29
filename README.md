@@ -119,6 +119,8 @@ Images published before the first release keep their `:<commit sha>` tags.
 
 If the image build of a release fails, the tag exists but `:latest` has not moved. Open that run in the Actions tab and choose "Re-run failed jobs": re-running all jobs would publish `:edge` only.
 
+If the build stops with "The release is not this commit", the release was cut for an earlier merge than the push being built. Nothing is published for that run, so `:latest` stays on the previous release. The tag exists without an image; the next release publishes normally.
+
 ### Rolling back
 
 Set the stack's image to the previous release, `ghcr.io/devinci-fablab/fablabot:X.Y.Z`, or to one commit with `:sha-<commit>`, and redeploy. Read the changelog entries in between first: a release that changed the files in `data/` says so there. Go back to `:latest` once a fixed release is out.

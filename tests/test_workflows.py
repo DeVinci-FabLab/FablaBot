@@ -146,5 +146,7 @@ def test_latest_moves_only_with_a_release() -> None:
     build = _job("build-and-push-image")
     assert "RELEASE_CREATED: ${{ needs.release.outputs.created }}" in build
     assert "VERSION: ${{ needs.release.outputs.version }}" in build
+    assert "RELEASE_SHA: ${{ needs.release.outputs.sha }}" in build
+    assert "sha: ${{ steps.release.outputs.sha }}" in _job("release")
     assert "run: bash .github/scripts/image-tags.sh" in build
     assert "tags: ${{ steps.tags.outputs.tags }}" in build

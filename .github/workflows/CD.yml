@@ -30,6 +30,7 @@ jobs:
       created: ${{ steps.release.outputs.release_created }}
       version: ${{ steps.release.outputs.version }}
       pr: ${{ steps.release.outputs.pr }}
+      sha: ${{ steps.release.outputs.sha }}
     steps:
       - name: Update the release pull request, or tag the release it merged
         id: release
@@ -72,6 +73,7 @@ jobs:
         env:
           RELEASE_CREATED: ${{ needs.release.outputs.created }}
           VERSION: ${{ needs.release.outputs.version }}
+          RELEASE_SHA: ${{ needs.release.outputs.sha }}
         run: bash .github/scripts/image-tags.sh
 
       - name: Read the build date
