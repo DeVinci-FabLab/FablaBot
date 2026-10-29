@@ -150,3 +150,26 @@ def test_latest_moves_only_with_a_release() -> None:
     assert "sha: ${{ steps.release.outputs.sha }}" in _job("release")
     assert "run: bash .github/scripts/image-tags.sh" in build
     assert "tags: ${{ steps.tags.outputs.tags }}" in build
+
+
+def test_no_workflow_uses_a_personal_token() -> None:
+    """The only secret a workflow reads is the run's own GITHUB_TOKEN, and the release step takes no token input."""
+    secrets = {
+        match["name"]
+        for path in WORKFLOWS.glob("*.y*ml")
+        for match in re.finditer(r"secrets\.(?P<name>\w+)", path.read_text(encoding="utf-8"))
+    }
+    assert secrets == {"GITHUB_TOKEN"}
+    release = next(step for step in _steps("CD.yml") if "id: release" in step)
+    assert not re.search(r"^\s+token:", release, re.MULTILINE), release
+
+
+def test_the_release_steps_are_documented() -> None:
+    """README explains how to release, roll back and set the repository; CONTRIBUTING says the title sets the version."""
+    root = WORKFLOWS.parent.parent
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    releases = re.search(r"^## Releases\n(?P<body>.*?)(?=^## )", readme, re.MULTILINE | re.DOTALL)
+    assert releases
+    for heading in ("Making a release", "Rolling back", "Repository settings"):
+        assert re.search(rf"^### {heading}$", releases["body"], re.MULTILINE), heading
+    assert "The title also decides the next version" in CONTRIBUTING.read_text(encoding="utf-8")
