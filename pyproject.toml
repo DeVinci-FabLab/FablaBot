@@ -2,7 +2,7 @@
 dependencies = [
   "discord-py>=2.7.1",
   "emoji>=2.15.0",
-  "python-dotenv==1.0.0",
+  "python-dotenv==1.2.4",
   "tzdata>=2025.2",
 ]
 description = "General purpose Discord bot for the DeVinci Fablab discord server."

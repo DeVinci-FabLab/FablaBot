@@ -211,7 +211,7 @@ def test_delay_counts_from_the_stored_time() -> None:
 
 async def test_timer_that_wakes_before_the_clock_is_due_waits_again(cog: UserManagement) -> None:
     """A timer that wakes before the clock is due waits again."""
-    guild, target, caller = _server(GUILD_A)
+    guild, target, _caller = _server(GUILD_A)
     target.roles.append(guild.roles[0])
     cog.bot.get_guild = MagicMock(return_value=guild)
     expires_at = NOW + timedelta(milliseconds=5)

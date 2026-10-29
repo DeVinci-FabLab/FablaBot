@@ -101,7 +101,7 @@ async def test_log_export_rejects_bad_date(cog, caplog, bad) -> None:
         ("01/01/2020", False, "Log export (guild_id=1234, date=2020-01-01, found=no)"),
     ],
 )
-async def test_log_export_logs_server_date_and_outcome(cog, handler, caplog, typed, found, expected) -> None:  # noqa: PLR0913 - pytest fixtures and parameters
+async def test_log_export_logs_server_date_and_outcome(cog, handler, caplog, typed, found, expected) -> None:  # noqa: PLR0913, PLR0917 - pytest fixtures and parameters
     """The export logs the server, the parsed date and whether a file was found, at INFO."""
     if found:
         path = handler.guild_log_path(1234, date(2026, 10, 27))
