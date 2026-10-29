@@ -1,6 +1,6 @@
 [project]
 dependencies = [
-  "discord-py>=2.6.4",
+  "discord-py>=2.7.1",
   "emoji>=2.15.0",
   "python-dotenv==1.0.0",
   "tzdata>=2025.2",
