@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import discord
@@ -76,8 +76,9 @@ class _Translator(app_commands.Translator):
 
 def _command(name: str = "hello", description: str = "Say hello", *, option: bool = False) -> app_commands.Command:
     """Build one slash command."""
-    callback = _hello_with_option if option else _hello
-    return app_commands.Command(name=name, description=description, callback=callback)
+    if option:
+        return app_commands.Command(name=name, description=description, callback=_hello_with_option)
+    return app_commands.Command(name=name, description=description, callback=_hello)
 
 
 def _tree(*items: app_commands.Command, word: str | None = None) -> app_commands.CommandTree:
@@ -92,6 +93,11 @@ def _tree(*items: app_commands.Command, word: str | None = None) -> app_commands
     return tree
 
 
+def _sync(tree: app_commands.CommandTree) -> AsyncMock:
+    """Return the recording ``sync`` a test put on ``tree``."""
+    return cast("AsyncMock", tree.sync)
+
+
 async def _start(tree: app_commands.CommandTree, *, application_id: int = APP_ID, dev_guild_id: int | None = None) -> bool:
     """Run one start: a fresh store read from disk, then the sync decision."""
     store = JsonStateStore(logging.getLogger("test"), COMMAND_SYNC_STATE_FILE)
@@ -103,7 +109,7 @@ async def test_first_sync_records_fingerprint(caplog: pytest.LogCaptureFixture) 
     tree = _tree()
     with caplog.at_level(logging.INFO, logger=LOGGER_NAME):
         assert await _start(tree) is True
-    tree.sync.assert_awaited_once_with(guild=None)
+    _sync(tree).assert_awaited_once_with(guild=None)
     assert COMMAND_SYNC_STATE_FILE.exists()
     assert "Commands synced (1, global)." in caplog.messages
 
@@ -114,7 +120,7 @@ async def test_same_commands_skip_sync(caplog: pytest.LogCaptureFixture) -> None
     tree = _tree()
     with caplog.at_level(logging.INFO, logger=LOGGER_NAME):
         assert await _start(tree) is False
-    tree.sync.assert_not_awaited()
+    _sync(tree).assert_not_awaited()
     assert "Commands unchanged, sync skipped (global)." in caplog.messages
 
 
@@ -131,7 +137,7 @@ async def test_changed_definition_syncs_again(changed) -> None:
     await _start(_tree())
     tree = _tree(changed())
     assert await _start(tree) is True
-    tree.sync.assert_awaited_once_with(guild=None)
+    _sync(tree).assert_awaited_once_with(guild=None)
 
 
 async def test_changed_translation_syncs_again() -> None:
@@ -139,7 +145,7 @@ async def test_changed_translation_syncs_again() -> None:
     await _start(_tree(word="bonjour"))
     tree = _tree(word="salut")
     assert await _start(tree) is True
-    tree.sync.assert_awaited_once()
+    _sync(tree).assert_awaited_once()
 
 
 async def test_load_order_does_not_change_fingerprint() -> None:
@@ -156,19 +162,19 @@ async def test_other_application_syncs_again() -> None:
     await _start(_tree())
     tree = _tree()
     assert await _start(tree, application_id=OTHER_APP_ID) is True
-    tree.sync.assert_awaited_once()
+    _sync(tree).assert_awaited_once()
 
 
 async def test_failed_sync_records_nothing() -> None:
     """A failed sync leaves no record, so the next start syncs."""
     tree = _tree()
-    tree.sync.side_effect = discord.HTTPException(MagicMock(status=500, reason="boom"), "boom")
+    _sync(tree).side_effect = discord.HTTPException(MagicMock(status=500, reason="boom"), "boom")
     with pytest.raises(discord.HTTPException):
         await _start(tree)
     assert not COMMAND_SYNC_STATE_FILE.exists()
     retry = _tree()
     assert await _start(retry) is True
-    retry.sync.assert_awaited_once()
+    _sync(retry).assert_awaited_once()
 
 
 @pytest.mark.parametrize("content", ["not json", "[]", "{}", '{"fingerprint": 3}', '{"fingerprint": "abc"}'])
@@ -178,7 +184,7 @@ async def test_doubtful_record_syncs(content: str) -> None:
     COMMAND_SYNC_STATE_FILE.write_text(content)
     tree = _tree()
     assert await _start(tree) is True
-    tree.sync.assert_awaited_once()
+    _sync(tree).assert_awaited_once()
     saved = json.loads(COMMAND_SYNC_STATE_FILE.read_text())
     assert isinstance(saved, dict)
     assert set(saved) == {"fingerprint"}
@@ -205,12 +211,12 @@ async def test_setup_hook_syncs_once_then_skips(fablabot_main: ModuleType, monke
     first = fablabot_main.Fablabot()
     first.tree.sync = AsyncMock(return_value=[])
     await first.setup_hook()
-    first.tree.sync.assert_awaited_once()
+    _sync(first.tree).assert_awaited_once()
 
     second = fablabot_main.Fablabot()
     second.tree.sync = AsyncMock(return_value=[])
     await second.setup_hook()
-    second.tree.sync.assert_not_awaited()
+    _sync(second.tree).assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -249,9 +255,11 @@ async def test_dev_guild_syncs_that_guild_only(caplog: pytest.LogCaptureFixture)
     tree = _tree()
     with caplog.at_level(logging.INFO, logger=LOGGER_NAME):
         assert await _start(tree, dev_guild_id=DEV) is True
-    tree.sync.assert_awaited_once()
-    assert tree.sync.await_args.kwargs["guild"].id == DEV
-    assert all(call.kwargs["guild"] is not None for call in tree.sync.await_args_list)
+    _sync(tree).assert_awaited_once()
+    last_call = _sync(tree).await_args
+    assert last_call is not None
+    assert last_call.kwargs["guild"].id == DEV
+    assert all(call.kwargs["guild"] is not None for call in _sync(tree).await_args_list)
     assert len(tree.get_commands(guild=None)) == 1
     assert f"Commands synced (1, guild_id={DEV})." in caplog.messages
     assert (
@@ -289,5 +297,7 @@ async def test_setup_hook_syncs_dev_guild(fablabot_main: ModuleType, monkeypatch
     bot = fablabot_main.Fablabot()
     bot.tree.sync = AsyncMock(return_value=[])
     await bot.setup_hook()
-    bot.tree.sync.assert_awaited_once()
-    assert bot.tree.sync.await_args.kwargs["guild"].id == DEV
+    _sync(bot.tree).assert_awaited_once()
+    last_call = _sync(bot.tree).await_args
+    assert last_call is not None
+    assert last_call.kwargs["guild"].id == DEV
