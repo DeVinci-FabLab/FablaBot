@@ -155,7 +155,7 @@ async def test_msg_purge_logs_the_purged_member_as_target_and_the_caller_as_user
     )
 
     purged = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Purged")]
-    assert len(purged) == 2  # noqa: PLR2004
+    assert len(purged) == 2
     assert all("target_id=4242" in line for line in purged)
     assert [line.count("user_id=418003123456789012") for line in purged] == [0, 1]
     assert not any("user_id=4242" in line for line in purged)

@@ -126,14 +126,14 @@ async def test_export_end_to_end_guild_b_never_gets_guild_a_lines() -> None:
         logging.getLogger("fablabot.probe").info(f"payload {data['marker']}")
 
     bot = MagicMock()
-    bot._connection.parsers = {"INTERACTION_CREATE": parser}  # noqa: SLF001
+    bot._connection.parsers = {"INTERACTION_CREATE": parser}
     added: list[logging.Handler] = []
     try:
         handlers = configure_logging(bot)
         added.extend(handlers)
         file_handler = handlers[1]
-        bot._connection.parsers["INTERACTION_CREATE"]({"guild_id": str(GUILD_A), "marker": "secret-of-a"})  # noqa: SLF001
-        bot._connection.parsers["INTERACTION_CREATE"]({"guild_id": str(GUILD_B), "marker": "line-of-b"})  # noqa: SLF001
+        bot._connection.parsers["INTERACTION_CREATE"]({"guild_id": str(GUILD_A), "marker": "secret-of-a"})
+        bot._connection.parsers["INTERACTION_CREATE"]({"guild_id": str(GUILD_B), "marker": "line-of-b"})
 
         bot.file_log_handler = file_handler
         cog = LogManagement(bot)

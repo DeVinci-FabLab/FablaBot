@@ -45,7 +45,7 @@ target-version = "py313"
 docstring-code-format = true
 
 [tool.ruff.lint]
-ignore = ["D105", "PTH123"]
+ignore = ["COM812", "D105", "PTH123"]
 select = [
   "ARG",
   "B",
@@ -71,6 +71,9 @@ select = [
   "UP",
   "W",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLR2004", "SLF001"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

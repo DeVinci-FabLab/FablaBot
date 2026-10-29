@@ -17,7 +17,7 @@ CALLER_ID, TARGET_ID, OTHER_ID = 418003123456789012, 501, 502
 
 
 @pytest.fixture(autouse=True)
-def _commands_channel_ok():  # noqa: ANN202
+def _commands_channel_ok():
     """Skip the commands-channel check so the real role check runs."""
     with patch("fablabot.helpers.utils._is_in_allowed_channel", AsyncMock(return_value=True)):
         yield
@@ -53,7 +53,8 @@ async def _open_bulk(server: Server, role_name: str, action: str) -> tuple[Magic
 
 
 async def _confirm_bulk(server: Server, view: object, *members: MagicMock) -> MagicMock:
-    view.select_members._values = list(members)  # noqa: SLF001 - discord.py exposes no public setter for a selection
+    # discord.py exposes no public setter for a selection
+    view.select_members._values = list(members)
     click = server.interaction()
     await view.confirm_button.callback(click)
     return click
@@ -142,7 +143,8 @@ async def test_with_roles_list_is_private(role: str) -> None:
     interaction.response.defer.assert_not_awaited()
     interaction.followup.send.assert_not_awaited()
 
-    view.select_roles._values = [server.roles["F - Laser"]]  # noqa: SLF001 - no public setter for a selection
+    # discord.py exposes no public setter for a selection
+    view.select_roles._values = [server.roles["F - Laser"]]
     click = server.interaction()
     await view.confirm_button.callback(click)
 
@@ -160,7 +162,8 @@ async def test_with_roles_confirm_after_losing_rights_lists_nothing(caplog: pyte
     view = interaction.response.send_message.await_args.kwargs["view"]
     server.caller.roles.clear()
 
-    view.select_roles._values = [server.roles["F - Laser"]]  # noqa: SLF001 - no public setter for a selection
+    # discord.py exposes no public setter for a selection
+    view.select_roles._values = [server.roles["F - Laser"]]
     click = server.interaction()
     await view.confirm_button.callback(click)
 

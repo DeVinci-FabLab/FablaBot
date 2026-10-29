@@ -29,7 +29,7 @@ USER_NAME = "kevin_secret_name"
 
 
 @pytest.fixture
-def fablabot_main(tmp_path, monkeypatch) -> ModuleType:  # noqa: ANN001
+def fablabot_main(tmp_path, monkeypatch) -> ModuleType:
     """Import ``fablabot.main`` with a fake token file in place."""
     token = tmp_path / "token"
     token.write_text("fake-token")

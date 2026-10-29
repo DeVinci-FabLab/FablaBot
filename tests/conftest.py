@@ -9,7 +9,7 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _isolated_cwd(tmp_path, monkeypatch) -> None:  # noqa: ANN001
+def _isolated_cwd(tmp_path, monkeypatch) -> None:
     """Run every test from an empty temporary directory so nothing lands in ``data/`` or ``logs/``."""
     monkeypatch.chdir(tmp_path)
 
@@ -63,7 +63,7 @@ def fill_text_input(item: ui.TextInput, value: str) -> None:
         item (ui.TextInput): The text input to fill.
         value (str): The value the user typed.
     """
-    item._value = value  # noqa: SLF001
+    item._value = value
 
 
 def cog_bot() -> MagicMock:
@@ -116,7 +116,9 @@ def make_member(member_id: int, *roles: MagicMock) -> MagicMock:
     return member
 
 
-def make_guild(guild_id: int, roles: list[MagicMock], members: list[MagicMock], *, channel: MagicMock | None = None) -> MagicMock:
+def make_guild(
+    guild_id: int, roles: list[MagicMock], members: list[MagicMock], *, channel: MagicMock | None = None
+) -> MagicMock:
     """Build a stub guild that finds its members by ID and returns ``channel`` for any channel ID.
 
     Args:

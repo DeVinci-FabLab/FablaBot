@@ -49,15 +49,19 @@ def _caller(*role_names: str) -> MagicMock:
 
 
 @pytest.fixture(autouse=True)
-def _in_commands_channel():  # noqa: ANN202
+def _in_commands_channel():
     """Skip the commands-channel check so the real role check runs."""
     with patch("fablabot.helpers.utils._is_in_allowed_channel", AsyncMock(return_value=True)):
         yield
 
 
 REFUSED = {
-    "channel.text_delete": lambda i: ChannelManagement.text_delete.callback(MagicMock(), i, channel=MagicMock(spec=TextChannel)),
-    "channel.vocal_delete": lambda i: ChannelManagement.vocal_delete.callback(MagicMock(), i, channel=MagicMock(spec=VoiceChannel)),
+    "channel.text_delete": lambda i: ChannelManagement.text_delete.callback(
+        MagicMock(), i, channel=MagicMock(spec=TextChannel)
+    ),
+    "channel.vocal_delete": lambda i: ChannelManagement.vocal_delete.callback(
+        MagicMock(), i, channel=MagicMock(spec=VoiceChannel)
+    ),
     "log.set": lambda i: LogManagement.log_set.callback(MagicMock(), i, channel=MagicMock(spec=TextChannel)),
     "log.export": lambda i: LogManagement.log_export.callback(MagicMock(), i, date=None),
     "welcome.verify": lambda i: WelcomeManagement.welcome_verify.callback(MagicMock(), i, enable=True),
@@ -99,15 +103,15 @@ def test_temp_admin_only_cannot_assign_any_role() -> None:
     member = interaction.user
     assert isinstance(member, Member)
     for name in (RoleNames.PRESIDENT, RoleNames.ADMIN_TEMP, "F - Laser", "Pôle Numérique", RoleNames.SBIRE_BUREAU):
-        assert UserManagement._can_assign_role(member, _role(name)) is False  # noqa: SLF001
+        assert UserManagement._can_assign_role(member, _role(name)) is False
 
 
 def test_temp_admin_keeps_rights_of_other_roles() -> None:
     trainer_lead = _caller(RoleNames.ADMIN_TEMP, RoleNames.TRAININGS_MANAGER).user
     president = _caller(RoleNames.ADMIN_TEMP, RoleNames.PRESIDENT).user
-    assert UserManagement._can_assign_role(trainer_lead, _role("F - Laser")) is True  # noqa: SLF001
-    assert UserManagement._can_assign_role(trainer_lead, _role(RoleNames.PRESIDENT)) is False  # noqa: SLF001
-    assert UserManagement._can_assign_role(president, _role(RoleNames.SECRETARY)) is True  # noqa: SLF001
+    assert UserManagement._can_assign_role(trainer_lead, _role("F - Laser")) is True
+    assert UserManagement._can_assign_role(trainer_lead, _role(RoleNames.PRESIDENT)) is False
+    assert UserManagement._can_assign_role(president, _role(RoleNames.SECRETARY)) is True
 
 
 async def test_role_refusal_logs_kind_and_ids_only(caplog: pytest.LogCaptureFixture) -> None:
