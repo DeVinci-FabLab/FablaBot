@@ -82,6 +82,31 @@ To run the code, you can then use:
 DISCORD_TOKEN_FILE=secrets/discord_token.secret ALLOWED_GUILD_IDS=<your server ID> uv run main
 ```
 
+### Staff commands in the slash menu
+
+The staff command groups (`/text`, `/vocal`, `/fm`, `/log`, `/msg`, `/user`, `/welcome`) are hidden from the slash menu by default: only members with the Administrator permission see them. `/suggest` stays visible to everyone. This changes what the menu shows, not who may run a command: each command still checks the caller's roles when it runs.
+
+On each server, a member with the Administrator permission shows each group to the roles that use it:
+
+1. Open Server Settings > Integrations, then Manage next to the bot.
+2. Under Commands, open a command, choose Add Roles or Members, add the roles listed below for it, and save.
+3. Leave the Roles & Members section at the top of that page alone: a role added there sees every staff group.
+4. Check with an account that has no staff role: after a reload, it sees `/suggest` and no staff group. If a group still shows, open that command and make sure `@everyone` is not allowed there.
+
+| Command | Roles to add |
+| --- | --- |
+| `/text`, `/vocal`, `/welcome` | Administrateur, Président, Vice-Président, Secrétaire Général |
+| `/log` | Administrateur, Président, Vice-Président, Secrétaire Général, Respo Numérique, Pôle Numérique |
+| `/fm` | Administrateur, CoDir, Respo Formation, Admin -temp- |
+| `/msg` | Administrateur, Président, Vice-Président, Secrétaire Général, Bureau |
+| `/user` | Administrateur, Président, Vice-Président, Secrétaire Général, Bureau, Respo Communication, Respo Event, Respo Formation, Respo Numérique, Respo Partenariat, Respo Projet |
+
+- These are the role names the bot checks today (`src/fablabot/helpers/constants.py`). Skip a role the server does not have, and a role that already has the Administrator permission.
+- Discord applies this per command, not per subcommand: a role added to `/msg` sees all of `/msg`, and the bot still refuses the subcommands that role may not run. `/msg clear` needs Manage Messages in the channel and `/msg purge` the Administrator permission; a role that only uses `/msg clear` is added to `/msg` too.
+- For `/user`, also add any other `Respo <area>` role whose `Pôle <area>` role exists on the server.
+- The settings stay across restarts and redeploys as long as the commands keep their names.
+- Members may need to reload Discord before their menu changes: Ctrl+R (Windows, Linux), Cmd+R (macOS), or close and reopen the mobile app.
+
 ## Documentation
 
 We **highly recommend** you to read the user guide before using the bot. It will help you understand the bot's features

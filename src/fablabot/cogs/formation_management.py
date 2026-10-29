@@ -15,7 +15,7 @@ from warnings import deprecated
 from discord import Embed, File, Interaction, Member, RawReactionActionEvent, Role, TextChannel, app_commands
 from discord.ext import commands, tasks
 
-from fablabot.helpers.constants import PARIS_TZ, ErrorMessages, RoleNames
+from fablabot.helpers.constants import PARIS_TZ, ErrorMessages, RoleNames, staff_default_permissions
 from fablabot.helpers.formation import (
     format_current_registrations,
     format_respo_contacts,
@@ -123,7 +123,11 @@ class FormationManagement(commands.Cog):
         logger.info("FormationManagement unloaded")
 
     # region ====== Fm Slash Commands Group ======
-    fm_group = app_commands.Group(name="fm", description="Gère les annonces de Formations et les inscriptions.")
+    fm_group = app_commands.Group(
+        name="fm",
+        description="Gère les annonces de Formations et les inscriptions.",
+        default_permissions=staff_default_permissions(),
+    )
 
     @fm_group.command(name="help", description="Afficher l'aide pour les commandes de gestion des formations.")
     @app_commands.describe(show="Afficher l'aide publiquement ou non")
