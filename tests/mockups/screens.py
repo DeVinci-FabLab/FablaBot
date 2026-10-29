@@ -6,8 +6,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from fablabot.cogs import channel_management, formation_management
+from fablabot.cogs import channel_management, formation_management, message_management
 from fablabot.models.formation import FmMessageDraft, Formation
+from fablabot.ui.formation import StartFmModal
+from fablabot.ui.message import SuggestionView
 
 from .preview import Capture, Sent
 
@@ -88,7 +90,34 @@ async def fm_edit() -> Screen:
     return Screen(capture.sent)
 
 
+async def suggest() -> Screen:
+    """``/suggest``: the recipient menu, the anonymity button and the button that opens the modal."""
+    capture = Capture()
+    with patch.object(message_management, "ensure_command_context", _allowed()):
+        await _invoke(message_management.MessageManagement.suggest, MagicMock(), capture.interaction())
+    return Screen(capture.sent)
+
+
+async def suggest_modal() -> Screen:
+    """The modal that opens when a recipient is chosen and "Rédiger la suggestion" is clicked."""
+    capture = Capture()
+    view = SuggestionView(MagicMock())
+    view.selected_recipient = "formation"
+    await view.open_modal_button.callback(capture.interaction())
+    return Screen(capture.sent)
+
+
+async def fm_start_modal() -> Screen:
+    """``/fm start``: the modal asking for the intro, the conclusion and an optional forms URL."""
+    capture = Capture()
+    await capture.interaction().response.send_modal(StartFmModal(MagicMock(), ROLE_FORMATIONS))
+    return Screen(capture.sent)
+
+
 SCREENS: dict[str, Callable[[], Coroutine[Any, Any, Screen]]] = {
     "text-help": text_help,
     "fm-edit": fm_edit,
+    "suggest": suggest,
+    "suggest-modal": suggest_modal,
+    "fm-start-modal": fm_start_modal,
 }

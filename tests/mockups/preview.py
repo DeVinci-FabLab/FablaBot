@@ -47,6 +47,7 @@ class Capture:
         interaction.response.edit_message = AsyncMock(side_effect=self._message)
         interaction.followup.send = AsyncMock(side_effect=self._message)
         interaction.response.defer = AsyncMock()
+        interaction.response.send_modal = AsyncMock(side_effect=self._modal)
         return interaction
 
     async def _message(
@@ -72,6 +73,10 @@ class Capture:
                 },
             )
         )
+
+    async def _modal(self, modal: ui.Modal) -> None:
+        """Keep a modal as Discord's API would receive it."""
+        self.sent.append(Sent("modal", dict(modal.to_dict())))
 
 
 # region ====== Markdown ======
@@ -193,6 +198,21 @@ def _button(data: Mapping[str, Any]) -> str:
     return f'<span class="button {style}{disabled}">{icon}{label}{link}</span>'
 
 
+def _select(data: Mapping[str, Any]) -> str:
+    """Render one select menu: a text select lists its options, the others stay closed."""
+    placeholder = html.escape(data.get("placeholder") or "")
+    head = f'<div class="select-head"><span class="placeholder">{placeholder}</span><span class="chevron">⌄</span></div>'
+    options = ""
+    if data.get("type") == 3:
+        items = []
+        for option in data.get("options", []):
+            description = option.get("description")
+            note = f'<div class="select-description">{html.escape(description)}</div>' if description else ""
+            items.append(f'<div class="select-option"><div>{html.escape(option["label"])}</div>{note}</div>')
+        options = f'<div class="select-options">{"".join(items)}</div>'
+    return f'<div class="select">{head}{options}</div>'
+
+
 def _row(data: Mapping[str, Any]) -> str:
     """Render one action row."""
     items: list[str] = []
@@ -200,6 +220,8 @@ def _row(data: Mapping[str, Any]) -> str:
         kind = child.get("type")
         if kind == 2:
             items.append(_button(child))
+        elif kind in (3, 5, 6, 7, 8):
+            items.append(_select(child))
     return f'<div class="row">{"".join(items)}</div>'
 
 
@@ -220,6 +242,29 @@ def message_html(payload: Mapping[str, Any], names: Mapping[int, str] | None = N
     body.append("</div>")
     css = "message ephemeral-message" if payload.get("ephemeral") else "message"
     return f'<div class="{css}">' + "\n".join(body) + "</div>"
+
+
+def _field(data: Mapping[str, Any]) -> str:
+    """Render one text input of a modal."""
+    star = '<span class="required-star">*</span>' if data.get("required") else ""
+    label = f'<div class="field-label">{html.escape(data.get("label") or "")}{star}</div>'
+    if value := data.get("value"):
+        shown = html.escape(value)
+    else:
+        shown = f'<span class="placeholder">{html.escape(data.get("placeholder") or "")}</span>'
+    kind = "textarea" if data.get("style") == 2 else "input"
+    return f'<div class="field">{label}<div class="{kind}">{shown}</div></div>'
+
+
+def modal_html(payload: Mapping[str, Any]) -> str:
+    """Render one modal: its title, then each text input with its label, star, placeholder or value."""
+    fields = [
+        _field(child) for row in payload.get("components", []) for child in row.get("components", []) if child.get("type") == 4
+    ]
+    return (
+        '<div class="modal"><div class="modal-title">'
+        f"{html.escape(payload.get('title') or '')}</div>" + "".join(fields) + "</div>"
+    )
 
 
 # endregion ====== Message parts ======
@@ -276,6 +321,18 @@ a { color: var(--link); text-decoration: none; }
 .ephemeral { margin-top: 4px; font-size: 12px; color: var(--muted); }
 .eye { margin-right: 4px; }
 .placeholder { color: var(--muted); }
+.select { margin-top: 8px; max-width: 400px; background: var(--select); border-radius: 8px; font-size: 14px; }
+.select-head { display: flex; justify-content: space-between; padding: 8px 12px; min-height: 40px; align-items: center; }
+.select-options { border-top: 1px solid var(--line); padding: 4px; }
+.select-option { padding: 6px 8px; border-radius: 4px; }
+.select-description { font-size: 12px; color: var(--muted); }
+.modal { max-width: 440px; margin: 0 auto; background: var(--modal); border-radius: 8px; padding: 16px; }
+.modal-title { font-size: 24px; font-weight: 600; color: var(--strong); margin-bottom: 16px; }
+.field { margin-bottom: 16px; }
+.field-label { font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+.required-star { color: #f23f42; margin-left: 4px; }
+.input, .textarea { background: var(--input); border-radius: 4px; padding: 10px; font-size: 16px; }
+.textarea { min-height: 88px; }
 """
 
 
@@ -289,7 +346,7 @@ def markup(sent: Sequence[Sent], names: Mapping[int, str] | None = None) -> str:
     Returns:
         str: The screen's markup, without the page around it.
     """
-    parts = [message_html(s.payload, names) for s in sent if s.kind == "message"]
+    parts = [message_html(s.payload, names) if s.kind == "message" else modal_html(s.payload) for s in sent]
     return "\n".join(parts) + "\n"
 
 

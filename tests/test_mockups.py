@@ -6,7 +6,8 @@ import os
 from pathlib import Path
 import sys
 
-from mockups.preview import EPHEMERAL_NOTE, Sent, markdown, markup, message_html, page
+from discord import ui
+from mockups.preview import EPHEMERAL_NOTE, Capture, Sent, markdown, markup, message_html, modal_html, page
 from mockups.screens import SCREENS
 import pytest
 
@@ -131,6 +132,63 @@ def test_button_styles() -> None:
     out = message_html({"components": [{"type": 1, "components": [enabled]}]})
     assert 'class="button primary"' in out
     assert "disabled" not in out
+
+
+def test_text_select_lists_its_options() -> None:
+    """A text select shows its placeholder, each option label and a description when one is set."""
+    select = {
+        "type": 3,
+        "placeholder": "Choisir...",
+        "options": [{"label": "Un", "value": "1", "description": "Premier"}, {"label": "Deux", "value": "2"}],
+    }
+    out = message_html({"components": [{"type": 1, "components": [select]}]})
+    assert "Choisir..." in out
+    assert "Un" in out
+    assert "Deux" in out
+    assert "Premier" in out
+    assert out.count("select-description") == 1
+
+
+def test_member_select_is_closed() -> None:
+    """A user select shows its placeholder and no option list."""
+    select = {"type": 5, "placeholder": "Choisir un membre"}
+    out = message_html({"components": [{"type": 1, "components": [select]}]})
+    assert "Choisir un membre" in out
+    assert "select-option" not in out
+
+
+def test_modal_fields() -> None:
+    """A modal shows its escaped title, a star on required fields, a field per style and placeholder or value."""
+
+    def field(**data: object) -> dict[str, object]:
+        return {"type": 1, "components": [{"type": 4, "style": 1, "label": "L", **data}]}
+
+    payload = {
+        "title": "<i>T</i>",
+        "components": [
+            field(label="Court", style=1, required=True, placeholder="ph-court"),
+            field(label="Long", style=2, required=False, placeholder="ph-long"),
+            field(label="Rempli", style=1, placeholder="ph-rempli", value="valeur"),
+        ],
+    }
+    out = modal_html(payload)
+    assert "&lt;i&gt;T&lt;/i&gt;" in out
+    assert "<i>" not in out
+    assert out.count("required-star") == 1
+    assert out.count('class="input"') == 2
+    assert out.count('class="textarea"') == 1
+    assert "ph-court" in out
+    assert "ph-long" in out
+    assert "valeur" in out
+    assert "ph-rempli" not in out
+
+
+async def test_modal_is_captured() -> None:
+    """A modal sent through the capture becomes one modal entry."""
+    capture = Capture()
+    await capture.interaction().response.send_modal(ui.Modal(title="Titre"))
+    assert [s.kind for s in capture.sent] == ["modal"]
+    assert capture.sent[0].payload["title"] == "Titre"
 
 
 def test_ephemeral_note() -> None:
