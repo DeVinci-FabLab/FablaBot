@@ -24,6 +24,7 @@ main = "fablabot.main:main"
 
 [dependency-groups]
 dev = [
+  "basedpyright>=1.40.2",
   "pdoc>=15.0.3",
   "pytest>=9.2.0",
   "pytest-asyncio>=1.4.1",
@@ -83,3 +84,9 @@ max-doc-length = 128
 
 [tool.ruff.lint.isort]
 force-sort-within-sections = true
+
+[tool.basedpyright]
+include = ["src", "tests"]
+pythonPlatform = "Linux"
+pythonVersion = "3.13"
+typeCheckingMode = "standard"
