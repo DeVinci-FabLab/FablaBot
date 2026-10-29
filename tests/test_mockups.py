@@ -81,6 +81,12 @@ def test_masked_link_must_be_http() -> None:
     assert "[x](javascript:alert(1))" in out
 
 
+def test_masked_link_cannot_add_an_attribute() -> None:
+    """A double quote in the target never closes the href to add an attribute to the tag."""
+    out = markdown('[x](https://a"onmouseover="alert(1))')
+    assert "<a " not in out
+
+
 def test_embed_parts() -> None:
     """An embed shows its colour border, author, title, description, fields, footer and image frame."""
     embed = {

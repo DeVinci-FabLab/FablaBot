@@ -77,7 +77,7 @@ class Capture:
 # region ====== Markdown ======
 
 _CODE = re.compile(r"`([^`\n]+)`")
-_LINK = re.compile(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
+_LINK = re.compile(r"\[([^\]\n]+)\]\((https?://[^)\s\"]+)\)")
 _BOLD = re.compile(r"\*\*(.+?)\*\*")
 _UNDERLINE = re.compile(r"__(.+?)__")
 _ITALIC = re.compile(r"(?<![\w*])[*_](?![\s*_])(.+?)(?<![\s*_])[*_](?![\w*])")
