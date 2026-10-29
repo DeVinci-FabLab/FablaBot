@@ -21,7 +21,12 @@ from fablabot.cogs import (
     UserManagement,
     WelcomeManagement,
 )
-from fablabot.helpers.command_sync import COMMAND_SYNC_STATE_FILE, sync_commands_if_changed
+from fablabot.helpers.command_sync import (
+    COMMAND_SYNC_STATE_FILE,
+    DEV_GUILD_ID_ENV,
+    parse_dev_guild_id,
+    sync_commands_if_changed,
+)
 from fablabot.helpers.guild_access import GuildAccessPolicy, GuildAccessTree
 from fablabot.helpers.logging_setup import configure_logging
 from fablabot.helpers.state_store import JsonStateStore
@@ -87,8 +92,9 @@ class Fablabot(commands.Bot):
             - reactions: for handling message reactions
             - message_content: for reading message content
         """
-        # Parsed before the base class so a malformed list stops the process before login.
+        # Parsed before the base class so a malformed list or dev guild stops the process before login.
         policy = GuildAccessPolicy.from_env()
+        dev_guild_id = parse_dev_guild_id(os.environ.get(DEV_GUILD_ID_ENV), allowed=policy.allowed)
         super().__init__(
             command_prefix=commands.when_mentioned,
             tree_cls=GuildAccessTree,
@@ -104,6 +110,7 @@ class Fablabot(commands.Bot):
             ),
         )
         self.guild_access: GuildAccessPolicy = policy
+        self.dev_guild_id: int | None = dev_guild_id
         self.discord_log_handler: DiscordLogHandler | None = None
         self.file_log_handler: DailyFileHandler | None = None
         logger.info("Bot initialized")
@@ -127,7 +134,10 @@ class Fablabot(commands.Bot):
             logger.info(f"Loaded cog {cog.__class__.__name__}.")
 
         await sync_commands_if_changed(
-            self.tree, JsonStateStore(logger, COMMAND_SYNC_STATE_FILE), application_id=self.application_id
+            self.tree,
+            JsonStateStore(logger, COMMAND_SYNC_STATE_FILE),
+            application_id=self.application_id,
+            dev_guild_id=self.dev_guild_id,
         )
 
     @override

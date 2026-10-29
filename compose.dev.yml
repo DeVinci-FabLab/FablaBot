@@ -15,6 +15,7 @@ services:
       - DISCORD_TOKEN_FILE=/run/secrets/discord_token
       - ALLOWED_GUILD_IDS=${ALLOWED_GUILD_IDS:-}
       - OPERATOR_LOG_CHANNEL_ID=${OPERATOR_LOG_CHANNEL_ID:-}
+      - DEV_GUILD_ID=${DEV_GUILD_ID:-}
       - EASTER_EGGS_ENABLED=false
     secrets:
       - discord_token
