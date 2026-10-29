@@ -5,25 +5,45 @@ on:
     branches:
       - main
 
-permissions:
-  contents: read
-  packages: write
+permissions: {}
+
+# One image build at a time, so :latest always ends on the last push.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
 
 jobs:
+  check:
+    name: check
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
   build-and-push-image:
+    name: build and push image
+    needs: check
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push the image to ghcr.io
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read the build date
+        id: build-date
+        run: echo "value=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
 
       - name: Log in to the Container registry
-        uses: docker/login-action@v2
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: docker/Dockerfile
@@ -32,6 +52,7 @@ jobs:
           tags: |
             ghcr.io/devinci-fablab/fablabot:latest
             ghcr.io/devinci-fablab/fablabot:${{ github.sha }}
-          build-args: |
-            VERSION=${{ github.ref_name }}
-            BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          labels: |
+            org.opencontainers.image.created=${{ steps.build-date.outputs.value }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
