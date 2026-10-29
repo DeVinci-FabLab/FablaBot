@@ -74,6 +74,23 @@ Log files live in `logs/`:
 - `logs/guilds/<server ID>/<date>.log` holds one server's lines. `/log export` sends that file to that server only.
 - The bot deletes no log file. See the [operator guide](./docs/OPERATIONS.md) for archiving before a redeploy.
 
+#### Slash commands
+
+At start, the bot sends its slash commands to Discord only when they changed since the last sync. It keeps a fingerprint of the last sync in `data/command_sync_state.json`.
+
+- To force a sync, stop the bot, delete that file and start it again.
+- After rolling back to an older image, delete that file before you upgrade again: the older image syncs at every start without updating it.
+
+`DEV_GUILD_ID` holds one server ID, for a development bot only. When it is set, the bot syncs its commands to that server alone, where they show at once, and leaves the global commands as they are.
+
+```bash
+DEV_GUILD_ID=111111111111111111
+```
+
+- Use a separate Discord application for the development bot, one that never synced without `DEV_GUILD_ID`: otherwise each command shows twice on that server.
+- Never set it on the production bot: its commands would stop updating on every other server.
+- The server must be in `ALLOWED_GUILD_IDS` when that list is set. A malformed value, or a server outside the list, stops the bot at start.
+
 ### Running the project
 
 To run the code, you can then use:
