@@ -4,6 +4,8 @@ on:
   pull_request:
   # Pushes to main run these checks through CD.yml, before the image is built.
   workflow_call:
+  # CD.yml starts them on the release pull request, which GITHUB_TOKEN opens without triggering pull_request.
+  workflow_dispatch:
 
 permissions:
   contents: read

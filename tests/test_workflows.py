@@ -34,19 +34,30 @@ def test_every_action_is_pinned_by_commit_sha() -> None:
 
 
 def test_image_build_waits_for_the_checks() -> None:
-    """The image workflow calls the check workflow and its build job needs it."""
+    """The image workflow calls the check workflow; the release and the build job both need it."""
     text = (WORKFLOWS / "CD.yml").read_text(encoding="utf-8")
     assert "uses: ./.github/workflows/ci.yml" in text
-    assert re.search(
-        r"^  build-and-push-image:\n(?:    .*\n)*?    needs: check$",
-        text,
-        re.MULTILINE,
-    )
+    assert re.search(r"^    needs: check$", _job("release"), re.MULTILINE)
+    assert re.search(r"^    needs: \[check, release\]$", _job("build-and-push-image"), re.MULTILINE)
 
 
 def _read(name: str) -> str:
     """Return the text of one workflow file."""
     return (WORKFLOWS / name).read_text(encoding="utf-8")
+
+
+def _job(job: str) -> str:
+    """Return the body of one job of CD.yml, up to the next job."""
+    found = re.search(rf"^  {re.escape(job)}:\n(?P<body>(?:    .*\n|\n)*)", _read("CD.yml"), re.MULTILINE)
+    assert found, job
+    return found["body"]
+
+
+def _permissions(job: str) -> set[str]:
+    """List the permissions one job of CD.yml grants, without their comments."""
+    block = re.search(r"^    permissions:\n(?P<lines>(?:      .*\n)+)", _job(job), re.MULTILINE)
+    assert block, job
+    return {line.split("#")[0].strip() for line in block["lines"].splitlines()}
 
 
 def _steps(name: str) -> list[str]:
@@ -107,3 +118,22 @@ def test_permissions_stay_at_least_privilege() -> None:
     ci = _read("ci.yml")
     assert re.search(r"^permissions:\n  contents: read\n(?=\n|\S)", ci, re.MULTILINE)
     assert not re.search(r":\s*write\b", ci)
+
+
+def test_each_job_gets_only_the_permissions_it_needs() -> None:
+    """CD.yml has four jobs; only the release job writes to the repository, only the build writes packages."""
+    jobs = re.findall(r"^  ([\w-]+):$", _read("CD.yml").split("\njobs:\n", 1)[1], re.MULTILINE)
+    assert jobs == ["check", "release", "check-release-pr", "build-and-push-image"]
+    assert _permissions("check") == {"contents: read"}
+    assert _permissions("release") == {"contents: write", "pull-requests: write"}
+    assert _permissions("check-release-pr") == {"actions: write"}
+    assert _permissions("build-and-push-image") == {"contents: read", "packages: write"}
+
+
+def test_the_release_pull_request_gets_the_check() -> None:
+    """ci.yml can be started by hand, and CD.yml starts it on the release branch whenever release-please updates it."""
+    assert re.search(r"^on:\n(?:  .*\n)*  workflow_dispatch:$", _read("ci.yml"), re.MULTILINE)
+    job = _job("check-release-pr")
+    assert "if: ${{ needs.release.outputs.pr != '' }}" in job
+    assert "release-please--branches--*) ;;" in job
+    assert 'gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"' in job
