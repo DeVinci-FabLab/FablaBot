@@ -7,7 +7,7 @@ from pathlib import Path
 import sys
 import tomllib
 import types
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Any, Self
 
 from mockups import __main__ as command
 from mockups.preview import EPHEMERAL_NOTE
@@ -15,7 +15,7 @@ from mockups.screens import SCREENS
 import pytest
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 ROOT = Path(__file__).parent.parent
 
@@ -180,8 +180,24 @@ def test_screens_are_built_away_from_the_repository(tmp_path: Path, monkeypatch:
 
 
 def test_pages_run_without_script_and_without_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Each capture context turns script and service workers off, so no page can open a WebSocket or fetch."""
+    """Each capture context turns script and service workers off and lets only local pages load."""
     contexts: list[dict[str, object]] = []
+    routes: list[tuple[str, Callable[[Any], None]]] = []
+
+    class Route:
+        """A request the filter decides on."""
+
+        def __init__(self, url: str) -> None:
+            self.request = types.SimpleNamespace(url=url)
+            self.verdict = ""
+
+        def continue_(self) -> None:
+            """Let the request go."""
+            self.verdict = "continue"
+
+        def abort(self) -> None:
+            """Stop the request."""
+            self.verdict = "abort"
 
     class Tab:
         """A page that captures nothing."""
@@ -195,8 +211,9 @@ def test_pages_run_without_script_and_without_network(monkeypatch: pytest.Monkey
     class Context:
         """A browser context that records how it was made."""
 
-        def route(self, pattern: str, handler: object) -> None:
-            """Register the request filter."""
+        def route(self, pattern: str, handler: Callable[[Any], None]) -> None:
+            """Keep the request filter."""
+            routes.append((pattern, handler))
 
         def new_page(self) -> Tab:
             """Open a tab."""
@@ -244,6 +261,18 @@ def test_pages_run_without_script_and_without_network(monkeypatch: pytest.Monkey
     assert len(contexts) == 1
     assert contexts[0]["java_script_enabled"] is False
     assert contexts[0]["service_workers"] == "block"
+    assert [pattern for pattern, _ in routes] == ["**/*"]
+    handler = routes[0][1]
+
+    def verdict(url: str) -> str:
+        route = Route(url)
+        handler(route)
+        return route.verdict
+
+    for url in ("file:///tmp/page.html", "data:text/css,a{}", "about:blank"):
+        assert verdict(url) == "continue", url
+    for url in ("http://127.0.0.1/a.css", "https://example.org/a.png", "ws://127.0.0.1/socket"):
+        assert verdict(url) == "abort", url
 
 
 def test_contributing_explains_the_preview() -> None:
