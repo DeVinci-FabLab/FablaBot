@@ -127,6 +127,10 @@ def test_button_styles() -> None:
     assert '<span class="emoji">🔧</span>' in out
     assert "&lt;b&gt;x&lt;/b&gt;" in out
     assert "<b>" not in out
+    enabled = {"type": 2, "style": 1, "label": "Ok", "emoji": {"name": "✅"}}
+    out = message_html({"components": [{"type": 1, "components": [enabled]}]})
+    assert 'class="button primary"' in out
+    assert "disabled" not in out
 
 
 def test_ephemeral_note() -> None:
