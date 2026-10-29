@@ -140,7 +140,13 @@ Volumes and the token file written by an older image belong to root. Do this onc
    done
    ```
 
-3. Give both folders to the bot's user. Leave `archive/` as it is.
+3. Check that nothing on the host already uses id 10001. The command must print nothing. If it prints a line, stop: giving the files to that id would give the token and the state to that host account.
+
+   ```bash
+   getent passwd 10001; getent group 10001
+   ```
+
+   Then give both folders to the bot's user. Leave `archive/` as it is.
 
    ```bash
    sudo chown -R 10001:10001 "$VOLUMES_PATH/fablabot/data" "$VOLUMES_PATH/fablabot/logs"
@@ -164,6 +170,8 @@ Volumes and the token file written by an older image belong to root. Do this onc
    Use your stack's container name if it is not `fablabot-prod`. A `Cannot start:` line names the folder, file or setting to fix; once fixed, the bot starts at its next restart.
 
 To roll back, set the image back to the previous `:<commit sha>` tag and restore the stack as it was before step 5. The older image runs as root and reads the volumes without a `chown` back, but root without capabilities cannot write files owned by 10001: the seven lines must go with it.
+
+After a rollback, the root image writes root-owned files. Run step 3 again (and step 4 if the token file was replaced) before you redeploy the non-root image.
 
 After restoring an archive, run step 3 again: `tar` run as root restores the files as root.
 
