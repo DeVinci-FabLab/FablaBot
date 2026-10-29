@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib
 import logging
-from types import ModuleType
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock
 
 import discord
@@ -20,6 +20,9 @@ from fablabot.helpers.guild_access import (
     GuildAccessTree,
     parse_allowed_guild_ids,
 )
+
+if TYPE_CHECKING:
+    from types import ModuleType
 
 LISTED = 111111111111111111
 UNLISTED = 222222222222222222

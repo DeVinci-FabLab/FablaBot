@@ -32,6 +32,7 @@ SRC = Path(message_management.__file__).parent.parent
 
 
 def make_message(content: str, guild_id: int = 987654321) -> MagicMock:
+    """Build a message stub from a human in a text channel with the given content."""
     msg = MagicMock(spec=Message)
     msg.content = content
     msg.author = MagicMock(spec=Member)
@@ -47,6 +48,7 @@ def make_message(content: str, guild_id: int = 987654321) -> MagicMock:
 
 @pytest.fixture
 def cog(monkeypatch: pytest.MonkeyPatch) -> MessageManagement:
+    """Return a message cog with easter eggs on and the random draw always hitting."""
     monkeypatch.setattr(message_management, "EASTER_EGGS_ENABLED", True)
     monkeypatch.setattr(message_management.random, "random", lambda: 0.0)
     return MessageManagement(MagicMock())
@@ -54,6 +56,7 @@ def cog(monkeypatch: pytest.MonkeyPatch) -> MessageManagement:
 
 @pytest.mark.parametrize("content", REMOVED_WORDS)
 async def test_removed_words_get_no_reply(cog: MessageManagement, content: str) -> None:
+    """A message holding a removed trigger word gets no reply and no reaction."""
     msg = make_message(content)
 
     await cog.on_message(msg)
@@ -63,6 +66,7 @@ async def test_removed_words_get_no_reply(cog: MessageManagement, content: str) 
 
 
 async def test_remaining_easter_egg_replies_on_any_guild(cog: MessageManagement) -> None:
+    """A remaining easter egg still replies, whatever the guild."""
     msg = make_message("ce n'est pas sorcier", guild_id=987654321)
 
     await cog.on_message(msg)
@@ -72,6 +76,7 @@ async def test_remaining_easter_egg_replies_on_any_guild(cog: MessageManagement)
 
 @pytest.mark.parametrize("name", ["models/message.py", "cogs/message_management.py"])
 def test_no_guild_id_literal_remains(name: str) -> None:
+    """The message sources hold no guild id literal and no main guild constant."""
     text = (SRC / name).read_text(encoding="utf-8")
 
     assert "MAIN_GUILD_ID" not in text

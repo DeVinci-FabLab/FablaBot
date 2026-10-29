@@ -96,8 +96,13 @@ def test_formatter_escapes_line_breaks_in_message() -> None:
 def test_formatter_keeps_traceback_and_defaults_guild_field() -> None:
     """The traceback keeps its lines and a record without guild_id formats as None."""
     formatter = SingleLineFormatter("%(guild_id)s | %(message)s")
-    try:
+
+    def _raise_bad() -> None:
+        """Raise the error whose traceback the record carries."""
         raise ValueError("bad")
+
+    try:
+        _raise_bad()
     except ValueError:
         record = _record(exc_info=sys.exc_info())
     out = formatter.format(record)
@@ -127,7 +132,7 @@ def test_payload_guild_id_reads_guild_id_and_guild_events(event: str, data: obje
 def test_gateway_wrapper_sets_guild_during_parse_only() -> None:
     """The parser sees the guild while it runs; the context is clear afterwards."""
     seen: list[int | None] = []
-    parsers = {"MESSAGE_CREATE": lambda data: seen.append(current_guild_id.get())}
+    parsers = {"MESSAGE_CREATE": lambda _data: seen.append(current_guild_id.get())}
     install_gateway_guild_context(parsers)
     parsers["MESSAGE_CREATE"]({"guild_id": str(GUILD)})
     assert seen == [GUILD]
@@ -137,7 +142,7 @@ def test_gateway_wrapper_sets_guild_during_parse_only() -> None:
 def test_gateway_wrapper_resets_after_parser_error() -> None:
     """A parser that raises still leaves the context clear."""
 
-    def failing(data: object) -> None:
+    def failing(_data: object) -> None:
         """Raise like a broken parser."""
         raise RuntimeError("boom")
 
@@ -215,7 +220,7 @@ async def _run_real_parser(payload: dict[str, Any]) -> list[int | None]:
         seen.append(current_guild_id.get())
 
     tree = MagicMock()
-    tree._from_interaction = lambda interaction: asyncio.create_task(record())
+    tree._from_interaction = lambda _interaction: asyncio.create_task(record())
     state._command_tree = tree
     assert install_gateway_guild_context(state.parsers) is True
     state.parsers["INTERACTION_CREATE"](payload)

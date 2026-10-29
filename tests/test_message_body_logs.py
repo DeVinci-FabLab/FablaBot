@@ -15,6 +15,7 @@ SECRET_BODY = "SECRET-DM-BODY"
 
 @pytest.mark.asyncio
 async def test_bulk_dm_modal_logs_no_body(caplog: pytest.LogCaptureFixture) -> None:
+    """Submitting the bulk DM modal logs the event but never the message body."""
     caplog.set_level(logging.DEBUG)
     interaction = make_interaction()
     interaction.followup.send.return_value = MagicMock(id=42)
@@ -29,6 +30,7 @@ async def test_bulk_dm_modal_logs_no_body(caplog: pytest.LogCaptureFixture) -> N
 
 @pytest.mark.asyncio
 async def test_start_message_modal_logs_no_body(caplog: pytest.LogCaptureFixture) -> None:
+    """Submitting the start message modal logs the event but never the message body."""
     caplog.set_level(logging.DEBUG)
     interaction = make_interaction()
     cog = MagicMock()
@@ -44,6 +46,7 @@ async def test_start_message_modal_logs_no_body(caplog: pytest.LogCaptureFixture
 
 @pytest.mark.asyncio
 async def test_reaction_message_modal_logs_no_body(caplog: pytest.LogCaptureFixture) -> None:
+    """Submitting the reaction message modal logs the event but never the message body."""
     caplog.set_level(logging.DEBUG)
     interaction = make_interaction()
     cog = MagicMock()

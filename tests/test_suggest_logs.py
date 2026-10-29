@@ -65,17 +65,20 @@ async def _run_flow(caplog: pytest.LogCaptureFixture, *, anonymous: bool, send_e
 
 @pytest.mark.parametrize("anonymous", [True, False], ids=["anonymous", "signed"])
 async def test_suggest_flow_logs_no_author_or_text(caplog: pytest.LogCaptureFixture, *, anonymous: bool) -> None:
+    """A suggestion, anonymous or signed, logs neither its author nor its text."""
     await _run_flow(caplog, anonymous=anonymous)
     _assert_no_secret(caplog)
 
 
 async def test_suggest_delivery_failure_logs_no_author_or_text(caplog: pytest.LogCaptureFixture) -> None:
+    """A failed delivery is logged without the author or the text."""
     await _run_flow(caplog, anonymous=False, send_error=Exception("boom"))
     _assert_no_secret(caplog)
     assert "Failed to send suggestion" in caplog.text
 
 
 async def test_suggest_logs_command_and_guild_only(caplog: pytest.LogCaptureFixture) -> None:
+    """The suggest command logs one line with the guild id and no user."""
     caplog.set_level(logging.DEBUG)
     interaction = make_interaction()
     await MessageManagement.suggest.callback(cog_bot(), interaction)
@@ -87,6 +90,7 @@ async def test_suggest_logs_command_and_guild_only(caplog: pytest.LogCaptureFixt
 
 
 async def test_suggest_stops_when_context_check_fails() -> None:
+    """The suggest command sends nothing when the context check fails."""
     interaction = make_interaction()
     with patch("fablabot.cogs.message_management.ensure_command_context", AsyncMock(return_value=False)):
         await MessageManagement.suggest.callback(cog_bot(), interaction)
@@ -94,6 +98,7 @@ async def test_suggest_stops_when_context_check_fails() -> None:
 
 
 async def test_role_refusal_without_identity_logs_no_user(caplog: pytest.LogCaptureFixture) -> None:
+    """A role refusal logs no user identity."""
     caplog.set_level(logging.DEBUG)
     interaction = make_interaction()
     bureau = MagicMock()

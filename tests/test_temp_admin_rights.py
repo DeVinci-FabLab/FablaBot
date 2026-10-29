@@ -70,12 +70,14 @@ REFUSED = {
 
 
 def test_temp_admin_role_is_not_an_admin_role() -> None:
+    """The temporary admin role is allowed for formations but is not an admin role."""
     assert RoleNames.ADMIN_TEMP not in ADMIN_ROLES
     assert RoleNames.ADMIN_TEMP in formation_management.ALLOWED_ROLES
 
 
 @pytest.mark.parametrize("command", list(REFUSED))
 async def test_temp_admin_only_is_refused(command: str) -> None:
+    """A caller holding only the temporary admin role is refused each admin command."""
     interaction = _caller(RoleNames.ADMIN_TEMP)
 
     await REFUSED[command](interaction)
@@ -88,6 +90,7 @@ async def test_temp_admin_only_is_refused(command: str) -> None:
 
 
 async def test_temp_admin_only_passes_fm_role_check() -> None:
+    """A caller holding only the temporary admin role passes the formation role check."""
     interaction = _caller(RoleNames.ADMIN_TEMP)
     allowed = await ensure_command_context(
         logging.getLogger("test"),
@@ -99,6 +102,7 @@ async def test_temp_admin_only_passes_fm_role_check() -> None:
 
 
 def test_temp_admin_only_cannot_assign_any_role() -> None:
+    """A caller holding only the temporary admin role can assign no role."""
     interaction = _caller(RoleNames.ADMIN_TEMP)
     member = interaction.user
     assert isinstance(member, Member)
@@ -107,6 +111,7 @@ def test_temp_admin_only_cannot_assign_any_role() -> None:
 
 
 def test_temp_admin_keeps_rights_of_other_roles() -> None:
+    """A temporary admin keeps the assignment rights of their other roles."""
     trainer_lead = _caller(RoleNames.ADMIN_TEMP, RoleNames.TRAININGS_MANAGER).user
     president = _caller(RoleNames.ADMIN_TEMP, RoleNames.PRESIDENT).user
     assert UserManagement._can_assign_role(trainer_lead, _role("F - Laser")) is True
@@ -115,6 +120,7 @@ def test_temp_admin_keeps_rights_of_other_roles() -> None:
 
 
 async def test_role_refusal_logs_kind_and_ids_only(caplog: pytest.LogCaptureFixture) -> None:
+    """A role refusal logs its kind and IDs, never the name of the caller."""
     caplog.set_level(logging.DEBUG)
     interaction = _caller(RoleNames.ADMIN_TEMP)
 
