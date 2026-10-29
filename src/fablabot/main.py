@@ -169,7 +169,6 @@ class Fablabot(commands.Bot):
         """Touch the heartbeat file on a fixed interval."""
         self.write_heartbeat()
 
-    @override
     async def on_ready(self) -> None:
         """Mark the gateway as up, beat at once and start the heartbeat loop once."""
         self.gateway_up = True
@@ -177,12 +176,10 @@ class Fablabot(commands.Bot):
         if not self.heartbeat.is_running():
             self.heartbeat.start()
 
-    @override
     async def on_resumed(self) -> None:
         """Mark the gateway as up after a resumed session."""
         self.gateway_up = True
 
-    @override
     async def on_disconnect(self) -> None:
         """Mark the gateway as down."""
         self.gateway_up = False

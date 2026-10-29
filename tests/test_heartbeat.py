@@ -123,3 +123,11 @@ def test_loop_interval_matches_the_health_check(bot) -> None:
     """The loop beats three times within the health check's tolerance."""
     assert bot.heartbeat.seconds == HEARTBEAT_INTERVAL_SECONDS == 30
     assert HEARTBEAT_MAX_AGE_SECONDS == 3 * HEARTBEAT_INTERVAL_SECONDS
+
+
+def test_event_handlers_are_not_marked_as_overrides(fablabot_main) -> None:
+    """Discord's client defines no on_ready, on_resumed or on_disconnect to override."""
+    cls = fablabot_main.Fablabot
+    for name in ("on_ready", "on_resumed", "on_disconnect"):
+        assert not any(hasattr(base, name) for base in cls.__mro__[1:])
+        assert not getattr(getattr(cls, name), "__override__", False), name
