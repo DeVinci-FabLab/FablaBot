@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, override
 
 from discord import Intents
 from discord.app_commands import AppCommandContext
-from discord.ext import commands
+from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
 from fablabot.cogs import (
@@ -22,6 +22,7 @@ from fablabot.cogs import (
     UserManagement,
     WelcomeManagement,
 )
+from fablabot.healthcheck import HEARTBEAT_FILE, HEARTBEAT_INTERVAL_SECONDS
 from fablabot.helpers.command_sync import (
     COMMAND_SYNC_STATE_FILE,
     DEV_GUILD_ID_ENV,
@@ -34,6 +35,8 @@ from fablabot.helpers.startup_checks import TOKEN_FILE_ENV, StartupError, check_
 from fablabot.helpers.state_store import JsonStateStore
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from fablabot.logging_handlers import DailyFileHandler, DiscordLogHandler
 
 logger = logging.getLogger(__name__)
@@ -111,6 +114,9 @@ class Fablabot(commands.Bot):
         self.dev_guild_id: int | None = dev_guild_id
         self.discord_log_handler: DiscordLogHandler | None = None
         self.file_log_handler: DailyFileHandler | None = None
+        self.heartbeat_file: Path = HEARTBEAT_FILE
+        self.gateway_up: bool = False
+        self._heartbeat_failed: bool = False
         logger.info("Bot initialized")
 
     @override
@@ -137,6 +143,49 @@ class Fablabot(commands.Bot):
             application_id=self.application_id,
             dev_guild_id=self.dev_guild_id,
         )
+
+    def write_heartbeat(self) -> bool:
+        """Touch the heartbeat file while the gateway session is up.
+
+        A failed write is logged once, until a write succeeds again.
+
+        Returns:
+            bool: True when the file was touched, False when disconnected, closed or unwritable.
+        """
+        if not self.gateway_up or self.is_closed():
+            return False
+        try:
+            self.heartbeat_file.touch()
+        except OSError:
+            if not self._heartbeat_failed:
+                logger.exception(f"Cannot write the heartbeat file {self.heartbeat_file}")
+            self._heartbeat_failed = True
+            return False
+        self._heartbeat_failed = False
+        return True
+
+    @tasks.loop(seconds=HEARTBEAT_INTERVAL_SECONDS)
+    async def heartbeat(self) -> None:
+        """Touch the heartbeat file on a fixed interval."""
+        self.write_heartbeat()
+
+    @override
+    async def on_ready(self) -> None:
+        """Mark the gateway as up, beat at once and start the heartbeat loop once."""
+        self.gateway_up = True
+        self.write_heartbeat()
+        if not self.heartbeat.is_running():
+            self.heartbeat.start()
+
+    @override
+    async def on_resumed(self) -> None:
+        """Mark the gateway as up after a resumed session."""
+        self.gateway_up = True
+
+    @override
+    async def on_disconnect(self) -> None:
+        """Mark the gateway as down."""
+        self.gateway_up = False
 
     @override
     async def on_command_error(self, ctx: commands.Context[Any], exception: Exception) -> None:
