@@ -53,7 +53,7 @@ To keep other people from adding the bot to their servers, set these in the [Dev
 1. Installation: set Install Link to None and uncheck User Install.
 2. Bot: turn Public Bot off.
 
-To copy a server ID, enable Developer Mode in Discord (User Settings, Advanced), then right-click the server and choose Copy Server ID.
+To copy a server ID, enable Developer Mode in Discord (User Settings, Advanced), then right-click the server and choose Copy Server ID. The [operator guide](./docs/OPERATIONS.md) has the full steps to add or remove a server.
 
 #### Log channels
 
@@ -72,7 +72,7 @@ Log files live in `logs/`:
 
 - `logs/<date>.log` holds every line, stays on the host and is never sent.
 - `logs/guilds/<server ID>/<date>.log` holds one server's lines. `/log export` sends that file to that server only.
-- The bot deletes no log file.
+- The bot deletes no log file. See the [operator guide](./docs/OPERATIONS.md) for archiving before a redeploy.
 
 ### Running the project
 
@@ -86,6 +86,8 @@ DISCORD_TOKEN_FILE=secrets/discord_token.secret ALLOWED_GUILD_IDS=<your server I
 
 We **highly recommend** you to read the user guide before using the bot. It will help you understand the bot's features
 and how to use them. You can find the user guide [here](./docs/user-guide.md).
+
+Whoever hosts an instance should read the [operator guide](./docs/OPERATIONS.md): deployment, adding and removing servers, Developer Portal settings and troubleshooting.
 
 ### Building the technical documentation
 
