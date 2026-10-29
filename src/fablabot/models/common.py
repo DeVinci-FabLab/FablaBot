@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class ReactionAction(str, Enum):
+class ReactionAction(StrEnum):
     """Enumeration of possible reaction actions.
 
     Attributes:
