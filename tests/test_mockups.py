@@ -181,6 +181,18 @@ def test_modal_fields() -> None:
     assert "ph-long" in out
     assert "valeur" in out
     assert "ph-rempli" not in out
+    assert out.startswith('<div class="backdrop">')
+    assert 'class="close"' in out
+    assert ">Annuler<" in out
+    assert '<span class="button primary">Envoyer</span>' in out
+
+
+def test_modal_puts_one_field_per_line() -> None:
+    """Each field of a modal starts its own line, so a snapshot diff names the field that changed."""
+    field = {"type": 1, "components": [{"type": 4, "style": 1, "label": "L"}]}
+    out = modal_html({"title": "T", "components": [field, field]})
+    lines = out.splitlines()
+    assert sum(line.startswith('<div class="field">') for line in lines) == 2
 
 
 async def test_modal_is_captured() -> None:

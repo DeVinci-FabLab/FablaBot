@@ -257,13 +257,17 @@ def _field(data: Mapping[str, Any]) -> str:
 
 
 def modal_html(payload: Mapping[str, Any]) -> str:
-    """Render one modal: its title, then each text input with its label, star, placeholder or value."""
+    """Render one modal over a dimmed channel: title and close mark, one line per text input, then Annuler and Envoyer."""
     fields = [
         _field(child) for row in payload.get("components", []) for child in row.get("components", []) if child.get("type") == 4
     ]
     return (
-        '<div class="modal"><div class="modal-title">'
-        f"{html.escape(payload.get('title') or '')}</div>" + "".join(fields) + "</div>"
+        '<div class="backdrop"><div class="modal">\n'
+        f'<div class="modal-header"><span class="modal-title">{html.escape(payload.get("title") or "")}</span>'
+        '<span class="close">✕</span></div>\n'
+        '<div class="modal-body">\n' + "\n".join(fields) + "\n</div>\n"
+        '<div class="modal-footer"><span class="cancel">Annuler</span><span class="button primary">Envoyer</span></div>\n'
+        "</div></div>"
     )
 
 
@@ -326,9 +330,15 @@ a { color: var(--link); text-decoration: none; }
 .select-options { border-top: 1px solid var(--line); padding: 4px; }
 .select-option { padding: 6px 8px; border-radius: 4px; }
 .select-description { font-size: 12px; color: var(--muted); }
-.modal { max-width: 440px; margin: 0 auto; background: var(--modal); border-radius: 8px; padding: 16px; }
-.modal-title { font-size: 24px; font-weight: 600; color: var(--strong); margin-bottom: 16px; }
-.field { margin-bottom: 16px; }
+.backdrop { background: rgba(0,0,0,.7); padding: 32px 16px; display: flex; justify-content: center; }
+.modal { width: 100%; max-width: 440px; background: var(--modal); border-radius: 12px; overflow: hidden; }
+.modal-header { display: flex; justify-content: space-between; padding: 16px; }
+.modal-title { font-size: 20px; font-weight: 600; color: var(--strong); }
+.close { color: var(--muted); }
+.modal-body { padding: 0 16px 8px; display: grid; gap: 16px; }
+.modal-footer { display: flex; justify-content: flex-end; align-items: center; gap: 16px; padding: 16px;
+  background: var(--embed); }
+.cancel { color: var(--text); font-size: 14px; }
 .field-label { font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
 .required-star { color: #f23f42; margin-left: 4px; }
 .input, .textarea { background: var(--input); border-radius: 4px; padding: 10px; font-size: 16px; }
