@@ -58,7 +58,7 @@ async def test_missing_server_role_is_not_posted_and_logs_one_warning(caplog: py
     caplog.set_level(logging.WARNING)
     interaction = _setup(member_has_role=False, in_commands_channel=True, role_on_server=False)
     assert await _run(interaction) is False
-    interaction.channel.send.assert_not_called() if hasattr(interaction.channel.send, "assert_not_called") else None
+    interaction.channel.send.assert_not_called()
     warnings = [r for r in caplog.records if "Missing roles" in r.getMessage()]
     assert len(warnings) == 1
     assert "Admin" in warnings[0].getMessage()

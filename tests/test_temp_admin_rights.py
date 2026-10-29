@@ -56,8 +56,12 @@ def _in_commands_channel():  # noqa: ANN202
 
 
 REFUSED = {
-    "channel.text_delete": lambda i: ChannelManagement.text_delete.callback(MagicMock(), i, channel=MagicMock(spec=TextChannel)),
-    "channel.vocal_delete": lambda i: ChannelManagement.vocal_delete.callback(MagicMock(), i, channel=MagicMock(spec=VoiceChannel)),
+    "channel.text_delete": lambda i: ChannelManagement.text_delete.callback(
+        MagicMock(), i, channel=MagicMock(spec=TextChannel)
+    ),
+    "channel.vocal_delete": lambda i: ChannelManagement.vocal_delete.callback(
+        MagicMock(), i, channel=MagicMock(spec=VoiceChannel)
+    ),
     "log.set": lambda i: LogManagement.log_set.callback(MagicMock(), i, channel=MagicMock(spec=TextChannel)),
     "log.export": lambda i: LogManagement.log_export.callback(MagicMock(), i, date=None),
     "welcome.verify": lambda i: WelcomeManagement.welcome_verify.callback(MagicMock(), i, enable=True),
