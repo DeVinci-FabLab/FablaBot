@@ -27,3 +27,14 @@ def test_every_action_is_pinned_by_commit_sha() -> None:
     for name, ref, rest in third_party:
         assert PINNED.match(ref), f"{name}: {ref} is not pinned by a full commit SHA"
         assert VERSION_COMMENT.match(rest), f"{name}: {ref} has no '# vX.Y.Z' comment"
+
+
+def test_image_build_waits_for_the_checks() -> None:
+    """The image workflow calls the check workflow and its build job needs it."""
+    text = (WORKFLOWS / "CD.yml").read_text(encoding="utf-8")
+    assert "uses: ./.github/workflows/ci.yml" in text
+    assert re.search(
+        r"^  build-and-push-image:\n(?:    .*\n)*?    needs: check$",
+        text,
+        re.MULTILINE,
+    )
