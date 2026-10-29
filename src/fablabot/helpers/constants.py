@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from zoneinfo import ZoneInfo
 
+from discord import Permissions
+
 PARIS_TZ = ZoneInfo("Europe/Paris")
 MAX_MSG_CHARS = 1900
 MAX_TRACKED_OPTIONS = 25
@@ -76,6 +78,19 @@ ADMIN_ROLES = {
 }
 
 
+def staff_default_permissions() -> Permissions:
+    """Return the default permissions of a staff command group, which hide it from members.
+
+    An empty set means only server administrators see the group until one of them allows a role on it in
+    Server Settings > Integrations. It only hides commands in the slash menu: the role check of each command
+    still decides who may run it.
+
+    Returns:
+        Permissions: An empty permission set.
+    """
+    return Permissions.none()
+
+
 class ErrorMessages:
     """Standard error messages."""
 
@@ -104,6 +119,18 @@ class ErrorMessages:
 
     ROLE_NOT_FOUND = "Impossible de trouver le(s) rôle(s) {role_name} sur ce serveur."
     """Role not found on server."""
+
+    ROLE_REQUIRED = (
+        "Cette commande est réservée aux membres ayant l'un des rôles suivants : {roles}. "
+        "Demandez ce rôle au staff (Bureau) du serveur."
+    )
+    """Refusal for a member without the required role, with the next step."""
+
+    WRONG_COMMANDS_CHANNEL = (
+        "Vous ne pouvez pas utiliser de commandes en dehors du salon {channel}. "
+        "Rendez-vous dans ce salon, ou demandez au staff de changer le salon de commandes."
+    )
+    """Refusal for a command used outside the commands channel, with the next step."""
 
     MEMBER_NOT_FOUND = "Impossible de trouver le membre avec le nom {member_name}."
     """Member not found by name."""

@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  pull_request:
+  # Pushes to main run these checks through CD.yml, before the image is built.
+  workflow_call:
+  # CD.yml starts them on the release pull request, which GITHUB_TOKEN opens without triggering pull_request.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUFF_OUTPUT_FORMAT: github
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          # The uv release that wrote uv.lock.
+          version: "0.13.6"
+          # On for pull requests and branch pushes, off for tag and release events.
+          enable-cache: auto
+
+      - name: Install the locked environment
+        id: sync
+        run: uv sync --locked
+
+      # Each check runs even when an earlier one failed, so one run shows every failure.
+      - name: Format
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
+        run: uv run --group dev ruff format --check src tests
+
+      - name: Lint
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
+        run: uv run --group dev ruff check src tests
+
+      - name: Types
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
+        run: uv run --group dev basedpyright
+
+      - name: Type baseline is up to date
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
+        run: git diff --exit-code -- .basedpyright/baseline.json
+
+      - name: Tests
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
+        run: uv run --group dev pytest -q
+
+      - name: Lockfile
+        if: ${{ !cancelled() }}
+        run: uv lock --check

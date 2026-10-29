@@ -24,7 +24,7 @@ from discord import (
 from discord.ext import commands
 from discord.utils import get
 
-from fablabot.helpers.constants import ADMIN_ROLES, RoleNames
+from fablabot.helpers.constants import ADMIN_ROLES, RoleNames, staff_default_permissions
 from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.safe_discord_operations import (
     safe_create_text_channel,
@@ -75,7 +75,9 @@ class ChannelManagement(commands.Cog):
         self.remove_tasks: dict[int, asyncio.Task[None]] = {}
 
     # region ====== Text Slash Commands Group ======
-    text_group = app_commands.Group(name="text", description="Gestion des salons textuels")
+    text_group = app_commands.Group(
+        name="text", description="Gestion des salons textuels", default_permissions=staff_default_permissions()
+    )
 
     @text_group.command(
         name="help",
@@ -218,7 +220,9 @@ class ChannelManagement(commands.Cog):
     # endregion Text Slash Commands Group
 
     # region ====== Vocal Slash Commands Group ======
-    vocal_group = app_commands.Group(name="vocal", description="Gestion des salons vocaux dynamiques")
+    vocal_group = app_commands.Group(
+        name="vocal", description="Gestion des salons vocaux dynamiques", default_permissions=staff_default_permissions()
+    )
 
     @vocal_group.command(
         name="help",

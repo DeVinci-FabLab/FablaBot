@@ -10,7 +10,7 @@ from discord import Interaction, TextChannel, abc, app_commands
 from discord.ext import commands
 
 from fablabot.guild_config import get_log_channel_id, migrate_legacy_log_channel, set_log_channel_id
-from fablabot.helpers.constants import ADMIN_ROLES, PARIS_TZ, RoleNames
+from fablabot.helpers.constants import ADMIN_ROLES, PARIS_TZ, RoleNames, staff_default_permissions
 from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.utils import ensure_command_context, format_channel_mention
 from fablabot.logging_handlers import DailyFileHandler
@@ -72,7 +72,9 @@ class LogManagement(commands.Cog):
         migrate_legacy_log_channel(self._guild_of_channel)
 
     # region ====== Log Slash Commands Group ======
-    log_group = app_commands.Group(name="log", description="Configuration des logs du bot")
+    log_group = app_commands.Group(
+        name="log", description="Configuration des logs du bot", default_permissions=staff_default_permissions()
+    )
 
     @log_group.command(
         name="help",
