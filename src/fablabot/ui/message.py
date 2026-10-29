@@ -509,7 +509,7 @@ class _DraftSelectButton(ui.Button["TrackedMessageSelectView"]):
 class TrackedMessageSelectView(ui.View):
     """View to pick a tracked message or draft before running message commands."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - keyword-only options; group them past eight
         self,
         cog: MessageManagement,
         tracked_messages: list[TrackedMessage],

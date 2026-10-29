@@ -213,7 +213,7 @@ async def _check_has_role(
     return True
 
 
-async def ensure_command_context(
+async def ensure_command_context(  # noqa: PLR0913 - keyword-only switches; group them past eight
     logger: Logger,
     command_name: str,
     interaction: Interaction,
@@ -289,7 +289,7 @@ async def _can_dm_user(user: Member) -> bool:
     return True
 
 
-async def send_dm_to_member(
+async def send_dm_to_member(  # noqa: PLR0913 - keyword-only options; group them past eight
     logger: Logger,
     guild: Guild,
     member: Member,

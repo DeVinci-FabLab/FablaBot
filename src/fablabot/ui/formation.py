@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import logging
 from copy import deepcopy
+import logging
 from typing import TYPE_CHECKING, cast
 
 from discord import ButtonStyle, Embed, Interaction, TextStyle, ui
@@ -25,6 +25,7 @@ MAKE_EXCUSABLE_BUTTON_ID = 15
 MAKE_NON_EXCUSABLE_BUTTON_ID = 16
 MIN_SEATS = 1
 MAX_SEATS = 500
+DURATION_SEATS_PARTS = 2  # "<duration> - <seats>" splits into two parts
 
 
 class StartFmModal(ui.Modal, title="Commencer une annonce de formation"):
@@ -644,9 +645,6 @@ class _EditDurationSeatsModal(ui.Modal, title="Modifier durée et places"):
 
         Args:
             interaction (Interaction): The interaction that triggered the modal submission.
-
-        Raises:
-            ValueError: If the seats number is not an integer or out of bounds.
         """
         assert interaction.guild is not None
         candidate = self.duration_seats_input.value.strip()
@@ -656,7 +654,7 @@ class _EditDurationSeatsModal(ui.Modal, title="Modifier durée et places"):
         )
         parts = [part.strip() for part in candidate.split("-")]
 
-        if len(parts) != 2:
+        if len(parts) != DURATION_SEATS_PARTS:
             logger.warning(f"Guild {interaction.guild.id} provided invalid duration/seats format: {candidate!r}.")
             await interaction.response.send_message(ErrorMessages.INVALID_DURATION_SEATS_FORMAT, ephemeral=True)
             return
@@ -668,11 +666,10 @@ class _EditDurationSeatsModal(ui.Modal, title="Modifier durée et places"):
             return
 
         try:
-            new_seats = int(seats_str)
-            if not (MIN_SEATS <= new_seats <= MAX_SEATS):
-                msg = "Seats number out of valid range."
-                raise ValueError(msg)
+            new_seats: int | None = int(seats_str)
         except ValueError:
+            new_seats = None
+        if new_seats is None or not (MIN_SEATS <= new_seats <= MAX_SEATS):
             logger.warning(f"Guild {interaction.guild.id} provided out-of-bounds seats number: {seats_str!r}.")
             await interaction.response.send_message(ErrorMessages.INVALID_SEATS, ephemeral=True)
             return
