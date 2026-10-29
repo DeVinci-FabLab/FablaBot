@@ -159,6 +159,26 @@ def test_missing_browser_says_how_to_install(
     assert (tmp_path / "text-help-light.html").exists()
 
 
+def test_screens_are_built_away_from_the_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Screens are built from a throwaway folder, so the caller's folder gets no ``data/`` or ``logs/``."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.chdir(repo)
+    seen: list[Path] = []
+    real = command.SCREENS["text-help"]
+
+    async def spy() -> object:
+        seen.append(Path.cwd())
+        return await real()
+
+    monkeypatch.setitem(command.SCREENS, "text-help", spy)
+    assert command.main(["--out", str(tmp_path / "out"), "--html-only"]) == 0
+    assert seen
+    assert all(folder != repo for folder in seen)
+    assert Path.cwd() == repo
+    assert sorted(path.name for path in repo.iterdir()) == []
+
+
 def test_contributing_explains_the_preview() -> None:
     """CONTRIBUTING has a section with the install, render and snapshot-update commands."""
     text = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
