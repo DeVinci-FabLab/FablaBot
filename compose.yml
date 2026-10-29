@@ -10,8 +10,6 @@ services:
       - EASTER_EGGS_ENABLED=false
     secrets:
       - discord_token
-    labels:
-      - "com.centurylinklabs.watchtower.enable=true"
     volumes:
       - ${VOLUMES_PATH}/fablabot/data:/app/data
       - ${VOLUMES_PATH}/fablabot/logs:/app/logs

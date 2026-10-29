@@ -7,7 +7,7 @@ on:
 
 permissions: {}
 
-# One image build at a time, so :latest always ends on the last push.
+# One run at a time, so the release pull request and the image tags always end on the last push.
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
@@ -19,9 +19,46 @@ jobs:
       contents: read
     uses: ./.github/workflows/ci.yml
 
+  release:
+    name: release
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # tag the release and push the release branch
+      pull-requests: write # open, label and comment on the release pull request
+    outputs:
+      created: ${{ steps.release.outputs.release_created }}
+      version: ${{ steps.release.outputs.version }}
+      pr: ${{ steps.release.outputs.pr }}
+      sha: ${{ steps.release.outputs.sha }}
+    steps:
+      - name: Update the release pull request, or tag the release it merged
+        id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+
+  check-release-pr:
+    name: check the release pull request
+    needs: release
+    if: ${{ needs.release.outputs.pr != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write # start ci.yml on the release branch
+    steps:
+      - name: Start the check on the release branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ needs.release.outputs.pr }}
+        run: |
+          branch=$(printf '%s' "$PR" | jq -r .headBranchName)
+          case "$branch" in
+            release-please--branches--*) ;;
+            *) echo "Unexpected release branch: '$branch'" >&2; exit 1 ;;
+          esac
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
+
   build-and-push-image:
     name: build and push image
-    needs: check
+    needs: [check, release]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -30,6 +67,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Choose the image tags
+        id: tags
+        env:
+          RELEASE_CREATED: ${{ needs.release.outputs.created }}
+          VERSION: ${{ needs.release.outputs.version }}
+          RELEASE_SHA: ${{ needs.release.outputs.sha }}
+        run: bash .github/scripts/image-tags.sh
 
       - name: Read the build date
         id: build-date
@@ -49,10 +94,9 @@ jobs:
           file: docker/Dockerfile
           target: production
           push: true
-          tags: |
-            ghcr.io/devinci-fablab/fablabot:latest
-            ghcr.io/devinci-fablab/fablabot:${{ github.sha }}
+          tags: ${{ steps.tags.outputs.tags }}
           labels: |
             org.opencontainers.image.created=${{ steps.build-date.outputs.value }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.tags.outputs.version }}
