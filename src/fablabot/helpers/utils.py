@@ -165,7 +165,7 @@ async def _is_in_allowed_channel(logger: Logger, interaction: Interaction) -> bo
             f"Attempt to use command in a different channel than {_COMMANDS_CHANNEL_NAME}: {interaction.channel.name}",
         )
         await interaction.response.send_message(
-            f"Vous ne pouvez pas utiliser de commandes en dehors du salon {commands_channel.mention}.",
+            ErrorMessages.WRONG_COMMANDS_CHANNEL.format(channel=commands_channel.mention),
             ephemeral=True,
         )
         return False
@@ -196,17 +196,14 @@ async def _check_has_role(
     guild_role_names = {role.name for role in interaction.guild.roles}
     missing_roles = roles - guild_role_names
     if missing_roles:
-        assert isinstance(interaction.channel, TextChannel)
-        logger.warning(f"Missing roles {', '.join(missing_roles)} for guild {interaction.guild}")
-        await interaction.channel.send(ErrorMessages.ROLE_NOT_FOUND.format(role_name=", ".join(missing_roles)))
+        logger.warning(f"Missing roles {', '.join(sorted(missing_roles))} for guild {interaction.guild.id}")
 
     assert isinstance(interaction.user, Member)
     member_role_names = {role.name for role in interaction.user.roles}
     if not member_role_names & roles:
         log_refusal(logger, command_name, interaction, RefusalKind.MISSING_RIGHT, log_identity=log_identity)
-        msg = f"Il est requis d'avoir au moins l'un des rôles suivants pour utiliser cette commande : {', '.join(roles)}."
         await interaction.response.send_message(
-            msg,
+            ErrorMessages.ROLE_REQUIRED.format(roles=", ".join(sorted(roles))),
             ephemeral=True,
         )
         return False
@@ -239,16 +236,16 @@ async def ensure_command_context(  # noqa: PLR0913 - keyword-only switches; grou
     """
     log_request(logger, command_name, interaction, log_identity=log_identity, **(log_details or {}))
 
-    if enforce_commands_channel and not await _is_in_allowed_channel(logger, interaction):
-        return False
-
-    return required_roles is None or await _check_has_role(
+    if required_roles is not None and not await _check_has_role(
         logger,
         command_name,
         interaction,
         required_roles,
         log_identity=log_identity,
-    )
+    ):
+        return False
+
+    return not enforce_commands_channel or await _is_in_allowed_channel(logger, interaction)
 
 
 def is_valid_emoji(emoji: str) -> bool:

@@ -1,25 +1,59 @@
 # Contributing
 
-> *This page is still a work in progress.*
+Every pull request runs one check, called `check`. It covers formatting, lint, types, tests and the lockfile.
+The image is built only when that check passes on `main`.
+This page shows how to run the same commands locally.
 
-## Linting and formatting
+## Set up
 
-This code base is formatted with [Ruff](https://docs.astral.sh/ruff/), a fast python linter and formatter, written in Rust.
-
-Before submitting any code to the project, please ensure that all of your code is clean and respects all linter rules.
-
-Apply the formatter to the project by running:
+Install [uv](https://docs.astral.sh/uv/) (0.13.6 or later), then run:
 
 ```bash
-ruff format
+uv sync --locked
 ```
 
-And check for linter errors with:
+## Run the checks
 
 ```bash
-ruff check  # Add the `--fix` flag to automatically apply available fixes
+uv sync --locked
+uv run --group dev ruff format --check src tests
+uv run --group dev ruff check src tests
+uv run --group dev basedpyright
+git diff --exit-code -- .basedpyright/baseline.json
+uv run --group dev pytest -q
+uv lock --check
 ```
 
-> [!note] If you do not have Ruff installed
-> Run the commands directly with uv py prepending the above commands with `uvx`.  
-> *Giving the commands `uvx ruff format` and `uvx ruff check`.*
+CI runs the same lines.
+
+## Fix what they report
+
+```bash
+uv run --group dev ruff format src tests
+uv run --group dev ruff check --fix src tests
+```
+
+## Type errors and the baseline
+
+`.basedpyright/baseline.json` records the type errors that predate the check. A new error fails it. Fix it, or add `# pyright: ignore[<rule>]` followed by a short reason.
+
+When a fix removes a recorded error, the check rewrites the baseline. Commit that change with the fix, or CI fails.
+
+Do not run `--writebaseline` to hide a new error. It is only for a basedpyright upgrade that reports errors in code nobody touched, and the pull request says so.
+
+## Pull requests
+
+- Titles follow Conventional Commits, for example `fix(log): ...`, since the title becomes the squash commit.
+- One maintainer approval is needed to merge.
+- The title also decides the next version: `feat:` bumps the minor number; `fix:`, `perf:`, `deps:`, `revert:` and `docs:` bump the patch number and appear in the changelog. `build:`, `ci:`, `chore:`, `test:`, `refactor:` and `style:` do not start a release on their own.
+- A push to `main` runs the check, then builds and publishes `ghcr.io/devinci-fablab/fablabot:edge` and `:sha-<commit>`. A red check publishes nothing.
+- `:latest` moves only when the release pull request is merged; the README's Releases section explains the steps.
+- Publishing does not restart a running bot. The deployment is updated by hand.
+
+## Dependency updates
+
+Dependabot opens one grouped pull request per week for Python packages, GitHub Actions and Docker images, for releases at least 7 days old. They are reviewed and merged like any other, never automatically.
+
+Actions are pinned by full commit SHA with the version in a comment (`@<sha> # v7.0.1`). When updating one by hand, change both.
+
+After editing `pyproject.toml`, run `uv lock` and commit `uv.lock`.
