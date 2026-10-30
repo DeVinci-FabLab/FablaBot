@@ -157,3 +157,40 @@ async def test_recipient_choice_never_leaks_to_another_view() -> None:
     await view.anonymity_button.callback(interaction)
 
     assert _defaults(SuggestionView(cog_bot())) == []
+
+
+def _template_options() -> list:
+    """The options the decorator hands to every view; they must stay untouched."""
+    return SuggestionView.recipient_select.__discord_ui_model_kwargs__["options"]  # type: ignore[attr-defined]
+
+
+async def _choose_and_toggle(view: SuggestionView, key: str) -> None:
+    interaction = make_interaction()
+    view.recipient_select._values = [key]
+    await view.recipient_select.callback(interaction)
+    await view.anonymity_button.callback(interaction)
+
+
+async def test_views_never_share_option_objects() -> None:
+    """Each view holds its own option list and objects, so an in-place change cannot leak."""
+    first, second = SuggestionView(cog_bot()), SuggestionView(cog_bot())
+    template = _template_options()
+
+    assert first.recipient_select.options is not second.recipient_select.options
+    for a, b, shared in zip(first.recipient_select.options, second.recipient_select.options, template, strict=True):
+        assert a is not b
+        assert a is not shared
+        assert b is not shared
+
+
+async def test_choice_stays_in_its_own_view_when_views_are_live_together() -> None:
+    """A view built before another member's choice stays clean, and so does the decorator template."""
+    mine, theirs = SuggestionView(cog_bot()), SuggestionView(cog_bot())
+    keys = list(SUGGESTION_OPTIONS)
+
+    await _choose_and_toggle(mine, keys[-1])
+    await _choose_and_toggle(theirs, keys[0])
+
+    assert _defaults(mine) == [keys[-1]]
+    assert _defaults(theirs) == [keys[0]]
+    assert not any(option.default for option in _template_options())
