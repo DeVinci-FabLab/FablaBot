@@ -10,7 +10,7 @@ from discord import ButtonStyle, Embed, Interaction, TextStyle, ui
 from emoji import emojize
 
 from fablabot.helpers.constants import MAX_TRACKED_OPTIONS, PARIS_TZ, ErrorMessages
-from fablabot.helpers.formation import Emojis, parse_date_time, render_formation, render_message
+from fablabot.helpers.formation import Emojis, is_past, parse_date_time, render_formation, render_message
 from fablabot.helpers.utils import is_valid_emoji, log_request
 from fablabot.models.formation import FmCommand, FmMessageDraft, Formation
 
@@ -609,6 +609,11 @@ class _EditDatetimeModal(ui.Modal, title="Modifier date et heure"):
         except Exception:
             logger.warning(f"Guild {interaction.guild.id} provided invalid datetime format: {candidate!r}.")
             await interaction.response.send_message(ErrorMessages.INVALID_DATETIME, ephemeral=True)
+            return
+
+        if is_past(start_dt):
+            logger.warning(f"Guild {interaction.guild.id} provided a past datetime: {candidate!r}.")
+            await interaction.response.send_message(ErrorMessages.PAST_DATETIME, ephemeral=True)
             return
 
         self.view_ref.updated_formation.start_iso = start_dt.isoformat()

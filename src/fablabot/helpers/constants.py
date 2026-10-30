@@ -160,6 +160,9 @@ class ErrorMessages:
     INVALID_DATETIME = "Date/heure invalides. Format attendu: `DD/MM/YYYY HH:MM` (ex: `15/12/2024 18:30`)."
     """Invalid date and time provided."""
 
+    PAST_DATETIME = "Date/heure dans le passé. La formation doit commencer dans le futur."
+    """Start date and time already passed."""
+
     INVALID_DURATION_SEATS_FORMAT = "Durée/Places invalides. Format attendu: `durée - places` (ex: `2h - 10`)."
     """Invalid duration and seats provided."""
 

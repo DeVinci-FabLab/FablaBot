@@ -108,6 +108,18 @@ def parse_date_time(date_str: str, hour_str: str, timezone: Any) -> datetime:
     return dt
 
 
+def is_past(start_dt: datetime) -> bool:
+    """Tell whether a start is before now in Paris time.
+
+    Args:
+        start_dt (datetime): The timezone-aware start.
+
+    Returns:
+        bool: True when the start is strictly before now.
+    """
+    return start_dt < datetime.now(PARIS_TZ)
+
+
 def humanize_dt(dt: datetime) -> str:
     """Humanize a datetime object.
 

@@ -20,6 +20,7 @@ from fablabot.helpers.constants import PARIS_TZ, ErrorMessages, RoleNames, staff
 from fablabot.helpers.formation import (
     format_current_registrations,
     format_respo_contacts,
+    is_past,
     notify_participants_before_formation,
     notify_responsible_before_formation,
     notify_trainer_before_formation,
@@ -292,6 +293,11 @@ class FormationManagement(commands.Cog):
             )
             return
 
+        if is_past(start_dt):
+            logger.warning(f"Guild {interaction.guild.id} tried to add formation starting in the past: {date} {hour}.")
+            await interaction.response.send_message(ErrorMessages.PAST_DATETIME, ephemeral=True)
+            return
+
         fm = Formation(
             emoji=emoji_clean,
             name="",
@@ -330,11 +336,9 @@ class FormationManagement(commands.Cog):
             ephemeral=True,
         )
 
-    @fm_group.command(
-        name="remove", description="Retirer une formation du brouillon par son index (1..n).", extras=access(_ACCESS)
-    )
+    @fm_group.command(name="remove", description="Retirer une formation du brouillon.", extras=access(_ACCESS))
     async def fm_remove(self, interaction: Interaction) -> None:
-        """Remove a formation from the draft by its index (1..n).
+        """Remove a formation from the draft, picked from a selector.
 
         Args:
             interaction (Interaction): The Discord interaction context.
