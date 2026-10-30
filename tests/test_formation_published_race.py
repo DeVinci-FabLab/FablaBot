@@ -15,22 +15,23 @@ from fablabot.helpers.constants import PARIS_TZ
 from fablabot.models import FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
 
 GUILD_ID = 1234
+NEW_GUILD_ID = 98765
 MESSAGE_ID = 555
 EMOJI = "🔧"
 MEMBER_ID = 42
 
 
 class _Env:
-    """A published message one hour away, a stub guild, and spies on every notification."""
+    """A published message (one hour away unless told otherwise), a stub guild, and spies on every notification."""
 
-    def __init__(self, cog: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    def __init__(self, cog: Any, monkeypatch: pytest.MonkeyPatch, *, start_in: timedelta = timedelta(hours=1)) -> None:
         self.cog = cog
         self.gate = asyncio.Event()
         self.entered = asyncio.Event()
         self.fetch_gate = asyncio.Event()
         self.fetch_entered = asyncio.Event()
 
-        start = datetime.now(PARIS_TZ) + timedelta(hours=1)
+        start = datetime.now(PARIS_TZ) + start_in
         fm = Formation(emoji=EMOJI, name="Soudure", trainer_mention="<@1>", start_iso=start.isoformat(), duration="2h", seats=5)
         cog._set_last_published_in_guild(
             GUILD_ID,
@@ -134,3 +135,16 @@ async def test_registration_during_the_reminder_dms_is_not_announced_twice(env: 
     pub = env.cog._get_last_published_in_guild(GUILD_ID)
     assert pub is not None
     assert [entry["user_id"] for entry in pub.message.fms[0].registered_users] == [MEMBER_ID]
+
+
+async def test_tick_waiting_on_the_lock_survives_a_new_guild(started_bot: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A guild's first state entry written while the tick waits on the lock must not break the tick's walk over the guilds."""
+    cog = started_bot.get_cog("FormationManagement")
+    _Env(cog, monkeypatch, start_in=timedelta(days=3))  # nothing due: only the wait on the lock yields to the loop
+
+    async with cog._published_lock(GUILD_ID):
+        tick = asyncio.create_task(cog._check_upcoming_formations())
+        await _let_others_run()
+        cog._get_guild_state(NEW_GUILD_ID)
+
+    await tick

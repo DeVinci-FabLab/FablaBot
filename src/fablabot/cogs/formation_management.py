@@ -649,7 +649,8 @@ class FormationManagement(commands.Cog):
         start_window_start = now - window_tolerance
         start_window_end = now + window_tolerance
 
-        for guild_id_str in self._state_store.state:
+        # A snapshot: waiting on a guild's lock yields to code that may add a guild to the state.
+        for guild_id_str in list(self._state_store.state):
             guild_id = int(guild_id_str)
             with guild_log_context(guild_id):
                 guild = self.bot.get_guild(guild_id)
