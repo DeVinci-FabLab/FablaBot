@@ -90,11 +90,12 @@ def _edit(typed: str) -> tuple[Any, MagicMock, MagicMock]:
     return modal, view, interaction
 
 
-async def test_edit_modal_past_start_is_refused_privately() -> None:
-    """A past start in the edit modal is refused privately and the formation is untouched."""
+async def test_edit_modal_past_start_is_refused_privately(caplog: pytest.LogCaptureFixture) -> None:
+    """A past start in the edit modal is refused privately, logged as a warning with the guild id, and changes nothing."""
     modal, view, interaction = _edit("15/06/2030 18:29")
     await modal.on_submit(interaction)
     interaction.response.send_message.assert_awaited_once_with(ErrorMessages.PAST_DATETIME, ephemeral=True)
+    assert any("1234" in r.getMessage() and r.levelname == "WARNING" for r in caplog.records)
     assert view.updated_formation.start_iso == "unchanged"
     view.refresh_main_message.assert_not_awaited()
 
