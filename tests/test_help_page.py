@@ -141,6 +141,16 @@ def test_long_field_continues_under_its_heading() -> None:
     assert "\n".join(value for _, value in fields) == "\n".join(lines)
 
 
+@pytest.mark.parametrize(("joined", "fields"), [(FIELD_VALUE_CHARS, 1), (FIELD_VALUE_CHARS + 1, 2)])
+def test_a_field_holds_exactly_the_limit(joined: int, fields: int) -> None:
+    """Two lines joining to the limit stay one field value; one character more starts another."""
+    lines = ["a" * 1000, "b" * (joined - 1001)]
+    assert len("\n".join(lines)) == joined
+    values = [value for _, value in _fields(paginate("T", "D", [("Heading", lines)], "F"))]
+    assert len(values) == fields
+    assert all(len(value) <= FIELD_VALUE_CHARS for value in values)
+
+
 def test_many_fields_spill_into_more_messages() -> None:
     """Thirty domains do not fit 25 fields, so a second message with no title follows."""
     embeds = paginate("T", "D", [(f"Domain {i}", ["a line"]) for i in range(30)], "F")
