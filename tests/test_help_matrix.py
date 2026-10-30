@@ -323,10 +323,11 @@ def _member(member_id: int, *names: str) -> MagicMock:
     ("held", "role", "expected"),
     [
         (RoleNames.MEMBER_VERIFIED, RoleNames.BUREAU, utils.RefusalKind.MISSING_RIGHT),
+        (RoleNames.MEMBER_VERIFIED, RoleNames.ADMIN_TEMP, utils.RefusalKind.MISSING_RIGHT),
         (RoleNames.PRESIDENT, RoleNames.ADMIN_TEMP, utils.RefusalKind.TEMP_ROLE_OUTSIDE_OP),
         (RoleNames.PRESIDENT, F_ROLE, utils.RefusalKind.SELF_TARGET),
     ],
-    ids=["no-right", "temporary-role", "role-the-caller-may-give"],
+    ids=["no-right", "no-right-temporary-role", "temporary-role", "role-the-caller-may-give"],
 )
 def test_giving_a_role_to_oneself_reports_the_first_refusal(held: str, role: str, expected: utils.RefusalKind) -> None:
     """The missing right is reported before the temporary role, and both before the self-target."""
