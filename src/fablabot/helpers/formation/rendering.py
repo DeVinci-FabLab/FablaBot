@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 import io
 import logging
 from typing import TYPE_CHECKING, Any
@@ -106,6 +106,19 @@ def parse_date_time(date_str: str, hour_str: str, timezone: Any) -> datetime:
     dt = datetime(y, m, d, hh, mm, tzinfo=timezone)
     logger.debug(f"Parsed formation schedule {date_str} {hour_str} -> {dt.isoformat()}")
     return dt
+
+
+def is_past(start_dt: datetime) -> bool:
+    """Tell whether a start is before now, in absolute time.
+
+    Args:
+        start_dt (datetime): The timezone-aware start.
+
+    Returns:
+        bool: True when the start is strictly before now.
+    """
+    # Same tzinfo on both sides would compare wall clocks, wrong in the hour the clocks go back.
+    return start_dt < datetime.now(UTC)
 
 
 def humanize_dt(dt: datetime) -> str:
