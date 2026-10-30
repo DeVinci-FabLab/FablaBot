@@ -149,14 +149,16 @@ def test_many_fields_spill_into_more_messages() -> None:
     assert embeds[1].title is None
 
 
-def test_no_line_is_lost_or_cut() -> None:
-    """300 lines of 100 characters come out whole, once, in order, within every limit."""
-    lines = [f"{i:03} " + "y" * 96 for i in range(300)]
-    embeds = paginate("Title", "Description", [("Domain", lines)], "Footer")
+@pytest.mark.parametrize("count", [300, *range(40, 70)])
+def test_no_line_is_lost_or_cut(count: int) -> None:
+    """Lines of 100 characters come out whole, once, in order, within every limit, whatever the count."""
+    lines = [f"{i:03} " + "y" * 96 for i in range(count)]
+    footer = "Footer " + "z" * 600
+    embeds = paginate("Title", "Description", [("Domain", lines)], footer)
     assert [line for _, value in _fields(embeds) for line in value.split("\n")] == lines
     assert all(len(embed) <= MESSAGE_CHARS and len(embed.fields) <= FIELDS for embed in embeds)
     assert embeds[0].title == "Title"
     assert embeds[0].description == "Description"
     assert all(embed.title is None and embed.description is None for embed in embeds[1:])
-    assert [embed.footer.text for embed in embeds] == [None] * (len(embeds) - 1) + ["Footer"]
+    assert [embed.footer.text for embed in embeds] == [None] * (len(embeds) - 1) + [footer]
     assert all(embed.colour is not None for embed in embeds)
