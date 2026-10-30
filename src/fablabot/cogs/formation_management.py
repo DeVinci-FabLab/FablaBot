@@ -15,6 +15,7 @@ from warnings import deprecated
 from discord import Embed, File, Interaction, Member, RawReactionActionEvent, Role, TextChannel, app_commands
 from discord.ext import commands, tasks
 
+from fablabot.helpers.access import AnyRole, access
 from fablabot.helpers.constants import PARIS_TZ, ErrorMessages, RoleNames, staff_default_permissions
 from fablabot.helpers.formation import (
     format_current_registrations,
@@ -28,7 +29,6 @@ from fablabot.helpers.formation import (
     send_registration_dm,
     send_waitlist_dm,
 )
-from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.state_store import JsonStateStore
 from fablabot.helpers.utils import ensure_command_context, is_valid_emoji
@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 
 ALLOWED_ROLES = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN_TEMP, RoleNames.ADMIN, RoleNames.CODIR}
+_ACCESS = AnyRole(ALLOWED_ROLES)
 FM_STATE_FILE = Path("data/formations_state.json")
 TRAINER_NOTIFICATION_ADVANCE = timedelta(hours=1)
 REACTION_LOG_RETENTION = timedelta(days=30)
@@ -49,7 +50,6 @@ class FormationManagement(commands.Cog):
     """Hebdo formations management cog (Draft -> Publish -> Export).
 
     Commands:
-        - /fm help: Display help for formation management commands.
         - /fm start: Start/overwrite a draft with an introduction, ending and role to mention (uses modal).
         - /fm edit_text: Edit the draft introduction and/or ending (uses modal if text=True).
         - /fm add: Add a new formation to the draft (uses modal for text inputs).
@@ -129,42 +129,7 @@ class FormationManagement(commands.Cog):
         default_permissions=staff_default_permissions(),
     )
 
-    @fm_group.command(name="help", description="Afficher l'aide pour les commandes de gestion des formations.")
-    @app_commands.describe(show="Afficher l'aide publiquement ou non")
-    async def fm_help(self, interaction: Interaction, *, show: bool = False) -> None:
-        """Display help information for the formation management commands.
-
-        Args:
-            interaction (Interaction): The Discord interaction context.
-            show (bool): Whether to show the help publicly or not.
-        """
-        help_message = build_help_message(
-            "Commandes de gestion des formations",
-            "fm",
-            [
-                (
-                    "start <role>",
-                    "Démarrer un brouillon de formation et choisir le rôle à mentionner (modal intro/conclusion)",
-                ),
-                (
-                    "edit_text [role] [text]",
-                    "Mettre à jour l'introduction, la conclusion ou le rôle mentionné du brouillon",
-                ),
-                (
-                    "add <emoji> <trainer> <date> <hour> <duration> <seats>",
-                    "Ajouter une formation au brouillon via un modal (nom, description, caractère excusable)",
-                ),
-                ("edit", "Modifier une formation existante après sélection"),
-                ("remove <index>", "Supprimer une formation du brouillon par son index"),
-                ("clear", "Vider le brouillon actuel en conservant intro et conclusion"),
-                ("preview", "Afficher l'aperçu du brouillon dans le salon courant"),
-                ("publish <channel>", "Publier le brouillon dans un salon cible avec réactions automatiques"),
-                ("export [message_id]", "Exporter les réactions/inscriptions en CSV ou texte"),
-            ],
-        )
-        await interaction.response.send_message(help_message, ephemeral=not show)
-
-    @fm_group.command(name="start", description="Démarrer/écraser un brouillon avec une introduction.")
+    @fm_group.command(name="start", description="Démarrer/écraser un brouillon avec une introduction.", extras=access(_ACCESS))
     @app_commands.describe(role="Rôle à mentionner")
     async def fm_start(self, interaction: Interaction, *, role: Role) -> None:
         """Start a new draft with an introduction.
@@ -184,7 +149,9 @@ class FormationManagement(commands.Cog):
 
         await interaction.response.send_modal(fmui.StartFmModal(self, role.id))
 
-    @fm_group.command(name="edit_text", description="Modifier l'introduction et/ou la conclusion du brouillon.")
+    @fm_group.command(
+        name="edit_text", description="Modifier l'introduction et/ou la conclusion du brouillon.", extras=access(_ACCESS)
+    )
     @app_commands.describe(
         role="Nouveau rôle à mentionner (laisser vide pour conserver)",
         text="Modifier l'introduction ou la conclusion",
@@ -246,7 +213,11 @@ class FormationManagement(commands.Cog):
             ephemeral=True,
         )
 
-    @fm_group.command(name="add", description="Ajouter une formation au brouillon (triée automatiquement par date/heure).")
+    @fm_group.command(
+        name="add",
+        description="Ajouter une formation au brouillon (triée automatiquement par date/heure).",
+        extras=access(_ACCESS),
+    )
     @app_commands.describe(
         emoji="Émoji unique pour cette FM (ex: 🔧)",
         trainer="Formateur·ice",
@@ -333,7 +304,7 @@ class FormationManagement(commands.Cog):
 
         await interaction.response.send_modal(fmui.AddFmModal(self, fm))
 
-    @fm_group.command(name="edit", description="Modifier une formation existante.")
+    @fm_group.command(name="edit", description="Modifier une formation existante.", extras=access(_ACCESS))
     async def fm_edit(self, interaction: Interaction) -> None:
         """Edit a formation in the draft using an interactive view system.
 
@@ -359,7 +330,9 @@ class FormationManagement(commands.Cog):
             ephemeral=True,
         )
 
-    @fm_group.command(name="remove", description="Retirer une formation du brouillon par son index (1..n).")
+    @fm_group.command(
+        name="remove", description="Retirer une formation du brouillon par son index (1..n).", extras=access(_ACCESS)
+    )
     async def fm_remove(self, interaction: Interaction) -> None:
         """Remove a formation from the draft by its index (1..n).
 
@@ -385,7 +358,7 @@ class FormationManagement(commands.Cog):
             ephemeral=True,
         )
 
-    @fm_group.command(name="clear", description="Vider le brouillon courant (intro et fin conservées).")
+    @fm_group.command(name="clear", description="Vider le brouillon courant (intro et fin conservées).", extras=access(_ACCESS))
     async def fm_clear(self, interaction: Interaction) -> None:
         """Clear the current draft (introduction and ending are preserved).
 
@@ -417,7 +390,7 @@ class FormationManagement(commands.Cog):
             ephemeral=True,
         )
 
-    @fm_group.command(name="preview", description="Afficher l'aperçu du brouillon dans ce salon.")
+    @fm_group.command(name="preview", description="Afficher l'aperçu du brouillon dans ce salon.", extras=access(_ACCESS))
     async def fm_preview(self, interaction: Interaction) -> None:
         """Show the draft preview in the current channel.
 
@@ -438,7 +411,11 @@ class FormationManagement(commands.Cog):
             embed=Embed(description="Utilise **/fm publish** pour le publier."),
         )
 
-    @fm_group.command(name="publish", description="Publier le message dans un salon d'annonces (réactions auto-ajoutées).")
+    @fm_group.command(
+        name="publish",
+        description="Publier le message dans un salon d'annonces (réactions auto-ajoutées).",
+        extras=access(_ACCESS),
+    )
     @app_commands.describe(channel="Salon d'annonces cible")
     async def fm_publish(self, interaction: Interaction, *, channel: TextChannel) -> None:
         """Publish the message in an announcement channel (auto-added reactions).
@@ -507,7 +484,9 @@ class FormationManagement(commands.Cog):
         logger.info(f"Guild {interaction.guild.id} published the formations message as announcement.")
         await interaction.followup.send("Message publié en mode annonce.")
 
-    @fm_group.command(name="export", description="Exporter la liste des membres ayant (dé)réagi aux émojis des FMs.")
+    @fm_group.command(
+        name="export", description="Exporter la liste des membres ayant (dé)réagi aux émojis des FMs.", extras=access(_ACCESS)
+    )
     @app_commands.describe(message_id="ID du message publié (optionnel si dernière publication)")
     async def fm_export(self, interaction: Interaction, *, message_id: str | None = None) -> None:
         """Export the list of members who reacted (added/removed) to the formation emojis.

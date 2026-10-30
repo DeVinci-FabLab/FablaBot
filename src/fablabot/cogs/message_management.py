@@ -38,8 +38,8 @@ from discord import (
 )
 from discord.ext import commands
 
+from fablabot.helpers.access import EVERYONE, AnyRole, ServerPermission, access
 from fablabot.helpers.constants import ADMIN_ROLES, PARIS_TZ, ErrorMessages, RoleNames, staff_default_permissions
-from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.state_store import JsonStateStore
 from fablabot.helpers.utils import (
@@ -58,13 +58,15 @@ logger = logging.getLogger(__name__)
 MESSAGES_STATE_FILE = Path("data/messages_state.json")
 REACTION_LOG_RETENTION = timedelta(days=30)
 ALLOWED_ROLES = ADMIN_ROLES | {RoleNames.BUREAU}
+_ACCESS = AnyRole(ALLOWED_ROLES)
+_DM_ROLES = {RoleNames.BUREAU}
+_DM_ACCESS = AnyRole(_DM_ROLES)
 
 
 class MessageManagement(commands.Cog):
     """Cog handling message tracking, reaction automation, and quick messaging workflows.
 
     Commands:
-        - /msg help: Display help for message management commands.
         - /msg clear: Clear the current channel of its last messages.
         - /msg dm: Send a direct message to multiple users.
         - /msg start: Create or overwrite a message draft via a modal.
@@ -109,44 +111,10 @@ class MessageManagement(commands.Cog):
     )
 
     @msg_group.command(
-        name="help",
-        description="Afficher l'aide sur les commandes message.",
+        name="clear",
+        description="Nettoie le salon actuel de ses derniers messages.",
+        extras=access(ServerPermission("manage_messages")),
     )
-    @app_commands.describe(show="Afficher l'aide publiquement ou non")
-    async def msg_help(self, interaction: Interaction, *, show: bool = False) -> None:
-        """Display help for message management commands.
-
-        Args:
-            interaction (Interaction): The Discord interaction context.
-            show (bool): Whether to show the help publicly or not.
-        """
-        help_message = build_help_message(
-            "Commandes de gestion des messages",
-            "msg",
-            [
-                ("clear [messages]", "Nettoyer les derniers messages du salon (par défaut 5)"),
-                ("dm <message>", "Envoyer un message privé à plusieurs utilisateurs sélectionnés"),
-                ("start", "Créer ou remplacer le brouillon via un modal"),
-                ("follow <channel> <message>", "Ajouter le suivi sur un message existant (ID ou lien)"),
-                (
-                    "link_reaction <message> <emoji>",
-                    "Associer une réaction à une action automatisée (DM utilisateur/rôle ou message salon)",
-                ),
-                ("unlink_reaction", "Retirer une action liée à une réaction (sélection via une vue)"),
-                ("list", "Lister les messages suivis et leurs réactions"),
-                ("preview", "Prévisualiser le brouillon en cours"),
-                ("publish <channel>", "Publier le brouillon et activer le suivi"),
-                ("export [message]", "Exporter l'historique des réactions d'un message suivi"),
-                ("stop", "Arrêter le suivi d'un message (sélection via une vue)"),
-            ],
-            footer=(
-                "Actions supportées : `user_dm` (DM la personne qui réagit), "
-                "`role_dm` (DM les membres d'un rôle), `channel` (message dans un salon cible)"
-            ),
-        )
-        await interaction.response.send_message(help_message, ephemeral=not show)
-
-    @msg_group.command(name="clear", description="Nettoie le salon actuel de ses derniers messages.")
     @app_commands.describe(messages="Le nombre de messages à supprimer (par défaut 5)")
     async def msg_clear(self, interaction: Interaction, *, messages: app_commands.Range[int, 1, 50] = 5) -> None:
         """Clears the current channel of its last messages.
@@ -196,6 +164,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="dm",
+        extras=access(_DM_ACCESS),
         description="Envoie un message privé à plusieurs utilisateurs via un sélecteur.",
     )
     async def msg_dm(self, interaction: Interaction) -> None:
@@ -205,7 +174,7 @@ class MessageManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             message (str): The message content to send.
         """
-        if not await ensure_command_context(logger, "message.dm", interaction, required_roles={RoleNames.BUREAU}):
+        if not await ensure_command_context(logger, "message.dm", interaction, required_roles=_DM_ROLES):
             return
 
         await interaction.response.send_modal(mui.BulkDMModal(self))
@@ -213,6 +182,7 @@ class MessageManagement(commands.Cog):
     @msg_group.command(
         name="purge",
         description="Supprime les messages d'un utilisateur (ADMIN ONLY)",
+        extras=access(ServerPermission("administrator")),
     )
     @app_commands.describe(
         user="Utilisateur à purger (OBLIGATOIRE)",
@@ -399,6 +369,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="start",
+        extras=access(_ACCESS),
         description="Démarrer/écraser un brouillon de message (modal).",
     )
     async def msg_start(self, interaction: Interaction) -> None:
@@ -412,7 +383,7 @@ class MessageManagement(commands.Cog):
 
         await interaction.response.send_modal(mui.StartMessageModal(self))
 
-    @msg_group.command(name="follow", description="Démarrer le suivi sur un message déjà envoyé.")
+    @msg_group.command(name="follow", description="Démarrer le suivi sur un message déjà envoyé.", extras=access(_ACCESS))
     @app_commands.describe(
         channel="Salon dans lequel se trouve le message",
         message="ID du message ou lien complet",
@@ -479,7 +450,9 @@ class MessageManagement(commands.Cog):
             f"{len(migrated_reactions)} réaction(s) importée(s) depuis le brouillon.",
         )
 
-    @msg_group.command(name="link_reaction", description="Associer une réaction à une action automatisée.")
+    @msg_group.command(
+        name="link_reaction", description="Associer une réaction à une action automatisée.", extras=access(_ACCESS)
+    )
     @app_commands.describe(emoji="Emoji déclencheur")
     async def msg_link_reaction(
         self,
@@ -528,6 +501,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="unlink_reaction",
+        extras=access(_ACCESS),
         description="Retirer une action associée à une réaction sur un message suivi.",
     )
     async def msg_unlink_reaction(self, interaction: Interaction) -> None:
@@ -566,6 +540,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="list",
+        extras=access(_ACCESS),
         description="Lister les messages actuellement suivis.",
     )
     async def msg_list(self, interaction: Interaction) -> None:
@@ -614,6 +589,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="preview",
+        extras=access(_ACCESS),
         description="Prévisualiser le brouillon courant.",
     )
     async def msg_preview(self, interaction: Interaction) -> None:
@@ -646,6 +622,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="publish",
+        extras=access(_ACCESS),
         description="Publier le brouillon dans un salon et activer le suivi.",
     )
     @app_commands.describe(channel="Salon cible pour la publication")
@@ -709,6 +686,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="export",
+        extras=access(_ACCESS),
         description="Exporter l'historique des réactions d'un message suivi.",
     )
     async def msg_export(self, interaction: Interaction) -> None:
@@ -745,6 +723,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="stop",
+        extras=access(_ACCESS),
         description="Arrêter le suivi d'un message.",
     )
     async def msg_stop(self, interaction: Interaction) -> None:
@@ -782,7 +761,11 @@ class MessageManagement(commands.Cog):
 
     # region ====== Suggestion Slash Command ======
 
-    @app_commands.command(name="suggest", description="Envoyer une suggestion (choisir destinataire, texte, anonymat)")
+    @app_commands.command(
+        name="suggest",
+        extras=access(EVERYONE),
+        description="Envoyer une suggestion (choisir destinataire, texte, anonymat)",
+    )
     async def suggest(self, interaction: Interaction) -> None:
         """Single command entrypoint for sending suggestions via a small interactive flow.
 

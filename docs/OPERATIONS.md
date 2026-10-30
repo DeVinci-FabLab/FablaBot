@@ -187,7 +187,8 @@ checks the roles above when a command runs.
 
 ## Commands channel
 
-Commands only run in one text channel per server.
+Most commands only run in one text channel per server. `/suggest` and `/msg purge` work outside it, `/msg clear`
+refuses it, and `/welcome approve` runs in a `welcome-…` channel.
 
 1. The bot reads the channel from the server's stored settings.
 2. If none is stored, it uses the text channel named `commandes_bot` (`helpers/utils.py:32`) and stores it.
@@ -196,8 +197,23 @@ Commands only run in one text channel per server.
 
 So on a new server, create a text channel named `commandes_bot`.
 
+`/help` is open to every member and runs in this channel, so members need View Channel and
+Use Application Commands on it. Without them, they get a refusal that points at a channel they cannot open.
+
 `/log set` picks the channel that receives the server's errors. `/log export` sends that server's log
 file to that server only.
+
+## Server language
+
+The help answers in the language the server declares to Discord: `fr`, `de`, else English. Discord lets a
+server set its language only in Community mode: Server Settings > Enable Community, then Server Settings >
+Community > Overview > Server Primary Language. A server outside Community mode reports `en-US`, so its help
+is in English.
+
+After the deploy, check it on the test server, where `/help` should answer in French.
+
+A per-server language setting in the bot is planned and not available yet. The texts live in
+`src/fablabot/locales/<language>.toml`; adding a language means adding one file with the keys of `en.toml`.
 
 ## Temporary admin
 
@@ -225,7 +241,10 @@ To force a sync: stop the stack, delete `data/command_sync_state.json`, start it
 back to an older image, before upgrading again. The file only records the last sync; it holds no
 member data.
 
-The log tells which case applies: `Commands synced (8, global).` after a sync, and
+The first start after the `/help` release syncs once, because the command list changed. Members reload
+Discord to see `/help` (or `/aide`, `/hilfe`).
+
+The log tells which case applies: `Commands synced (9, global).` after a sync, and
 `Commands unchanged, sync skipped (global).` when nothing changed.
 
 ## Troubleshooting

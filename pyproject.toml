@@ -18,6 +18,9 @@ requires = ["setuptools"]
 include = ["fablabot*"]
 where = ["src"]
 
+[tool.setuptools.package-data]
+fablabot = ["locales/*.toml"]
+
 [project.scripts]
 doc_builder = "fablabot._build_docs:build_docs"
 main = "fablabot.main:main"

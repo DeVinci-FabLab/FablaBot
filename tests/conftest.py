@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import importlib
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
 from discord import Guild, Member, Role, TextChannel, ui
 import pytest
 
+from fablabot.helpers.guild_access import ALLOWED_GUILD_IDS_ENV
+
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
     from types import ModuleType
+
+LISTED_GUILD = "111111111111111111"
 
 
 @pytest.fixture(autouse=True)
@@ -28,6 +33,27 @@ def fablabot_main(tmp_path, monkeypatch) -> ModuleType:
     import fablabot.main
 
     return importlib.reload(fablabot.main)
+
+
+@pytest.fixture
+async def started_bot(tmp_path, monkeypatch) -> AsyncIterator[Any]:
+    """Run the real bot through ``setup_hook`` with a fake token and one listed guild, and remove its cogs after."""
+    token = tmp_path / "token"
+    token.write_text("fake-token")
+    monkeypatch.setenv("DISCORD_TOKEN_FILE", str(token))
+    monkeypatch.setenv(ALLOWED_GUILD_IDS_ENV, LISTED_GUILD)
+    import fablabot.main
+
+    main = importlib.reload(fablabot.main)
+    monkeypatch.setattr(main, "configure_logging", lambda _bot: (None, None))
+    bot = main.Fablabot()
+    bot.tree.sync = AsyncMock(return_value=[])
+    # Entering the client sets up its loop state without logging in, so the cogs' tasks wait instead of failing.
+    async with bot:
+        await bot.setup_hook()
+        yield bot
+        for name in list(bot.cogs):
+            await bot.remove_cog(name)
 
 
 def make_interaction(

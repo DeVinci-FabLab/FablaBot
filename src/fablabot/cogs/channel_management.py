@@ -24,8 +24,8 @@ from discord import (
 from discord.ext import commands
 from discord.utils import get
 
+from fablabot.helpers.access import AnyRole, access
 from fablabot.helpers.constants import ADMIN_ROLES, RoleNames, staff_default_permissions
-from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.safe_discord_operations import (
     safe_create_text_channel,
     safe_create_voice_channel,
@@ -40,17 +40,16 @@ logger = logging.getLogger(__name__)
 DYNAMIC_SUFFIX = "-vocal"
 INDEX_SEPARATOR = "/"
 EPHEMERAL_SUFFIX = "-temp"
+_ACCESS = AnyRole(ADMIN_ROLES)
 
 
 class ChannelManagement(commands.Cog):
     """Cog to register text and voice channel management commands and listeners.
 
     Commands:
-        - /text help: Display help for text channel management commands.
         - /text create: Create a new text channel in the specified category.
         - /text rename: Rename an existing text channel.
         - /text delete: Delete a text channel.
-        - /vocal help: Display help for voice channel management commands.
         - /vocal create: Create a new voice channel in the specified category.
         - /vocal rename: Rename an existing voice channel.
         - /vocal delete: Delete a voice channel.
@@ -80,30 +79,8 @@ class ChannelManagement(commands.Cog):
     )
 
     @text_group.command(
-        name="help",
-        description="Affiche l'aide pour les commandes de gestion des salons textuels.",
-    )
-    @app_commands.describe(show="Afficher l'aide publiquement ou non")
-    async def text_help(self, interaction: Interaction, *, show: bool = False) -> None:
-        """Display help for text channel management commands.
-
-        Args:
-            interaction (Interaction): The Discord interaction context.
-            show (bool): Whether to show the help publicly or not.
-        """
-        help_message = build_help_message(
-            "Commandes de gestion des salons textuels",
-            "text",
-            [
-                ("create <channel> <category>", "Créer un salon textuel dans la catégorie spécifiée"),
-                ("rename <channel> <new_name>", "Renommer un salon textuel existant"),
-                ("delete <channel>", "Supprimer un salon textuel existant"),
-            ],
-        )
-        await interaction.response.send_message(help_message, ephemeral=not show)
-
-    @text_group.command(
         name="create",
+        extras=access(_ACCESS),
         description="Crée un nouveau salon dans la catégorie spécifiée.",
     )
     @app_commands.describe(
@@ -150,6 +127,7 @@ class ChannelManagement(commands.Cog):
 
     @text_group.command(
         name="rename",
+        extras=access(_ACCESS),
         description="Renomme un salon textuel.",
     )
     @app_commands.describe(
@@ -190,6 +168,7 @@ class ChannelManagement(commands.Cog):
 
     @text_group.command(
         name="delete",
+        extras=access(_ACCESS),
         description="Supprime un salon textuel.",
     )
     @app_commands.describe(channel="Le salon à supprimer")
@@ -225,33 +204,8 @@ class ChannelManagement(commands.Cog):
     )
 
     @vocal_group.command(
-        name="help",
-        description="Affiche l'aide pour les commandes de gestion des salons vocaux.",
-    )
-    @app_commands.describe(show="Afficher l'aide publiquement ou non")
-    async def vocal_help(self, interaction: Interaction, *, show: bool = False) -> None:
-        """Display help for vocal channel management commands.
-
-        Args:
-            interaction (Interaction): The Discord interaction context.
-            show (bool): Whether to show the help publicly or not.
-        """
-        help_message = build_help_message(
-            "Commandes de gestion des salons vocaux",
-            "vocal",
-            [
-                (
-                    "create <name> <category> [is_temporary] [max_user]",
-                    "Créer un salon vocal (temporaire par défaut) avec nombre d'utilisateurs optionnel",
-                ),
-                ("rename <channel> <new_name>", "Renommer un salon vocal existant"),
-                ("delete <channel>", "Supprimer un salon vocal existant"),
-            ],
-        )
-        await interaction.response.send_message(help_message, ephemeral=not show)
-
-    @vocal_group.command(
         name="create",
+        extras=access(_ACCESS),
         description="Crée un salon vocal personnalisé.",
     )
     @app_commands.describe(
@@ -323,6 +277,7 @@ class ChannelManagement(commands.Cog):
 
     @vocal_group.command(
         name="rename",
+        extras=access(_ACCESS),
         description="Renomme un salon vocal.",
     )
     @app_commands.describe(
@@ -389,6 +344,7 @@ class ChannelManagement(commands.Cog):
 
     @vocal_group.command(
         name="delete",
+        extras=access(_ACCESS),
         description="Supprime un salon vocal.",
     )
     @app_commands.describe(channel="Le salon vocal à supprimer")

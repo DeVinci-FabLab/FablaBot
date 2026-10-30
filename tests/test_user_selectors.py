@@ -54,10 +54,13 @@ async def _open_bulk(server: Server, role_name: str, action: str) -> tuple[Magic
     return interaction, sent.kwargs.get("view") if sent else None
 
 
-async def _confirm_bulk(server: Server, view: object, *members: MagicMock) -> MagicMock:
+async def _confirm_bulk(server: Server, view: object, *members: MagicMock, clicker: MagicMock | None = None) -> MagicMock:
+    """Click Confirm on ``view`` with ``members`` selected, as ``clicker`` when given (else as the member who opened it)."""
     # discord.py exposes no public setter for a selection
     view.select_members._values = list(members)
     click = server.interaction()
+    if clicker is not None:
+        click.user = clicker
     await view.confirm_button.callback(click)
     return click
 
@@ -104,14 +107,25 @@ async def test_bulk_remove_from_self_is_allowed() -> None:
     server.caller.remove_roles.assert_awaited_once()
 
 
+async def test_bulk_remove_takes_the_temporary_role() -> None:
+    """The selector of /user remove_roles opens for the temporary role and takes it from the members who hold it."""
+    server = Server(RoleNames.PRESIDENT)
+    server.target.roles.append(server.roles[RoleNames.ADMIN_TEMP])
+    _interaction, view = await _open_bulk(server, RoleNames.ADMIN_TEMP, "remove")
+    assert view is not None
+
+    await _confirm_bulk(server, view, server.target)
+
+    server.target.remove_roles.assert_awaited_once()
+
+
 async def test_bulk_confirm_after_losing_rights_changes_nothing(caplog: pytest.LogCaptureFixture) -> None:
-    """Confirming a bulk change after losing rights changes no role."""
+    """Confirming a bulk change as a member who lost the rights since opening it changes no role."""
     caplog.set_level(logging.DEBUG)
     server = Server(RoleNames.PRESIDENT)
     _interaction, view = await _open_bulk(server, "F - Laser", "add")
-    server.caller.roles.clear()
 
-    click = await _confirm_bulk(server, view, server.target, server.other)
+    click = await _confirm_bulk(server, view, server.target, server.other, clicker=make_member(CALLER_ID))
 
     server.target.add_roles.assert_not_awaited()
     server.other.add_roles.assert_not_awaited()
@@ -119,6 +133,24 @@ async def test_bulk_confirm_after_losing_rights_changes_nothing(caplog: pytest.L
     click.followup.edit_message.assert_not_awaited()
     lines = [r.getMessage() for r in caplog.records if "refused" in r.getMessage()]
     assert lines == [f"[user.add_roles] refused kind=right_lost_before_confirm guild_id={GUILD_ID} user_id={CALLER_ID}"]
+
+
+async def test_bulk_remove_confirm_after_losing_rights_changes_nothing(caplog: pytest.LogCaptureFixture) -> None:
+    """Confirming a bulk removal as a member who lost the rights since opening it takes no role from the holders."""
+    caplog.set_level(logging.DEBUG)
+    server = Server(RoleNames.PRESIDENT)
+    for member in (server.target, server.other):
+        member.roles.append(server.roles["F - Laser"])
+    _interaction, view = await _open_bulk(server, "F - Laser", "remove")
+
+    click = await _confirm_bulk(server, view, server.target, server.other, clicker=make_member(CALLER_ID))
+
+    server.target.remove_roles.assert_not_awaited()
+    server.other.remove_roles.assert_not_awaited()
+    assert click.response.send_message.await_args.kwargs["ephemeral"] is True
+    click.followup.edit_message.assert_not_awaited()
+    lines = [r.getMessage() for r in caplog.records if "refused" in r.getMessage()]
+    assert lines == [f"[user.remove_roles] refused kind=right_lost_before_confirm guild_id={GUILD_ID} user_id={CALLER_ID}"]
 
 
 # -- Role search --
@@ -169,11 +201,11 @@ async def test_with_roles_confirm_after_losing_rights_lists_nothing(caplog: pyte
     interaction = server.interaction()
     await UserManagement.user_with_roles.callback(UserManagement(MagicMock()), interaction)
     view = interaction.response.send_message.await_args.kwargs["view"]
-    server.caller.roles.clear()
 
     # discord.py exposes no public setter for a selection
     view.select_roles._values = [server.roles["F - Laser"]]
     click = server.interaction()
+    click.user = make_member(CALLER_ID)
     await view.confirm_button.callback(click)
 
     assert click.response.send_message.await_args.kwargs["ephemeral"] is True

@@ -16,6 +16,7 @@ from fablabot.cogs import (
     ChannelManagement,
     FormationManagement,
     GuildAccess,
+    HelpManagement,
     LogManagement,
     MessageManagement,
     UserManagement,
@@ -28,6 +29,7 @@ from fablabot.helpers.command_sync import (
     sync_commands_if_changed,
 )
 from fablabot.helpers.guild_access import GuildAccessPolicy, GuildAccessTree
+from fablabot.helpers.i18n import CatalogTranslator, catalog
 from fablabot.helpers.logging_setup import configure_logging
 from fablabot.helpers.state_store import JsonStateStore
 
@@ -129,10 +131,12 @@ class Fablabot(commands.Bot):
             MessageManagement(self),
             UserManagement(self),
             WelcomeManagement(self),
+            HelpManagement(self),
         ):
             await self.add_cog(cog)
             logger.info(f"Loaded cog {cog.__class__.__name__}.")
 
+        await self.tree.set_translator(CatalogTranslator(catalog()))
         await sync_commands_if_changed(
             self.tree,
             JsonStateStore(logger, COMMAND_SYNC_STATE_FILE),

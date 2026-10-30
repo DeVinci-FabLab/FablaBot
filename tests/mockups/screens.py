@@ -6,7 +6,12 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from fablabot.cogs import channel_management, formation_management, message_management
+from discord import Locale, Member, Permissions, Role
+
+import fablabot.cogs as cogs_package
+from fablabot.cogs import formation_management, help_management, message_management
+from fablabot.helpers.constants import RoleNames
+from fablabot.helpers.help_page import leaf_commands
 from fablabot.models.formation import FmMessageDraft, Formation
 from fablabot.ui.formation import StartFmModal
 from fablabot.ui.message import SuggestionView
@@ -16,6 +21,8 @@ from .preview import Capture, Sent
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
     from typing import Any
+
+    from discord import app_commands
 
 ROLE_FORMATIONS = 1111
 TRAINER = 2222
@@ -72,12 +79,57 @@ def _draft() -> FmMessageDraft:
     )
 
 
-async def text_help() -> Screen:
-    """``/text help``: the staff help for text channels, private by default."""
+def declared_commands() -> list[app_commands.Command[Any, ..., Any]]:
+    """Every leaf command declared on a cog class, as the tree holds them once the cogs are loaded."""
+    declared = [item for name in cogs_package.__all__ for item in getattr(cogs_package, name).__cog_app_commands__]
+    return leaf_commands(declared)
+
+
+def _member(*role_names: str) -> MagicMock:
+    """A member holding the named roles, with no permission of its own."""
+    member = MagicMock(spec=Member)
+    member.id = 3333
+    member.roles = [_role(name) for name in role_names]
+    member.guild_permissions = Permissions.none()
+    return member
+
+
+def _role(name: str) -> MagicMock:
+    """A role stub with a name."""
+    role = MagicMock(spec=Role)
+    role.name = name
+    return role
+
+
+async def _help_for(member: MagicMock, locale: Locale) -> Screen:
+    """``/help`` run by ``member`` on a server that holds every role the bot knows."""
     capture = Capture()
-    cog = channel_management.ChannelManagement(MagicMock())
-    await _invoke(channel_management.ChannelManagement.text_help, cog, capture.interaction(), show=False)
+    interaction = capture.interaction()
+    interaction.user = member
+    interaction.guild.roles = [_role(value) for key, value in vars(RoleNames).items() if key.isupper()]
+    interaction.guild_locale = locale
+    bot = MagicMock()
+    bot.tree.walk_commands.side_effect = lambda: iter(declared_commands())
+    with patch.object(help_management, "ensure_command_context", _allowed()):
+        await _invoke(help_management.HelpManagement.show_help, help_management.HelpManagement(bot), interaction)
     return Screen(capture.sent)
+
+
+async def help_member() -> Screen:
+    """``/help`` for a verified member: the commands open to everyone, and how to get more."""
+    return await _help_for(_member(RoleNames.MEMBER_VERIFIED), Locale.american_english)
+
+
+async def help_trainer() -> Screen:
+    """``/help`` for a training manager on a server with no ``F - ...`` role: the training commands and the role summary."""
+    return await _help_for(_member(RoleNames.TRAININGS_MANAGER), Locale.american_english)
+
+
+async def help_admin() -> Screen:
+    """``/help`` for an administrator who is also Bureau and holds every permission, in French."""
+    member = _member(RoleNames.BUREAU, RoleNames.ADMIN)
+    member.guild_permissions = Permissions.all()
+    return await _help_for(member, Locale.french)
 
 
 async def fm_edit() -> Screen:
@@ -115,7 +167,9 @@ async def fm_start_modal() -> Screen:
 
 
 SCREENS: dict[str, Callable[[], Coroutine[Any, Any, Screen]]] = {
-    "text-help": text_help,
+    "help-member": help_member,
+    "help-trainer": help_trainer,
+    "help-admin": help_admin,
     "fm-edit": fm_edit,
     "suggest": suggest,
     "suggest-modal": suggest_modal,
