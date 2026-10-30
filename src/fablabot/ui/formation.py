@@ -310,6 +310,25 @@ class AddFmModal(ui.Modal, title="Ajouter une formation"):
         )
 
 
+def _find_unchanged(fms: list[Formation], snapshot: Formation) -> int | None:
+    """Locate the formation a view was opened on, by its emoji (unique in a draft).
+
+    Draft positions shift whenever another formation is added, so a view keeps the formation itself
+    rather than its position, and acts on it only while the draft still holds it unchanged.
+
+    Args:
+        fms (list[Formation]): The formations of the current draft.
+        snapshot (Formation): The formation as it was when the view was opened.
+
+    Returns:
+        int | None: The 0-based position of the formation in the list, or None when it is gone or has changed.
+    """
+    for position, fm in enumerate(fms):
+        if fm.emoji == snapshot.emoji:
+            return position if fm == snapshot else None
+    return None
+
+
 # region ====== FormationSelectView and its components ======
 
 
@@ -350,7 +369,7 @@ class _FormationSelectButton(ui.Button["FormationSelectView"]):
             case FmCommand.EDIT:
                 await view.open_edit_view(interaction, self.formation_index, self.formation)
             case FmCommand.REMOVE:
-                await view.remove_formation(interaction, self.formation_index)
+                await view.remove_formation(interaction, self.formation)
             case _:
                 logger.error("Unknown command in FormationSelectView callback.")
 
@@ -388,17 +407,23 @@ class FormationSelectView(ui.View):
             embed=Embed(description=render_formation(formation)),
         )
 
-    async def remove_formation(self, interaction: Interaction, formation_index: int) -> None:
+    async def remove_formation(self, interaction: Interaction, formation: Formation) -> None:
         """Called to remove a formation from the draft.
 
         Args:
             interaction (Interaction): The interaction that triggered the button click.
-            formation_index (int): The index of the formation (1-based).
+            formation (Formation): The formation as it was when the selector opened.
         """
         assert interaction.guild is not None
         draft = self.cog.get_guild_draft(interaction.guild.id)
 
-        removed = draft.fms.pop(formation_index - 1)
+        position = _find_unchanged(draft.fms, formation)
+        if position is None:
+            logger.warning(f"Guild {interaction.guild.id} used a selector whose formation {formation.name!r} has moved on.")
+            await interaction.response.send_message(ErrorMessages.EXPIRED_VIEW_MESSAGE, ephemeral=True)
+            return
+
+        removed = draft.fms.pop(position)
 
         self.cog.set_guild_draft(interaction.guild.id, draft)
 
@@ -465,7 +490,7 @@ class _EditEmojiModal(ui.Modal, title="Modifier l'émoji"):
             await interaction.response.send_message(ErrorMessages.INVALID_EMOJI, ephemeral=True)
             return
 
-        if any(i != self.view_ref.formation_index - 1 and fm.emoji == candidate for i, fm in enumerate(fms)):
+        if candidate != self.view_ref.original.emoji and any(fm.emoji == candidate for fm in fms):
             logger.warning(f"Guild {interaction.guild.id} tried to reuse emoji {candidate!r} while editing formation.")
             await interaction.response.send_message(ErrorMessages.EMOJI_ALREADY_USED, ephemeral=True)
             return
@@ -703,6 +728,7 @@ class _EditFormationView(ui.View):
         self.cog = cog
         self.formation_index = formation_index
 
+        self.original = deepcopy(original)
         self.updated_formation = deepcopy(original)
 
         edit_emoji_button = self.get_button(EDIT_EMOJI_BUTTON_ID)
@@ -828,11 +854,21 @@ class _EditFormationView(ui.View):
         assert interaction.guild is not None
         draft = self.cog.get_guild_draft(interaction.guild.id)
         fms = sorted(draft.fms, key=lambda x: x.start_dt)
-        original = fms[self.formation_index - 1]
+        position = _find_unchanged(fms, self.original)
+        emoji_taken = self.updated_formation.emoji != self.original.emoji and any(
+            fm.emoji == self.updated_formation.emoji for fm in fms
+        )
+        if position is None or emoji_taken:
+            logger.warning(
+                f"Guild {interaction.guild.id} validated an edit of {self.original.name!r} that the draft has moved on from.",
+            )
+            await interaction.response.send_message(ErrorMessages.EXPIRED_VIEW_MESSAGE, ephemeral=True)
+            return
+        original = fms[position]
 
         log_request(logger, "fm.edit", interaction, index=self.formation_index, updated_formation=self.updated_formation)
 
-        fms[self.formation_index - 1] = self.updated_formation
+        fms[position] = self.updated_formation
         fms.sort(key=lambda x: x.start_dt)
 
         draft = FmMessageDraft(
