@@ -117,6 +117,19 @@ def test_missing_key_falls_back_to_english_once(caplog: pytest.LogCaptureFixture
     assert "greeting" in warnings[0].getMessage()
 
 
+def test_missing_plural_falls_back_to_english_once(caplog: pytest.LogCaptureFixture) -> None:
+    """A plural absent from a locale gives the English forms, and the gap is reported once."""
+    reference = {"gap.count": {"one": "{count} item", "other": "{count} items"}}
+    texts = Texts(locale="fr", entries={}, reference=reference)
+    with caplog.at_level(logging.WARNING):
+        assert texts.plural("gap.count", 1) == "1 item"
+        assert texts.plural("gap.count", 3) == "3 items"
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "fr" in warnings[0].getMessage()
+    assert "gap.count" in warnings[0].getMessage()
+
+
 @pytest.mark.parametrize(
     ("code", "expected"),
     [
