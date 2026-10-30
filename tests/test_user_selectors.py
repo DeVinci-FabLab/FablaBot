@@ -201,11 +201,11 @@ async def test_with_roles_confirm_after_losing_rights_lists_nothing(caplog: pyte
     interaction = server.interaction()
     await UserManagement.user_with_roles.callback(UserManagement(MagicMock()), interaction)
     view = interaction.response.send_message.await_args.kwargs["view"]
-    server.caller.roles.clear()
 
     # discord.py exposes no public setter for a selection
     view.select_roles._values = [server.roles["F - Laser"]]
     click = server.interaction()
+    click.user = make_member(CALLER_ID)
     await view.confirm_button.callback(click)
 
     assert click.response.send_message.await_args.kwargs["ephemeral"] is True
