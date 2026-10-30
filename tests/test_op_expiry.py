@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from conftest import make_guild, make_interaction, make_member, make_role
-from discord import Forbidden, HTTPException, NotFound
+from discord import CategoryChannel, Forbidden, ForumChannel, HTTPException, NotFound
 import pytest
 
 from fablabot.cogs import user_management
@@ -408,3 +408,29 @@ async def test_expiry_with_the_op_channel_gone_logs_the_member(cog: UserManageme
     assert len(lines) == 1
     assert f"guild_id={GUILD_A}" in lines[0]
     assert f"member_id={TARGET_ID}" in lines[0]
+
+
+@pytest.mark.parametrize("channel_type", [ForumChannel, CategoryChannel])
+async def test_notice_for_channel_that_cannot_receive_posts_nothing_and_warns(
+    channel_type: type, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A forum or category op channel gets no post and the existing warning."""
+    channel = MagicMock(spec=channel_type)
+    channel.send = AsyncMock()
+    guild = make_guild(GUILD_A, [], [], channel=channel)
+    expiry = OpExpiry(expires_at=NOW, channel_id=OP_CHANNEL_ID)
+
+    await UserManagement._post_op_notice(guild, TARGET_ID, expiry, "text")
+
+    channel.send.assert_not_awaited()
+    assert f"Op channel {OP_CHANNEL_ID} gone in guild_id={GUILD_A} member_id={TARGET_ID}; notice not posted" in caplog.text
+
+
+async def test_notice_for_text_channel_is_posted() -> None:
+    """A text op channel receives the notice."""
+    guild = make_guild(GUILD_A, [], [])
+    expiry = OpExpiry(expires_at=NOW, channel_id=OP_CHANNEL_ID)
+
+    await UserManagement._post_op_notice(guild, TARGET_ID, expiry, "text")
+
+    guild.get_channel.return_value.send.assert_awaited_once_with("text")

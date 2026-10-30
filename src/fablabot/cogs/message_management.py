@@ -222,7 +222,7 @@ class MessageManagement(commands.Cog):
             reason=reason,
         )
 
-        if not interaction.user.guild_permissions.administrator:
+        if not interaction.permissions.administrator:
             logger.warning(f"Non-admin user_id={interaction.user.id} tried to purge messages")
             await interaction.response.send_message(
                 "Seuls les administrateurs peuvent utiliser cette commande",

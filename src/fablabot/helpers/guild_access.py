@@ -17,6 +17,9 @@ if TYPE_CHECKING:
 
     from discord import Interaction
 
+    from fablabot.main import Fablabot  # noqa: F401 -- named by the string in GuildAccessTree's base
+
+
 logger = logging.getLogger(__name__)
 
 ALLOWED_GUILD_IDS_ENV: Final = "ALLOWED_GUILD_IDS"
@@ -91,7 +94,7 @@ class GuildAccessPolicy:
         return guild_id in self.tolerated
 
 
-class GuildAccessTree(app_commands.CommandTree):
+class GuildAccessTree(app_commands.CommandTree["Fablabot"]):
     """Command tree that refuses interactions from guilds the bot does not serve."""
 
     @override
