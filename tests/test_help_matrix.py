@@ -13,7 +13,7 @@ import pytest
 
 from fablabot.cogs import user_management
 from fablabot.helpers import utils
-from fablabot.helpers.access import Caller, rule_of
+from fablabot.helpers.access import AnyRole, Caller, rule_of
 from fablabot.helpers.constants import ErrorMessages, RoleNames
 from fablabot.helpers.help_page import EVERYONE_DOMAIN, HELP_COMMAND, build_help, leaf_commands
 from fablabot.helpers.i18n import catalog
@@ -178,3 +178,25 @@ async def test_profile_runs_its_commands(profile: str, started_bot: Any) -> None
         if line.startswith("`/") and line.split("`")[1][1:] in names
     ]
     assert (len(runnable), len(listed)) == (PROFILES[profile].expected, PROFILES[profile].expected)
+
+
+async def test_every_role_rule_is_the_set_the_callback_checks(started_bot: Any) -> None:
+    """The roles a command's callback requires are the very set its help rule holds, not an equal copy."""
+    world = _world(PROFILES["member"])
+    commands = [c for c in _ruled(started_bot) if isinstance(rule_of(c), AnyRole)]
+    assert commands
+    mismatches: list[str] = []
+    for command in commands:
+        rule = rule_of(command)
+        assert isinstance(rule, AnyRole)
+        seen: list[Any] = []
+
+        async def spy(_logger: Any, _name: str, _interaction: Any, roles: Any, **_kwargs: Any) -> bool:
+            seen.append(roles)  # noqa: B023 - called before the next loop turn
+            return False
+
+        with patch.object(utils, "_check_has_role", spy):
+            await _try(command, world, world.server_roles[0])
+        if not seen or seen[0] is not rule.roles:
+            mismatches.append(f"/{command.qualified_name}: " + ("no role check ran" if not seen else "another set"))
+    assert not mismatches, "\n".join(mismatches)
