@@ -14,7 +14,7 @@ import pytest
 from fablabot.cogs import user_management
 from fablabot.helpers import utils
 from fablabot.helpers.access import AccessRule, AnyRole, Caller, rule_of
-from fablabot.helpers.constants import ErrorMessages, RoleNames
+from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames
 from fablabot.helpers.help_page import DOMAINS, EVERYONE_DOMAIN, HELP_COMMAND, build_help, leaf_commands, line_key
 from fablabot.helpers.i18n import catalog
 
@@ -280,6 +280,14 @@ async def test_bureau_may_give_and_take_each_of_its_two_roles(name: str, absent:
     world = _world(PROFILES["bureau"], absent=(absent,))
     assert _rule(command).admits(world.caller), absent
     assert not await _refused(command, world), absent
+
+
+@pytest.mark.parametrize("holder", sorted(ADMIN_ROLES))
+def test_no_administrative_role_may_give_or_take_the_admin_role(holder: str) -> None:
+    """The admin role is out of reach of every administrative role, whatever the action."""
+    assert user_management.can_assign({holder}, RoleNames.ADMIN) is False
+    for action in ("add", "remove"):
+        assert user_management.role_refusal({holder}, RoleNames.ADMIN, action=action) is not None
 
 
 def test_role_refusal_agrees_with_assignment_refusal() -> None:
