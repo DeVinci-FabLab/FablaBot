@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -41,6 +41,20 @@ def test_past_check_compares_aware_datetimes() -> None:
     assert formation_helpers.is_past(datetime(2030, 6, 15, 18, 29, tzinfo=PARIS_TZ))
     assert not formation_helpers.is_past(NOW)
     assert not formation_helpers.is_past(datetime(2030, 6, 15, 18, 31, tzinfo=PARIS_TZ))
+
+
+def test_past_check_holds_in_the_repeated_hour(monkeypatch: pytest.MonkeyPatch) -> None:
+    """In the hour the clocks go back, a start earlier in absolute time is past though its wall clock is later."""
+
+    class _Night(datetime):
+        """The clock at 02:10 CET, the second 02:10 of the night."""
+
+        @classmethod
+        def now(cls, tz: Any = None) -> datetime:
+            return datetime(2026, 10, 25, 1, 10, tzinfo=UTC).astimezone(tz)
+
+    monkeypatch.setattr(rendering, "datetime", _Night)
+    assert formation_helpers.is_past(datetime(2026, 10, 25, 2, 40, tzinfo=PARIS_TZ))
 
 
 @pytest.fixture
