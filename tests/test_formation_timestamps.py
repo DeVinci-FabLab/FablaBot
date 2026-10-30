@@ -90,6 +90,15 @@ def test_export_entry_without_date_reads_n_a() -> None:
     assert lines[2].endswith("· inscrit·e le n/a (en attente)")
 
 
+def test_export_numbers_the_waitlist_after_the_registered() -> None:
+    """The waitlist continues the numbering of the registered list instead of restarting at 1."""
+    waitlisted = [{"user_id": 9, "username": "cy"}, {"user_id": 10, "username": "di"}]
+    fm = _fm(WINTER, waitlisted)
+    fm.registered_users.append({"user_id": 8, "username": "bob"})
+    lines = rendering.format_formation_export(fm).split("\n")
+    assert [line.split(" · ")[0].split(" (")[0] for line in lines[1:]] == ["1. <@7>", "2. <@8>", "3. <@9>", "4. <@10>"]
+
+
 @pytest.fixture
 def sent(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Collect the text of every DM the notifications send."""
