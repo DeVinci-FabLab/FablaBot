@@ -33,7 +33,7 @@ def _utc_machine(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     time.tzset()
 
 
-def _fm(start: datetime) -> Formation:
+def _fm(start: datetime, waitlisted: list[dict[str, Any]] | None = None) -> Formation:
     return Formation(
         emoji="🔧",
         name="Soudure",
@@ -42,6 +42,7 @@ def _fm(start: datetime) -> Formation:
         duration="2h",
         seats=5,
         registered_users=[{"user_id": 7, "username": "ada", "ts_iso": "2030-03-01T10:00:00+01:00"}],
+        waitlisted_users=waitlisted or [],
     )
 
 
@@ -70,6 +71,14 @@ def test_export_stays_plain_text() -> None:
     export = rendering.format_formation_export(_fm(WINTER))
     assert "<t:" not in export
     assert "inscrit·e le vendredi 01/03 à 10h00" in export
+
+
+def test_export_waitlist_stays_plain_text() -> None:
+    """A waitlisted entry keeps its registration date as words, marked as waiting, with no timestamp."""
+    waitlisted = [{"user_id": 8, "username": "bob", "ts_iso": "2030-03-02T11:15:00+01:00"}]
+    export = rendering.format_formation_export(_fm(WINTER, waitlisted))
+    assert "<t:" not in export
+    assert "inscrit·e le samedi 02/03 à 11h15 (en attente)" in export
 
 
 @pytest.fixture
