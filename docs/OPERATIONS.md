@@ -172,7 +172,7 @@ The bot looks roles up by name, and the names are fixed today in `src/fablabot/h
 | `CoDir` | Required: `/user op` refuses with "Rôles administratifs manquants sur le serveur." without it; also used by the welcome, channel and training flows |
 | `Admin -temp-` | Required by `/user op` (see Temporary admin) |
 | `Administrateur`, `Président`, `Vice-Président`, `Secrétaire Général` | Admin roles (`ADMIN_ROLES`, same file) |
-| `Bureau`, `Sbire Bureau` | Bureau permissions (messages, `/user` with roles); `Bureau` members can hand out `Sbire Bureau` and `agent MyFab` |
+| `Bureau`, `Sbire Bureau` | Bureau permissions (messages, `/user` with roles, `/vocal create` for temporary channels); `Bureau` members can hand out `Sbire Bureau` and `agent MyFab` |
 | `Pôle Numérique` | Allowed to use `/log` with the admin roles and `Respo Numérique` |
 | `Respo Communication`, `Respo Event`, `Respo Formation`, `Respo Numérique`, `Respo Partenariat`, `Respo Projet` | Area managers, who receive the matching suggestions and trainings |
 | `agent MyFab`, `Membre ✓` | MyFab agents; verified members (welcome flow) |

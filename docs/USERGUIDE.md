@@ -34,7 +34,7 @@ In the tables below, "admin roles" means Administrateur, Président, Vice-Prési
 
 | Command | What it does | Who can run it |
 | --- | --- | --- |
-| `/vocal create` | Create your own voice channel | Admin roles |
+| `/vocal create` | Create your own voice channel; Bureau can create temporary channels only | Admin roles, Bureau |
 | `/vocal rename` | Rename a voice channel | Admin roles |
 | `/vocal delete` | Delete a voice channel | Admin roles |
 

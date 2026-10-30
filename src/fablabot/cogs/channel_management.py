@@ -41,6 +41,9 @@ DYNAMIC_SUFFIX = "-vocal"
 INDEX_SEPARATOR = "/"
 EPHEMERAL_SUFFIX = "-temp"
 _ACCESS = AnyRole(ADMIN_ROLES)
+# Bureau may only create temporary voice channels; /help lists /vocal create with this wider rule.
+_TEMP_VOICE_ROLES = ADMIN_ROLES | {RoleNames.BUREAU}
+_TEMP_VOICE_ACCESS = AnyRole(_TEMP_VOICE_ROLES)
 
 
 class ChannelManagement(commands.Cog):
@@ -205,7 +208,7 @@ class ChannelManagement(commands.Cog):
 
     @vocal_group.command(
         name="create",
-        extras=access(_ACCESS),
+        extras=access(_TEMP_VOICE_ACCESS),
         description="Crée un salon vocal personnalisé.",
     )
     @app_commands.describe(
@@ -243,7 +246,7 @@ class ChannelManagement(commands.Cog):
                 "is_temporary": is_temporary,
                 "max_user": max_user,
             },
-            required_roles=ADMIN_ROLES,
+            required_roles=_TEMP_VOICE_ROLES if is_temporary else ADMIN_ROLES,
         ):
             return
 
