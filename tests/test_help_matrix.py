@@ -333,3 +333,12 @@ def test_giving_a_role_to_oneself_reports_the_first_refusal(held: str, role: str
     actor = _member(1, held)
     refusal = user_management.UserManagement.assignment_refusal(actor, actor, _role(role), action="add")
     assert refusal is expected
+
+
+def test_the_temporary_role_is_given_by_op_only_but_taken_like_any_other() -> None:
+    """Adding the temporary role is left to /user op; whoever may take a role may take it too."""
+    actor, target, role = _member(1, RoleNames.PRESIDENT), _member(2), _role(RoleNames.ADMIN_TEMP)
+    assignment_refusal = user_management.UserManagement.assignment_refusal
+    assert assignment_refusal(actor, target, role, action="add") is utils.RefusalKind.TEMP_ROLE_OUTSIDE_OP
+    assert assignment_refusal(actor, target, role, action="remove") is None
+    assert user_management.role_refusal({RoleNames.PRESIDENT}, RoleNames.ADMIN_TEMP, action="remove") is None
