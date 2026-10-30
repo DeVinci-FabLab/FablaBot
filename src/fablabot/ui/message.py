@@ -934,7 +934,7 @@ class SuggestionView(ui.View):
     def _render_recipient_options(self) -> None:
         """Give this view its own options, with the chosen recipient marked as default.
 
-        The decorator's options are shared by every view, so they are never mutated.
+        Rebuilt per view so that one member's choice stays in their view, whatever discord.py copies.
         """
         self.recipient_select.options = [
             SelectOption(label=config.label, value=key, default=key == self.selected_recipient)

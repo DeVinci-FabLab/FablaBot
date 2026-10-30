@@ -147,7 +147,7 @@ async def test_anonymity_button_keeps_recipient_selected() -> None:
     await view.anonymity_button.callback(interaction)
 
     edited = interaction.response.edit_message.call_args.kwargs["view"]
-    assert [o.value for o in edited.recipient_select.options if o.default] == [key]
+    assert _defaults(edited) == [key]
     assert len(edited.recipient_select.options) == len(SUGGESTION_OPTIONS)
 
 
@@ -161,6 +161,16 @@ async def test_recipient_choice_never_leaks_to_another_view() -> None:
     await view.anonymity_button.callback(interaction)
 
     assert _defaults(SuggestionView(cog_bot())) == []
+
+
+async def test_changing_recipient_moves_the_default() -> None:
+    """Choosing another recipient leaves only the new one selected."""
+    first, *_, last = SUGGESTION_OPTIONS
+    view = SuggestionView(cog_bot())
+    await _choose_and_toggle(view, first)
+    await _choose_and_toggle(view, last)
+
+    assert _defaults(view) == [last]
 
 
 def _template_options() -> list:
