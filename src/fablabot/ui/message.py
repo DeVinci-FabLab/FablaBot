@@ -929,6 +929,17 @@ class SuggestionView(ui.View):
         self.cog = cog
         self.selected_recipient: str | None = None
         self.anonymous: bool = False
+        self._render_recipient_options()
+
+    def _render_recipient_options(self) -> None:
+        """Give this view its own options, with the chosen recipient marked as default.
+
+        The decorator's options are shared by every view, so they are never mutated.
+        """
+        self.recipient_select.options = [
+            SelectOption(label=config.label, value=key, default=key == self.selected_recipient)
+            for key, config in SUGGESTION_OPTIONS.items()
+        ]
 
     @ui.select(
         placeholder="Choisir le destinataire...",
@@ -956,6 +967,7 @@ class SuggestionView(ui.View):
         self.anonymous = not self.anonymous
         logger.debug(f"Suggestion anonymity toggled anonymous={self.anonymous}")
         button.label = "Afficher mon nom" if self.anonymous else "Masquer mon nom"
+        self._render_recipient_options()
         await interaction.response.edit_message(view=self)
 
     @ui.button(label="Rédiger la suggestion", style=ButtonStyle.primary)

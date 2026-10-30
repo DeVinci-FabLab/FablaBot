@@ -127,3 +127,33 @@ def test_log_request_logs_caller_id_not_name(caplog: pytest.LogCaptureFixture) -
     log_request(logging.getLogger("test"), "x", make_interaction(), key="v")
     assert f"user_id={USER_ID}" in caplog.text
     assert USER_NAME not in caplog.text
+
+
+def _defaults(view: SuggestionView) -> list[str]:
+    return [option.value for option in view.recipient_select.options if option.default]
+
+
+async def test_anonymity_button_keeps_recipient_selected() -> None:
+    """The re-render after the anonymity button marks the chosen recipient as default."""
+    interaction = make_interaction()
+    key = list(SUGGESTION_OPTIONS)[-1]
+    view = SuggestionView(cog_bot())
+    view.recipient_select._values = [key]  # discord.py exposes no public setter
+    await view.recipient_select.callback(interaction)
+    await view.anonymity_button.callback(interaction)
+
+    edited = interaction.response.edit_message.call_args.kwargs["view"]
+    assert [o.value for o in edited.recipient_select.options if o.default] == [key]
+    assert len(edited.recipient_select.options) == len(SUGGESTION_OPTIONS)
+
+
+async def test_recipient_choice_never_leaks_to_another_view() -> None:
+    """A later SuggestionView starts with no default option."""
+    interaction = make_interaction()
+    key = next(iter(SUGGESTION_OPTIONS))
+    view = SuggestionView(cog_bot())
+    view.recipient_select._values = [key]
+    await view.recipient_select.callback(interaction)
+    await view.anonymity_button.callback(interaction)
+
+    assert _defaults(SuggestionView(cog_bot())) == []
