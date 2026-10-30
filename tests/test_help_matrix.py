@@ -271,6 +271,17 @@ async def test_role_commands_need_a_role_the_caller_may_give(name: str, started_
     assert await _refused(command, world)
 
 
+@pytest.mark.usefixtures("patched_checks")
+@pytest.mark.parametrize("name", ["user add_role", "user add_roles", "user remove_role", "user remove_roles"])
+@pytest.mark.parametrize("absent", [RoleNames.SBIRE_BUREAU, RoleNames.AGENTS_MYFAB])
+async def test_bureau_may_give_and_take_each_of_its_two_roles(name: str, absent: str, started_bot: Any) -> None:
+    """Bureau on a server holding only one of Sbire Bureau and agent MyFab is still listed and served for that one."""
+    command = _command(started_bot, name)
+    world = _world(PROFILES["bureau"], absent=(absent,))
+    assert _rule(command).admits(world.caller), absent
+    assert not await _refused(command, world), absent
+
+
 def test_role_refusal_agrees_with_assignment_refusal() -> None:
     """For every role and every kind of holder, the rule's reasoning and the callback's give the same refusal."""
     roles = [*SERVER_ROLES, "F - x", RoleNames.DIGITAL_POLE]
