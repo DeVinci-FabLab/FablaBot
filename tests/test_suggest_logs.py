@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from conftest import cog_bot, fill_text_input, make_interaction
-from discord import Member, TextChannel
+from discord import Member, SelectOption, TextChannel
 import pytest
 
 from fablabot.cogs.message_management import MessageManagement
 from fablabot.helpers.utils import ensure_command_context, log_request
 from fablabot.models.message import SUGGESTION_OPTIONS
 from fablabot.ui.message import SuggestionView
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 SECRET_TEXT = "SECRET-SUGGESTION-TEXT"
 USER_ID = 418003123456789012
@@ -127,3 +131,113 @@ def test_log_request_logs_caller_id_not_name(caplog: pytest.LogCaptureFixture) -
     log_request(logging.getLogger("test"), "x", make_interaction(), key="v")
     assert f"user_id={USER_ID}" in caplog.text
     assert USER_NAME not in caplog.text
+
+
+def _defaults(view: SuggestionView) -> list[str]:
+    return [option.value for option in view.recipient_select.options if option.default]
+
+
+async def test_anonymity_button_keeps_recipient_selected() -> None:
+    """The re-render after the anonymity button marks the chosen recipient as default."""
+    interaction = make_interaction()
+    key = list(SUGGESTION_OPTIONS)[-1]
+    view = SuggestionView(cog_bot())
+    view.recipient_select._values = [key]  # discord.py exposes no public setter
+    await view.recipient_select.callback(interaction)
+    await view.anonymity_button.callback(interaction)
+
+    edited = interaction.response.edit_message.call_args.kwargs["view"]
+    assert _defaults(edited) == [key]
+    assert len(edited.recipient_select.options) == len(SUGGESTION_OPTIONS)
+
+
+async def test_recipient_choice_never_leaks_to_another_view() -> None:
+    """A later SuggestionView starts with no default option."""
+    interaction = make_interaction()
+    key = next(iter(SUGGESTION_OPTIONS))
+    view = SuggestionView(cog_bot())
+    view.recipient_select._values = [key]
+    await view.recipient_select.callback(interaction)
+    await view.anonymity_button.callback(interaction)
+
+    assert _defaults(SuggestionView(cog_bot())) == []
+
+
+async def test_changing_recipient_moves_the_default() -> None:
+    """Choosing another recipient leaves only the new one selected."""
+    first, *_, last = SUGGESTION_OPTIONS
+    view = SuggestionView(cog_bot())
+    await _choose_and_toggle(view, first)
+    await _choose_and_toggle(view, last)
+
+    assert _defaults(view) == [last]
+
+
+def _template_options() -> list:
+    """The options the decorator hands to every view; they must stay untouched."""
+    return SuggestionView.recipient_select.__discord_ui_model_kwargs__["options"]  # type: ignore[attr-defined]
+
+
+async def _choose_and_toggle(view: SuggestionView, key: str) -> None:
+    interaction = make_interaction()
+    view.recipient_select._values = [key]
+    await view.recipient_select.callback(interaction)
+    await view.anonymity_button.callback(interaction)
+
+
+async def test_views_never_share_option_objects() -> None:
+    """Each view holds its own option list and objects, so an in-place change cannot leak."""
+    first, second = SuggestionView(cog_bot()), SuggestionView(cog_bot())
+    template = _template_options()
+
+    assert first.recipient_select.options is not second.recipient_select.options
+    for a, b, shared in zip(first.recipient_select.options, second.recipient_select.options, template, strict=True):
+        assert a is not b
+        assert a is not shared
+        assert b is not shared
+
+
+async def test_choice_stays_in_its_own_view_when_views_are_live_together() -> None:
+    """A view built before another member's choice stays clean, and so does the decorator template."""
+    mine, theirs = SuggestionView(cog_bot()), SuggestionView(cog_bot())
+    keys = list(SUGGESTION_OPTIONS)
+
+    await _choose_and_toggle(mine, keys[-1])
+    await _choose_and_toggle(theirs, keys[0])
+
+    assert _defaults(mine) == [keys[-1]]
+    assert _defaults(theirs) == [keys[0]]
+    assert not any(option.default for option in _template_options())
+
+
+@pytest.fixture
+def _template_defaults_restored() -> Iterator[None]:
+    """Put the decorator template's defaults back after a test, so a leak found there cannot reach another test."""
+    options = _template_options()
+    saved = [option.default for option in options]
+    yield
+    for option, default in zip(options, saved, strict=True):
+        option.default = default
+
+
+@pytest.mark.usefixtures("_template_defaults_restored")
+async def test_choice_stays_in_its_own_view_without_discord_copying_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The view keeps a choice to itself even if discord.py stops copying the decorator's options per view."""
+    monkeypatch.setattr(SelectOption, "copy", lambda self: self)
+    keys = list(SUGGESTION_OPTIONS)
+    before, chooser = SuggestionView(cog_bot()), SuggestionView(cog_bot())
+
+    await _choose_and_toggle(chooser, keys[-1])
+    after = SuggestionView(cog_bot())
+
+    assert _defaults(chooser) == [keys[-1]]
+    assert _defaults(before) == []
+    assert _defaults(after) == []
+    assert not any(option.default for option in _template_options())
+
+
+async def test_first_render_ignores_the_decorator_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A new view starts with no default whatever state the decorator's options are in."""
+    monkeypatch.setattr(_template_options()[0], "default", True)
+
+    assert _defaults(SuggestionView(cog_bot())) == []
