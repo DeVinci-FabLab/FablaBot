@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from fablabot.helpers.command_sync import COMMAND_SYNC_STATE_FILE, command_fingerprint
 from fablabot.helpers.i18n import catalog
 
 STAFF_GROUPS = ("text", "vocal", "fm", "log", "msg", "user", "welcome")
@@ -68,3 +71,11 @@ async def test_other_commands_have_no_translation(started_bot: Any) -> None:
     for name in (*STAFF_GROUPS, "suggest"):
         payload = await _translated(started_bot, name)
         assert not payload.get("name_localizations"), name
+
+
+async def test_commands_sync_with_their_translations(started_bot: Any) -> None:
+    """The translator is in place when the commands are synced, so the localized names reach Discord."""
+    started_bot.tree.sync.assert_awaited_once()
+    recorded = json.loads(Path(COMMAND_SYNC_STATE_FILE).read_text(encoding="utf-8"))["fingerprint"]
+    translated = await command_fingerprint(started_bot.tree, guild=None, application_id=started_bot.application_id)
+    assert recorded == translated
