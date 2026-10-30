@@ -151,6 +151,11 @@ def test_long_field_continues_under_its_heading() -> None:
     assert "\n".join(value for _, value in fields) == "\n".join(lines)
 
 
+def test_the_limits_are_the_ones_discord_enforces() -> None:
+    """The constants hold Discord's documented limits, so a test that imports them cannot follow a wrong edit."""
+    assert (MESSAGE_CHARS, FIELDS, FIELD_VALUE_CHARS) == (6000, 25, 1024)
+
+
 @pytest.mark.parametrize(("joined", "fields"), [(FIELD_VALUE_CHARS, 1), (FIELD_VALUE_CHARS + 1, 2)])
 def test_a_field_holds_exactly_the_limit(joined: int, fields: int) -> None:
     """Two lines joining to the limit stay one field value; one character more starts another."""
