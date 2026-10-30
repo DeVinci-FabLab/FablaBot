@@ -70,7 +70,8 @@ In the tables below, "admin roles" means Administrateur, Président, Vice-Prési
 
 - `/msg clear` removes 5 messages by default and 50 at most. It needs Manage Messages in the channel where
   it runs, and refuses bot channels, the log channel and the commands channel.
-- `/msg purge` needs the Administrator permission on the server.
+- `/msg purge` needs the Administrator permission on the server. It works outside the commands channel, and
+  with no `channel` option it targets the current channel.
 - `/msg link_reaction` takes one of three actions: `user_dm` (a DM to the member who reacts), `role_dm`
   (a DM to the members of a role) or `channel` (a message in a channel).
 
@@ -126,3 +127,5 @@ commands channel.
 | --- | --- | --- |
 | `/suggest` | Send an idea or a problem to the staff, anonymously if you like | Everyone |
 | `/help` | Show this list | Everyone |
+
+`/suggest` works outside the commands channel.

@@ -146,3 +146,20 @@ def test_user_guide_says_who_can_run_the_member_commands() -> None:
         assert audiences[f"/user {name}"] == ROLE_SUMMARY_CELL, name
     assert audiences["/msg clear"] == PERMISSION_CELLS[0]
     assert audiences["/msg purge"] == PERMISSION_CELLS[1]
+
+
+def test_user_guide_says_suggest_and_purge_work_outside_the_commands_channel() -> None:
+    """The two commands the channel rule does not gate say so, and purge says where it aims by default."""
+    text = _read("docs/USERGUIDE.md")
+    assert "`/suggest` works outside the commands channel." in _section(text, "## For everyone")
+    bullet = re.search(r"^- `/msg purge`.*(?:\n  .*)*", text, re.MULTILINE)
+    assert bullet
+    purge = " ".join(bullet.group().split())
+    assert "works outside the commands channel" in purge
+    assert "with no `channel` option it targets the current channel" in purge
+
+
+def test_operator_guide_describes_the_commands_channel_rule() -> None:
+    """The commands channel section names the two exempt commands."""
+    section = _section(_read("docs/OPERATIONS.md"), "## Commands channel")
+    assert "except `/suggest` and `/msg purge`" in section

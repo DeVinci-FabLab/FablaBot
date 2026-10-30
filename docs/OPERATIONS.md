@@ -187,7 +187,7 @@ checks the roles above when a command runs.
 
 ## Commands channel
 
-Commands only run in one text channel per server.
+Commands only run in one text channel per server, except `/suggest` and `/msg purge`, which work outside it.
 
 1. The bot reads the channel from the server's stored settings.
 2. If none is stored, it uses the text channel named `commandes_bot` (`helpers/utils.py:32`) and stores it.
