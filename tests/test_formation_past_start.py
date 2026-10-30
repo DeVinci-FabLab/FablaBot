@@ -108,3 +108,8 @@ async def test_edit_modal_now_or_later_passes(typed: str) -> None:
     view.refresh_main_message.assert_awaited_once_with(interaction)
     assert view.updated_formation.start_iso != "unchanged"
     interaction.response.send_message.assert_not_awaited()
+
+
+async def test_remove_description_mentions_no_index(cog: Any) -> None:
+    """/fm remove opens a selector, so its slash description names no index."""
+    assert cog.fm_remove.description == "Retirer une formation du brouillon."
