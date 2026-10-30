@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+from typing import Any
+
+from fablabot.cogs import user_management
+from fablabot.helpers.access import EVERYONE, AnyRole, rule_of
+from fablabot.helpers.constants import ADMIN_ROLES, RoleNames
+from fablabot.helpers.help_page import leaf_commands
 
 ROOT = Path(__file__).resolve().parent.parent
 DOMAINS = (
@@ -16,6 +22,14 @@ DOMAINS = (
     "Bot logs",
     "For everyone",
 )
+
+
+TABLE_HEADER = "| Command | What it does | Who can run it |"
+ADMIN_CELL = "Admin roles"
+EVERYONE_CELL = "Everyone"
+PERMISSION_CELLS = ("The Manage Messages permission", "The Administrator permission")
+ROLE_SUMMARY_CELL = "Depends on the role, see below"
+SAME_CELL = "Same"
 
 
 def _read(relative: str) -> str:
@@ -65,3 +79,70 @@ def test_readme_check_names_help() -> None:
     section = _section(text, "### Staff commands in the slash menu")
     assert "`/suggest` and `/help` stay visible to everyone" in section
     assert "it sees `/suggest` and `/help` and no staff group" in section
+
+
+def _audiences(text: str) -> dict[str, frozenset[str] | str]:
+    """Return what each domain table says about who can run each command, keyed by ``/group name``.
+
+    A cell naming roles becomes the set of role names (``Admin roles`` stands for the four admin roles, ``Same``
+    for the row above); a cell naming a permission or a rule in words stays as written.
+    """
+    audiences: dict[str, frozenset[str] | str] = {}
+    for domain in DOMAINS:
+        section = _section(text, f"## {domain}")
+        assert TABLE_HEADER in section, domain
+        previous: frozenset[str] | str = ""
+        for line in section.split(TABLE_HEADER, 1)[1].split("\n")[2:]:
+            if not line.startswith("|"):
+                break
+            command, _summary, cell = (part.strip() for part in line.strip("|").split(" | "))
+            name = " ".join(word for word in command.strip("`").split() if not word.startswith(("[", "<")))
+            if cell == SAME_CELL:
+                audiences[name] = previous
+            elif cell in (EVERYONE_CELL, ROLE_SUMMARY_CELL, *PERMISSION_CELLS):
+                audiences[name] = previous = cell
+            else:
+                roles: set[str] = set()
+                for part in cell.split(", "):
+                    roles |= ADMIN_ROLES if part == ADMIN_CELL else {part}
+                audiences[name] = previous = frozenset(roles)
+    return audiences
+
+
+def test_user_guide_tables_have_the_header_of_every_domain() -> None:
+    """Every domain section holds a ``Command | What it does | Who can run it`` table with at least one row."""
+    text = _read("docs/USERGUIDE.md")
+    for domain in DOMAINS:
+        section = _section(text, f"## {domain}")
+        assert f"{TABLE_HEADER}\n| --- | --- | --- |\n| `/" in section, domain
+
+
+async def test_user_guide_says_who_can_run_each_command(started_bot: Any) -> None:
+    """The audience in each table row is the set of roles the command's own rule holds, for every ruled command."""
+    audiences = _audiences(_read("docs/USERGUIDE.md"))
+    ruled = {f"/{c.qualified_name}": rule_of(c) for c in leaf_commands(started_bot.tree.walk_commands())}
+    ruled = {name: rule for name, rule in ruled.items() if rule is not None}
+    assert ruled
+    mismatches: list[str] = []
+    for name, rule in ruled.items():
+        if name not in audiences:
+            mismatches.append(f"{name}: missing from the user guide")
+        elif rule is EVERYONE:
+            if audiences[name] != EVERYONE_CELL:
+                mismatches.append(f"{name}: should say {EVERYONE_CELL}, says {audiences[name]!r}")
+        elif isinstance(rule, AnyRole) and audiences[name] != frozenset(rule.roles):
+            mismatches.append(f"{name}: should name {sorted(rule.roles)}, names {audiences[name]!r}")
+    assert not mismatches, "\n".join(mismatches)
+
+
+def test_user_guide_says_who_can_run_the_member_commands() -> None:
+    """The ``/user`` rows that differ from the admin set name the roles their checks name, and the others say so."""
+    audiences = _audiences(_read("docs/USERGUIDE.md"))
+    op_roles = frozenset(ADMIN_ROLES | {RoleNames.DIGITAL_MANAGER})
+    assert audiences["/user op"] == op_roles
+    assert audiences["/user deop"] == op_roles
+    assert audiences["/user with_roles"] == frozenset(user_management._WITH_ROLES_ALLOWED)
+    for name in ("add_role", "remove_role", "add_roles", "remove_roles"):
+        assert audiences[f"/user {name}"] == ROLE_SUMMARY_CELL, name
+    assert audiences["/msg clear"] == PERMISSION_CELLS[0]
+    assert audiences["/msg purge"] == PERMISSION_CELLS[1]
