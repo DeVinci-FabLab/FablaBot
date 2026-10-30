@@ -271,6 +271,14 @@ async def test_role_commands_need_a_role_the_caller_may_give(name: str, started_
     assert await _refused(command, world)
 
 
+def test_give_rule_judges_a_role_as_given_and_take_rule_as_taken() -> None:
+    """With only the temporary role on offer, the give rule refuses it (/user op gives it) and the take rule admits."""
+    # A real server also has @everyone, which an administrative role may give, so the two rules agree there.
+    caller = Caller(roles=(RoleNames.PRESIDENT,), permissions=Permissions.none(), server_roles=(RoleNames.ADMIN_TEMP,))
+    assert user_management._GIVE_ACCESS.admits(caller) is False
+    assert user_management._TAKE_ACCESS.admits(caller) is True
+
+
 @pytest.mark.usefixtures("patched_checks")
 @pytest.mark.parametrize("name", ["user add_role", "user add_roles", "user remove_role", "user remove_roles"])
 @pytest.mark.parametrize("absent", [RoleNames.SBIRE_BUREAU, RoleNames.AGENTS_MYFAB])
