@@ -9,13 +9,14 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 import logging
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from warnings import deprecated
 
 from discord import Guild, HTTPException, Interaction, Member, NotFound, Role, User, app_commands
 from discord.ext import commands
 from discord.utils import get
 
+from fablabot.helpers.access import AnyRole, Check, access
 from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames, staff_default_permissions
 from fablabot.helpers.safe_discord_operations import safe_add_roles, safe_remove_roles
 from fablabot.helpers.state_store import JsonStateStore
@@ -29,6 +30,9 @@ from fablabot.helpers.utils import (
 )
 from fablabot.models.user import OpExpiry
 from fablabot.ui import uui
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +50,64 @@ _ADD_REFUSALS = {
 _REMOVE_REFUSALS = {RefusalKind.MISSING_RIGHT: ErrorMessages.NO_PERMISSION_REMOVE_ROLE}
 # Same audience as the other staff tools (/msg): the member lists it shows are personal data.
 _WITH_ROLES_ALLOWED = ADMIN_ROLES | {RoleNames.BUREAU}
+
+
+def _role_names(member: Member) -> frozenset[str]:
+    """Return the names of the roles a member holds."""
+    return frozenset(role.name for role in member.roles)
+
+
+def can_assign(role_names: Collection[str], role: str) -> bool:
+    """Tell whether a holder of ``role_names`` may give or take the role named ``role``.
+
+    Args:
+        role_names (Collection[str]): The role names the member holds.
+        role (str): The name of the role to give or take.
+
+    Returns:
+        bool: True for an administrative role (never for the admin role itself), for the bureau's own roles,
+            for the pole whose manager the member is, and for the ``F - `` roles of a training manager.
+    """
+    if role == RoleNames.ADMIN:
+        return False
+    held = set(role_names)
+    if held & ADMIN_ROLES:
+        return True
+    if role in {RoleNames.SBIRE_BUREAU, RoleNames.AGENTS_MYFAB} and RoleNames.BUREAU in held:
+        return True
+    if role.startswith("Pôle ") and f"Respo {role.split('Pôle ', 1)[1]}" in held:
+        return True
+    return RoleNames.TRAININGS_MANAGER in held and role.startswith("F - ")
+
+
+def role_refusal(role_names: Collection[str], role: str, *, action: Literal["add", "remove"]) -> RefusalKind | None:
+    """Tell why a holder of ``role_names`` may not give or take ``role``, or None when allowed.
+
+    Args:
+        role_names (Collection[str]): The role names the member holds.
+        role (str): The name of the role to give or take.
+        action (Literal["add", "remove"]): Whether the role is given or taken.
+
+    Returns:
+        RefusalKind | None: The reason to refuse, or None. The self-target refusal depends on the target and is not here.
+    """
+    if not can_assign(role_names, role):
+        return RefusalKind.MISSING_RIGHT
+    if action == "add" and role == RoleNames.ADMIN_TEMP:
+        return RefusalKind.TEMP_ROLE_OUTSIDE_OP
+    return None
+
+
+def can_op(role_names: Collection[str]) -> bool:
+    """Tell whether a holder of ``role_names`` may op or deop: a right over the temporary role, or the digital manager."""
+    return can_assign(role_names, RoleNames.ADMIN_TEMP) or RoleNames.DIGITAL_MANAGER in role_names
+
+
+_OP_ACCESS = Check(lambda c: RoleNames.ADMIN_TEMP in c.server_roles and RoleNames.CODIR in c.server_roles and can_op(c.roles))
+_DEOP_ACCESS = Check(lambda c: RoleNames.ADMIN_TEMP in c.server_roles and can_op(c.roles))
+_GIVE_ACCESS = Check(lambda c: any(role_refusal(c.roles, r, action="add") is None for r in c.server_roles))
+_TAKE_ACCESS = Check(lambda c: any(role_refusal(c.roles, r, action="remove") is None for r in c.server_roles))
+_WITH_ROLES_ACCESS = AnyRole(_WITH_ROLES_ALLOWED)
 
 
 def _utcnow() -> datetime:
@@ -104,7 +166,9 @@ class UserManagement(commands.Cog):
         name="user", description="Gestion des utilisateurs", default_permissions=staff_default_permissions()
     )
 
-    @user_group.command(name="op", description="Donne des droits admin temporaires à un utilisateur.")
+    @user_group.command(
+        name="op", description="Donne des droits admin temporaires à un utilisateur.", extras=access(_OP_ACCESS)
+    )
     @app_commands.describe(
         member="L'utilisateur cible",
         reason="Raison de l'attribution",
@@ -146,7 +210,7 @@ class UserManagement(commands.Cog):
             )
             return
         assert isinstance(interaction.user, Member)
-        if not self._can_op(interaction.user, admin_role):
+        if not can_op(_role_names(interaction.user)):
             await self._refuse(interaction, "user.op", RefusalKind.MISSING_RIGHT, ErrorMessages.INSUFFICIENT_PERMISSIONS)
             return
         if member.id == interaction.user.id:
@@ -176,6 +240,7 @@ class UserManagement(commands.Cog):
     @user_group.command(
         name="deop",
         description="Retire les droits admin temporaires d'un utilisateur.",
+        extras=access(_DEOP_ACCESS),
     )
     @app_commands.describe(member="L'utilisateur cible")
     async def user_deop(self, interaction: Interaction, *, member: Member) -> None:
@@ -199,7 +264,7 @@ class UserManagement(commands.Cog):
             )
             return
         assert isinstance(interaction.user, Member)
-        if not self._can_op(interaction.user, admin_role):
+        if not can_op(_role_names(interaction.user)):
             await self._refuse(interaction, "user.deop", RefusalKind.MISSING_RIGHT, ErrorMessages.INSUFFICIENT_PERMISSIONS)
             return
 
@@ -230,6 +295,7 @@ class UserManagement(commands.Cog):
     @user_group.command(
         name="add_role",
         description="Donne un rôle à un utilisateur.",
+        extras=access(_GIVE_ACCESS),
     )
     @app_commands.describe(
         member="L'utilisateur cible",
@@ -266,6 +332,7 @@ class UserManagement(commands.Cog):
     @user_group.command(
         name="remove_role",
         description="Retire un rôle à un utilisateur.",
+        extras=access(_TAKE_ACCESS),
     )
     @app_commands.describe(
         member="L'utilisateur cible",
@@ -312,6 +379,7 @@ class UserManagement(commands.Cog):
     @user_group.command(
         name="add_roles",
         description="Donne un rôle à plusieurs utilisateurs via un sélecteur.",
+        extras=access(_GIVE_ACCESS),
     )
     @app_commands.describe(role="Le rôle à attribuer")
     async def user_add_roles(self, interaction: Interaction, *, role: Role) -> None:
@@ -349,6 +417,7 @@ class UserManagement(commands.Cog):
     @user_group.command(
         name="remove_roles",
         description="Retire un rôle à plusieurs utilisateurs via un sélecteur.",
+        extras=access(_TAKE_ACCESS),
     )
     @app_commands.describe(role="Le rôle à retirer")
     async def user_remove_roles(self, interaction: Interaction, *, role: Role) -> None:
@@ -386,6 +455,7 @@ class UserManagement(commands.Cog):
     @user_group.command(
         name="with_roles",
         description="Obtenir les membres avec des rôles spécifiques.",
+        extras=access(_WITH_ROLES_ACCESS),
     )
     async def user_with_roles(self, interaction: Interaction) -> None:
         """Get members with specific roles.
@@ -662,11 +732,6 @@ class UserManagement(commands.Cog):
         await interaction.response.send_message(text, ephemeral=True)
 
     @staticmethod
-    def _can_op(user: Member, admin_role: Role) -> bool:
-        """Checks if the member may op or deop: a permanent admin role or the digital manager role."""
-        return UserManagement._can_assign_role(user, admin_role) or RoleNames.DIGITAL_MANAGER in (r.name for r in user.roles)
-
-    @staticmethod
     def assignment_refusal(
         actor: Member,
         target: Member | None,
@@ -685,83 +750,24 @@ class UserManagement(commands.Cog):
         Returns:
             RefusalKind | None: The first reason to refuse, or None.
         """
-        if not UserManagement._can_assign_role(actor, role):
-            return RefusalKind.MISSING_RIGHT
-        if action == "add" and role.name == RoleNames.ADMIN_TEMP:
-            return RefusalKind.TEMP_ROLE_OUTSIDE_OP
-        if action == "add" and target is not None and target.id == actor.id:
+        kind = role_refusal(_role_names(actor), role.name, action=action)
+        if kind is None and action == "add" and target is not None and target.id == actor.id:
             return RefusalKind.SELF_TARGET
-        return None
+        return kind
 
     @staticmethod
-    def _can_assign_role(user: User | Member, target_role: Role) -> bool:
+    def _can_assign_role(user: Member | User, target_role: Role) -> bool:
         """Checks if the member can assign a specific role.
 
         Args:
-            user (User | Member): The user attempting to assign the role.
+            user (Member | User): The user attempting to assign the role.
             target_role (Role): The role to be assigned.
 
         Returns:
             bool: True if the user can assign the role, False otherwise.
         """
-        if target_role.name == RoleNames.ADMIN:
-            return False
         assert isinstance(user, Member)
-
-        return (
-            UserManagement._is_user_server_admin(user)
-            or UserManagement._is_user_responsible_for_pole(user, target_role)
-            or UserManagement._is_user_responsible_for_trainers(user, target_role)
-        )
-
-    @staticmethod
-    def _is_user_server_admin(member: Member) -> bool:
-        """Checks if the member has an administrative role.
-
-        Args:
-            member (Member): The member to check.
-
-        Returns:
-            bool: `True` if the member is a server admin, `False` otherwise.
-        """
-        member_role_names = {role.name for role in member.roles}
-        return bool(member_role_names & ADMIN_ROLES)
-
-    @staticmethod
-    def _is_user_responsible_for_pole(member: Member, target_role: Role) -> bool:
-        """Checks if member is responsible for the 'pole' of the target role.
-
-        Args:
-            member (Member): The member to check.
-            target_role (Role): The role to check against.
-
-        Returns:
-            bool: `True` if the member is responsible for the pole, `False` otherwise.
-        """
-        role_names = {role.name for role in member.roles}
-        if target_role.name == RoleNames.SBIRE_BUREAU and RoleNames.BUREAU in role_names:
-            return True
-        if target_role.name == RoleNames.AGENTS_MYFAB and RoleNames.BUREAU in role_names:
-            return True
-        if target_role.name.startswith("Pôle "):
-            suffix = target_role.name.split("Pôle ", 1)[1]
-            if f"Respo {suffix}" in role_names:
-                return True
-        return False
-
-    @staticmethod
-    def _is_user_responsible_for_trainers(member: Member, target_role: Role) -> bool:
-        """Checks if member manages formations for the target role.
-
-        Args:
-            member (Member): The member to check.
-            target_role (Role): The role to check against.
-
-        Returns:
-            bool: `True` if the member is responsible for the formation, `False` otherwise.
-        """
-        role_names = {role.name for role in member.roles}
-        return RoleNames.TRAININGS_MANAGER in role_names and target_role.name.startswith("F - ")
+        return can_assign(_role_names(user), target_role.name)
 
     # endregion Helpers
 

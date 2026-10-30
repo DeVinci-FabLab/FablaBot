@@ -38,7 +38,7 @@ from discord import (
 )
 from discord.ext import commands
 
-from fablabot.helpers.access import EVERYONE, AnyRole, access
+from fablabot.helpers.access import EVERYONE, AnyRole, ServerPermission, access
 from fablabot.helpers.constants import ADMIN_ROLES, PARIS_TZ, ErrorMessages, RoleNames, staff_default_permissions
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.state_store import JsonStateStore
@@ -110,7 +110,11 @@ class MessageManagement(commands.Cog):
         name="msg", description="Gestion des messages", default_permissions=staff_default_permissions()
     )
 
-    @msg_group.command(name="clear", description="Nettoie le salon actuel de ses derniers messages.")
+    @msg_group.command(
+        name="clear",
+        description="Nettoie le salon actuel de ses derniers messages.",
+        extras=access(ServerPermission("manage_messages")),
+    )
     @app_commands.describe(messages="Le nombre de messages à supprimer (par défaut 5)")
     async def msg_clear(self, interaction: Interaction, *, messages: app_commands.Range[int, 1, 50] = 5) -> None:
         """Clears the current channel of its last messages.
@@ -178,6 +182,7 @@ class MessageManagement(commands.Cog):
     @msg_group.command(
         name="purge",
         description="Supprime les messages d'un utilisateur (ADMIN ONLY)",
+        extras=access(ServerPermission("administrator")),
     )
     @app_commands.describe(
         user="Utilisateur à purger (OBLIGATOIRE)",

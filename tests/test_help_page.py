@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 ADMIN = (RoleNames.ADMIN,)
 ZERO = Permissions.none()
+SERVER_ROLES = tuple(value for key, value in vars(RoleNames).items() if key.isupper())
 
 
 class _ByPermission:
@@ -28,9 +29,9 @@ class _ByPermission:
         return caller.permissions.manage_messages
 
 
-def _caller(*roles: str) -> Caller:
-    """Build a caller holding ``roles`` (highest first), with no permission."""
-    return Caller(roles=roles, permissions=ZERO, server_roles=())
+def _caller(*roles: str, permissions: Permissions = ZERO) -> Caller:
+    """Build a caller holding ``roles`` (highest first), on a server that has every role the bot knows."""
+    return Caller(roles=roles, permissions=permissions, server_roles=SERVER_ROLES)
 
 
 def _commands(rules: dict[str, Any]) -> list[app_commands.Command[Any, ..., Any]]:
@@ -69,8 +70,10 @@ def test_empty_domain_is_left_out() -> None:
 
 def test_summary_names_the_opening_roles_highest_first() -> None:
     """An admin who is also Bureau gets both roles named, highest first, with the count of staff commands."""
-    embeds = build_help(declared_commands(), _caller(RoleNames.ADMIN, RoleNames.BUREAU), catalog().texts("en"))
-    assert embeds[0].description == "Your roles **Administrateur** and **Bureau** open 29 commands."
+    embeds = build_help(
+        declared_commands(), _caller(RoleNames.ADMIN, RoleNames.BUREAU, permissions=Permissions.all()), catalog().texts("en")
+    )
+    assert embeds[0].description == "Your roles **Administrateur** and **Bureau** open 38 commands."
     assert all(name != "Want to do more?" for name, _ in _fields(embeds))
 
 
@@ -101,6 +104,13 @@ def test_summary_for_permissions_only() -> None:
     assert embeds[0].description == "Your permissions on this server open 1 command."
 
 
+def test_summary_with_permissions_only() -> None:
+    """A member who can only manage messages is told their permissions open the one command."""
+    caller = Caller(roles=(), permissions=Permissions(manage_messages=True), server_roles=())
+    embeds = build_help(declared_commands(), caller, catalog().texts("fr"))
+    assert embeds[0].description == "Tes permissions sur ce serveur t\u2019ouvrent 1 commande."
+
+
 def test_role_names_are_escaped() -> None:
     """A role name cannot add markdown or a mention to the summary."""
     name = "**x** @everyone"
@@ -127,7 +137,7 @@ def test_one_message_when_it_fits() -> None:
     names = [name for name, _ in _fields(embeds)]
     assert len(embeds) == 1
     assert len(names) == len(set(names))
-    assert embeds[0].description == texts.plural("help.summary.one_role", 28, roles="**Administrateur**")
+    assert embeds[0].description == texts.plural("help.summary.one_role", 35, roles="**Administrateur**")
 
 
 def test_long_field_continues_under_its_heading() -> None:

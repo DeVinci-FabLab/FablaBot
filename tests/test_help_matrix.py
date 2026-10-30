@@ -13,9 +13,9 @@ import pytest
 
 from fablabot.cogs import user_management
 from fablabot.helpers import utils
-from fablabot.helpers.access import AnyRole, Caller, rule_of
+from fablabot.helpers.access import AccessRule, AnyRole, Caller, rule_of
 from fablabot.helpers.constants import ErrorMessages, RoleNames
-from fablabot.helpers.help_page import EVERYONE_DOMAIN, HELP_COMMAND, build_help, leaf_commands
+from fablabot.helpers.help_page import DOMAINS, EVERYONE_DOMAIN, HELP_COMMAND, build_help, leaf_commands, line_key
 from fablabot.helpers.i18n import catalog
 
 if TYPE_CHECKING:
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
     from discord import app_commands
 
-SERVER_ROLES = tuple(value for key, value in vars(RoleNames).items() if key.isupper())
+SERVER_ROLES: list[str] = [value for key, value in vars(RoleNames).items() if key.isupper()]
 F_ROLE = "F - Découpe laser"
 NO_RIGHT = (
     ErrorMessages.ROLE_REQUIRED.split("{")[0],
@@ -33,6 +33,8 @@ NO_RIGHT = (
     ErrorMessages.NO_PERMISSION_MANAGE_MESSAGES,
     user_management._TEMP_ROLE_REFUSED,
     "Seuls les administrateurs peuvent utiliser cette commande",
+    "Rôles administratifs manquants",
+    ErrorMessages.ROLE_NOT_FOUND.split("{")[0],
 )
 
 
@@ -49,14 +51,14 @@ class Profile:
 PROFILES = {
     "member": Profile((RoleNames.MEMBER_VERIFIED,), Permissions.none(), 0),
     "trainer": Profile((RoleNames.TRAININGS_MANAGER,), Permissions.none(), 9),
-    "trainer-with-F-roles": Profile((RoleNames.TRAININGS_MANAGER,), Permissions.none(), 9, f_roles=True),
+    "trainer-with-F-roles": Profile((RoleNames.TRAININGS_MANAGER,), Permissions.none(), 13, f_roles=True),
     "temp-admin": Profile((RoleNames.ADMIN_TEMP,), Permissions.none(), 9),
     "codir": Profile((RoleNames.CODIR,), Permissions.none(), 9),
-    "bureau": Profile((RoleNames.BUREAU,), Permissions.none(), 10),
-    "digital-manager": Profile((RoleNames.DIGITAL_MANAGER,), Permissions.none(), 1),
-    "admin-no-permission": Profile((RoleNames.ADMIN,), Permissions.none(), 28),
-    "admin-bureau-administrator": Profile((RoleNames.BUREAU, RoleNames.ADMIN), Permissions.all(), 29),
-    "manage-messages-only": Profile((), Permissions(manage_messages=True), 0),
+    "bureau": Profile((RoleNames.BUREAU,), Permissions.none(), 15),
+    "digital-manager": Profile((RoleNames.DIGITAL_MANAGER,), Permissions.none(), 7),
+    "admin-no-permission": Profile((RoleNames.ADMIN,), Permissions.none(), 35),
+    "admin-bureau-administrator": Profile((RoleNames.BUREAU, RoleNames.ADMIN), Permissions.all(), 38),
+    "manage-messages-only": Profile((), Permissions(manage_messages=True), 1),
 }
 
 
@@ -80,10 +82,10 @@ class World:
     caller: Caller
 
 
-def _world(profile: Profile) -> World:
-    """Build the interaction, the server's roles and the help caller of a profile."""
+def _world(profile: Profile, *, absent: tuple[str, ...] = ()) -> World:
+    """Build the interaction, the server's roles (less those in ``absent``) and the help caller of a profile."""
     interaction = make_interaction()
-    names = (*SERVER_ROLES, F_ROLE) if profile.f_roles else SERVER_ROLES
+    names = [name for name in (*SERVER_ROLES, *([F_ROLE] if profile.f_roles else [])) if name not in absent]
     server_roles = [_role(name) for name in names]
     interaction.guild.roles = server_roles
     interaction.user.roles = [_role(name) for name in profile.roles]
@@ -137,10 +139,24 @@ async def _refused(command: app_commands.Command[Any, ..., Any], world: World) -
     return True
 
 
+def _rule(command: app_commands.Command[Any, ..., Any]) -> AccessRule:
+    """The rule of a command; a command without one fails the test that reads it."""
+    rule = rule_of(command)
+    assert rule is not None, f"/{command.qualified_name} has no access rule"
+    return rule
+
+
 def _ruled(bot: Any) -> list[app_commands.Command[Any, ..., Any]]:
-    """The commands of the real tree that carry an access rule, each once."""
-    ruled = {c.qualified_name: c for c in leaf_commands(bot.tree.walk_commands()) if rule_of(c) is not None}
-    return list(ruled.values())
+    """Every command of the real tree, each once, each asserted to carry an access rule."""
+    commands = {c.qualified_name: c for c in leaf_commands(bot.tree.walk_commands())}
+    for command in commands.values():
+        _rule(command)
+    return list(commands.values())
+
+
+def _command(bot: Any, name: str) -> app_commands.Command[Any, ..., Any]:
+    """The command of the real tree with this qualified name."""
+    return next(c for c in _ruled(bot) if c.qualified_name == name)
 
 
 @pytest.mark.usefixtures("patched_checks")
@@ -150,9 +166,7 @@ async def test_help_matches_every_callback(profile: str, started_bot: Any) -> No
     world = _world(PROFILES[profile])
     mismatches: list[str] = []
     for command in _ruled(started_bot):
-        rule = rule_of(command)
-        assert rule is not None
-        admitted = rule.admits(world.caller)
+        admitted = _rule(command).admits(world.caller)
         refused = await _refused(command, world)
         if admitted == refused:
             mismatches.append(f"/{command.qualified_name}: help says {admitted}, callback refuses {refused}")
@@ -200,3 +214,73 @@ async def test_every_role_rule_is_the_set_the_callback_checks(started_bot: Any) 
         if not seen or seen[0] is not rule.roles:
             mismatches.append(f"/{command.qualified_name}: " + ("no role check ran" if not seen else "another set"))
     assert not mismatches, "\n".join(mismatches)
+
+
+async def test_every_command_has_a_rule_a_line_and_a_place(started_bot: Any) -> None:
+    """Every command of the real tree has a rule, an English line and a place in DOMAINS, and DOMAINS lists no other."""
+    reference = catalog().texts("en").reference
+    tree = {c.qualified_name: c for c in leaf_commands(started_bot.tree.walk_commands())}
+    placed = {name if domain == EVERYONE_DOMAIN else f"{domain} {name}" for domain, names in DOMAINS for name in names}
+    lacking = {
+        name: [
+            what
+            for what, missing in (
+                ("a rule", rule_of(command) is None),
+                ("an en line", line_key(name) not in reference),
+                ("a place in DOMAINS", name not in placed),
+            )
+            if missing
+        ]
+        for name, command in tree.items()
+    }
+    problems = [f"/{name} lacks {', '.join(what)}" for name, what in lacking.items() if what]
+    problems += [f"DOMAINS names /{name}, which the tree lacks" for name in sorted(placed - tree.keys())]
+    assert not problems, "\n".join(problems)
+
+
+@pytest.mark.usefixtures("patched_checks")
+async def test_op_needs_both_roles_on_the_server(started_bot: Any) -> None:
+    """An admin on a server without CoDir, or without the temporary role, is neither listed nor served for /user op."""
+    command = _command(started_bot, "user op")
+    full = _world(PROFILES["admin-no-permission"])
+    assert _rule(command).admits(full.caller)
+    assert not await _refused(command, full)
+    for absent in (RoleNames.CODIR, RoleNames.ADMIN_TEMP):
+        world = _world(PROFILES["admin-no-permission"], absent=(absent,))
+        assert not _rule(command).admits(world.caller), absent
+        assert await _refused(command, world), absent
+
+
+@pytest.mark.usefixtures("patched_checks")
+async def test_deop_needs_the_temporary_role_on_the_server(started_bot: Any) -> None:
+    """/user deop is listed only on a server that has the temporary role, whether or not it has CoDir."""
+    command = _command(started_bot, "user deop")
+    for absent, listed in (((), True), ((RoleNames.CODIR,), True), ((RoleNames.ADMIN_TEMP,), False)):
+        world = _world(PROFILES["admin-no-permission"], absent=absent)
+        assert _rule(command).admits(world.caller) is listed, absent
+        assert await _refused(command, world) is not listed, absent
+
+
+@pytest.mark.usefixtures("patched_checks")
+@pytest.mark.parametrize("name", ["user add_role", "user add_roles"])
+async def test_role_commands_need_a_role_the_caller_may_give(name: str, started_bot: Any) -> None:
+    """Bureau on a server with neither Sbire Bureau nor agent MyFab has no role to give: unlisted, and refused for all."""
+    command = _command(started_bot, name)
+    world = _world(PROFILES["bureau"], absent=(RoleNames.SBIRE_BUREAU, RoleNames.AGENTS_MYFAB))
+    assert not _rule(command).admits(world.caller)
+    assert await _refused(command, world)
+
+
+def test_role_refusal_agrees_with_assignment_refusal() -> None:
+    """For every role and every kind of holder, the rule's reasoning and the callback's give the same refusal."""
+    roles = [*SERVER_ROLES, "F - x", RoleNames.DIGITAL_POLE]
+    for profile in PROFILES.values():
+        actor = MagicMock(spec=Member)
+        actor.id = 1
+        actor.roles = [_role(name) for name in profile.roles]
+        names = user_management._role_names(actor)
+        for name in roles:
+            for action in ("add", "remove"):
+                stub = _role(name)
+                expected = user_management.UserManagement.assignment_refusal(actor, None, stub, action=action)
+                assert user_management.role_refusal(names, name, action=action) == expected, (profile.roles, name, action)

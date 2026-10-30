@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, Final, Protocol, Self
+from typing import TYPE_CHECKING, Any, Final, Literal, Protocol, Self
 
 from discord import Permissions
 
 if TYPE_CHECKING:
-    from collections.abc import Collection
+    from collections.abc import Callable, Collection
 
     from discord import Guild, Member, app_commands
 
@@ -103,6 +103,50 @@ class AnyRole:
             bool: True when any of the caller's roles is in the set.
         """
         return any(role in self.roles for role in caller.roles)
+
+
+@dataclass(frozen=True)
+class ServerPermission:
+    """The rule of a command open to the members who hold a server permission.
+
+    Attributes:
+        name (Literal["manage_messages", "administrator"]): The permission the command's callback checks.
+    """
+
+    name: Literal["manage_messages", "administrator"]
+
+    def admits(self, caller: Caller) -> bool:
+        """Admit a caller who holds the permission.
+
+        Args:
+            caller (Caller): The member asking.
+
+        Returns:
+            bool: True when the caller holds the permission on the server.
+        """
+        return bool(getattr(caller.permissions, self.name))
+
+
+@dataclass(frozen=True)
+class Check:
+    """The rule of a command whose callback reasons on the caller's roles and the server's.
+
+    Attributes:
+        test (Callable[[Caller], bool]): The same reasoning the callback runs, on a described caller.
+    """
+
+    test: Callable[[Caller], bool]
+
+    def admits(self, caller: Caller) -> bool:
+        """Admit a caller the test accepts.
+
+        Args:
+            caller (Caller): The member asking.
+
+        Returns:
+            bool: The test's answer.
+        """
+        return self.test(caller)
 
 
 def access(rule: AccessRule) -> dict[str, Any]:

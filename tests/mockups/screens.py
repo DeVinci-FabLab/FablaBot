@@ -125,6 +125,13 @@ async def help_trainer() -> Screen:
     return await _help_for(_member(RoleNames.TRAININGS_MANAGER), Locale.american_english)
 
 
+async def help_admin() -> Screen:
+    """``/help`` for an administrator who is also Bureau and holds every permission, in French."""
+    member = _member(RoleNames.BUREAU, RoleNames.ADMIN)
+    member.guild_permissions = Permissions.all()
+    return await _help_for(member, Locale.french)
+
+
 async def fm_edit() -> Screen:
     """``/fm edit``: the draft preview and one button per formation."""
     capture = Capture()
@@ -162,6 +169,7 @@ async def fm_start_modal() -> Screen:
 SCREENS: dict[str, Callable[[], Coroutine[Any, Any, Screen]]] = {
     "help-member": help_member,
     "help-trainer": help_trainer,
+    "help-admin": help_admin,
     "fm-edit": fm_edit,
     "suggest": suggest,
     "suggest-modal": suggest_modal,
