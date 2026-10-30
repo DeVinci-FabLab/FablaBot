@@ -285,8 +285,8 @@ async def test_bureau_may_give_and_take_each_of_its_two_roles(name: str, absent:
 @pytest.mark.parametrize("holder", sorted(ADMIN_ROLES))
 @pytest.mark.parametrize(
     "beside",
-    [(), (RoleNames.MEMBER_VERIFIED,), (*sorted(ADMIN_ROLES), RoleNames.BUREAU)],
-    ids=["alone", "with-member-role", "with-every-administrative-role"],
+    [(), (RoleNames.MEMBER_VERIFIED,), (RoleNames.ADMIN_TEMP,), (*sorted(ADMIN_ROLES), RoleNames.BUREAU)],
+    ids=["alone", "with-member-role", "with-temporary-role", "with-every-administrative-role"],
 )
 def test_no_administrative_role_may_give_or_take_the_admin_role(holder: str, beside: tuple[str, ...]) -> None:
     """The admin role is out of reach of every administrative role, alone or among other roles, whatever the action."""
