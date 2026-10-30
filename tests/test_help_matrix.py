@@ -283,11 +283,17 @@ async def test_bureau_may_give_and_take_each_of_its_two_roles(name: str, absent:
 
 
 @pytest.mark.parametrize("holder", sorted(ADMIN_ROLES))
-def test_no_administrative_role_may_give_or_take_the_admin_role(holder: str) -> None:
-    """The admin role is out of reach of every administrative role, whatever the action."""
-    assert user_management.can_assign({holder}, RoleNames.ADMIN) is False
+@pytest.mark.parametrize(
+    "beside",
+    [(), (RoleNames.MEMBER_VERIFIED,), (*sorted(ADMIN_ROLES), RoleNames.BUREAU)],
+    ids=["alone", "with-member-role", "with-every-administrative-role"],
+)
+def test_no_administrative_role_may_give_or_take_the_admin_role(holder: str, beside: tuple[str, ...]) -> None:
+    """The admin role is out of reach of every administrative role, alone or among other roles, whatever the action."""
+    held = {holder, *beside}
+    assert user_management.can_assign(held, RoleNames.ADMIN) is False
     for action in ("add", "remove"):
-        assert user_management.role_refusal({holder}, RoleNames.ADMIN, action=action) is not None
+        assert user_management.role_refusal(held, RoleNames.ADMIN, action=action) is not None
 
 
 def test_role_refusal_agrees_with_assignment_refusal() -> None:
