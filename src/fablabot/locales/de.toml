@@ -1,0 +1,95 @@
+# German. Informal address (du).
+
+[help]
+title = "Was du hier ausführen kannst"
+member_intro = "Das sind die Befehle, die du mit deinen Rollen auf diesem Server ausführen kannst."
+footer = "Fehlt etwas oder klappt etwas nicht? Sag es uns mit /suggest."
+line = "{command}: {text}"
+roles_join = "{head} und {last}"
+
+[help.slash]
+name = "hilfe"
+description = "Zeigt die Befehle, die du auf diesem Server ausführen kannst"
+show = "Postet die Liste für alle sichtbar im Kanal"
+
+[help.summary.one_role]
+one = "Deine Rolle {roles} öffnet dir {count} Befehl."
+other = "Deine Rolle {roles} öffnet dir {count} Befehle."
+
+[help.summary.many_roles]
+one = "Deine Rollen {roles} öffnen dir {count} Befehl."
+other = "Deine Rollen {roles} öffnen dir {count} Befehle."
+
+[help.summary.permissions]
+one = "Deine Berechtigungen auf diesem Server öffnen dir {count} Befehl."
+other = "Deine Berechtigungen auf diesem Server öffnen dir {count} Befehle."
+
+[help.more]
+name = "Willst du mehr machen?"
+value = "Befehle für Schulungen, Kanäle oder Nachrichten gibt es mit einer Staff-Rolle. Wenn du hilfst, diesen Server zu betreiben, bitte ein Staff-Mitglied um die passende Rolle."
+
+[help.domain]
+text = "Textkanäle"
+vocal = "Sprachkanäle"
+fm = "Schulungen"
+msg = "Bot-Nachrichten"
+user = "Mitglieder und Rollen"
+welcome = "Begrüßung neuer Mitglieder"
+log = "Bot-Protokolle"
+everyone = "Für alle"
+
+[help.cmd.text]
+create = "erstellt einen Kanal"
+rename = "benennt einen Kanal um"
+delete = "löscht einen Kanal"
+
+[help.cmd.vocal]
+create = "erstellt deinen eigenen Sprachkanal"
+rename = "benennt einen Sprachkanal um"
+delete = "löscht einen Sprachkanal"
+
+[help.cmd.fm]
+start = "beginnt einen neuen Entwurf, der den alten ersetzt"
+edit_text = "bearbeitet Einleitung und Schluss"
+add = "fügt dem Entwurf eine Schulung hinzu"
+edit = "ändert eine Schulung im Entwurf"
+remove = "nimmt eine Schulung heraus"
+clear = "entfernt alle Schulungen"
+preview = "zeigt hier die Vorschau des Entwurfs"
+publish = "postet den Entwurf in einem Kanal"
+export = "listet An- und Abmeldungen auf"
+
+[help.cmd.msg]
+start = "beginnt einen Entwurf"
+preview = "zeigt die Vorschau"
+publish = "veröffentlicht und verfolgt"
+follow = "verfolgt eine bereits gesendete Nachricht"
+link_reaction = "verknüpft eine Reaktion"
+unlink_reaction = "löst eine Reaktion"
+list = "listet verfolgte Nachrichten auf"
+export = "exportiert die Reaktionen"
+stop = "beendet eine Verfolgung"
+clear = "löscht hier die letzten Nachrichten"
+purge = "löscht die Nachrichten eines Mitglieds"
+dm = "schickt mehreren eine Direktnachricht"
+
+[help.cmd.user]
+op = "gibt befristete Admin-Rechte"
+deop = "entzieht befristete Admin-Rechte"
+add_role = "gibt eine Rolle"
+remove_role = "entzieht eine Rolle"
+add_roles = "gibt mehreren eine Rolle"
+remove_roles = "entzieht mehreren eine Rolle"
+with_roles = "wer diese Rollen hat"
+
+[help.cmd.welcome]
+verify = "schaltet die Begrüßung ein oder aus"
+approve = "bestätigt ein neues Mitglied"
+
+[help.cmd.log]
+set = "wählt den Fehlerkanal"
+export = "exportiert die Protokolle"
+
+[help.cmd]
+suggest = "schickt dem Staff eine Idee oder ein Problem, auf Wunsch anonym"
+help = "zeigt diese Liste"

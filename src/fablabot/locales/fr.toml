@@ -1,0 +1,96 @@
+# French. Before ":" a no-break space (\u00A0), before "?", "!" and ";" a narrow no-break space (\u202F).
+# Informal address (tu).
+
+[help]
+title = "Ce que tu peux lancer ici"
+member_intro = "Voici les commandes que tes rôles te permettent de lancer sur ce serveur."
+footer = "Un manque ou un souci\u202F? Dis-le-nous avec /suggest."
+line = "{command}\u00A0: {text}"
+roles_join = "{head} et {last}"
+
+[help.slash]
+name = "aide"
+description = "Affiche les commandes que tu peux lancer sur ce serveur"
+show = "Publie la liste dans le salon, pour tout le monde"
+
+[help.summary.one_role]
+one = "Ton rôle {roles} t’ouvre {count} commande."
+other = "Ton rôle {roles} t’ouvre {count} commandes."
+
+[help.summary.many_roles]
+one = "Tes rôles {roles} t’ouvrent {count} commande."
+other = "Tes rôles {roles} t’ouvrent {count} commandes."
+
+[help.summary.permissions]
+one = "Tes permissions sur ce serveur t’ouvrent {count} commande."
+other = "Tes permissions sur ce serveur t’ouvrent {count} commandes."
+
+[help.more]
+name = "Envie d’en faire plus\u202F?"
+value = "Les commandes des formations, des salons ou des messages viennent avec un rôle du staff. Si tu aides à faire vivre ce serveur, demande à un membre du staff de te donner le bon rôle."
+
+[help.domain]
+text = "Salons texte"
+vocal = "Salons vocaux"
+fm = "Formations"
+msg = "Messages du bot"
+user = "Membres et rôles"
+welcome = "Accueil des nouveaux"
+log = "Journaux du bot"
+everyone = "Pour tout le monde"
+
+[help.cmd.text]
+create = "crée un salon"
+rename = "renomme un salon"
+delete = "supprime un salon"
+
+[help.cmd.vocal]
+create = "crée un vocal perso"
+rename = "renomme un vocal"
+delete = "supprime un vocal"
+
+[help.cmd.fm]
+start = "repart d’un nouveau brouillon, qui remplace l’ancien"
+edit_text = "modifie l’intro et la fin"
+add = "ajoute une formation au brouillon"
+edit = "modifie une formation du brouillon"
+remove = "retire une formation"
+clear = "retire toutes les formations"
+preview = "montre l’aperçu du brouillon ici"
+publish = "poste le brouillon dans un salon"
+export = "liste les inscriptions et désinscriptions"
+
+[help.cmd.msg]
+start = "commence un brouillon"
+preview = "montre l’aperçu"
+publish = "publie et suit"
+follow = "suit un message envoyé"
+link_reaction = "lie une réaction"
+unlink_reaction = "délie une réaction"
+list = "liste les suivis"
+export = "exporte les réactions"
+stop = "arrête un suivi"
+clear = "efface les derniers messages"
+purge = "efface les messages d’un membre"
+dm = "envoie un MP groupé"
+
+[help.cmd.user]
+op = "donne l’admin temporaire"
+deop = "retire l’admin temporaire"
+add_role = "donne un rôle"
+remove_role = "retire un rôle"
+add_roles = "donne un rôle à plusieurs"
+remove_roles = "retire un rôle à plusieurs"
+with_roles = "qui a ces rôles"
+
+[help.cmd.welcome]
+verify = "allume ou coupe l’accueil"
+approve = "valide un nouveau"
+
+[help.cmd.log]
+set = "choisit le salon des erreurs"
+export = "exporte les journaux"
+
+[help.cmd]
+suggest = "envoie une idée ou un problème au staff, anonymement si tu veux"
+help = "affiche cette liste"

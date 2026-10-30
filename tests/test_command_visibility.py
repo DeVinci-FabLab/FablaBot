@@ -2,43 +2,22 @@
 
 from __future__ import annotations
 
-import importlib
-from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock
+from typing import Any
 
 import pytest
 
-from fablabot.helpers.guild_access import ALLOWED_GUILD_IDS_ENV
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+from fablabot.helpers.i18n import catalog
 
 STAFF_GROUPS = ("text", "vocal", "fm", "log", "msg", "user", "welcome")
-MEMBER_COMMANDS = ("suggest",)
+MEMBER_COMMANDS = ("suggest", "help")
 GUILD_CONTEXT = 0
 """Discord's interaction context type for a server channel."""
-LISTED_GUILD = "111111111111111111"
 
 
 @pytest.fixture
-async def payloads(tmp_path, monkeypatch) -> AsyncIterator[dict[str, dict[str, Any]]]:
+async def payloads(started_bot: Any) -> dict[str, dict[str, Any]]:
     """Build the payload of each top-level command from the real bot and its real cogs."""
-    token = tmp_path / "token"
-    token.write_text("fake-token")
-    monkeypatch.setenv("DISCORD_TOKEN_FILE", str(token))
-    monkeypatch.setenv(ALLOWED_GUILD_IDS_ENV, LISTED_GUILD)
-    import fablabot.main
-
-    main = importlib.reload(fablabot.main)
-    monkeypatch.setattr(main, "configure_logging", lambda _bot: (None, None))
-    bot = main.Fablabot()
-    bot.tree.sync = AsyncMock(return_value=[])
-    # Entering the client sets up its loop state without logging in, so the cogs' tasks wait instead of failing.
-    async with bot:
-        await bot.setup_hook()
-        yield {command.name: command.to_dict(bot.tree) for command in bot.tree.get_commands()}
-        for name in list(bot.cogs):
-            await bot.remove_cog(name)
+    return {command.name: command.to_dict(started_bot.tree) for command in started_bot.tree.get_commands()}
 
 
 def test_every_top_level_command_is_classified(payloads: dict[str, dict[str, Any]]) -> None:
@@ -62,3 +41,30 @@ def test_member_command_is_visible_to_everyone(payloads: dict[str, dict[str, Any
 def test_command_is_usable_in_servers_only(payloads: dict[str, dict[str, Any]], name: str) -> None:
     """A command is offered in server channels only, never in direct messages."""
     assert payloads[name]["contexts"] == [GUILD_CONTEXT]
+
+
+async def _translated(bot: Any, name: str) -> dict[str, Any]:
+    """Return the payload of a top-level command with the catalogue's translations applied."""
+    command = bot.tree.get_command(name)
+    assert command is not None
+    return await command.get_translated_payload(bot.tree, bot.tree.translator)
+
+
+async def test_help_payload_is_localized(started_bot: Any) -> None:
+    """The help command is named and described in French and German, and its option is described too."""
+    payload = await _translated(started_bot, "help")
+    texts = {code: catalog().texts(code) for code in ("fr", "de")}
+    assert payload["name"] == "help"
+    assert payload["name_localizations"] == {"fr": "aide", "de": "hilfe"}
+    assert payload["description_localizations"] == {code: texts[code].get("help.slash.description") for code in ("fr", "de")}
+    (option,) = payload["options"]
+    assert option["name"] == "show"
+    assert not option.get("name_localizations")
+    assert option["description_localizations"] == {code: texts[code].get("help.slash.show") for code in ("fr", "de")}
+
+
+async def test_other_commands_have_no_translation(started_bot: Any) -> None:
+    """Only the help command is translated: every other top-level command keeps a single name."""
+    for name in (*STAFF_GROUPS, "suggest"):
+        payload = await _translated(started_bot, name)
+        assert not payload.get("name_localizations"), name

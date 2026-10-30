@@ -12,6 +12,8 @@ MAX_TRACKED_OPTIONS = 25
 EMBED_PREVIEW_MAX_CHARS = 900
 EMBED_TOTAL_FIELD_CHAR_BUDGET = 5800
 EMBED_PREVIEW_MIN_CHARS = 80
+BRAND_COLOUR = 0xEA5B25
+"""Accent colour of the bot's embeds, the FabLab orange, the shipped default."""
 
 
 class RoleNames:

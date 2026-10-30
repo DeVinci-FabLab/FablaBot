@@ -38,6 +38,7 @@ from discord import (
 )
 from discord.ext import commands
 
+from fablabot.helpers.access import EVERYONE, access
 from fablabot.helpers.constants import ADMIN_ROLES, PARIS_TZ, ErrorMessages, RoleNames, staff_default_permissions
 from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.reaction_log import ReactionLogManager
@@ -782,7 +783,11 @@ class MessageManagement(commands.Cog):
 
     # region ====== Suggestion Slash Command ======
 
-    @app_commands.command(name="suggest", description="Envoyer une suggestion (choisir destinataire, texte, anonymat)")
+    @app_commands.command(
+        name="suggest",
+        extras=access(EVERYONE),
+        description="Envoyer une suggestion (choisir destinataire, texte, anonymat)",
+    )
     async def suggest(self, interaction: Interaction) -> None:
         """Single command entrypoint for sending suggestions via a small interactive flow.
 

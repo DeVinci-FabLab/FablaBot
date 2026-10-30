@@ -1,0 +1,96 @@
+# English is the reference locale: every other file has the same keys and the same {placeholders}.
+# A table holding exactly "one" and "other" is a plural, picked by {count}.
+
+[help]
+title = "What you can run here"
+member_intro = "These are the commands your roles let you run on this server."
+footer = "Something missing or not working? Tell us with /suggest."
+line = "{command}: {text}"
+roles_join = "{head} and {last}"
+
+[help.slash]
+name = "help"
+description = "Show the commands you can run on this server"
+show = "Post the list in the channel for everyone to see"
+
+[help.summary.one_role]
+one = "Your role {roles} opens {count} command."
+other = "Your role {roles} opens {count} commands."
+
+[help.summary.many_roles]
+one = "Your roles {roles} open {count} command."
+other = "Your roles {roles} open {count} commands."
+
+[help.summary.permissions]
+one = "Your permissions on this server open {count} command."
+other = "Your permissions on this server open {count} commands."
+
+[help.more]
+name = "Want to do more?"
+value = "Commands for trainings, channels or messages come with a staff role. If you help run this server, ask a staff member to give you the right role."
+
+[help.domain]
+text = "Text channels"
+vocal = "Voice channels"
+fm = "Trainings"
+msg = "Bot messages"
+user = "Members and roles"
+welcome = "Welcoming newcomers"
+log = "Bot logs"
+everyone = "For everyone"
+
+[help.cmd.text]
+create = "create a channel"
+rename = "rename a channel"
+delete = "delete a channel"
+
+[help.cmd.vocal]
+create = "create your own voice channel"
+rename = "rename a voice channel"
+delete = "delete a voice channel"
+
+[help.cmd.fm]
+start = "start over with a new draft"
+edit_text = "edit intro and closing"
+add = "add a training to the draft"
+edit = "change a training in the draft"
+remove = "take a training out"
+clear = "remove every training"
+preview = "preview the draft here"
+publish = "post the draft in a channel"
+export = "list sign-ups and drop-outs"
+
+[help.cmd.msg]
+start = "start a draft"
+preview = "preview the draft"
+publish = "publish and track"
+follow = "track a message already sent"
+link_reaction = "link a reaction"
+unlink_reaction = "unlink a reaction"
+list = "list tracked messages"
+export = "export the reactions"
+stop = "stop tracking a message"
+clear = "delete the last messages here"
+purge = "delete a member's messages"
+dm = "send a group DM"
+
+[help.cmd.user]
+op = "give temporary admin"
+deop = "take temporary admin back"
+add_role = "give a role"
+remove_role = "take a role away"
+add_roles = "give a role to several members"
+remove_roles = "take a role from several members"
+with_roles = "who has these roles"
+
+[help.cmd.welcome]
+verify = "turn welcoming on or off"
+approve = "approve a newcomer"
+
+[help.cmd.log]
+set = "pick the error channel"
+export = "export the logs"
+
+[help.cmd]
+suggest = "send an idea or a problem to the staff, anonymously if you like"
+help = "show this list"
