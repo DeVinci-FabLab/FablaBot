@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Literal
 from warnings import deprecated
 
 from discord import Guild, HTTPException, Interaction, Member, NotFound, Role, User, app_commands
+from discord.abc import Messageable
 from discord.ext import commands
 from discord.utils import get
 
@@ -716,7 +717,7 @@ class UserManagement(commands.Cog):
     async def _post_op_notice(guild: Guild, member_id: int, expiry: OpExpiry, text: str) -> None:
         """Post an op notice in the channel where the op was run; log only when it is gone."""
         channel = guild.get_channel(expiry.channel_id)
-        if channel is None or not hasattr(channel, "send"):
+        if channel is None or not isinstance(channel, Messageable):
             logger.warning(
                 f"Op channel {expiry.channel_id} gone in guild_id={guild.id} member_id={member_id}; notice not posted",
             )

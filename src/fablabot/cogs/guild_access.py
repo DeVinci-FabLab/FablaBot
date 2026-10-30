@@ -41,7 +41,7 @@ class GuildAccess(commands.Cog):
         if guild.owner_id is None:
             return False
         try:
-            return await self.bot.is_owner(discord.Object(id=guild.owner_id))
+            return await self.bot.is_owner(discord.Object(id=guild.owner_id))  # pyright: ignore[reportArgumentType] -- is_owner only reads .id
         except discord.HTTPException as exc:
             logger.warning(f"Could not check the application owner (guild_id={guild.id}): {exc}")
             return False
