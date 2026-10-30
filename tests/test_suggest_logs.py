@@ -224,3 +224,10 @@ async def test_choice_stays_in_its_own_view_without_discord_copying_options(monk
     assert _defaults(before) == []
     assert _defaults(after) == []
     assert not any(option.default for option in _template_options())
+
+
+async def test_first_render_ignores_the_decorator_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A new view starts with no default whatever state the decorator's options are in."""
+    monkeypatch.setattr(_template_options()[0], "default", True)
+
+    assert _defaults(SuggestionView(cog_bot())) == []
