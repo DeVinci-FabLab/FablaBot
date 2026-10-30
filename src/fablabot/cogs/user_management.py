@@ -17,7 +17,6 @@ from discord.ext import commands
 from discord.utils import get
 
 from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames, staff_default_permissions
-from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.safe_discord_operations import safe_add_roles, safe_remove_roles
 from fablabot.helpers.state_store import JsonStateStore
 from fablabot.helpers.utils import (
@@ -70,7 +69,6 @@ class UserManagement(commands.Cog):
     """Cog to register user management commands.
 
     Commands:
-        - /user help: Display help for user management commands.
         - /user op: Grant temporary admin privileges to a user.
         - /user deop: Revoke temporary admin privileges from a user.
         - /user add_role: Add a role to a single user.
@@ -100,45 +98,11 @@ class UserManagement(commands.Cog):
         logger.info("UserManagement initialized")
 
     # region ====== User Slash Commands Group ======
-    # -- Help & Admin Access --
+    # -- Admin Access --
 
     user_group = app_commands.Group(
         name="user", description="Gestion des utilisateurs", default_permissions=staff_default_permissions()
     )
-
-    @user_group.command(
-        name="help",
-        description="Affiche l'aide pour les commandes de gestion des utilisateurs.",
-    )
-    @app_commands.describe(show="Afficher l'aide publiquement ou non")
-    async def user_help(self, interaction: Interaction, *, show: bool = False) -> None:
-        """Display help for user management commands.
-
-        Args:
-            interaction (Interaction): The Discord interaction context.
-            show (bool): Whether to show the help publicly or not.
-        """
-        help_message = build_help_message(
-            "Commandes de gestion des utilisateurs",
-            "user",
-            [
-                (
-                    "op <user> <reason> [time]",
-                    f"Donner le rôle {RoleNames.ADMIN_TEMP} pour une durée limitée (5 minutes par défaut, 90 au plus). "
-                    "Il n'ouvre que les commandes qui le nomment, aujourd'hui /fm. On ne peut pas s'op soi-même",
-                ),
-                ("deop <user>", f"Retirer le rôle {RoleNames.ADMIN_TEMP} avant la fin de sa durée"),
-                (
-                    "add_role <user> <role>",
-                    f"Ajouter un rôle à un utilisateur, jamais à soi-même ({RoleNames.ADMIN_TEMP} se donne avec op)",
-                ),
-                ("remove_role <user> <role>", "Retirer un rôle à un utilisateur"),
-                ("add_roles <role>", "Ajouter un rôle à plusieurs utilisateurs via un sélecteur"),
-                ("remove_roles <role>", "Retirer un rôle à plusieurs utilisateurs via un sélecteur"),
-                ("with_roles", "Lister les membres possédant les rôles sélectionnés"),
-            ],
-        )
-        await interaction.response.send_message(help_message, ephemeral=not show)
 
     @user_group.command(name="op", description="Donne des droits admin temporaires à un utilisateur.")
     @app_commands.describe(

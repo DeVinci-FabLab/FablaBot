@@ -28,7 +28,6 @@ from fablabot.helpers.formation import (
     send_registration_dm,
     send_waitlist_dm,
 )
-from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.state_store import JsonStateStore
 from fablabot.helpers.utils import ensure_command_context, is_valid_emoji
@@ -49,7 +48,6 @@ class FormationManagement(commands.Cog):
     """Hebdo formations management cog (Draft -> Publish -> Export).
 
     Commands:
-        - /fm help: Display help for formation management commands.
         - /fm start: Start/overwrite a draft with an introduction, ending and role to mention (uses modal).
         - /fm edit_text: Edit the draft introduction and/or ending (uses modal if text=True).
         - /fm add: Add a new formation to the draft (uses modal for text inputs).
@@ -128,41 +126,6 @@ class FormationManagement(commands.Cog):
         description="Gère les annonces de Formations et les inscriptions.",
         default_permissions=staff_default_permissions(),
     )
-
-    @fm_group.command(name="help", description="Afficher l'aide pour les commandes de gestion des formations.")
-    @app_commands.describe(show="Afficher l'aide publiquement ou non")
-    async def fm_help(self, interaction: Interaction, *, show: bool = False) -> None:
-        """Display help information for the formation management commands.
-
-        Args:
-            interaction (Interaction): The Discord interaction context.
-            show (bool): Whether to show the help publicly or not.
-        """
-        help_message = build_help_message(
-            "Commandes de gestion des formations",
-            "fm",
-            [
-                (
-                    "start <role>",
-                    "Démarrer un brouillon de formation et choisir le rôle à mentionner (modal intro/conclusion)",
-                ),
-                (
-                    "edit_text [role] [text]",
-                    "Mettre à jour l'introduction, la conclusion ou le rôle mentionné du brouillon",
-                ),
-                (
-                    "add <emoji> <trainer> <date> <hour> <duration> <seats>",
-                    "Ajouter une formation au brouillon via un modal (nom, description, caractère excusable)",
-                ),
-                ("edit", "Modifier une formation existante après sélection"),
-                ("remove <index>", "Supprimer une formation du brouillon par son index"),
-                ("clear", "Vider le brouillon actuel en conservant intro et conclusion"),
-                ("preview", "Afficher l'aperçu du brouillon dans le salon courant"),
-                ("publish <channel>", "Publier le brouillon dans un salon cible avec réactions automatiques"),
-                ("export [message_id]", "Exporter les réactions/inscriptions en CSV ou texte"),
-            ],
-        )
-        await interaction.response.send_message(help_message, ephemeral=not show)
 
     @fm_group.command(name="start", description="Démarrer/écraser un brouillon avec une introduction.")
     @app_commands.describe(role="Rôle à mentionner")

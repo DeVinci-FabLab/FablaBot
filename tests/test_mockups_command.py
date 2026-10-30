@@ -77,9 +77,9 @@ def test_missing_group_says_what_to_run(
 ) -> None:
     """Without the playwright group, PNG mode exits 1 naming the command to run, after writing the HTML."""
     monkeypatch.setitem(sys.modules, "playwright", None)
-    assert command.main(["--out", str(tmp_path), "text-help"]) == 1
+    assert command.main(["--out", str(tmp_path), "suggest"]) == 1
     assert "uv run --group mockups" in capsys.readouterr().err
-    assert (tmp_path / "text-help-dark.html").exists()
+    assert (tmp_path / "suggest-dark.html").exists()
 
 
 def test_preview_dependency_stays_out_of_the_bot() -> None:
@@ -154,9 +154,9 @@ def test_missing_browser_says_how_to_install(
     fake.sync_playwright = Session  # pyright: ignore[reportAttributeAccessIssue]  # a bare module stands in for the library
     monkeypatch.setitem(sys.modules, "playwright", types.ModuleType("playwright"))
     monkeypatch.setitem(sys.modules, "playwright.sync_api", fake)
-    assert command.main(["--out", str(tmp_path), "text-help"]) == 1
+    assert command.main(["--out", str(tmp_path), "suggest"]) == 1
     assert "playwright install chromium --only-shell" in capsys.readouterr().err
-    assert (tmp_path / "text-help-light.html").exists()
+    assert (tmp_path / "suggest-light.html").exists()
 
 
 def test_screens_are_built_away_from_the_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -165,13 +165,13 @@ def test_screens_are_built_away_from_the_repository(tmp_path: Path, monkeypatch:
     repo.mkdir()
     monkeypatch.chdir(repo)
     seen: list[Path] = []
-    real = command.SCREENS["text-help"]
+    real = command.SCREENS["suggest"]
 
     async def spy() -> object:
         seen.append(Path.cwd())
         return await real()
 
-    monkeypatch.setitem(command.SCREENS, "text-help", spy)
+    monkeypatch.setitem(command.SCREENS, "suggest", spy)
     assert command.main(["--out", str(tmp_path / "out"), "--html-only"]) == 0
     assert seen
     assert all(folder != repo for folder in seen)

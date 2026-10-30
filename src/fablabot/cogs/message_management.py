@@ -40,7 +40,6 @@ from discord.ext import commands
 
 from fablabot.helpers.access import EVERYONE, access
 from fablabot.helpers.constants import ADMIN_ROLES, PARIS_TZ, ErrorMessages, RoleNames, staff_default_permissions
-from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.state_store import JsonStateStore
 from fablabot.helpers.utils import (
@@ -65,7 +64,6 @@ class MessageManagement(commands.Cog):
     """Cog handling message tracking, reaction automation, and quick messaging workflows.
 
     Commands:
-        - /msg help: Display help for message management commands.
         - /msg clear: Clear the current channel of its last messages.
         - /msg dm: Send a direct message to multiple users.
         - /msg start: Create or overwrite a message draft via a modal.
@@ -108,44 +106,6 @@ class MessageManagement(commands.Cog):
     msg_group = app_commands.Group(
         name="msg", description="Gestion des messages", default_permissions=staff_default_permissions()
     )
-
-    @msg_group.command(
-        name="help",
-        description="Afficher l'aide sur les commandes message.",
-    )
-    @app_commands.describe(show="Afficher l'aide publiquement ou non")
-    async def msg_help(self, interaction: Interaction, *, show: bool = False) -> None:
-        """Display help for message management commands.
-
-        Args:
-            interaction (Interaction): The Discord interaction context.
-            show (bool): Whether to show the help publicly or not.
-        """
-        help_message = build_help_message(
-            "Commandes de gestion des messages",
-            "msg",
-            [
-                ("clear [messages]", "Nettoyer les derniers messages du salon (par défaut 5)"),
-                ("dm <message>", "Envoyer un message privé à plusieurs utilisateurs sélectionnés"),
-                ("start", "Créer ou remplacer le brouillon via un modal"),
-                ("follow <channel> <message>", "Ajouter le suivi sur un message existant (ID ou lien)"),
-                (
-                    "link_reaction <message> <emoji>",
-                    "Associer une réaction à une action automatisée (DM utilisateur/rôle ou message salon)",
-                ),
-                ("unlink_reaction", "Retirer une action liée à une réaction (sélection via une vue)"),
-                ("list", "Lister les messages suivis et leurs réactions"),
-                ("preview", "Prévisualiser le brouillon en cours"),
-                ("publish <channel>", "Publier le brouillon et activer le suivi"),
-                ("export [message]", "Exporter l'historique des réactions d'un message suivi"),
-                ("stop", "Arrêter le suivi d'un message (sélection via une vue)"),
-            ],
-            footer=(
-                "Actions supportées : `user_dm` (DM la personne qui réagit), "
-                "`role_dm` (DM les membres d'un rôle), `channel` (message dans un salon cible)"
-            ),
-        )
-        await interaction.response.send_message(help_message, ephemeral=not show)
 
     @msg_group.command(name="clear", description="Nettoie le salon actuel de ses derniers messages.")
     @app_commands.describe(messages="Le nombre de messages à supprimer (par défaut 5)")

@@ -228,21 +228,6 @@ async def test_refusal_lines_carry_ids_but_no_name(cog: UserManagement, caplog: 
     assert all(CALLER_NAME not in r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING)
 
 
-# -- Help --
-
-
-async def test_help_explains_op_scope_and_self_rule(cog: UserManagement) -> None:
-    """The help text explains the op scope and the self rule."""
-    interaction = make_interaction()
-
-    await UserManagement.user_help.callback(cog, interaction)
-
-    text = interaction.response.send_message.await_args.args[0]
-    assert "durée limitée" in text
-    assert "/fm" in text
-    assert "soi-même" in text
-
-
 # -- A malformed guild entry in the op state does not block op --
 
 

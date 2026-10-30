@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from discord import Locale, Member, Permissions, Role
 
 import fablabot.cogs as cogs_package
-from fablabot.cogs import channel_management, formation_management, help_management, message_management
+from fablabot.cogs import formation_management, help_management, message_management
 from fablabot.helpers.constants import RoleNames
 from fablabot.helpers.help_page import leaf_commands
 from fablabot.models.formation import FmMessageDraft, Formation
@@ -120,14 +120,6 @@ async def help_member() -> Screen:
     return await _help_for(_member(RoleNames.MEMBER_VERIFIED), Locale.american_english)
 
 
-async def text_help() -> Screen:
-    """``/text help``: the staff help for text channels, private by default."""
-    capture = Capture()
-    cog = channel_management.ChannelManagement(MagicMock())
-    await _invoke(channel_management.ChannelManagement.text_help, cog, capture.interaction(), show=False)
-    return Screen(capture.sent)
-
-
 async def fm_edit() -> Screen:
     """``/fm edit``: the draft preview and one button per formation."""
     capture = Capture()
@@ -164,7 +156,6 @@ async def fm_start_modal() -> Screen:
 
 SCREENS: dict[str, Callable[[], Coroutine[Any, Any, Screen]]] = {
     "help-member": help_member,
-    "text-help": text_help,
     "fm-edit": fm_edit,
     "suggest": suggest,
     "suggest-modal": suggest_modal,

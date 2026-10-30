@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from discord import app_commands
 import pytest
 
 from fablabot.helpers.command_sync import COMMAND_SYNC_STATE_FILE, command_fingerprint
@@ -79,3 +80,13 @@ async def test_commands_sync_with_their_translations(started_bot: Any) -> None:
     recorded = json.loads(Path(COMMAND_SYNC_STATE_FILE).read_text(encoding="utf-8"))["fingerprint"]
     translated = await command_fingerprint(started_bot.tree, guild=None, application_id=started_bot.application_id)
     assert recorded == translated
+
+
+def test_no_group_has_a_help_subcommand(started_bot: Any) -> None:
+    """The only help is the top-level ``/help``: no subcommand of a group is named ``help``."""
+    found = [
+        f"{command.parent.name} help"
+        for command in started_bot.tree.walk_commands()
+        if isinstance(command, app_commands.Command) and command.parent is not None and command.name == "help"
+    ]
+    assert not found, f"help subcommands remain: {', '.join(sorted(found))}"

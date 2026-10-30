@@ -1,4 +1,4 @@
-"""Tests for the ``/log export`` and ``/log help`` commands."""
+"""Tests for the ``/log export`` command."""
 
 from __future__ import annotations
 
@@ -128,14 +128,3 @@ async def test_log_export_refusal_logs_malformed_date_at_info(cog, caplog) -> No
     assert len(records) == 1
     assert records[0].levelno == logging.INFO
     assert "forged" not in caplog.text
-
-
-async def test_log_help_shows_accepted_date_format(cog) -> None:
-    """The log help shows the accepted date format."""
-    interaction = make_interaction()
-
-    await LogManagement.log_help.callback(cog, interaction)
-
-    text = interaction.response.send_message.await_args.args[0]
-    assert "JJ/MM/AAAA" in text
-    assert "YYYY-MM-DD" not in text
