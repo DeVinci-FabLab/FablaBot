@@ -210,7 +210,8 @@ server set its language only in Community mode: Server Settings > Enable Communi
 Community > Overview > Server Primary Language. A server outside Community mode reports `en-US`, so its help
 is in English.
 
-After the deploy, check it on the test server, where `/help` should answer in French.
+After the deploy, check it on a server in Community mode with French as its primary language, where `/help`
+should answer in French.
 
 A per-server language setting in the bot is planned and not available yet. The texts live in
 `src/fablabot/locales/<language>.toml`; adding a language means adding one file with the keys of `en.toml`.
