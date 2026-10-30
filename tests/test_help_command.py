@@ -112,6 +112,20 @@ async def test_reply_follows_the_server_locale() -> None:
     assert embed.title == "Ce que tu peux lancer ici"
 
 
+@pytest.mark.parametrize(
+    ("locale", "promise"),
+    [
+        (Locale.french, "`/suggest`\N{NO-BREAK SPACE}: envoie une idée ou un problème au staff, anonymement si tu veux"),
+        (Locale.german, "`/suggest`: schickt dem Staff eine Idee oder ein Problem, auf Wunsch anonym"),
+    ],
+)
+async def test_suggest_line_keeps_the_anonymity_promise_in_french_and_german(locale: Locale, promise: str) -> None:
+    """The French and German suggest lines say, in their own words, that the idea can be sent anonymously."""
+    interaction = _interaction(locale)
+    await _help(interaction)
+    assert promise in (_embed(interaction).fields[0].value or "")
+
+
 @pytest.mark.parametrize("locale", [Locale.french, Locale.german, Locale.american_english, None])
 async def test_suggest_line_is_the_long_text_in_every_locale(locale: Locale | None) -> None:
     """The suggest line carries the long catalogue text, not the short command description."""
