@@ -309,3 +309,27 @@ def test_role_refusal_agrees_with_assignment_refusal() -> None:
                 stub = _role(name)
                 expected = user_management.UserManagement.assignment_refusal(actor, None, stub, action=action)
                 assert user_management.role_refusal(names, name, action=action) == expected, (profile.roles, name, action)
+
+
+def _member(member_id: int, *names: str) -> MagicMock:
+    """Build a member stub with an id and the roles named."""
+    member = MagicMock(spec=Member)
+    member.id = member_id
+    member.roles = [_role(name) for name in names]
+    return member
+
+
+@pytest.mark.parametrize(
+    ("held", "role", "expected"),
+    [
+        (RoleNames.MEMBER_VERIFIED, RoleNames.BUREAU, utils.RefusalKind.MISSING_RIGHT),
+        (RoleNames.PRESIDENT, RoleNames.ADMIN_TEMP, utils.RefusalKind.TEMP_ROLE_OUTSIDE_OP),
+        (RoleNames.PRESIDENT, F_ROLE, utils.RefusalKind.SELF_TARGET),
+    ],
+    ids=["no-right", "temporary-role", "role-the-caller-may-give"],
+)
+def test_giving_a_role_to_oneself_reports_the_first_refusal(held: str, role: str, expected: utils.RefusalKind) -> None:
+    """The missing right is reported before the temporary role, and both before the self-target."""
+    actor = _member(1, held)
+    refusal = user_management.UserManagement.assignment_refusal(actor, actor, _role(role), action="add")
+    assert refusal is expected
