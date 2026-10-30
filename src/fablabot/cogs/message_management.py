@@ -38,7 +38,7 @@ from discord import (
 )
 from discord.ext import commands
 
-from fablabot.helpers.access import EVERYONE, access
+from fablabot.helpers.access import EVERYONE, AnyRole, access
 from fablabot.helpers.constants import ADMIN_ROLES, PARIS_TZ, ErrorMessages, RoleNames, staff_default_permissions
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.state_store import JsonStateStore
@@ -58,6 +58,9 @@ logger = logging.getLogger(__name__)
 MESSAGES_STATE_FILE = Path("data/messages_state.json")
 REACTION_LOG_RETENTION = timedelta(days=30)
 ALLOWED_ROLES = ADMIN_ROLES | {RoleNames.BUREAU}
+_ACCESS = AnyRole(ALLOWED_ROLES)
+_DM_ROLES = {RoleNames.BUREAU}
+_DM_ACCESS = AnyRole(_DM_ROLES)
 
 
 class MessageManagement(commands.Cog):
@@ -157,6 +160,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="dm",
+        extras=access(_DM_ACCESS),
         description="Envoie un message privé à plusieurs utilisateurs via un sélecteur.",
     )
     async def msg_dm(self, interaction: Interaction) -> None:
@@ -166,7 +170,7 @@ class MessageManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             message (str): The message content to send.
         """
-        if not await ensure_command_context(logger, "message.dm", interaction, required_roles={RoleNames.BUREAU}):
+        if not await ensure_command_context(logger, "message.dm", interaction, required_roles=_DM_ROLES):
             return
 
         await interaction.response.send_modal(mui.BulkDMModal(self))
@@ -360,6 +364,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="start",
+        extras=access(_ACCESS),
         description="Démarrer/écraser un brouillon de message (modal).",
     )
     async def msg_start(self, interaction: Interaction) -> None:
@@ -373,7 +378,7 @@ class MessageManagement(commands.Cog):
 
         await interaction.response.send_modal(mui.StartMessageModal(self))
 
-    @msg_group.command(name="follow", description="Démarrer le suivi sur un message déjà envoyé.")
+    @msg_group.command(name="follow", description="Démarrer le suivi sur un message déjà envoyé.", extras=access(_ACCESS))
     @app_commands.describe(
         channel="Salon dans lequel se trouve le message",
         message="ID du message ou lien complet",
@@ -440,7 +445,9 @@ class MessageManagement(commands.Cog):
             f"{len(migrated_reactions)} réaction(s) importée(s) depuis le brouillon.",
         )
 
-    @msg_group.command(name="link_reaction", description="Associer une réaction à une action automatisée.")
+    @msg_group.command(
+        name="link_reaction", description="Associer une réaction à une action automatisée.", extras=access(_ACCESS)
+    )
     @app_commands.describe(emoji="Emoji déclencheur")
     async def msg_link_reaction(
         self,
@@ -489,6 +496,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="unlink_reaction",
+        extras=access(_ACCESS),
         description="Retirer une action associée à une réaction sur un message suivi.",
     )
     async def msg_unlink_reaction(self, interaction: Interaction) -> None:
@@ -527,6 +535,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="list",
+        extras=access(_ACCESS),
         description="Lister les messages actuellement suivis.",
     )
     async def msg_list(self, interaction: Interaction) -> None:
@@ -575,6 +584,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="preview",
+        extras=access(_ACCESS),
         description="Prévisualiser le brouillon courant.",
     )
     async def msg_preview(self, interaction: Interaction) -> None:
@@ -607,6 +617,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="publish",
+        extras=access(_ACCESS),
         description="Publier le brouillon dans un salon et activer le suivi.",
     )
     @app_commands.describe(channel="Salon cible pour la publication")
@@ -670,6 +681,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="export",
+        extras=access(_ACCESS),
         description="Exporter l'historique des réactions d'un message suivi.",
     )
     async def msg_export(self, interaction: Interaction) -> None:
@@ -706,6 +718,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="stop",
+        extras=access(_ACCESS),
         description="Arrêter le suivi d'un message.",
     )
     async def msg_stop(self, interaction: Interaction) -> None:

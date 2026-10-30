@@ -24,6 +24,7 @@ from discord import (
 from discord.ext import commands
 from discord.utils import get
 
+from fablabot.helpers.access import AnyRole, access
 from fablabot.helpers.constants import ADMIN_ROLES, RoleNames, staff_default_permissions
 from fablabot.helpers.safe_discord_operations import (
     safe_create_text_channel,
@@ -39,6 +40,7 @@ logger = logging.getLogger(__name__)
 DYNAMIC_SUFFIX = "-vocal"
 INDEX_SEPARATOR = "/"
 EPHEMERAL_SUFFIX = "-temp"
+_ACCESS = AnyRole(ADMIN_ROLES)
 
 
 class ChannelManagement(commands.Cog):
@@ -78,6 +80,7 @@ class ChannelManagement(commands.Cog):
 
     @text_group.command(
         name="create",
+        extras=access(_ACCESS),
         description="Crée un nouveau salon dans la catégorie spécifiée.",
     )
     @app_commands.describe(
@@ -124,6 +127,7 @@ class ChannelManagement(commands.Cog):
 
     @text_group.command(
         name="rename",
+        extras=access(_ACCESS),
         description="Renomme un salon textuel.",
     )
     @app_commands.describe(
@@ -164,6 +168,7 @@ class ChannelManagement(commands.Cog):
 
     @text_group.command(
         name="delete",
+        extras=access(_ACCESS),
         description="Supprime un salon textuel.",
     )
     @app_commands.describe(channel="Le salon à supprimer")
@@ -200,6 +205,7 @@ class ChannelManagement(commands.Cog):
 
     @vocal_group.command(
         name="create",
+        extras=access(_ACCESS),
         description="Crée un salon vocal personnalisé.",
     )
     @app_commands.describe(
@@ -271,6 +277,7 @@ class ChannelManagement(commands.Cog):
 
     @vocal_group.command(
         name="rename",
+        extras=access(_ACCESS),
         description="Renomme un salon vocal.",
     )
     @app_commands.describe(
@@ -337,6 +344,7 @@ class ChannelManagement(commands.Cog):
 
     @vocal_group.command(
         name="delete",
+        extras=access(_ACCESS),
         description="Supprime un salon vocal.",
     )
     @app_commands.describe(channel="Le salon vocal à supprimer")

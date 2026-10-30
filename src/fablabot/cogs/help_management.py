@@ -68,3 +68,5 @@ class HelpManagement(commands.Cog):
             ephemeral=not show,
             allowed_mentions=AllowedMentions.none(),
         )
+        for embed in embeds[1:]:
+            await interaction.followup.send(embed=embed, ephemeral=not show, allowed_mentions=AllowedMentions.none())

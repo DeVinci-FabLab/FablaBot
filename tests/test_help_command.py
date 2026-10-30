@@ -212,3 +212,18 @@ async def test_help_is_refused_outside_listed_servers() -> None:
     interaction.command = HelpManagement.show_help
     assert await tree.interaction_check(interaction) is False
     assert interaction.response.send_message.await_args.args[0] == ErrorMessages.GUILD_NOT_ALLOWED
+
+
+@pytest.mark.parametrize("show", [False, True])
+async def test_every_message_keeps_the_visibility(show: bool) -> None:
+    """A help split in two sends both messages with the same visibility and no mention."""
+    first, second = Embed(title="one"), Embed(title="two")
+    interaction = _interaction()
+    with patch.object(help_management, "build_help", return_value=[first, second]):
+        await _help(interaction, show=show)
+    sent = interaction.response.send_message.await_args.kwargs
+    followed = interaction.followup.send.await_args.kwargs
+    assert (sent["embed"], followed["embed"]) == (first, second)
+    assert (sent["ephemeral"], followed["ephemeral"]) == (not show, not show)
+    assert sent["allowed_mentions"].to_dict() == AllowedMentions.none().to_dict()
+    assert followed["allowed_mentions"].to_dict() == AllowedMentions.none().to_dict()

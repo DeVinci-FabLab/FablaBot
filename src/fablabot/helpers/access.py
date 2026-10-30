@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any, Final, Protocol, Self
 from discord import Permissions
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from discord import Guild, Member, app_commands
 
 
@@ -79,6 +81,28 @@ class Everyone:
 
 
 EVERYONE: Final = Everyone()
+
+
+@dataclass(frozen=True)
+class AnyRole:
+    """The rule of a command open to the holders of any of some roles.
+
+    Attributes:
+        roles (Collection[str]): The very set the command's callback passes to ``required_roles=``, not a copy.
+    """
+
+    roles: Collection[str]
+
+    def admits(self, caller: Caller) -> bool:
+        """Admit a caller who holds one of the roles.
+
+        Args:
+            caller (Caller): The member asking.
+
+        Returns:
+            bool: True when any of the caller's roles is in the set.
+        """
+        return any(role in self.roles for role in caller.roles)
 
 
 def access(rule: AccessRule) -> dict[str, Any]:

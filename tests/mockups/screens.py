@@ -120,6 +120,11 @@ async def help_member() -> Screen:
     return await _help_for(_member(RoleNames.MEMBER_VERIFIED), Locale.american_english)
 
 
+async def help_trainer() -> Screen:
+    """``/help`` for a training manager on a server with no ``F - ...`` role: the training commands and the role summary."""
+    return await _help_for(_member(RoleNames.TRAININGS_MANAGER), Locale.american_english)
+
+
 async def fm_edit() -> Screen:
     """``/fm edit``: the draft preview and one button per formation."""
     capture = Capture()
@@ -156,6 +161,7 @@ async def fm_start_modal() -> Screen:
 
 SCREENS: dict[str, Callable[[], Coroutine[Any, Any, Screen]]] = {
     "help-member": help_member,
+    "help-trainer": help_trainer,
     "fm-edit": fm_edit,
     "suggest": suggest,
     "suggest-modal": suggest_modal,
