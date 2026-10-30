@@ -81,6 +81,15 @@ def test_export_waitlist_stays_plain_text() -> None:
     assert "inscrit·e le samedi 02/03 à 11h15 (en attente)" in export
 
 
+def test_export_entry_without_date_reads_n_a() -> None:
+    """A registered or waitlisted entry with no `ts_iso` shows "n/a", not the placeholder date."""
+    fm = _fm(WINTER, [{"user_id": 8, "username": "bob"}])
+    fm.registered_users = [{"user_id": 7, "username": "ada"}]
+    lines = rendering.format_formation_export(fm).split("\n")
+    assert lines[1].endswith("· inscrit·e le n/a")
+    assert lines[2].endswith("· inscrit·e le n/a (en attente)")
+
+
 @pytest.fixture
 def sent(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Collect the text of every DM the notifications send."""
