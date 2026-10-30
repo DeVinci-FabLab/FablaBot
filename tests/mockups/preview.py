@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 import html
 import re
 from typing import TYPE_CHECKING, Any, Literal
 from unittest.mock import AsyncMock, MagicMock
+from zoneinfo import ZoneInfo
 
 from emoji import emojize
 
@@ -87,7 +89,31 @@ _BOLD = re.compile(r"\*\*(.+?)\*\*")
 _UNDERLINE = re.compile(r"__(.+?)__")
 _ITALIC = re.compile(r"(?<![\w*])[*_](?![\s*_])(.+?)(?<![\s*_])[*_](?![\w*])")
 _STRIKE = re.compile(r"~~(.+?)~~")
+_TIMESTAMP = re.compile(r"&lt;t:(-?\d+):F&gt;")
 _MENTION = re.compile(r"&lt;(@&amp;|@!?|#)(\d+)&gt;")
+
+
+_WEEKDAYS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+_MONTHS = [
+    "janvier",
+    "février",
+    "mars",
+    "avril",
+    "mai",
+    "juin",
+    "juillet",
+    "août",
+    "septembre",
+    "octobre",
+    "novembre",
+    "décembre",
+]
+
+
+def timestamp_text(unix: int) -> str:
+    """Write a ``<t:UNIX:F>`` timestamp the way Discord shows it to a French reader in Paris."""
+    dt = datetime.fromtimestamp(unix, UTC).astimezone(ZoneInfo("Europe/Paris"))
+    return f"{_WEEKDAYS[dt.weekday()]} {dt.day} {_MONTHS[dt.month - 1]} {dt.year} à {dt:%H:%M}"
 
 
 def _inline(text: str, names: Mapping[int, str]) -> str:
@@ -107,6 +133,9 @@ def _inline(text: str, names: Mapping[int, str]) -> str:
         name = names.get(int(match[2]), "inconnu")
         return f'<span class="mention">{sigil}{html.escape(name)}</span>'
 
+    def timestamp(match: re.Match[str]) -> str:
+        return f'<span class="timestamp">{timestamp_text(int(match[1]))}</span>'
+
     def keep_target(match: re.Match[str]) -> str:
         targets.append(match[2])
         return f'<a href="\x01{len(targets) - 1}\x01">{match[1]}</a>'
@@ -118,6 +147,7 @@ def _inline(text: str, names: Mapping[int, str]) -> str:
     text = _ITALIC.sub(r"<em>\1</em>", text)
     text = _STRIKE.sub(r"<s>\1</s>", text)
     text = _MENTION.sub(mention, text)
+    text = _TIMESTAMP.sub(timestamp, text)
     text = re.sub(r"\x01(\d+)\x01", lambda m: targets[int(m[1])], text)
     return re.sub(r"\x00(\d+)\x00", lambda m: codes[int(m[1])], text)
 
@@ -314,6 +344,7 @@ h3 { font-size: 16px; margin: 8px 0 0; color: var(--strong); }
 blockquote { margin: 0; padding: 0 8px 0 12px; border-left: 4px solid var(--quote); }
 code { background: var(--code); border-radius: 4px; padding: 0 3px; font: 85% Menlo, Consolas, monospace; }
 a { color: var(--link); text-decoration: none; }
+.timestamp { background: var(--code); border-radius: 3px; padding: 0 2px; }
 .mention { background: var(--mention); color: var(--mention-text); border-radius: 3px; padding: 0 2px; font-weight: 500; }
 .embed { margin-top: 4px; max-width: 520px; background: var(--embed); border-left: 4px solid var(--line);
   border-radius: 4px; padding: 8px 16px 16px 12px; display: grid; gap: 8px; font-size: 14px; }

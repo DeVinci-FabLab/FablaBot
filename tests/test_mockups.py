@@ -262,3 +262,9 @@ def test_snapshot_is_written_only_on_request(tmp_path: Path) -> None:
     assert path.read_text(encoding="utf-8") == "old"
     _compare(path, "new", update=True)
     assert path.read_text(encoding="utf-8") == "new"
+
+
+def test_markdown_timestamp_reads_as_discord_shows_it_in_paris() -> None:
+    """A full timestamp becomes French text in Paris time, on both sides of a clock change."""
+    assert "samedi 30 mars 2030 à 14:30" in markdown("**<t:1901107800:F>**")
+    assert "lundi 1 avril 2030 à 14:30" in markdown("<t:1901277000:F>")
