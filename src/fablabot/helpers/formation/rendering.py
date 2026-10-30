@@ -121,20 +121,29 @@ def is_past(start_dt: datetime) -> bool:
     return start_dt < datetime.now(UTC)
 
 
+def discord_timestamp(dt: datetime) -> str:
+    """Format a datetime as a Discord full timestamp, shown in each reader's language and time zone.
+
+    Args:
+        dt (datetime): The timezone-aware datetime.
+
+    Returns:
+        str: The ``<t:UNIX:F>`` markup.
+    """
+    return f"<t:{int(dt.timestamp())}:F>"
+
+
 def humanize_dt(dt: datetime) -> str:
-    """Humanize a datetime object.
+    """Write a datetime as plain text, for exports read outside Discord.
 
     Args:
         dt (datetime): The datetime object to humanize.
 
     Returns:
-        str: The humanized date/time string.
+        str: The lower-case date/time string, such as "lundi 01/04 à 14h30".
     """
-    days = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
-    day_name = days[dt.weekday()]
-    date_part = dt.strftime("%d/%m")
-    time_part = dt.strftime("%Hh%M")
-    return f"**{day_name} {date_part} à {time_part}**"
+    days = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+    return f"{days[dt.weekday()]} {dt:%d/%m} à {dt:%Hh%M}"
 
 
 def render_formation(fm: Formation) -> str:
@@ -149,7 +158,7 @@ def render_formation(fm: Formation) -> str:
     lines: list[str] = []
     lines.append(f"{fm.emoji} **{fm.name}** avec {fm.trainer_mention} ({'non ' if not fm.excusable else ''}excusable)")
     lines.append(
-        f"> {humanize_dt(fm.start_dt)}  – "  # noqa: RUF001
+        f"> **{discord_timestamp(fm.start_dt)}**  – "  # noqa: RUF001
         f"{Emojis.get_clock_emoji(fm.start_dt)} {fm.duration}  – "  # noqa: RUF001
         f"{Emojis.PEOPLE} {len(fm.registered_users)}/{fm.seats} places",
     )
@@ -243,7 +252,7 @@ def format_formation_export(formation: Formation) -> str:
             username = user_entry.get("username", "Utilisateur inconnu")
             ts = user_entry.get("ts_iso", datetime.min.replace(tzinfo=PARIS_TZ).isoformat(timespec="seconds"))
             dt = datetime.fromisoformat(ts)
-            when = humanize_dt(dt).lower()[2:-2] if dt != datetime.min.replace(tzinfo=PARIS_TZ) else "n/a"
+            when = humanize_dt(dt) if dt != datetime.min.replace(tzinfo=PARIS_TZ) else "n/a"
             lines.append(f"{idx}. <@{user_id}> ({escape_md(username)}) · inscrit·e le {when}")
     else:
         lines.append("_(Aucune inscription)_")
@@ -254,7 +263,7 @@ def format_formation_export(formation: Formation) -> str:
             username = user_entry.get("username", "Utilisateur inconnu")
             ts = user_entry.get("ts_iso", datetime.min.replace(tzinfo=PARIS_TZ).isoformat(timespec="seconds"))
             dt = datetime.fromisoformat(ts)
-            when = humanize_dt(dt).lower()[2:-2] if dt != datetime.min.replace(tzinfo=PARIS_TZ) else "n/a"
+            when = humanize_dt(dt) if dt != datetime.min.replace(tzinfo=PARIS_TZ) else "n/a"
             lines.append(f"{idx}. <@{user_id}> ({escape_md(username)}) · inscrit·e le {when} (en attente)")
 
     return "\n".join(lines)
