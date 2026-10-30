@@ -199,6 +199,18 @@ So on a new server, create a text channel named `commandes_bot`.
 `/log set` picks the channel that receives the server's errors. `/log export` sends that server's log
 file to that server only.
 
+## Server language
+
+The help answers in the language the server declares to Discord: `fr`, `de`, else English. Discord lets a
+server set its language only in Community mode: Server Settings > Enable Community, then Server Settings >
+Community > Overview > Server Primary Language. A server outside Community mode reports `en-US`, so its help
+is in English.
+
+After the deploy, check it on the test server, where `/help` should answer in French.
+
+A per-server language setting in the bot is planned and not available yet. The texts live in
+`src/fablabot/locales/<language>.toml`; adding a language means adding one file with the keys of `en.toml`.
+
 ## Temporary admin
 
 `/user op` gives the `Admin -temp-` role for a limited time (5 minutes by default); `/user deop` removes it
@@ -225,7 +237,10 @@ To force a sync: stop the stack, delete `data/command_sync_state.json`, start it
 back to an older image, before upgrading again. The file only records the last sync; it holds no
 member data.
 
-The log tells which case applies: `Commands synced (8, global).` after a sync, and
+The first start after the `/help` release syncs once, because the command list changed. Members reload
+Discord to see `/help` (or `/aide`, `/hilfe`).
+
+The log tells which case applies: `Commands synced (9, global).` after a sync, and
 `Commands unchanged, sync skipped (global).` when nothing changed.
 
 ## Troubleshooting

@@ -101,14 +101,14 @@ DISCORD_TOKEN_FILE=secrets/discord_token.secret ALLOWED_GUILD_IDS=<your server I
 
 ### Staff commands in the slash menu
 
-The staff command groups (`/text`, `/vocal`, `/fm`, `/log`, `/msg`, `/user`, `/welcome`) are hidden from the slash menu by default: only members with the Administrator permission see them. `/suggest` stays visible to everyone. This changes what the menu shows, not who may run a command: each command still checks the caller's roles when it runs.
+The staff command groups (`/text`, `/vocal`, `/fm`, `/log`, `/msg`, `/user`, `/welcome`) are hidden from the slash menu by default: only members with the Administrator permission see them. `/suggest` and `/help` stay visible to everyone. This changes what the menu shows, not who may run a command: each command still checks the caller's roles when it runs.
 
 On each server, a member with the Administrator permission shows each group to the roles that use it:
 
 1. Open Server Settings > Integrations, then Manage next to the bot.
 2. Under Commands, open a command, choose Add Roles or Members, add the roles listed below for it, and save.
 3. Leave the Roles & Members section at the top of that page alone: a role added there sees every staff group.
-4. Check with an account that has no staff role: after a reload, it sees `/suggest` and no staff group. If a group still shows, open that command and make sure `@everyone` is not allowed there.
+4. Check with an account that has no staff role: after a reload, it sees `/suggest` and `/help` and no staff group. If a group still shows, open that command and make sure `@everyone` is not allowed there.
 
 | Command | Roles to add |
 | --- | --- |
