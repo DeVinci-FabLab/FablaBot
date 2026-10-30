@@ -196,6 +196,9 @@ Commands only run in one text channel per server, except `/suggest` and `/msg pu
 
 So on a new server, create a text channel named `commandes_bot`.
 
+`/help` is open to every member and runs in this channel, so members need View Channel and
+Use Application Commands on it. Without them, they get a refusal that points at a channel they cannot open.
+
 `/log set` picks the channel that receives the server's errors. `/log export` sends that server's log
 file to that server only.
 

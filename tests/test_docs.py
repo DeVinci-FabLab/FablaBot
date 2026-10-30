@@ -170,3 +170,10 @@ def test_user_guide_does_not_say_a_rule_can_be_roles_and_a_permission() -> None:
     section = _section(_read("docs/USERGUIDE.md"), "## /help")
     assert "or both" not in section
     assert "a rule per role" in section
+
+
+def test_operator_guide_says_members_need_to_open_the_commands_channel() -> None:
+    """``/help`` is held to the commands channel, so the guide says what a plain member needs there."""
+    section = _section(_read("docs/OPERATIONS.md"), "## Commands channel")
+    assert "View Channel" in section
+    assert "Use Application Commands" in section
