@@ -54,10 +54,13 @@ async def _open_bulk(server: Server, role_name: str, action: str) -> tuple[Magic
     return interaction, sent.kwargs.get("view") if sent else None
 
 
-async def _confirm_bulk(server: Server, view: object, *members: MagicMock) -> MagicMock:
+async def _confirm_bulk(server: Server, view: object, *members: MagicMock, clicker: MagicMock | None = None) -> MagicMock:
+    """Click Confirm on ``view`` with ``members`` selected, as ``clicker`` when given (else as the member who opened it)."""
     # discord.py exposes no public setter for a selection
     view.select_members._values = list(members)
     click = server.interaction()
+    if clicker is not None:
+        click.user = clicker
     await view.confirm_button.callback(click)
     return click
 
@@ -105,13 +108,12 @@ async def test_bulk_remove_from_self_is_allowed() -> None:
 
 
 async def test_bulk_confirm_after_losing_rights_changes_nothing(caplog: pytest.LogCaptureFixture) -> None:
-    """Confirming a bulk change after losing rights changes no role."""
+    """Confirming a bulk change as a member who lost the rights since opening it changes no role."""
     caplog.set_level(logging.DEBUG)
     server = Server(RoleNames.PRESIDENT)
     _interaction, view = await _open_bulk(server, "F - Laser", "add")
-    server.caller.roles.clear()
 
-    click = await _confirm_bulk(server, view, server.target, server.other)
+    click = await _confirm_bulk(server, view, server.target, server.other, clicker=make_member(CALLER_ID))
 
     server.target.add_roles.assert_not_awaited()
     server.other.add_roles.assert_not_awaited()
@@ -122,15 +124,14 @@ async def test_bulk_confirm_after_losing_rights_changes_nothing(caplog: pytest.L
 
 
 async def test_bulk_remove_confirm_after_losing_rights_changes_nothing(caplog: pytest.LogCaptureFixture) -> None:
-    """Confirming a bulk removal after losing rights takes no role from the members who hold it."""
+    """Confirming a bulk removal as a member who lost the rights since opening it takes no role from the holders."""
     caplog.set_level(logging.DEBUG)
     server = Server(RoleNames.PRESIDENT)
     for member in (server.target, server.other):
         member.roles.append(server.roles["F - Laser"])
     _interaction, view = await _open_bulk(server, "F - Laser", "remove")
-    server.caller.roles.clear()
 
-    click = await _confirm_bulk(server, view, server.target, server.other)
+    click = await _confirm_bulk(server, view, server.target, server.other, clicker=make_member(CALLER_ID))
 
     server.target.remove_roles.assert_not_awaited()
     server.other.remove_roles.assert_not_awaited()
