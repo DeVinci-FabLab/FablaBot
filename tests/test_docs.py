@@ -156,13 +156,14 @@ def test_user_guide_says_suggest_and_purge_work_outside_the_commands_channel() -
     assert bullet
     purge = " ".join(bullet.group().split())
     assert "works outside the commands channel" in purge
-    assert "with no `channel` option it targets the current channel" in purge
+    assert "with neither `channel` nor `all_channels` it targets the current channel" in purge
 
 
 def test_operator_guide_describes_the_commands_channel_rule() -> None:
-    """The commands channel section names the two exempt commands."""
+    """The commands channel section names the four commands that do not follow it."""
     section = _section(_read("docs/OPERATIONS.md"), "## Commands channel")
-    assert "except `/suggest` and `/msg purge`" in section
+    for command in ("`/suggest`", "`/msg purge`", "`/msg clear`", "`/welcome approve`"):
+        assert command in section
 
 
 def test_user_guide_does_not_say_a_rule_can_be_roles_and_a_permission() -> None:
