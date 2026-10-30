@@ -112,13 +112,15 @@ On each server, a member with the Administrator permission shows each group to t
 
 | Command | Roles to add |
 | --- | --- |
-| `/text`, `/vocal`, `/welcome` | Administrateur, Président, Vice-Président, Secrétaire Général |
+| `/text`, `/welcome` | Administrateur, Président, Vice-Président, Secrétaire Général |
+| `/vocal` | Administrateur, Président, Vice-Président, Secrétaire Général, Bureau |
 | `/log` | Administrateur, Président, Vice-Président, Secrétaire Général, Respo Numérique, Pôle Numérique |
 | `/fm` | Administrateur, CoDir, Respo Formation, Admin -temp- |
 | `/msg` | Administrateur, Président, Vice-Président, Secrétaire Général, Bureau |
 | `/user` | Administrateur, Président, Vice-Président, Secrétaire Général, Bureau, Respo Communication, Respo Event, Respo Formation, Respo Numérique, Respo Partenariat, Respo Projet |
 
 - These are the role names the bot checks today (`src/fablabot/helpers/constants.py`). Skip a role the server does not have, and a role that already has the Administrator permission.
+- `/vocal` allows Bureau for `/vocal create` of a temporary channel only: the bot still refuses `/vocal rename` and `/vocal delete` for Bureau at run time.
 - Discord applies this per command, not per subcommand: a role added to `/msg` sees all of `/msg`, and the bot still refuses the subcommands that role may not run. `/msg clear` needs Manage Messages in the channel and `/msg purge` the Administrator permission; a role that only uses `/msg clear` is added to `/msg` too.
 - For `/user`, also add any other `Respo <area>` role whose `Pôle <area>` role exists on the server.
 - The settings stay across restarts and redeploys as long as the commands keep their names.
