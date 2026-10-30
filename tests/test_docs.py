@@ -163,3 +163,10 @@ def test_operator_guide_describes_the_commands_channel_rule() -> None:
     """The commands channel section names the two exempt commands."""
     section = _section(_read("docs/OPERATIONS.md"), "## Commands channel")
     assert "except `/suggest` and `/msg purge`" in section
+
+
+def test_user_guide_does_not_say_a_rule_can_be_roles_and_a_permission() -> None:
+    """No command needs both a role and a permission, and the ``/user`` rule per role is named."""
+    section = _section(_read("docs/USERGUIDE.md"), "## /help")
+    assert "or both" not in section
+    assert "a rule per role" in section
