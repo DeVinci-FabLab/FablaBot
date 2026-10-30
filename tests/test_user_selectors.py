@@ -121,6 +121,25 @@ async def test_bulk_confirm_after_losing_rights_changes_nothing(caplog: pytest.L
     assert lines == [f"[user.add_roles] refused kind=right_lost_before_confirm guild_id={GUILD_ID} user_id={CALLER_ID}"]
 
 
+async def test_bulk_remove_confirm_after_losing_rights_changes_nothing(caplog: pytest.LogCaptureFixture) -> None:
+    """Confirming a bulk removal after losing rights takes no role from the members who hold it."""
+    caplog.set_level(logging.DEBUG)
+    server = Server(RoleNames.PRESIDENT)
+    for member in (server.target, server.other):
+        member.roles.append(server.roles["F - Laser"])
+    _interaction, view = await _open_bulk(server, "F - Laser", "remove")
+    server.caller.roles.clear()
+
+    click = await _confirm_bulk(server, view, server.target, server.other)
+
+    server.target.remove_roles.assert_not_awaited()
+    server.other.remove_roles.assert_not_awaited()
+    assert click.response.send_message.await_args.kwargs["ephemeral"] is True
+    click.followup.edit_message.assert_not_awaited()
+    lines = [r.getMessage() for r in caplog.records if "refused" in r.getMessage()]
+    assert lines == [f"[user.remove_roles] refused kind=right_lost_before_confirm guild_id={GUILD_ID} user_id={CALLER_ID}"]
+
+
 # -- Role search --
 
 
