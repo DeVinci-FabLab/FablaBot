@@ -107,6 +107,18 @@ async def test_bulk_remove_from_self_is_allowed() -> None:
     server.caller.remove_roles.assert_awaited_once()
 
 
+async def test_bulk_remove_takes_the_temporary_role() -> None:
+    """The selector of /user remove_roles opens for the temporary role and takes it from the members who hold it."""
+    server = Server(RoleNames.PRESIDENT)
+    server.target.roles.append(server.roles[RoleNames.ADMIN_TEMP])
+    _interaction, view = await _open_bulk(server, RoleNames.ADMIN_TEMP, "remove")
+    assert view is not None
+
+    await _confirm_bulk(server, view, server.target)
+
+    server.target.remove_roles.assert_awaited_once()
+
+
 async def test_bulk_confirm_after_losing_rights_changes_nothing(caplog: pytest.LogCaptureFixture) -> None:
     """Confirming a bulk change as a member who lost the rights since opening it changes no role."""
     caplog.set_level(logging.DEBUG)
