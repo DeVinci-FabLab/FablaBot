@@ -415,15 +415,37 @@ async def test_a_role_without_holder_and_channel_is_unreachable(
 async def test_lines_name_nobody_and_never_reach_a_channel(simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture) -> None:
     """Every line is tied to its server, below ERROR (so never posted), and names no member or typed role."""
     caplog.handler.addFilter(GuildContextFilter())
-    await ready_server(simcord_env, locale="es-ES")
+    await ready_server(simcord_env, locale="es-ES", without={RoleNames.EVENTS_MANAGER})
     await add_role(simcord_env, "Pôle Kevin", above_bot=True)
     simcord_env.guild.add_member(simcord_env.create_user("kevin_secret_name"))
     await run(simcord_env)
     lines = [r for r in caplog.records if r.getMessage().startswith("Server check")]
     assert len(lines) >= 3
+    assert any(r.getMessage().startswith("Server check: optional roles absent") for r in lines)
     assert all(r.__dict__["guild_id"] == GUILD for r in lines)
     assert max(r.levelno for r in lines) < logging.ERROR
     assert "kevin" not in " ".join(r.getMessage() for r in lines).lower()
+
+
+async def test_the_report_lines_keep_their_level_and_text(simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture) -> None:
+    """The summary and the note are INFO, each problem is a WARNING, and the text is the one the operator guide shows."""
+    await ready_server(simcord_env, locale="es-ES", without={"commands", RoleNames.EVENTS_MANAGER})
+    await run(simcord_env)
+    lines = [(r.levelname, r.getMessage()) for r in caplog.records if r.name == "fablabot.helpers.server_check"]
+    assert lines == [
+        ("INFO", f"Server check: guild_id={GUILD} blocking=1 warnings=1 locale=es-ES texts=en"),
+        ("INFO", f"Server check: optional roles absent (guild_id={GUILD}): {RoleNames.EVENTS_MANAGER}"),
+        (
+            "WARNING",
+            f"Server check problem: guild_id={GUILD} severity=blocking code=commands_channel_missing detail=[] "
+            "fix: create a text channel named commandes_bot",
+        ),
+        (
+            "WARNING",
+            f"Server check problem: guild_id={GUILD} severity=warning code=language_not_shipped detail=[locale=es-ES] "
+            "fix: pick a shipped language in Server Settings, Community, Overview",
+        ),
+    ]
 
 
 async def test_a_failure_on_one_server_does_not_stop_the_next(
