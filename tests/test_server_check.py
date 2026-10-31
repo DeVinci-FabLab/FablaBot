@@ -70,7 +70,7 @@ async def ready_server(
         guild_id (int): The ID of the new server.
         locale (str): The language the server declares.
         without (Collection[str]): What to leave out: role names, ``holder`` (nobody holds ``Respo Projet``, and
-            ``projet`` has no channel to fall back on) and ``validation`` (the category).
+            ``projet`` has no channel to fall back on), ``commands`` (the commands channel) and ``validation`` (the category).
         deny (Mapping[str, str] | None): A permission the bot lacks in the ``commands`` or the ``log`` channel.
 
     Returns:
@@ -82,7 +82,8 @@ async def ready_server(
     def overwrites(channel: str) -> dict[Any, PermissionOverwrite] | None:
         return {server.default_role: PermissionOverwrite(**{denied[channel]: False})} if channel in denied else None
 
-    server.create_text_channel("commandes_bot", overwrites=overwrites("commands"))
+    if "commands" not in without:
+        server.create_text_channel("commandes_bot", overwrites=overwrites("commands"))
     log = server.create_text_channel("logs", overwrites=overwrites("log"))
     if "validation" not in without:
         server.create_category("Validation")
@@ -178,6 +179,21 @@ async def test_a_stale_stored_channel_stays_stored(simcord_env: simcord.Env, cap
     await run(simcord_env)
     assert guild_config.get_commands_channel_id(GUILD) == 999
     assert "commands_channel_missing" not in codes(caplog)
+
+
+async def test_a_stored_commands_channel_with_another_name_is_the_commands_channel(
+    simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A stored text channel counts under any name, and a post problem there names its ID."""
+    await ready_server(simcord_env, without=["commands"])
+    muted = {simcord_env.guild.default_role: PermissionOverwrite(send_messages=False)}
+    created = simcord_env.guild.create_text_channel("salle-des-commandes", overwrites=muted)
+    await simcord_env.settle()
+    stored = cached(simcord_env).get_channel(created.id)
+    guild_config.set_commands_channel_id(GUILD, stored.id)
+    await run(simcord_env)
+    assert codes(caplog) == ["commands_channel_no_post"]
+    assert f"detail=[channel_id={stored.id}]" in problems(caplog)[0]
 
 
 @pytest.mark.parametrize(
