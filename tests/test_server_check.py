@@ -206,6 +206,35 @@ async def test_a_voice_channel_named_like_the_commands_channel_counts_as_missing
     assert "commands_channel_missing" in codes(caplog)
 
 
+async def test_a_commands_channel_of_another_server_counts_as_missing(
+    simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A commands channel stored for a server but belonging to another one is no commands channel here."""
+    server = await ready_server(simcord_env, without=["commands"])
+    other = await ready_server(simcord_env, OTHER)
+    foreign = discord.utils.get(other.text_channels, name="commandes_bot")
+    assert foreign is not None
+    assert server.get_channel(foreign.id) is None
+    guild_config.set_commands_channel_id(GUILD, foreign.id)
+    await run(simcord_env)
+    assert codes(caplog) == ["commands_channel_missing"]
+
+
+async def test_a_log_channel_of_another_server_counts_as_missing(
+    simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A log channel stored for a server but belonging to another one is no log channel here."""
+    server = await ready_server(simcord_env)
+    other = await ready_server(simcord_env, OTHER)
+    foreign = discord.utils.get(other.text_channels, name="logs")
+    assert foreign is not None
+    assert server.get_channel(foreign.id) is None
+    guild_config.set_log_channel_id(GUILD, foreign.id)
+    await run(simcord_env)
+    assert codes(caplog) == ["log_channel_missing"]
+    assert f"detail=[stored_id={foreign.id}]" in problems(caplog)[0]
+
+
 @pytest.mark.parametrize(
     ("commands_deny", "log_deny", "code"),
     [
