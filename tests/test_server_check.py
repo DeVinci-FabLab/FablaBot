@@ -987,3 +987,31 @@ async def test_a_command_missing_from_discord_is_reported(
     assert codes(caplog) == ["check_failed"]
     assert "detail=[step=integrations command=/fm not on Discord]" in problems(caplog)[0]
     assert "blocking=0 warnings=1" in report(caplog)
+
+
+@pytest.mark.parametrize(
+    ("answer", "status"),
+    [([{"id": "not-a-number", "permissions": []}], "ValueError"), ([{"permissions": []}], "KeyError")],
+)
+async def test_an_unexpected_integrations_answer_keeps_the_rest_of_the_report(
+    simcord_env: simcord.Env,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    answer: list[dict[str, Any]],
+    status: str,
+) -> None:
+    """An Integrations answer of an unexpected shape is reported by step, keeping the local problems and the leftovers."""
+    await ready_server(simcord_env, without={RoleNames.CODIR})
+    simcord_env.backend.register_commands(GUILD, [{"name": "user", "description": "x"}])
+    bot: Any = simcord_env.bot
+
+    async def bulk(_application_id: int, _guild_id: int) -> list[dict[str, Any]]:
+        return answer
+
+    monkeypatch.setattr(bot.http, "get_guild_application_command_permissions", bulk)
+    await run(simcord_env)
+    assert codes(caplog)[-2:] == ["leftover_commands", "check_failed"]
+    assert len(codes(caplog)) > 2
+    assert f"detail=[step=integrations status={status}]" in problems(caplog)[-1]
+    assert "step=report" not in caplog.text
+    assert "not-a-number" not in caplog.text
