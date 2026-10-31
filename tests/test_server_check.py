@@ -452,6 +452,20 @@ async def test_a_server_being_left_is_not_checked() -> None:
     check.assert_awaited_once_with([listed])
 
 
+async def test_a_tolerated_server_is_checked_when_the_allow_list_is_empty() -> None:
+    """With no allow-list, the servers the bot stays in are served and reach the check."""
+    guild = stub_guild(UNLISTED)
+    cog = stub_cog([guild])
+    cog.bot.guild_access = GuildAccessPolicy(frozenset())
+    with (
+        patch.object(cog, "_owner_owns", AsyncMock(return_value=False)),
+        patch.object(guild_access, "check_servers", AsyncMock()) as check,
+    ):
+        await cog.on_ready()
+    guild.leave.assert_not_awaited()
+    check.assert_awaited_once_with([guild])
+
+
 async def test_the_check_holds_up_no_other_ready_listener() -> None:
     """While the check runs, another listener of the same ready event still runs."""
     bot: Any = commands.Bot(command_prefix="!", intents=discord.Intents.none())  # Any: it stands in for Fablabot
@@ -487,6 +501,21 @@ async def test_the_real_ready_runs_the_check_on_served_guilds_only(simcord_bot: 
     assert report(caplog, GUILD)
     assert messages(caplog, UNLISTED) == []
     assert cached(env, UNLISTED) is None
+
+
+async def test_the_real_ready_reports_a_tolerated_server_when_the_allow_list_is_empty(
+    simcord_bot: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """At start with no allow-list, the real bot reports on the server it stays in."""
+    simcord_bot.guild_access = GuildAccessPolicy(frozenset())
+    env = simcord.Env(simcord_bot)
+    env.create_guild(id=GUILD)
+    await env.start()
+    try:
+        await env.settle()
+    finally:
+        await env.shutdown()
+    assert report(caplog, GUILD)
 
 
 def test_every_problem_has_its_fix_in_the_operator_guide() -> None:
