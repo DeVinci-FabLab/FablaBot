@@ -1007,6 +1007,28 @@ async def test_a_command_missing_from_discord_is_reported(
     assert "blocking=0 warnings=1" in report(caplog)
 
 
+async def test_a_command_missing_from_discord_does_not_stop_the_check_of_the_next(
+    simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A command Discord does not hold is reported, and the commands after it in the tree are still checked."""
+    await ready_server(simcord_env)
+    bot: Any = simcord_env.bot
+    suggest = await global_command(simcord_env, "suggest")
+    simcord_env.backend.set_command_permissions(GUILD, suggest.id, role_entries([GUILD], allowed=False))
+    read = bot.tree.fetch_commands
+
+    async def fetch(*, guild: Any = None) -> Any:
+        return [command for command in await read(guild=guild) if command.name != "fm"]
+
+    monkeypatch.setattr(bot.tree, "fetch_commands", fetch)
+    await run(simcord_env)
+    names = [command.name for command in bot.tree.get_commands()]
+    assert names.index("fm") < names.index("suggest")  # the missing command comes first: a stop there would hide the deny
+    assert codes(caplog) == ["check_failed", "member_command_denied"]
+    assert "detail=[step=integrations command=/fm not on Discord]" in problems(caplog)[0]
+    assert "detail=[/suggest denied for @everyone]" in problems(caplog)[1]
+
+
 @pytest.mark.parametrize(
     ("answer", "status"),
     [([{"id": "not-a-number", "permissions": []}], "ValueError"), ([{"permissions": []}], "KeyError")],
