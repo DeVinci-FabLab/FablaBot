@@ -196,6 +196,16 @@ async def test_a_stored_commands_channel_with_another_name_is_the_commands_chann
     assert f"detail=[channel_id={stored.id}]" in problems(caplog)[0]
 
 
+async def test_a_voice_channel_named_like_the_commands_channel_counts_as_missing(
+    simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A channel named commandes_bot that is not a text channel is no commands channel."""
+    simcord_env.create_guild(id=GUILD).create_voice_channel("commandes_bot")
+    await simcord_env.settle()
+    await run(simcord_env)
+    assert "commands_channel_missing" in codes(caplog)
+
+
 @pytest.mark.parametrize(
     ("commands_deny", "log_deny", "code"),
     [
