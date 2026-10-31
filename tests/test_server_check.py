@@ -853,6 +853,24 @@ async def test_everyone_denied_on_a_group_is_no_problem(simcord_env: simcord.Env
     assert codes(caplog) == []
 
 
+async def test_a_typed_role_missing_from_a_group_is_given_by_its_id(
+    simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A role the staff typed that a group lacks is named by its ID in the Integrations line, never by its name."""
+    await ready_server(simcord_env)
+    handle = simcord_env.guild
+    handle.create_role("Pôle Kevin")
+    typed = handle.create_role("Respo Kevin")
+    await simcord_env.settle()
+    command = await global_command(simcord_env, "user")
+    ids = [role.id for name, role in handle.roles.items() if name not in {"@everyone", "Respo Kevin"}]
+    simcord_env.backend.set_command_permissions(GUILD, command.id, role_entries(ids))
+    await run(simcord_env)
+    [line] = [line for line in lines_about(caplog, "integrations_role_missing") if "detail=[/user: " in line]
+    assert f"detail=[/user: role_id={typed.id}]" in line
+    assert "Kevin" not in caplog.text
+
+
 @pytest.mark.parametrize("on_application", [False, True])
 @pytest.mark.parametrize(("kind", "label"), [(1, "@everyone"), (3, "All Channels")])
 async def test_a_deny_on_member_commands_is_reported(
