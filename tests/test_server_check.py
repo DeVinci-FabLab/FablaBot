@@ -539,7 +539,8 @@ async def test_a_failing_report_does_not_stop_the_next_server(
         f"Server check problem: guild_id={GUILD} severity=warning code=check_failed "
         f"detail=[step=report status=RuntimeError] fix: {FIXES['check_failed'][1]}"
     ]
-    assert [r.__dict__["guild_id"] for r in caplog.records if "step=report" in r.getMessage()] == [GUILD]
+    failures = [r for r in caplog.records if "step=report" in r.getMessage()]
+    assert [(r.levelno, r.__dict__["guild_id"]) for r in failures] == [(logging.WARNING, GUILD)]
     assert "kevin" not in caplog.text
     assert "blocking=0 warnings=0" in report(caplog, OTHER)
 
