@@ -19,6 +19,7 @@ import simcord
 from fablabot.cogs import guild_access
 from fablabot.cogs.guild_access import GuildAccess
 import fablabot.guild_config as guild_config  # noqa: PLR0402 (imported after the cogs: guild_config first is a circular import)
+from fablabot.helpers import server_check
 from fablabot.helpers.constants import ADMIN_ROLES, RoleNames
 from fablabot.helpers.guild_access import GuildAccessPolicy
 from fablabot.helpers.server_check import FIXES, INVITE_PERMISSIONS, Problem, check_servers
@@ -27,7 +28,7 @@ from fablabot.logging_handlers import GuildContextFilter
 from fablabot.models.message import SUGGESTION_OPTIONS
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Mapping
+    from collections.abc import Callable, Collection, Mapping
 
 GUILD = int(LISTED_GUILD)
 OTHER = int(OTHER_LISTED_GUILD)
@@ -139,6 +140,15 @@ def codes(caplog: pytest.LogCaptureFixture, guild_id: int = GUILD) -> list[str]:
 async def run(env: simcord.Env, *guild_ids: int) -> None:
     """Run the check on cached servers."""
     await check_servers([cached(env, guild_id) for guild_id in guild_ids or (GUILD,)])
+
+
+def failing_check(message: str = "") -> Callable[[discord.Guild], list[Problem]]:
+    """Build a check that raises, as one does when a Discord read fails."""
+
+    def check(_guild: discord.Guild) -> list[Problem]:
+        raise RuntimeError(message)
+
+    return check
 
 
 async def test_a_ready_server_has_no_problem(simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture) -> None:
@@ -433,6 +443,41 @@ async def test_a_failure_on_one_server_does_not_stop_the_next(
     assert codes(caplog, GUILD) == ["check_failed"]
     assert "detail=[step=local status=RuntimeError]" in problems(caplog, GUILD)[0]
     assert "blocking=0 warnings=0" in report(caplog, OTHER)
+
+
+async def test_a_failed_check_does_not_hide_the_others(
+    simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A check that raises is reported where it stands, and the checks before and after it still report."""
+    simcord_env.create_guild(id=GUILD)
+    await simcord_env.settle()
+    first, *rest = server_check._LOCAL_CHECKS
+    monkeypatch.setattr(server_check, "_LOCAL_CHECKS", (first, failing_check(), *rest))
+    await run(simcord_env)
+    assert codes(caplog) == [
+        "commands_channel_missing",
+        "check_failed",
+        "log_channel_missing",
+        "roles_missing",
+        "suggest_recipient_unreachable",
+    ]
+    assert "blocking=3 warnings=2" in report(caplog)
+
+
+async def test_the_text_of_a_failure_stays_out_of_the_lines(
+    simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A check that raises with a message is reported by its error type only: the message may hold a name or an ID."""
+    simcord_env.create_guild(id=GUILD)
+    await simcord_env.settle()
+    monkeypatch.setattr(server_check, "_LOCAL_CHECKS", (failing_check("kevin_secret_name 418003123456789012"),))
+    await run(simcord_env)
+    assert problems(caplog) == [
+        f"Server check problem: guild_id={GUILD} severity=warning code=check_failed "
+        f"detail=[step=local status=RuntimeError] fix: {FIXES['check_failed'][1]}"
+    ]
+    assert "kevin" not in caplog.text
+    assert "418003123456789012" not in caplog.text
 
 
 async def test_an_unavailable_server_is_reported_unread(caplog: pytest.LogCaptureFixture) -> None:
