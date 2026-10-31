@@ -829,6 +829,30 @@ async def test_a_bot_wide_allow_does_not_show_a_group(simcord_env: simcord.Env, 
     assert "detail=[/fm]" in " ".join(lines_about(caplog, "integrations_no_role"))
 
 
+async def test_a_role_denied_on_a_group_is_still_missing(simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture) -> None:
+    """A role explicitly denied on a group does not count as shown it, so the group still warns about it."""
+    await ready_server(simcord_env, without={"integrations"})
+    handle = simcord_env.guild
+    command = await global_command(simcord_env, "fm")
+    ids = [role.id for name, role in handle.roles.items() if name not in {"@everyone", RoleNames.CODIR}]
+    entries = [*role_entries(ids), *role_entries([handle.roles[RoleNames.CODIR].id], allowed=False)]
+    simcord_env.backend.set_command_permissions(GUILD, command.id, entries)
+    await run(simcord_env)
+    [line] = lines_about(caplog, "integrations_role_missing")
+    assert f"detail=[/fm: {RoleNames.CODIR}]" in line
+
+
+async def test_everyone_denied_on_a_group_is_no_problem(simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture) -> None:
+    """A group that @everyone is explicitly denied is the hardened state, so nothing is reported for it."""
+    await ready_server(simcord_env)
+    handle = simcord_env.guild
+    command = await global_command(simcord_env, "fm")
+    ids = [role.id for name, role in handle.roles.items() if name != "@everyone"]
+    simcord_env.backend.set_command_permissions(GUILD, command.id, [*role_entries(ids), *role_entries([GUILD], allowed=False)])
+    await run(simcord_env)
+    assert codes(caplog) == []
+
+
 @pytest.mark.parametrize("on_application", [False, True])
 @pytest.mark.parametrize(("kind", "label"), [(1, "@everyone"), (3, "All Channels")])
 async def test_a_deny_on_member_commands_is_reported(
