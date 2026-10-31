@@ -9,6 +9,7 @@ import discord
 from discord.ext import commands
 
 from fablabot.helpers.guild_access import ALLOWED_GUILD_IDS_ENV
+from fablabot.helpers.server_check import check_servers
 
 if TYPE_CHECKING:
     from fablabot.main import Fablabot
@@ -101,6 +102,7 @@ class GuildAccess(commands.Cog):
         """Reconcile the current guilds with the allow-list, on every full connection."""
         policy = self.bot.guild_access
         guilds = list(self.bot.guilds)
+        first_ready = not self._first_ready_done
         leaving = 0
 
         if not policy.allowed:
@@ -134,3 +136,5 @@ class GuildAccess(commands.Cog):
 
         self._first_ready_done = True
         logger.info(f"Guild allow-list: {len(policy.allowed)} IDs listed, in {len(guilds)} guilds, leaving {leaving}.")
+        if first_ready:
+            await check_servers([guild for guild in guilds if policy.is_served(guild.id)])

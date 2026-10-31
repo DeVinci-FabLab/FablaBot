@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-import importlib
 import json
 from typing import TYPE_CHECKING, Any
 
@@ -11,26 +10,11 @@ from discord import Permissions
 import pytest
 
 from fablabot.helpers.constants import PARIS_TZ
-from fablabot.helpers.guild_access import ALLOWED_GUILD_IDS_ENV
 
 if TYPE_CHECKING:
     import simcord
 
 GUILD_ID = 111111111111111111
-
-
-@pytest.fixture
-def simcord_bot(tmp_path, monkeypatch) -> Any:
-    """Build the real bot, with a fake token and one listed guild."""
-    token = tmp_path / "token"
-    token.write_text("fake-token")
-    monkeypatch.setenv("DISCORD_TOKEN_FILE", str(token))
-    monkeypatch.setenv(ALLOWED_GUILD_IDS_ENV, str(GUILD_ID))
-    import fablabot.main
-
-    main = importlib.reload(fablabot.main)
-    monkeypatch.setattr(main, "configure_logging", lambda _bot: (None, None))
-    return main.Fablabot()
 
 
 class Server:
