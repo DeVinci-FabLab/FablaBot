@@ -26,6 +26,10 @@ uv lock --check
 
 CI runs the same lines.
 
+`tests/test_journeys.py` drives the real bot through SimCord, a simulated Discord with no network and no token: commands, buttons, menus, forms, reactions and permission checks. Add a journey there when a change touches what a member does on Discord. SimCord always reports the `en-US` locale and does not draw the Discord client, so language and display still need a look on a test server.
+
+SimCord reads private parts of discord.py and stops the whole test run if they move. If a discord.py security release breaks it, the fix pull request removes `simcord` and `tests/test_journeys.py`; they come back once SimCord catches up.
+
 ## Fix what they report
 
 ```bash
