@@ -137,4 +137,4 @@ class GuildAccess(commands.Cog):
         self._first_ready_done = True
         logger.info(f"Guild allow-list: {len(policy.allowed)} IDs listed, in {len(guilds)} guilds, leaving {leaving}.")
         if first_ready:
-            await check_servers([guild for guild in guilds if policy.is_served(guild.id)])
+            await check_servers(self.bot, [guild for guild in guilds if policy.is_served(guild.id)])

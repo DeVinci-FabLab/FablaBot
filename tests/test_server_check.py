@@ -11,24 +11,28 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from conftest import LISTED_GUILD, OTHER_LISTED_GUILD, make_guild
 import discord
-from discord import PermissionOverwrite, Permissions
+from discord import AppCommandPermissionType, PermissionOverwrite, Permissions
 from discord.ext import commands
 import pytest
 import simcord
+from simcord.backend.ops.commands import COMMAND_FIELDS
+from simcord.http import RequestContext, route
 
 from fablabot.cogs import guild_access
 from fablabot.cogs.guild_access import GuildAccess
 import fablabot.guild_config as guild_config  # noqa: PLR0402 (imported after the cogs: guild_config first is a circular import)
 from fablabot.helpers import server_check
+from fablabot.helpers.access import Caller, rule_of
 from fablabot.helpers.constants import ADMIN_ROLES, RoleNames
 from fablabot.helpers.guild_access import GuildAccessPolicy
+from fablabot.helpers.help_page import leaf_commands
 from fablabot.helpers.server_check import FIXES, INVITE_PERMISSIONS, Problem, check_servers
 from fablabot.helpers.state_store import JsonStateStore
 from fablabot.logging_handlers import GuildContextFilter
 from fablabot.models.message import SUGGESTION_OPTIONS
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Collection, Mapping
+    from collections.abc import Callable, Collection, Iterable, Mapping
 
 GUILD = int(LISTED_GUILD)
 OTHER = int(OTHER_LISTED_GUILD)
@@ -36,6 +40,17 @@ UNLISTED = 333333333333333333
 ALL_ROLES = tuple(value for name, value in vars(RoleNames).items() if name.isupper())
 OPERATIONS = Path(__file__).resolve().parent.parent / "docs" / "OPERATIONS.md"
 HIGH = 1000
+
+
+# SimCord has no route yet for the bulk read of a server's Integrations settings, so this one serves what it stores.
+@route("GET", "/applications/{application_id}/guilds/{guild_id}/commands/permissions")
+def _bulk_command_permissions(ctx: RequestContext) -> list[dict[str, Any]]:
+    guild_id = ctx.int_arg("guild_id")
+    return [
+        {"id": str(command_id), "application_id": ctx.args["application_id"], "guild_id": str(guild_id), "permissions": entries}
+        for (stored_guild, command_id), entries in ctx.backend.command_permissions.items()
+        if stored_guild == guild_id
+    ]
 
 
 @pytest.fixture(autouse=True)
@@ -56,6 +71,35 @@ def cached(env: simcord.Env, guild_id: int = GUILD) -> Any:
     return bot.get_guild(guild_id)
 
 
+def role_entries(role_ids: Iterable[int], *, allowed: bool = True) -> list[dict[str, Any]]:
+    """Write the raw Integrations entries that allow (or deny) some roles."""
+    return [{"id": str(role_id), "type": AppCommandPermissionType.role.value, "permission": allowed} for role_id in role_ids]
+
+
+async def global_command(env: simcord.Env, name: str) -> Any:
+    """Return a command as Discord holds it."""
+    bot: Any = env.bot
+    guild = discord.Object(id=bot.dev_guild_id) if bot.dev_guild_id is not None else None
+    return next(command for command in await bot.tree.fetch_commands(guild=guild) if command.name == name)
+
+
+async def show_all(env: simcord.Env, handle: Any) -> None:
+    """Allow on each staff group the roles that can use it, as an administrator does in Integrations."""
+    bot: Any = env.bot
+    names = tuple(name for name in handle.roles if name != "@everyone")
+    for group in bot.tree.get_commands():
+        if group.default_permissions is None:
+            continue
+        rules = [rule for leaf in leaf_commands([group]) if (rule := rule_of(leaf)) is not None]
+        opening = [
+            handle.roles[name].id
+            for name in names
+            if any(rule.admits(Caller((name,), Permissions.none(), names)) for rule in rules)
+        ]
+        command = await global_command(env, group.name)
+        env.backend.set_command_permissions(handle.id, command.id, role_entries(opening))
+
+
 async def ready_server(
     env: simcord.Env,
     guild_id: int = GUILD,
@@ -71,7 +115,8 @@ async def ready_server(
         guild_id (int): The ID of the new server.
         locale (str): The language the server declares.
         without (Collection[str]): What to leave out: role names, ``holder`` (nobody holds ``Respo Projet``, and
-            ``projet`` has no channel to fall back on), ``commands`` (the commands channel) and ``validation`` (the category).
+            ``projet`` has no channel to fall back on), ``commands`` (the commands channel), ``validation`` (the category)
+            and ``integrations`` (the settings that show each staff group).
         deny (Mapping[str, str] | None): A permission the bot lacks in the ``commands`` or the ``log`` channel.
 
     Returns:
@@ -95,6 +140,8 @@ async def ready_server(
     if "holder" not in without and RoleNames.PROJECTS_MANAGER in created:
         server.add_member(env.create_user(f"holder_{guild_id}"), roles=[created[RoleNames.PROJECTS_MANAGER]])
     guild_config.set_log_channel_id(guild_id, log.id)
+    if "integrations" not in without:
+        await show_all(env, server)
     await env.settle()
     guild = cached(env, guild_id)
     guild.me.top_role.position = HIGH
@@ -103,8 +150,9 @@ async def ready_server(
 
 
 async def add_role(env: simcord.Env, name: str, *, above_bot: bool = False) -> Any:
-    """Create a role on the first server and return the bot's cached copy of it."""
+    """Create a role on the first server, show the groups it opens, and return the bot's cached copy of it."""
     created = env.guild.create_role(name)
+    await show_all(env, env.guild)
     await env.settle()
     role = cached(env).get_role(created.id)
     role.position = HIGH + 1 if above_bot else 1
@@ -139,7 +187,8 @@ def codes(caplog: pytest.LogCaptureFixture, guild_id: int = GUILD) -> list[str]:
 
 async def run(env: simcord.Env, *guild_ids: int) -> None:
     """Run the check on cached servers."""
-    await check_servers([cached(env, guild_id) for guild_id in guild_ids or (GUILD,)])
+    bot: Any = env.bot  # SimCord types ``env.bot`` as a plain client
+    await check_servers(bot, [cached(env, guild_id) for guild_id in guild_ids or (GUILD,)])
 
 
 def failing_check(message: str = "") -> Callable[[discord.Guild], list[Problem]]:
@@ -549,7 +598,7 @@ async def test_an_unavailable_server_is_reported_unread(caplog: pytest.LogCaptur
     """A server Discord has not delivered gets check_failed and no other check."""
     guild = make_guild(GUILD, [], [])
     guild.unavailable = True
-    await check_servers([guild])
+    await check_servers(MagicMock(dev_guild_id=GUILD), [guild])
     assert codes(caplog) == ["check_failed"]
     assert "detail=[step=unavailable]" in problems(caplog)[0]
     assert "warnings=1" in report(caplog)
@@ -588,7 +637,7 @@ async def test_a_server_being_left_is_not_checked() -> None:
     with patch.object(guild_access, "check_servers", AsyncMock()) as check:
         await cog.on_ready()
     unlisted.leave.assert_awaited_once()
-    check.assert_awaited_once_with([listed])
+    check.assert_awaited_once_with(cog.bot, [listed])
 
 
 async def test_a_tolerated_server_is_checked_when_the_allow_list_is_empty() -> None:
@@ -602,7 +651,7 @@ async def test_a_tolerated_server_is_checked_when_the_allow_list_is_empty() -> N
     ):
         await cog.on_ready()
     guild.leave.assert_not_awaited()
-    check.assert_awaited_once_with([guild])
+    check.assert_awaited_once_with(cog.bot, [guild])
 
 
 async def test_the_check_holds_up_no_other_ready_listener() -> None:
@@ -611,7 +660,7 @@ async def test_the_check_holds_up_no_other_ready_listener() -> None:
     bot.guild_access = GuildAccessPolicy(frozenset({GUILD}))
     blocked, other_ran = asyncio.Event(), asyncio.Event()
 
-    async def never_ends(_guilds: object) -> None:
+    async def never_ends(_bot: object, _guilds: object) -> None:
         await blocked.wait()
 
     async def other() -> None:
@@ -670,3 +719,217 @@ def test_every_problem_has_its_fix_in_the_operator_guide() -> None:
         assert code in rows, code
         assert rows[code][1] == severity, code
         assert rows[code][3] == fix, code
+
+
+def commands_of(env: simcord.Env, guild_id: int = GUILD) -> dict[str, Any]:
+    """Return the commands registered on a server, by name."""
+    return {name: command for (name, _kind), command in env.backend.commands.get(guild_id, {}).items()}
+
+
+def lines_about(caplog: pytest.LogCaptureFixture, code: str, guild_id: int = GUILD) -> list[str]:
+    """Return the problem lines of a code."""
+    return [line for line in problems(caplog, guild_id) if f"code={code} " in line]
+
+
+async def test_reads_are_gets_one_global_and_two_per_server(simcord_env: simcord.Env) -> None:
+    """The check reads the global commands once, then the commands and the Integrations settings of each server."""
+    await ready_server(simcord_env)
+    await ready_server(simcord_env, OTHER)
+    before = len(simcord_env.http_requests)
+    await run(simcord_env, GUILD, OTHER)
+    reads = simcord_env.http_requests[before:]
+    assert [read.method for read in reads] == ["GET"] * 5
+    assert sum(read.path.endswith("/commands/permissions") for read in reads) == 2
+
+
+async def test_every_server_scoped_command_is_a_leftover(simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture) -> None:
+    """A command registered on the server is reported once, by name and ID, and is left registered."""
+    await ready_server(simcord_env)
+    simcord_env.backend.register_commands(GUILD, [{"name": "user", "description": "x"}, {"name": "bot", "description": "x"}])
+    registered = commands_of(simcord_env)
+    await run(simcord_env)
+    assert codes(caplog) == ["leftover_commands"]
+    expected = ", ".join(f"/{name} command_id={registered[name]['id']}" for name in ("bot", "user"))
+    assert f"detail=[{expected}]" in problems(caplog)[0]
+    assert set(commands_of(simcord_env)) == {"user", "bot"}
+
+
+async def test_a_group_shown_to_nobody_blocks(simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture) -> None:
+    """A staff group with no role allowed in Integrations blocks, and the line names the group."""
+    await ready_server(simcord_env, without={"integrations"})
+    await run(simcord_env)
+    assert any(
+        line.startswith("Server check problem") and "severity=blocking" in line
+        for line in lines_about(caplog, "integrations_no_role")
+    )
+    assert "detail=[/fm]" in " ".join(lines_about(caplog, "integrations_no_role"))
+    assert "integrations_role_missing" not in codes(caplog)
+
+
+async def test_a_group_missing_some_roles_warns(simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture) -> None:
+    """A group shown to some of its roles warns, naming the roles still missing."""
+    await ready_server(simcord_env, without={"integrations"})
+    handle = simcord_env.guild
+    command = await global_command(simcord_env, "fm")
+    simcord_env.backend.set_command_permissions(GUILD, command.id, role_entries([handle.roles[RoleNames.ADMIN].id]))
+    await run(simcord_env)
+    [line] = [line for line in lines_about(caplog, "integrations_role_missing") if "detail=[/fm: " in line]
+    assert "severity=warning" in line
+    assert RoleNames.CODIR in line
+    assert RoleNames.ADMIN not in line
+
+
+async def test_a_role_with_administrator_needs_no_setting(simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture) -> None:
+    """A role that holds the Administrator permission sees every command, so no setting is expected for it."""
+    server = await ready_server(simcord_env, without={"integrations"})
+    for role in server.roles:
+        if not role.is_default():
+            role._permissions = Permissions(administrator=True).value
+    await run(simcord_env)
+    assert not [code for code in codes(caplog) if code.startswith("integrations_")]
+
+
+async def test_a_respo_counts_only_where_its_pole_exists(simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture) -> None:
+    """A manager can give the role of its own pole only, so it is expected on /user once that pole exists."""
+    await ready_server(simcord_env, without={"integrations"})
+    handle = simcord_env.guild
+    command = await global_command(simcord_env, "user")
+    others = [role.id for name, role in handle.roles.items() if name not in {"@everyone", RoleNames.COMMUNICATION_MANAGER}]
+    simcord_env.backend.set_command_permissions(GUILD, command.id, role_entries(others))
+    await run(simcord_env)
+    assert not [line for line in lines_about(caplog, "integrations_role_missing") if "detail=[/user" in line]
+    handle.create_role("Pôle Communication")
+    await simcord_env.settle()
+    caplog.clear()
+    await run(simcord_env)
+    [line] = [line for line in lines_about(caplog, "integrations_role_missing") if "detail=[/user: " in line]
+    assert RoleNames.COMMUNICATION_MANAGER in line
+
+
+async def test_everyone_allowed_on_a_group_warns(simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture) -> None:
+    """A staff group allowed to @everyone in Integrations warns, since the whole server then sees it."""
+    await ready_server(simcord_env)
+    handle = simcord_env.guild
+    command = await global_command(simcord_env, "fm")
+    ids = [role.id for name, role in handle.roles.items() if name != "@everyone"]
+    simcord_env.backend.set_command_permissions(GUILD, command.id, role_entries([GUILD, *ids]))
+    await run(simcord_env)
+    assert codes(caplog) == ["integrations_everyone_allowed"]
+    assert "severity=warning" in problems(caplog)[0]
+    assert "detail=[/fm]" in problems(caplog)[0]
+
+
+@pytest.mark.parametrize("on_application", [False, True])
+@pytest.mark.parametrize(("kind", "label"), [(1, "@everyone"), (3, "All Channels")])
+async def test_a_deny_on_member_commands_is_reported(
+    simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture, *, on_application: bool, kind: int, label: str
+) -> None:
+    """A deny for @everyone or All Channels, on the command or on the whole bot, blocks a command for every member."""
+    await ready_server(simcord_env)
+    bot: Any = simcord_env.bot
+    command = await global_command(simcord_env, "suggest")
+    entry = {"id": str(GUILD if kind == 1 else GUILD - 1), "type": kind, "permission": False}
+    simcord_env.backend.set_command_permissions(GUILD, bot.application_id if on_application else command.id, [entry])
+    await run(simcord_env)
+    assert f"severity=blocking code=member_command_denied detail=[/suggest denied for {label}]" in " ".join(problems(caplog))
+    assert set(codes(caplog)) == {"member_command_denied"}
+
+
+async def test_a_command_setting_wins_over_the_bot_wide_one(simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture) -> None:
+    """An allow on the command stands even when the whole bot is denied to @everyone."""
+    await ready_server(simcord_env)
+    bot: Any = simcord_env.bot
+    command = await global_command(simcord_env, "suggest")
+    simcord_env.backend.set_command_permissions(GUILD, bot.application_id, role_entries([GUILD], allowed=False))
+    await run(simcord_env)
+    assert "/suggest denied for @everyone" in " ".join(lines_about(caplog, "member_command_denied"))
+    simcord_env.backend.set_command_permissions(GUILD, command.id, role_entries([GUILD]))
+    caplog.clear()
+    await run(simcord_env)
+    assert "/suggest" not in " ".join(lines_about(caplog, "member_command_denied"))
+
+
+async def test_a_refused_read_is_reported_and_the_next_server_goes_on(
+    simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A server whose commands Discord refuses to give gets check_failed with the HTTP status, and the next server is read."""
+    await ready_server(simcord_env)
+    await ready_server(simcord_env, OTHER)
+    simcord_env.inject_error("GET", f"/applications/*/guilds/{GUILD}/commands", status=403, times=None)
+    await run(simcord_env, GUILD, OTHER)
+    assert codes(caplog, GUILD) == ["check_failed"]
+    assert "detail=[step=server commands status=HTTP 403]" in problems(caplog, GUILD)[0]
+    assert "blocking=0 warnings=0" in report(caplog, OTHER)
+
+
+async def test_a_refused_bulk_read_keeps_the_leftovers(simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture) -> None:
+    """When the Integrations read is refused, the leftovers already found are still reported."""
+    await ready_server(simcord_env)
+    simcord_env.backend.register_commands(GUILD, [{"name": "user", "description": "x"}])
+    simcord_env.inject_error("GET", f"/applications/*/guilds/{GUILD}/commands/permissions", status=403, times=None)
+    await run(simcord_env)
+    assert codes(caplog) == ["leftover_commands", "check_failed"]
+    assert "detail=[step=integrations status=HTTP 403]" in problems(caplog)[1]
+
+
+async def test_a_failed_global_read_reports_each_server(
+    simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A global read that fails with a plain error is reported on every server, which still gets its other checks."""
+    await ready_server(simcord_env)
+    await ready_server(simcord_env, OTHER)
+    bot: Any = simcord_env.bot
+    read = bot.tree.fetch_commands
+
+    async def fetch(*, guild: Any = None) -> Any:
+        if guild is None:
+            raise TimeoutError
+        return await read(guild=guild)
+
+    monkeypatch.setattr(bot.tree, "fetch_commands", fetch)
+    await run(simcord_env, GUILD, OTHER)
+    for guild_id in (GUILD, OTHER):
+        assert codes(caplog, guild_id) == ["check_failed"]
+        assert "detail=[step=global commands status=TimeoutError]" in problems(caplog, guild_id)[0]
+
+
+async def test_dev_mode_reads_only_the_dev_server(simcord_bot: Any, caplog: pytest.LogCaptureFixture) -> None:
+    """With a development server, only that server is read for commands: no global read, no read of the other server."""
+    simcord_bot.dev_guild_id = GUILD
+    env = simcord.Env(simcord_bot)
+    env.create_guild(id=GUILD)
+    env.create_guild(id=OTHER)
+    await env.start()
+    try:
+        await env.settle()
+        caplog.clear()
+        before = len(env.http_requests)
+        await run(env, GUILD, OTHER)
+        reads = env.http_requests[before:]
+    finally:
+        await env.shutdown()
+    assert [read.path for read in reads if read.method == "GET"] == [
+        f"/applications/{simcord_bot.application_id}/guilds/{GUILD}/commands",
+        f"/applications/{simcord_bot.application_id}/guilds/{GUILD}/commands/permissions",
+    ]
+    assert not [code for code in codes(caplog, GUILD) if code == "leftover_commands"]
+    assert not [code for code in codes(caplog, OTHER) if code in {"leftover_commands", "check_failed"}]
+
+
+async def test_dev_mode_still_reports_a_stray_command(simcord_bot: Any, caplog: pytest.LogCaptureFixture) -> None:
+    """On the development server, a command outside the bot's own list is still a leftover."""
+    simcord_bot.dev_guild_id = GUILD
+    env = simcord.Env(simcord_bot)
+    env.create_guild(id=GUILD)
+    await env.start()
+    try:
+        await env.settle()
+        kept = [{key: command[key] for key in COMMAND_FIELDS if key in command} for command in commands_of(env).values()]
+        env.backend.register_commands(GUILD, [*kept, {"name": "stray", "description": "x"}])
+        stray = commands_of(env)["stray"]
+        caplog.clear()
+        await run(env, GUILD)
+    finally:
+        await env.shutdown()
+    assert "leftover_commands" in codes(caplog)
+    assert f"detail=[/stray command_id={stray['id']}]" in " ".join(problems(caplog))

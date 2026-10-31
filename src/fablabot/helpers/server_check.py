@@ -4,22 +4,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal
 
-from discord import CategoryChannel, Permissions, TextChannel
+from discord import AppCommandPermissionType, CategoryChannel, HTTPException, Permissions, TextChannel, app_commands
 from discord.utils import get
 
 from fablabot.guild_config import get_log_channel_id, is_welcome_verify_enabled
+from fablabot.helpers.access import Caller, rule_of
 from fablabot.helpers.constants import ADMIN_ROLES, RoleNames
+from fablabot.helpers.help_page import leaf_commands
 from fablabot.helpers.i18n import REFERENCE, catalog
 from fablabot.helpers.utils import COMMANDS_CHANNEL_NAME, find_commands_channel
 from fablabot.logging_handlers import guild_log_context
 from fablabot.models.message import SUGGESTION_OPTIONS
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping, Sequence
+    from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 
     from discord import Guild, Role
+
+    from fablabot.main import Fablabot
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +44,11 @@ FIXES: Final[Mapping[str, tuple[Severity, str]]] = {
     "welcome_setup_missing": ("blocking", "create what the welcome flow needs, or turn it off with /welcome verify"),
     "suggest_recipient_unreachable": ("warning", "give the role to a member or create the channel"),
     "language_not_shipped": ("warning", "pick a shipped language in Server Settings, Community, Overview"),
+    "integrations_no_role": ("blocking", "allow the group's roles in Integrations"),
+    "integrations_role_missing": ("warning", "allow these roles on the group in Integrations"),
+    "integrations_everyone_allowed": ("warning", "remove @everyone from the group in Integrations"),
+    "member_command_denied": ("blocking", "remove the deny on this command in Integrations"),
+    "leftover_commands": ("warning", "nothing to do yet: the bot reports them and a later release removes them"),
     "check_failed": (
         "warning",
         "read the next start; HTTP 403 on commands means the invite lacked applications.commands",
@@ -184,11 +193,150 @@ _LOCAL_CHECKS: Final[tuple[Callable[[Guild], list[Problem]], ...]] = (
 )
 
 
-def _check_server(guild: Guild) -> list[Problem]:
+def _opening_roles(group: app_commands.Group, guild: Guild) -> list[Role]:
+    """List the roles of a server that open some command of a group, the way ``/help`` decides it.
+
+    A role with the Administrator permission sees every command already, so it is not listed.
+
+    Args:
+        group (app_commands.Group): The staff group.
+        guild (Guild): The server.
+
+    Returns:
+        list[Role]: The roles that a setting in Integrations has to show the group to.
+    """
+    rules = [rule for leaf in leaf_commands([group]) if (rule := rule_of(leaf)) is not None]
+    names = tuple(role.name for role in guild.roles)
+    return [
+        role
+        for role in guild.roles
+        if not role.is_default()
+        and not role.permissions.administrator
+        and any(rule.admits(Caller((role.name,), Permissions.none(), names)) for rule in rules)
+    ]
+
+
+def _entry(entries: Sequence[Mapping[str, Any]], target_id: int, kind: AppCommandPermissionType) -> bool | None:
+    """Read what a list of Integrations entries says about one target: allowed, denied, or nothing."""
+    for entry in entries:
+        if int(entry["id"]) == target_id and entry["type"] == kind.value:
+            return bool(entry["permission"])
+    return None
+
+
+def _check_group(group: app_commands.Group, guild: Guild, entries: Sequence[Mapping[str, Any]]) -> list[Problem]:
+    """Check that the roles a staff group is for are shown it in Integrations, and that @everyone is not."""
+    allowed = {
+        int(entry["id"]) for entry in entries if entry["type"] == AppCommandPermissionType.role.value and entry["permission"]
+    }
+    expected = _opening_roles(group, guild)
+    missing = [role for role in expected if role.id not in allowed]
+    problems: list[Problem] = []
+    if missing and len(missing) == len(expected):
+        problems.append(Problem("integrations_no_role", f"/{group.name}"))
+    elif missing:
+        problems.append(Problem("integrations_role_missing", f"/{group.name}: {', '.join(_label(role) for role in missing)}"))
+    if guild.id in allowed:
+        problems.append(Problem("integrations_everyone_allowed", f"/{group.name}"))
+    return problems
+
+
+def _check_member_command(
+    name: str,
+    guild: Guild,
+    entries: Sequence[Mapping[str, Any]],
+    app_entries: Sequence[Mapping[str, Any]],
+) -> list[Problem]:
+    """Check that a command for every member is not denied to @everyone or to All Channels, on it or bot-wide."""
+    denied: list[str] = []
+    targets = (
+        ("@everyone", guild.id, AppCommandPermissionType.role),
+        ("All Channels", guild.id - 1, AppCommandPermissionType.channel),
+    )
+    for label, target_id, kind in targets:
+        value = _entry(entries, target_id, kind)
+        if value is None:
+            value = _entry(app_entries, target_id, kind)
+        if value is False:
+            denied.append(f"/{name} denied for {label}")
+    return [Problem("member_command_denied", ", ".join(denied))] if denied else []
+
+
+def _check_integrations(
+    bot: Fablabot,
+    guild: Guild,
+    ids: Mapping[str, int],
+    raw: Iterable[Mapping[str, Any]],
+) -> list[Problem]:
+    """Check the Integrations settings of each command of the tree against the IDs Discord holds for it."""
+    overrides = {int(item["id"]): item["permissions"] for item in raw}
+    app_entries = overrides.get(bot.application_id or 0, [])
+    problems: list[Problem] = []
+    for command in bot.tree.get_commands():
+        command_id = ids.get(command.name)
+        if command_id is None:
+            problems.append(Problem("check_failed", f"step=integrations command=/{command.name} not on Discord"))
+            continue
+        entries = overrides.get(command_id, [])
+        if command.default_permissions is None:  # pyright: ignore[reportAttributeAccessIssue] -- a union member has none
+            problems.extend(_check_member_command(command.name, guild, entries, app_entries))
+        else:
+            problems.extend(_check_group(command, guild, entries))  # pyright: ignore[reportArgumentType] -- not a context menu
+    return problems
+
+
+async def _read[T](step: str, call: Awaitable[T]) -> T | Problem:
+    """Await a Discord read; a failure becomes a problem that names the step and the error type, never its text."""
+    try:
+        return await call
+    except HTTPException as exc:
+        return Problem("check_failed", f"step={step} status=HTTP {exc.status}")
+    except Exception as exc:  # a read that fails must not stop the report of the server
+        return Problem("check_failed", f"step={step} status={type(exc).__name__}")
+
+
+async def _check_commands(
+    bot: Fablabot,
+    guild: Guild,
+    global_commands: Sequence[app_commands.AppCommand] | Problem | None,
+) -> list[Problem]:
+    """Report the commands left on the server and check the Integrations settings of the bot's commands."""
+    server_commands = await _read("server commands", bot.tree.fetch_commands(guild=guild))
+    if isinstance(server_commands, Problem):
+        return [server_commands]  # the bulk read would fail the same way
+    in_dev = bot.dev_guild_id == guild.id
+    own = {command.name for command in bot.tree.get_commands()} if in_dev else set()
+    leftovers = sorted(f"/{command.name} command_id={command.id}" for command in server_commands if command.name not in own)
+    problems = [Problem("leftover_commands", ", ".join(leftovers))] if leftovers else []
+    reference = server_commands if in_dev else global_commands
+    if isinstance(reference, Problem):
+        return [*problems, reference]
+    raw = await _read(
+        "integrations",
+        bot.http.get_guild_application_command_permissions(bot.application_id, guild.id),  # pyright: ignore[reportArgumentType] -- set once logged in
+    )
+    if isinstance(raw, Problem):
+        return [*problems, raw]
+    ids = {command.name: command.id for command in reference or ()}
+    try:
+        problems.extend(_check_integrations(bot, guild, ids, raw))
+    except Exception as exc:  # an unexpected answer must not hide the rest of the report
+        problems.append(Problem("check_failed", f"step=integrations status={type(exc).__name__}"))
+    return problems
+
+
+async def _check_server(
+    bot: Fablabot,
+    guild: Guild,
+    global_commands: Sequence[app_commands.AppCommand] | Problem | None,
+) -> list[Problem]:
     """Run every check on a server; one that fails is reported and the others still run.
 
     Args:
+        bot (Fablabot): The bot, which holds the commands and the Discord reads.
         guild (Guild): The server to read.
+        global_commands (Sequence[app_commands.AppCommand] | Problem | None): The bot's global commands as Discord holds
+            them, the problem that stopped their read, or None in development mode, where none is read.
 
     Returns:
         list[Problem]: What the server lacks, in the order of the checks.
@@ -201,6 +349,8 @@ def _check_server(guild: Guild) -> list[Problem]:
             problems.extend(check(guild))
         except Exception as exc:  # a broken check must not hide the other servers
             problems.append(Problem("check_failed", f"step=local status={type(exc).__name__}"))
+    if bot.dev_guild_id is None or bot.dev_guild_id == guild.id:
+        problems.extend(await _check_commands(bot, guild, global_commands))
     return problems
 
 
@@ -230,15 +380,17 @@ def _report(guild: Guild, problems: Sequence[Problem]) -> None:
             logger.warning(_problem_line(guild, problem))
 
 
-async def check_servers(guilds: Iterable[Guild]) -> None:
+async def check_servers(bot: Fablabot, guilds: Iterable[Guild]) -> None:
     """Read each server and write its report to the log; nothing is changed on Discord or in the stored settings.
 
     Args:
+        bot (Fablabot): The bot, which holds the commands and the Discord reads.
         guilds (Iterable[Guild]): The servers the bot serves.
     """
+    global_commands = None if bot.dev_guild_id is not None else await _read("global commands", bot.tree.fetch_commands())
     for guild in guilds:
         try:
-            _report(guild, _check_server(guild))
+            _report(guild, await _check_server(bot, guild, global_commands))
         except Exception as exc:  # the report of one server must not hide the next servers
             with guild_log_context(guild.id):
                 logger.warning(_problem_line(guild, Problem("check_failed", f"step=report status={type(exc).__name__}")))
