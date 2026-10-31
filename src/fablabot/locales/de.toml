@@ -4,13 +4,14 @@
 title = "Was du hier ausführen kannst"
 member_intro = "Das sind die Befehle, die du mit deinen Rollen auf diesem Server ausführen kannst."
 footer = "Fehlt etwas oder klappt etwas nicht? Sag es uns mit /suggest."
+public_channel_only = "Die öffentliche Liste gibt es nur in {channel}. Starte den Befehl ohne `show`, um sie hier privat zu lesen."
 line = "{command}: {text}"
 roles_join = "{head} und {last}"
 
 [help.slash]
 name = "hilfe"
 description = "Zeigt die Befehle, die du auf diesem Server ausführen kannst"
-show = "Postet die Liste für alle sichtbar im Kanal"
+show = "Postet die Liste für alle sichtbar, nur im Befehlskanal"
 
 [help.summary.one_role]
 one = "Deine Rolle {roles} öffnet dir {count} Befehl."

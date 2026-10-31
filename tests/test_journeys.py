@@ -101,6 +101,21 @@ async def test_private_help_works_outside_the_commands_channel(server: Server) -
     assert "/suggest" in lines(result)
 
 
+async def test_private_help_works_in_a_voice_channel(server: Server) -> None:
+    """The text chat of a voice channel counts as any channel."""
+    voice = server.guild.create_voice_channel("salon", category=server.category)
+    result = await server.plain.slash(voice, "help")
+    assert result.ephemeral
+    assert "/suggest" in lines(result)
+
+
+async def test_public_help_refusal_gives_the_private_way_out(server: Server) -> None:
+    """A member who cannot open the commands channel is told to drop ``show``."""
+    result = await server.plain.slash(server.general, "help", show=True)
+    assert result.ephemeral
+    assert "`show`" in result.response.content
+
+
 async def test_public_help_outside_commands_channel_points_to_it(server: Server) -> None:
     """Outside the commands channel, `/help show:True` refuses and names the channel."""
     result = await server.admin.slash(server.general, "help", show=True)

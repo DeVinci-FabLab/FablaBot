@@ -197,8 +197,8 @@ outside it, `/msg clear` refuses it, and `/welcome approve` runs in a `welcome-‚
 
 So on a new server, create a text channel named `commandes_bot`.
 
-`/help` is open to every member in any channel, so members do not need access to this one. Only
-`/help show:True`, which posts the list for everyone, stays in this channel.
+`/help` is open to every member, in any channel where they can use application commands, so members do not
+need access to this one. Only `/help show:True`, which posts the list for everyone, stays in this channel.
 
 `/log set` picks the channel that receives the server's errors. `/log export` sends that server's log
 file to that server only.
@@ -256,7 +256,7 @@ The log tells which case applies: `Commands synced (9, global).` after a sync, a
 | The bot does not leave a removed server | The change was not deployed, or the list now matches none of the current servers | Redeploy; read the "Guild allow-list" line, and check the IDs. |
 | Bot stops at start with "entry N is not a numeric guild ID" | `ALLOWED_GUILD_IDS` has quotes, spaces or a non-numeric entry | Use `id1,id2`, digits only. |
 | A merged fix is not live | A merge does not deploy | Archive, then redeploy the stack. |
-| "Vous ne pouvez pas utiliser de commandes en dehors du salon ..." | The command ran outside the commands channel | Use the channel named in the message. |
+| "Vous ne pouvez pas utiliser de commandes en dehors du salon ..." | The command ran outside the commands channel | Use the channel named in the message. A member who cannot open it uses `/suggest` or a private `/help`, which work anywhere. |
 | "Le salon de commandes du bot n'est pas configur√© sur ce serveur." | No stored channel and no `commandes_bot` channel | Create a text channel named `commandes_bot`. |
 | A `/user op` role is not added or removed (403) | The bot's role is below `Admin -temp-` | Move the bot's role above it. |
 | `Missing roles ... for guild ...` in the log | The server lacks a role name the bot expects | Create the role with the exact name (see Roles). |

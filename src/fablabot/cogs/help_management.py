@@ -56,15 +56,20 @@ class HelpManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             show (bool): Post the list in the channel instead of privately.
         """
+        texts = catalog().texts(interaction.guild_locale.value if interaction.guild_locale else None)
         # Most members cannot open the commands channel: a private answer works anywhere, a public one stays there.
         if not await ensure_command_context(
-            logger, "help", interaction, log_details={"show": show}, enforce_commands_channel=show
+            logger,
+            "help",
+            interaction,
+            log_details={"show": show},
+            enforce_commands_channel=show,
+            wrong_channel_text=lambda channel: texts.get("help.public_channel_only", channel=channel),
         ):
             return
         member: Member = interaction.user  # pyright: ignore[reportAssignmentType]  # commands run in servers only
         guild: Guild | None = interaction.guild
         assert guild is not None
-        texts = catalog().texts(interaction.guild_locale.value if interaction.guild_locale else None)
         embeds = build_help(leaf_commands(self.bot.tree.walk_commands()), Caller.of(member, guild), texts)
         await interaction.response.send_message(
             embed=embeds[0],

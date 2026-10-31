@@ -196,7 +196,7 @@ async def test_public_help_is_refused_outside_the_commands_channel() -> None:
     await HelpManagement.show_help.callback(_cog(), interaction, show=True)  # pyright: ignore[reportCallIssue]  # cog bound away
     interaction.response.send_message.assert_awaited_once()
     args, kwargs = interaction.response.send_message.await_args
-    assert args[0] == ErrorMessages.WRONG_COMMANDS_CHANNEL.format(channel="<#55>")
+    assert args[0] == catalog().texts("en-US").get("help.public_channel_only", channel="<#55>")
     assert "embed" not in kwargs
 
 

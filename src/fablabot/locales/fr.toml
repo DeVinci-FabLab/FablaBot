@@ -5,13 +5,14 @@
 title = "Ce que tu peux lancer ici"
 member_intro = "Voici les commandes que tes rôles te permettent de lancer sur ce serveur."
 footer = "Un manque ou un souci\u202F? Dis-le-nous avec /suggest."
+public_channel_only = "La liste publique se poste uniquement dans {channel}. Relance la commande sans `show` pour la lire ici, en privé."
 line = "{command}\u00A0: {text}"
 roles_join = "{head} et {last}"
 
 [help.slash]
 name = "aide"
 description = "Affiche les commandes que tu peux lancer sur ce serveur"
-show = "Publie la liste dans le salon, pour tout le monde"
+show = "Publie la liste pour tout le monde, dans le salon de commandes uniquement"
 
 [help.summary.one_role]
 one = "Ton rôle {roles} t’ouvre {count} commande."
