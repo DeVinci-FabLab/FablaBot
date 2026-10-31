@@ -414,6 +414,7 @@ async def test_an_unavailable_server_is_reported_unread(caplog: pytest.LogCaptur
     assert codes(caplog) == ["check_failed"]
     assert "detail=[step=unavailable]" in problems(caplog)[0]
     assert "warnings=1" in report(caplog)
+    assert len(messages(caplog)) == 2
 
 
 def stub_cog(guilds: list[MagicMock]) -> GuildAccess:
