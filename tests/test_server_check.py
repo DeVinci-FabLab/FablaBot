@@ -819,6 +819,16 @@ async def test_everyone_allowed_on_a_group_warns(simcord_env: simcord.Env, caplo
     assert "detail=[/fm]" in problems(caplog)[0]
 
 
+async def test_a_bot_wide_allow_does_not_show_a_group(simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture) -> None:
+    """Only the setting on the group itself counts: roles allowed for the whole bot leave the group shown to nobody."""
+    await ready_server(simcord_env, without={"integrations"})
+    bot: Any = simcord_env.bot
+    ids = [role.id for name, role in simcord_env.guild.roles.items() if name != "@everyone"]
+    simcord_env.backend.set_command_permissions(GUILD, bot.application_id, role_entries(ids))
+    await run(simcord_env)
+    assert "detail=[/fm]" in " ".join(lines_about(caplog, "integrations_no_role"))
+
+
 @pytest.mark.parametrize("on_application", [False, True])
 @pytest.mark.parametrize(("kind", "label"), [(1, "@everyone"), (3, "All Channels")])
 async def test_a_deny_on_member_commands_is_reported(
