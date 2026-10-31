@@ -912,6 +912,7 @@ async def test_a_failed_global_read_reports_each_server(
     """A global read that fails with a plain error is reported on every server, which still gets its other checks."""
     await ready_server(simcord_env)
     await ready_server(simcord_env, OTHER)
+    simcord_env.backend.register_commands(GUILD, [{"name": "user", "description": "x"}])
     bot: Any = simcord_env.bot
     read = bot.tree.fetch_commands
 
@@ -922,9 +923,10 @@ async def test_a_failed_global_read_reports_each_server(
 
     monkeypatch.setattr(bot.tree, "fetch_commands", fetch)
     await run(simcord_env, GUILD, OTHER)
+    assert codes(caplog, GUILD) == ["leftover_commands", "check_failed"]
+    assert codes(caplog, OTHER) == ["check_failed"]
     for guild_id in (GUILD, OTHER):
-        assert codes(caplog, guild_id) == ["check_failed"]
-        assert "detail=[step=global commands status=TimeoutError]" in problems(caplog, guild_id)[0]
+        assert "detail=[step=global commands status=TimeoutError]" in problems(caplog, guild_id)[-1]
 
 
 async def test_dev_mode_reads_only_the_dev_server(simcord_bot: Any, caplog: pytest.LogCaptureFixture) -> None:
