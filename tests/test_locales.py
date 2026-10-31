@@ -93,6 +93,12 @@ def test_french_typography() -> None:
     assert wrong == []
 
 
+@pytest.mark.parametrize("code", sorted(catalog().locales))
+def test_public_help_refusal_names_the_option_to_drop(code: str) -> None:
+    """The refusal of a public ``/help`` gives its way out in every language."""
+    assert "`show`" in catalog().texts(code).get("help.public_channel_only", channel="<#1>")
+
+
 def test_informal_address() -> None:
     """French says tu and German says du: no vous or Sie form anywhere in the files."""
     formal = {"fr": r"\b(vous|votre|vos)\b", "de": r"\b(Sie|Ihr|Ihre|Ihren|Ihnen)\b"}

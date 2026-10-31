@@ -179,3 +179,10 @@ def test_operator_guide_says_members_do_not_need_the_commands_channel_for_help()
     section = " ".join(_section(_read("docs/OPERATIONS.md"), "## Commands channel").split())
     assert "members do not need access to this one" in section
     assert "`/help show:True`, which posts the list for everyone, stays in this channel" in section
+
+
+def test_operator_guide_gives_a_member_without_the_channel_a_way_out() -> None:
+    """The troubleshooting rows name the private ``/help`` and the way out of its public refusal."""
+    section = _read("docs/OPERATIONS.md")
+    assert "A member who cannot open it uses `/suggest` or a private `/help`" in section
+    assert "Run `/help` without `show`" in section
