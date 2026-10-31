@@ -204,6 +204,15 @@ def _check_server(guild: Guild) -> list[Problem]:
     return problems
 
 
+def _problem_line(guild: Guild, problem: Problem) -> str:
+    """Write the log line of a problem: its severity, code, detail and fix."""
+    severity, fix = FIXES[problem.code]
+    return (
+        f"Server check problem: guild_id={guild.id} severity={severity} code={problem.code} "
+        f"detail=[{problem.detail}] fix: {fix}"
+    )
+
+
 def _report(guild: Guild, problems: Sequence[Problem]) -> None:
     """Write the summary, the optional-roles note and one warning per problem, all tied to the server."""
     blocking = sum(FIXES[problem.code][0] == "blocking" for problem in problems)
@@ -218,11 +227,7 @@ def _report(guild: Guild, problems: Sequence[Problem]) -> None:
             if optional:
                 logger.info(f"Server check: optional roles absent (guild_id={guild.id}): {', '.join(sorted(optional))}")
         for problem in problems:
-            severity, fix = FIXES[problem.code]
-            logger.warning(
-                f"Server check problem: guild_id={guild.id} severity={severity} code={problem.code} "
-                f"detail=[{problem.detail}] fix: {fix}",
-            )
+            logger.warning(_problem_line(guild, problem))
 
 
 async def check_servers(guilds: Iterable[Guild]) -> None:
@@ -232,4 +237,8 @@ async def check_servers(guilds: Iterable[Guild]) -> None:
         guilds (Iterable[Guild]): The servers the bot serves.
     """
     for guild in guilds:
-        _report(guild, _check_server(guild))
+        try:
+            _report(guild, _check_server(guild))
+        except Exception as exc:  # the report of one server must not hide the next servers
+            with guild_log_context(guild.id):
+                logger.warning(_problem_line(guild, Problem("check_failed", f"step=report status={type(exc).__name__}")))

@@ -275,7 +275,7 @@ person's name. Copy the ID into Discord's role search or Developer Mode to find 
 | `welcome_setup_missing` | blocking | The welcome flow is on, and the `Validation` category or the `Membre ✓` role is missing. | create what the welcome flow needs, or turn it off with /welcome verify |
 | `suggest_recipient_unreachable` | warning | A recipient of `/suggest` (the detail gives its key) has no member holding its role and no channel. | give the role to a member or create the channel |
 | `language_not_shipped` | warning | The language the server declares has no text file, so the help is in English. | pick a shipped language in Server Settings, Community, Overview |
-| `check_failed` | warning | A check did not finish (`step=local status=<error type>`), or Discord has not delivered the server (`step=unavailable`). The report of that server is incomplete. | read the next start; HTTP 403 on commands means the invite lacked applications.commands |
+| `check_failed` | warning | A check did not finish (`step=local status=<error type>`), the report of the server could not be written (`step=report status=<error type>`), or Discord has not delivered the server (`step=unavailable`). The report of that server is incomplete. | read the next start; HTTP 403 on commands means the invite lacked applications.commands |
 
 ## "This command is outdated"
 

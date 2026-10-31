@@ -502,6 +502,31 @@ async def test_the_text_of_a_failure_stays_out_of_the_lines(
     assert "418003123456789012" not in caplog.text
 
 
+async def test_a_failing_report_does_not_stop_the_next_server(
+    simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A server whose report cannot be written gets check_failed, tied to it, and the next server is still reported."""
+    caplog.handler.addFilter(GuildContextFilter())
+    await ready_server(simcord_env)
+    await ready_server(simcord_env, OTHER)
+    read = server_check._languages
+
+    def languages(guild: discord.Guild) -> tuple[str, str]:
+        if guild.id == GUILD:
+            raise RuntimeError("kevin_secret_name")
+        return read(guild)
+
+    monkeypatch.setattr(server_check, "_languages", languages)
+    await run(simcord_env, GUILD, OTHER)
+    assert problems(caplog, GUILD) == [
+        f"Server check problem: guild_id={GUILD} severity=warning code=check_failed "
+        f"detail=[step=report status=RuntimeError] fix: {FIXES['check_failed'][1]}"
+    ]
+    assert [r.__dict__["guild_id"] for r in caplog.records if "step=report" in r.getMessage()] == [GUILD]
+    assert "kevin" not in caplog.text
+    assert "blocking=0 warnings=0" in report(caplog, OTHER)
+
+
 async def test_an_unavailable_server_is_reported_unread(caplog: pytest.LogCaptureFixture) -> None:
     """A server Discord has not delivered gets check_failed and no other check."""
     guild = make_guild(GUILD, [], [])
