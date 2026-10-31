@@ -969,3 +969,21 @@ async def test_dev_mode_still_reports_a_stray_command(simcord_bot: Any, caplog: 
         await env.shutdown()
     assert "leftover_commands" in codes(caplog)
     assert f"detail=[/stray command_id={stray['id']}]" in " ".join(problems(caplog))
+
+
+async def test_a_command_missing_from_discord_is_reported(
+    simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A command of the bot that Discord does not hold is check_failed, so the server never reads as clean."""
+    await ready_server(simcord_env)
+    bot: Any = simcord_env.bot
+    read = bot.tree.fetch_commands
+
+    async def fetch(*, guild: Any = None) -> Any:
+        return [command for command in await read(guild=guild) if command.name != "fm"]
+
+    monkeypatch.setattr(bot.tree, "fetch_commands", fetch)
+    await run(simcord_env)
+    assert codes(caplog) == ["check_failed"]
+    assert "detail=[step=integrations command=/fm not on Discord]" in problems(caplog)[0]
+    assert "blocking=0 warnings=1" in report(caplog)
