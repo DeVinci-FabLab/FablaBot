@@ -5,13 +5,14 @@
 title = "What you can run here"
 member_intro = "These are the commands your roles let you run on this server."
 footer = "Something missing or not working? Tell us with /suggest."
+public_channel_only = "A public list only goes in {channel}. Run the command without `show` to read it here, privately."
 line = "{command}: {text}"
 roles_join = "{head} and {last}"
 
 [help.slash]
 name = "help"
 description = "Show the commands you can run on this server"
-show = "Post the list in the channel for everyone to see"
+show = "Post the list for everyone, in the commands channel only"
 
 [help.summary.one_role]
 one = "Your role {roles} opens {count} command."

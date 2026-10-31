@@ -148,10 +148,11 @@ def test_user_guide_says_who_can_run_the_member_commands() -> None:
     assert audiences["/msg purge"] == PERMISSION_CELLS[1]
 
 
-def test_user_guide_says_suggest_and_purge_work_outside_the_commands_channel() -> None:
-    """The two commands the channel rule does not gate say so, and purge says where it aims by default."""
+def test_user_guide_names_the_commands_outside_the_channel_rule() -> None:
+    """The commands the channel rule does not gate say so, and purge says where it aims by default."""
     text = _read("docs/USERGUIDE.md")
-    assert "`/suggest` works outside the commands channel." in _section(text, "## For everyone")
+    assert "`/suggest` and a private `/help` work outside the commands channel." in _section(text, "## For everyone")
+    assert "commands channel only" in " ".join(_section(text, "## /help").split())
     bullet = re.search(r"^- `/msg purge`.*(?:\n  .*)*", text, re.MULTILINE)
     assert bullet
     purge = " ".join(bullet.group().split())
@@ -160,9 +161,9 @@ def test_user_guide_says_suggest_and_purge_work_outside_the_commands_channel() -
 
 
 def test_operator_guide_describes_the_commands_channel_rule() -> None:
-    """The commands channel section names the four commands that do not follow it."""
+    """The commands channel section names the commands that do not follow it."""
     section = _section(_read("docs/OPERATIONS.md"), "## Commands channel")
-    for command in ("`/suggest`", "`/msg purge`", "`/msg clear`", "`/welcome approve`"):
+    for command in ("`/suggest`", "`/help`", "`/msg purge`", "`/msg clear`", "`/welcome approve`"):
         assert command in section
 
 
@@ -173,8 +174,15 @@ def test_user_guide_does_not_say_a_rule_can_be_roles_and_a_permission() -> None:
     assert "a rule per role" in section
 
 
-def test_operator_guide_says_members_need_to_open_the_commands_channel() -> None:
-    """``/help`` is held to the commands channel, so the guide says what a plain member needs there."""
-    section = _section(_read("docs/OPERATIONS.md"), "## Commands channel")
-    assert "View Channel" in section
-    assert "Use Application Commands" in section
+def test_operator_guide_says_members_do_not_need_the_commands_channel_for_help() -> None:
+    """Only the public ``/help`` is held to the commands channel."""
+    section = " ".join(_section(_read("docs/OPERATIONS.md"), "## Commands channel").split())
+    assert "members do not need access to this one" in section
+    assert "`/help show:True`, which posts the list for everyone, stays in this channel" in section
+
+
+def test_operator_guide_gives_a_member_without_the_channel_a_way_out() -> None:
+    """The troubleshooting rows name the private ``/help`` and the way out of its public refusal."""
+    section = _read("docs/OPERATIONS.md")
+    assert "A member who cannot open it uses `/suggest` or a private `/help`" in section
+    assert "Run `/help` without `show`" in section

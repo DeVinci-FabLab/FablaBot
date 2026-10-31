@@ -26,7 +26,7 @@ from fablabot.guild_config import get_commands_channel_id, set_commands_channel_
 from fablabot.helpers.constants import ErrorMessages
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
     from logging import Logger
 
 _COMMANDS_CHANNEL_NAME = "commandes_bot"
@@ -104,12 +104,16 @@ def log_request(
         logger.info(f"[{command_name}]: guild_id={interaction.guild_id} {details}")
 
 
-async def _is_in_allowed_channel(logger: Logger, interaction: Interaction) -> bool:
+async def _is_in_allowed_channel(
+    logger: Logger, interaction: Interaction, *, wrong_channel_text: Callable[[str], str] | None = None
+) -> bool:
     """Check if the interaction was made in the allowed commands channel.
 
     Args:
         logger (Logger): The logger of the cog.
         interaction (Interaction): The Discord interaction context of the command invocation.
+        wrong_channel_text (Callable[[str], str] | None): Builds the refusal from the channel mention, for a command
+            with its own way out; the shared refusal when None.
 
     Returns:
         bool: ``True`` if the interaction was made in the allowed commands channel,
@@ -165,7 +169,9 @@ async def _is_in_allowed_channel(logger: Logger, interaction: Interaction) -> bo
             f"Attempt to use command in a different channel than {_COMMANDS_CHANNEL_NAME}: {interaction.channel.name}",
         )
         await interaction.response.send_message(
-            ErrorMessages.WRONG_COMMANDS_CHANNEL.format(channel=commands_channel.mention),
+            wrong_channel_text(commands_channel.mention)
+            if wrong_channel_text
+            else ErrorMessages.WRONG_COMMANDS_CHANNEL.format(channel=commands_channel.mention),
             ephemeral=True,
         )
         return False
@@ -219,6 +225,7 @@ async def ensure_command_context(  # noqa: PLR0913 - keyword-only switches; grou
     required_roles: set[str] | None = None,
     enforce_commands_channel: bool = True,
     log_identity: bool = True,
+    wrong_channel_text: Callable[[str], str] | None = None,
 ) -> bool:
     """Log a command execution and run shared context checks.
 
@@ -230,6 +237,8 @@ async def ensure_command_context(  # noqa: PLR0913 - keyword-only switches; grou
         required_roles (set[str] | None): Required role names; skipped when None.
         enforce_commands_channel (bool): Whether to enforce the configured commands channel.
         log_identity (bool): Whether the logs name the invoking user. Disable it for anonymous flows.
+        wrong_channel_text (Callable[[str], str] | None): Builds the refusal from the channel mention; the shared
+            refusal when None.
 
     Returns:
         bool: ``True`` when all checks pass, ``False`` otherwise.
@@ -245,7 +254,9 @@ async def ensure_command_context(  # noqa: PLR0913 - keyword-only switches; grou
     ):
         return False
 
-    return not enforce_commands_channel or await _is_in_allowed_channel(logger, interaction)
+    return not enforce_commands_channel or await _is_in_allowed_channel(
+        logger, interaction, wrong_channel_text=wrong_channel_text
+    )
 
 
 def is_valid_emoji(emoji: str) -> bool:

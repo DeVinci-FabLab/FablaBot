@@ -180,9 +180,10 @@ async def test_help_logs_ids_and_show_only(caplog: pytest.LogCaptureFixture) -> 
     assert all(text not in record.getMessage() for record in caplog.records for text in texts)
 
 
-async def test_help_is_refused_outside_the_commands_channel() -> None:
-    """The channel check still applies: the member is sent to the commands channel and gets no list."""
-    interaction = _interaction()
+@pytest.mark.parametrize("locale", [Locale.american_english, Locale.french, Locale.german])
+async def test_public_help_is_refused_outside_the_commands_channel(locale: Locale) -> None:
+    """With ``show``, the member is sent to the commands channel in the server's language and gets no list."""
+    interaction = _interaction(locale)
     commands = MagicMock(spec=TextChannel)
     commands.id = 55
     commands.name = "commandes_bot"
@@ -193,11 +194,23 @@ async def test_help_is_refused_outside_the_commands_channel() -> None:
     interaction.channel = other
     interaction.guild.channels = [commands]
     interaction.guild.get_channel = MagicMock(return_value=commands)
-    await HelpManagement.show_help.callback(_cog(), interaction, show=False)  # pyright: ignore[reportCallIssue]  # cog bound away
+    await HelpManagement.show_help.callback(_cog(), interaction, show=True)  # pyright: ignore[reportCallIssue]  # cog bound away
     interaction.response.send_message.assert_awaited_once()
     args, kwargs = interaction.response.send_message.await_args
-    assert args[0] == ErrorMessages.WRONG_COMMANDS_CHANNEL.format(channel="<#55>")
+    assert args[0] == catalog().texts(locale.value).get("help.public_channel_only", channel="<#55>")
     assert "embed" not in kwargs
+
+
+async def test_private_help_answers_outside_the_commands_channel() -> None:
+    """Without ``show``, a member who cannot open the commands channel still gets the list."""
+    interaction = _interaction()
+    other = MagicMock(spec=TextChannel)
+    other.id = 66
+    other.name = "general"
+    interaction.channel = other
+    await HelpManagement.show_help.callback(_cog(), interaction, show=False)  # pyright: ignore[reportCallIssue]  # cog bound away
+    interaction.response.send_message.assert_awaited_once()
+    assert "embed" in interaction.response.send_message.await_args.kwargs
 
 
 async def test_help_is_refused_outside_listed_servers() -> None:
