@@ -94,9 +94,16 @@ async def test_help_show_posts_publicly(server: Server) -> None:
     assert not result.ephemeral
 
 
-async def test_help_outside_commands_channel_points_to_it(server: Server) -> None:
-    """Outside the commands channel, `/help` refuses and names the channel."""
-    result = await server.admin.slash(server.general, "help")
+async def test_private_help_works_outside_the_commands_channel(server: Server) -> None:
+    """Outside the commands channel, `/help` still gives a member the list, privately."""
+    result = await server.plain.slash(server.general, "help")
+    assert result.ephemeral
+    assert "/suggest" in lines(result)
+
+
+async def test_public_help_outside_commands_channel_points_to_it(server: Server) -> None:
+    """Outside the commands channel, `/help show:True` refuses and names the channel."""
+    result = await server.admin.slash(server.general, "help", show=True)
     assert result.ephemeral
     assert "commandes_bot" in result.response.content or str(server.commands.id) in result.response.content
 

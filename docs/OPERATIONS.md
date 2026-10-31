@@ -187,8 +187,8 @@ checks the roles above when a command runs.
 
 ## Commands channel
 
-Most commands only run in one text channel per server. `/suggest` and `/msg purge` work outside it, `/msg clear`
-refuses it, and `/welcome approve` runs in a `welcome-…` channel.
+Most commands only run in one text channel per server. `/suggest`, `/msg purge` and a private `/help` work
+outside it, `/msg clear` refuses it, and `/welcome approve` runs in a `welcome-…` channel.
 
 1. The bot reads the channel from the server's stored settings.
 2. If none is stored, it uses the text channel named `commandes_bot` (`helpers/utils.py:32`) and stores it.
@@ -197,8 +197,8 @@ refuses it, and `/welcome approve` runs in a `welcome-…` channel.
 
 So on a new server, create a text channel named `commandes_bot`.
 
-`/help` is open to every member and runs in this channel, so members need View Channel and
-Use Application Commands on it. Without them, they get a refusal that points at a channel they cannot open.
+`/help` is open to every member in any channel, so members do not need access to this one. Only
+`/help show:True`, which posts the list for everyone, stays in this channel.
 
 `/log set` picks the channel that receives the server's errors. `/log export` sends that server's log
 file to that server only.

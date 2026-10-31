@@ -12,7 +12,8 @@ your roles open. The list differs per member because each command applies its ow
 Discord permission or, for `/user`, a rule per role (what you can do depends on the roles the server has).
 A member without a staff role sees `/suggest` and `/help`.
 
-- The answer is private by default. Set the `show` option to post it in the channel for everyone.
+- It works in any channel. The answer is private by default; the `show` option posts it for everyone, in the
+  commands channel only.
 - It answers in the language the server declares to Discord, `fr` or `de`, else English. The menu shows
   `/help`, `/aide` or `/hilfe` after each member's own Discord language.
 - A command that is listed but hidden in the menu means the server has not allowed that role in
@@ -129,4 +130,4 @@ commands channel.
 | `/suggest` | Send an idea or a problem to the staff, anonymously if you like | Everyone |
 | `/help` | Show this list | Everyone |
 
-`/suggest` works outside the commands channel.
+`/suggest` and a private `/help` work outside the commands channel.

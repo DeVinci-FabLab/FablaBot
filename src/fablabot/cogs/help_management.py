@@ -56,7 +56,10 @@ class HelpManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             show (bool): Post the list in the channel instead of privately.
         """
-        if not await ensure_command_context(logger, "help", interaction, log_details={"show": show}):
+        # Most members cannot open the commands channel: a private answer works anywhere, a public one stays there.
+        if not await ensure_command_context(
+            logger, "help", interaction, log_details={"show": show}, enforce_commands_channel=show
+        ):
             return
         member: Member = interaction.user  # pyright: ignore[reportAssignmentType]  # commands run in servers only
         guild: Guild | None = interaction.guild

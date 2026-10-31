@@ -149,9 +149,9 @@ def test_user_guide_says_who_can_run_the_member_commands() -> None:
 
 
 def test_user_guide_says_suggest_and_purge_work_outside_the_commands_channel() -> None:
-    """The two commands the channel rule does not gate say so, and purge says where it aims by default."""
+    """The commands the channel rule does not gate say so, and purge says where it aims by default."""
     text = _read("docs/USERGUIDE.md")
-    assert "`/suggest` works outside the commands channel." in _section(text, "## For everyone")
+    assert "`/suggest` and a private `/help` work outside the commands channel." in _section(text, "## For everyone")
     bullet = re.search(r"^- `/msg purge`.*(?:\n  .*)*", text, re.MULTILINE)
     assert bullet
     purge = " ".join(bullet.group().split())
@@ -173,8 +173,8 @@ def test_user_guide_does_not_say_a_rule_can_be_roles_and_a_permission() -> None:
     assert "a rule per role" in section
 
 
-def test_operator_guide_says_members_need_to_open_the_commands_channel() -> None:
-    """``/help`` is held to the commands channel, so the guide says what a plain member needs there."""
-    section = _section(_read("docs/OPERATIONS.md"), "## Commands channel")
-    assert "View Channel" in section
-    assert "Use Application Commands" in section
+def test_operator_guide_says_members_do_not_need_the_commands_channel_for_help() -> None:
+    """Only the public ``/help`` is held to the commands channel."""
+    section = " ".join(_section(_read("docs/OPERATIONS.md"), "## Commands channel").split())
+    assert "members do not need access to this one" in section
+    assert "`/help show:True`" in section
