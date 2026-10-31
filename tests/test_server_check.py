@@ -186,7 +186,7 @@ async def test_a_stored_commands_channel_with_another_name_is_the_commands_chann
 ) -> None:
     """A stored text channel counts under any name, and a post problem there names its ID."""
     await ready_server(simcord_env, without=["commands"])
-    muted = {simcord_env.guild.default_role: PermissionOverwrite(send_messages=False)}
+    muted: dict[Any, PermissionOverwrite] = {simcord_env.guild.default_role: PermissionOverwrite(send_messages=False)}
     created = simcord_env.guild.create_text_channel("salle-des-commandes", overwrites=muted)
     await simcord_env.settle()
     stored = cached(simcord_env).get_channel(created.id)
