@@ -269,8 +269,8 @@ person's name. Copy the ID into Discord's role search or Developer Mode to find 
 | `log_channel_missing` | blocking | No `/log set` was run, or the stored channel (`stored_id=`) is gone or is not a text channel. | run /log set in the commands channel |
 | `log_channel_no_post` | blocking | The bot cannot view, post or attach files in the log channel (`channel_id=`). | let the bot view, post and attach files in the log channel, or run /log set |
 | `permissions_missing` | blocking | The bot's role lacks some permissions of the invitation; the detail lists their discord.py names (`read_messages` is View Channels). | give these permissions to the bot's role, or invite the bot again |
-| `role_order_temp` | blocking | `Admin -temp-` sits above the bot's role, so `/user op` fails with a 403. | drag the bot's role above Admin -temp- |
-| `role_order` | warning | Roles the bot gives or removes sit above its role. The detail lists them. `Administrateur` is not counted, since no command gives it. | drag the bot's role above these roles |
+| `role_order_temp` | blocking | `Admin -temp-` sits above the bot's role, or is the bot's own highest role, so `/user op` fails with a 403. | drag the bot's role above Admin -temp- |
+| `role_order` | warning | Roles the bot gives or removes sit above its role, or are its own highest role. The detail lists them. `Administrateur` is not counted, since no command gives it. | drag the bot's role above these roles |
 | `roles_missing` | blocking | `CoDir` or `Admin -temp-` is missing, or none of the four admin roles exists, so nobody can finish the setup. | create the role with this exact name |
 | `welcome_setup_missing` | blocking | The welcome flow is on, and the `Validation` category or the `Membre ✓` role is missing. | create what the welcome flow needs, or turn it off with /welcome verify |
 | `suggest_recipient_unreachable` | warning | A recipient of `/suggest` (the detail gives its key) has no member holding its role and no channel. | give the role to a member or create the channel |

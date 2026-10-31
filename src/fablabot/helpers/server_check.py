@@ -118,9 +118,9 @@ def _check_roles(guild: Guild) -> list[Problem]:
 
 
 def _check_role_order(guild: Guild) -> list[Problem]:
-    """Check that the roles the bot gives or removes sit below its own role."""
+    """Check that the roles the bot gives or removes sit below its own role, which it cannot hand out itself."""
     top = guild.me.top_role
-    above = [role for role in guild.roles if role > top]
+    above = [role for role in guild.roles if role >= top]
     problems: list[Problem] = []
     if any(role.name == RoleNames.ADMIN_TEMP for role in above):
         problems.append(Problem("role_order_temp"))

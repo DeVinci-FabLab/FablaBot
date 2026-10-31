@@ -330,6 +330,23 @@ async def test_roles_above_the_bot(
     assert codes(caplog) == ([code] if code else [])
 
 
+@pytest.mark.parametrize(
+    ("name", "code"),
+    [(RoleNames.ADMIN_TEMP, "role_order_temp"), (RoleNames.CODIR, "role_order"), (RoleNames.ADMIN, None)],
+)
+async def test_a_role_the_bot_holds_as_its_top_role_is_not_below_it(
+    simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture, name: str, code: str | None
+) -> None:
+    """The bot cannot hand out a role equal to its own highest one, so that role counts as not below the bot's."""
+    server = await ready_server(simcord_env)
+    role = discord.utils.get(server.roles, name=name)
+    role.position = HIGH + 1
+    server.me._roles.add(role.id)
+    assert server.me.top_role == role
+    await run(simcord_env)
+    assert codes(caplog) == ([code] if code else [])
+
+
 async def test_a_server_typed_role_name_stays_out_of_the_log(
     simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture
 ) -> None:
