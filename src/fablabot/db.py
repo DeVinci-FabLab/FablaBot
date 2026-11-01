@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import UTC, datetime
+import hashlib
 import logging
 from pathlib import Path
 import sqlite3
@@ -16,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 DATABASE_FILE: Final = Path("data/fablabot.db")
 MIGRATIONS_DIR: Final = Path(__file__).resolve().parent / "migrations"
+# What older releases kept as JSON. command_sync_state.json is no state to move: it stays a file.
+STATE_FILES: Final = ("guild_config.json", "formations_state.json", "messages_state.json", "temp_admin_state.json")
 
 _connection: sqlite3.Connection | None = None
 
@@ -122,8 +125,49 @@ def _migrate(conn: sqlite3.Connection, path: Path, migrations: Path) -> None:
         logger.info(f"Database schema moved to version {number} ({file.name}).")
 
 
+def _not_imported(files: list[Path], path: Path) -> StorageError:
+    """Build the refusal for state files the database does not hold.
+
+    Args:
+        files (list[Path]): The files.
+        path (Path): The database file.
+
+    Returns:
+        StorageError: The error to raise.
+    """
+    names = ", ".join(file.as_posix() for file in files)
+    return StorageError(f"{names} not imported into {path.as_posix()}; nothing was changed, see docs/OPERATIONS.md.")
+
+
+def _check_imported(conn: sqlite3.Connection, path: Path, files: list[Path]) -> None:
+    """Refuse state files the database does not hold, or that changed since it took them.
+
+    Args:
+        conn (sqlite3.Connection): The open connection.
+        path (Path): The database file.
+        files (list[Path]): The state files found next to it.
+
+    Raises:
+        StorageError: If a file was never imported, or no longer matches its import.
+    """
+    if not files:
+        return
+    imported = {row["file_name"]: row["sha256"] for row in conn.execute("SELECT file_name, sha256 FROM state_import")}
+    missing = [file for file in files if file.name not in imported]
+    if missing:
+        raise _not_imported(missing, path)
+    changed = [file for file in files if hashlib.sha256(file.read_bytes()).hexdigest() != imported[file.name]]
+    if changed:
+        names = ", ".join(file.as_posix() for file in changed)
+        msg = f"{names} changed since it was imported into {path.as_posix()}; nothing was changed, see docs/OPERATIONS.md."
+        raise StorageError(msg)
+
+
 def open_database(path: Path = DATABASE_FILE, *, migrations: Path = MIGRATIONS_DIR) -> None:
     """Open the database, creating it when missing, and bring its schema up to date.
+
+    JSON state left by an older release must have been imported first: the bot never starts over
+    it, and a refused start creates nothing.
 
     Args:
         path (Path): The database file.
@@ -134,11 +178,15 @@ def open_database(path: Path = DATABASE_FILE, *, migrations: Path = MIGRATIONS_D
     """
     global _connection
     close_database()
+    state_files = [file for name in STATE_FILES if (file := path.parent / name).exists()]
+    if state_files and not path.exists():
+        raise _not_imported(state_files, path)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, autocommit=True)
     try:
         _configure(conn)
         _migrate(conn, path, migrations)
+        _check_imported(conn, path, state_files)
     except sqlite3.DatabaseError as error:
         conn.close()
         msg = f"{path.as_posix()} cannot be used: {error}."

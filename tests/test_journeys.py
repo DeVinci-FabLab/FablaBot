@@ -419,3 +419,15 @@ async def test_a_commands_channel_setting_survives_a_restart(server: Server) -> 
     _restart()
 
     assert guild_config.get_commands_channel_id(GUILD_ID) == server.commands.id
+
+
+async def test_a_full_journey_writes_no_json_state(server: Server) -> None:
+    """Drafting, publishing and a sign-up leave only the command sync record as a JSON file."""
+    await _draft(server, later())
+    await server.admin.slash(server.commands, "fm publish", channel=server.general)
+    published = server.general.last_message
+    assert published is not None
+    await server.plain.react(published, "🔧")
+    await server.env.advance_time(120)
+
+    assert [path.name for path in Path("data").glob("*.json")] == ["command_sync_state.json"]

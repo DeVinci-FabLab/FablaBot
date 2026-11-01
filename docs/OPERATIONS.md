@@ -41,20 +41,22 @@ secrets:
 | `ALLOWED_GUILD_IDS` | Server IDs the bot may serve, comma-separated, no quotes, no spaces. |
 | `OPERATOR_LOG_CHANNEL_ID` | Optional. Channel receiving errors that belong to no server. Pick a channel only the bot's administrators can read: those errors come from every server's tasks. |
 | `DEV_GUILD_ID` | Optional, development bot only. Syncs the commands to this one server and leaves global commands alone. Never set on the production bot. |
-| `data/` volume | Per-server settings, the temporary-admin expiries (`data/temp_admin_state.json`) and the fingerprint of the last command sync (`data/command_sync_state.json`; delete it to force a sync). |
+| `data/` volume | The database `data/fablabot.db` (see "Stored data"), its copies in `data/backups/`, and the fingerprint of the last command sync (`data/command_sync_state.json`; delete it to force a sync). |
 | `logs/` volume | `logs/<date>.log` (every line, never sent) and `logs/guilds/<server ID>/<date>.log` (one server's lines). |
 
 ### Before every redeploy
 
-Archive `logs/` and `data/` first.
+Stop the stack, then archive `logs/` and `data/`: an archive of a running database can be inconsistent.
 
-1. Create a private archive folder outside the volumes and restrict it:
+1. Stop the stack.
+
+2. Create a private archive folder outside the volumes and restrict it:
 
    ```bash
    mkdir -p ~/fablabot-archive && chmod 700 ~/fablabot-archive
    ```
 
-2. Archive both folders and restrict the file:
+3. Archive both folders and restrict the file:
 
    ```bash
    STAMP=$(date +%Y%m%d-%H%M%S)
@@ -62,7 +64,7 @@ Archive `logs/` and `data/` first.
    chmod 600 ~/fablabot-archive/fablabot-$STAMP.tar.gz
    ```
 
-3. Check the file counts match:
+4. Check the file counts match:
 
    ```bash
    tar -tzf ~/fablabot-archive/fablabot-$STAMP.tar.gz | grep -vc '/$'
@@ -222,7 +224,7 @@ A per-server language setting in the bot is planned and not available yet. The t
 ## Temporary admin
 
 `/user op` gives the `Admin -temp-` role for a limited time (5 minutes by default); `/user deop` removes it
-early. The expiry is recorded in `data/temp_admin_state.json`.
+early. The expiry is recorded in the database.
 
 At every start, the bot checks each holder of `Admin -temp-` (`cogs/user_management.py`, `_reconcile_guild`):
 
@@ -292,6 +294,20 @@ and only when there are any, clears and syncs that server, then logs `Removed le
 IDs and names. The global commands and their Integrations settings are untouched. With `DEV_GUILD_ID` set,
 nothing is removed. A failure is logged as a warning with the error type, and the next server goes on.
 
+## Stored data
+
+Everything the bot keeps lives in one SQLite file, `data/fablabot.db`: per-server settings, training drafts,
+published messages and their registrations, tracked messages, the reaction history and the temporary-admin
+expiries. `data/command_sync_state.json` stays a separate file: it is a cache you may delete.
+
+- The file is one database at rest: no `-wal` or `-shm` file. A `data/fablabot.db-journal` file only exists while a write is
+  in progress, or after a crash, and the next start finishes the recovery from it. Never delete it.
+- When a release changes the schema, the bot first copies the database to `data/backups/`, then moves the schema at start.
+  It never removes these copies, and they count in the archive of "Before every redeploy".
+- A release never goes back: a database from a newer release stops an older one.
+- JSON state files left by an older release (`guild_config.json`, `formations_state.json`, `messages_state.json`,
+  `temp_admin_state.json`) stop the bot until they are imported. The bot never reads, changes or removes them.
+
 ## "This command is outdated"
 
 Commands are synced to Discord only when they changed since the last sync
@@ -329,4 +345,8 @@ The log tells which case applies: `Commands synced (9, global).` after a sync, a
 | A member sees a staff group | `@everyone` is allowed on that command in Integrations, or a role they hold was added at the top of the page | Remove that entry; leave the Roles & Members section at the top alone. |
 | A changed command does not show after a redeploy | The record matches while Discord holds other commands (another instance with the same token, or a rollback) | Delete `data/command_sync_state.json` and restart. |
 | Bot stops at start with `DEV_GUILD_ID: ...` | Malformed ID, or a server outside `ALLOWED_GUILD_IDS` | Digits only, and list the server; or unset it on the production bot. |
+| `Cannot start: data/... not imported into data/fablabot.db` | JSON state of an older release sits in `data/` and the database does not hold it | Nothing was changed. Keep the files and import them; never delete them to get past the message. |
+| `Cannot start: data/... changed since it was imported` | An older image ran after the import, so the file holds what the database lacks | Nothing was changed. Do not start this release before you know which side holds the latest data. |
+| `Cannot start: data/fablabot.db is at schema version ...` | The database comes from a newer release | Run that release or a later one. |
+| `Cannot start: data/fablabot.db cannot be used: ...` | The file is damaged, or `data/` is not writable | Restore the file from an archive or from `data/backups/`, or fix the folder's owner. |
 | A release's image build failed | The tag exists but `:latest` did not move | Re-run the failed jobs of that run (re-running all jobs publishes `:edge` only). |
