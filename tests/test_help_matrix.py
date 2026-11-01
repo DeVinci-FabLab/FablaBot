@@ -66,10 +66,11 @@ class _Answered(BaseException):
     """Raised by the armed reply mocks to stop a callback once it has answered."""
 
 
-def _role(name: str) -> MagicMock:
-    """Build a role stub with a name."""
+def _role(name: str, position: int = 0) -> MagicMock:
+    """Build a role stub with a name and a rank."""
     role = MagicMock(spec=Role)
     role.name = name
+    role.position = position
     return role
 
 
@@ -310,7 +311,7 @@ def test_role_refusal_agrees_with_assignment_refusal() -> None:
     for profile in PROFILES.values():
         actor = MagicMock(spec=Member)
         actor.id = 1
-        actor.roles = [_role(name) for name in profile.roles]
+        actor.roles = [_role(name, 10) for name in profile.roles]
         names = user_management._role_names(actor)
         for name in roles:
             for action in ("add", "remove"):
@@ -323,7 +324,7 @@ def _member(member_id: int, *names: str) -> MagicMock:
     """Build a member stub with an id and the roles named."""
     member = MagicMock(spec=Member)
     member.id = member_id
-    member.roles = [_role(name) for name in names]
+    member.roles = [_role(name, 10) for name in names]
     return member
 
 

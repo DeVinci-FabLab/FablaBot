@@ -46,7 +46,7 @@ class Server:
     def __init__(self, *caller_roles: str) -> None:
         """Build a server whose caller holds the given roles."""
         self.roles = {
-            name: make_role(name, role_id=i)
+            name: make_role(name, role_id=i, position=0 if name.startswith("F - ") else 10 if name in caller_roles else 0)
             for i, name in enumerate(
                 (
                     RoleNames.ADMIN_TEMP,

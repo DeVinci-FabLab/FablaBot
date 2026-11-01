@@ -43,12 +43,20 @@ EXPIRY_RETRY_DELAY = timedelta(seconds=60)
 _SELF_OP_REFUSED = "Vous ne pouvez pas vous op vous-même : un autre membre du staff doit le faire."
 _TEMP_ROLE_REFUSED = f"Le rôle {RoleNames.ADMIN_TEMP} se donne uniquement avec `/user op`, qui fixe sa durée."
 _SELF_ADD_REFUSED = "Vous ne pouvez pas vous donner un rôle vous-même : un autre membre du staff doit le faire."
+_ROLE_NOT_BELOW_REFUSED = (
+    "Ce rôle est au même rang que votre rôle le plus haut, ou au-dessus : "
+    "demandez à un membre dont le rôle le plus haut est au-dessus de celui-ci."
+)
 _ADD_REFUSALS = {
     RefusalKind.MISSING_RIGHT: ErrorMessages.NO_PERMISSION_ADD_ROLE,
+    RefusalKind.ROLE_NOT_BELOW: _ROLE_NOT_BELOW_REFUSED,
     RefusalKind.TEMP_ROLE_OUTSIDE_OP: _TEMP_ROLE_REFUSED,
     RefusalKind.SELF_TARGET: _SELF_ADD_REFUSED,
 }
-_REMOVE_REFUSALS = {RefusalKind.MISSING_RIGHT: ErrorMessages.NO_PERMISSION_REMOVE_ROLE}
+_REMOVE_REFUSALS = {
+    RefusalKind.MISSING_RIGHT: ErrorMessages.NO_PERMISSION_REMOVE_ROLE,
+    RefusalKind.ROLE_NOT_BELOW: _ROLE_NOT_BELOW_REFUSED,
+}
 # Same audience as the other staff tools (/msg): the member lists it shows are personal data.
 _WITH_ROLES_ALLOWED = ADMIN_ROLES | {RoleNames.BUREAU}
 
@@ -749,9 +757,12 @@ class UserManagement(commands.Cog):
             action (Literal["add", "remove"]): Whether the role is given or taken.
 
         Returns:
-            RefusalKind | None: The first reason to refuse, or None.
+            RefusalKind | None: The first reason to refuse, or None. Beyond the name rules, a role must sit strictly below the
+            actor's highest role, unless the actor owns the server.
         """
         kind = role_refusal(_role_names(actor), role.name, action=action)
+        if kind is None and actor.id != actor.guild.owner_id and role.position >= max(r.position for r in actor.roles):
+            return RefusalKind.ROLE_NOT_BELOW
         if kind is None and action == "add" and target is not None and target.id == actor.id:
             return RefusalKind.SELF_TARGET
         return kind

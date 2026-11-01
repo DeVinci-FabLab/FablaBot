@@ -93,6 +93,8 @@ In the tables below, "admin roles" means Administrateur, Président, Vice-Prési
   today `/fm`. Nobody can op themselves. It needs the `Admin -temp-` and `CoDir` roles on the server.
 - `/user add_role` never gives a role to oneself. `Admin -temp-` is given only by `/user op`, and nobody
   gives `Administrateur`.
+- Whoever gives or takes a role holds a role that sits strictly above it in the server's role list; the server
+  owner is exempt. A role at or above your highest one is refused: ask a member who ranks higher.
 - Who can give or take which role:
 
   | Role given or taken | Who can |

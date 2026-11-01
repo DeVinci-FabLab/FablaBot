@@ -29,7 +29,10 @@ class Server:
     def __init__(self, *caller_roles: str) -> None:
         """Build the server with the caller holding ``caller_roles``."""
         names = (RoleNames.ADMIN_TEMP, RoleNames.PRESIDENT, RoleNames.BUREAU, "F - Laser", *user_management.ADMIN_ROLES)
-        self.roles = {name: make_role(name, role_id=i) for i, name in enumerate(dict.fromkeys(names))}
+        self.roles = {
+            name: make_role(name, role_id=i, position=0 if name.startswith("F - ") else 10 if name in caller_roles else 0)
+            for i, name in enumerate(dict.fromkeys(names))
+        }
         self.caller = make_member(CALLER_ID, *(self.roles[n] for n in caller_roles))
         self.target = make_member(TARGET_ID)
         self.other = make_member(OTHER_ID)
