@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import discord
 from discord.ext import commands
 
+from fablabot.helpers.command_sync import remove_leftover_commands
 from fablabot.helpers.guild_access import ALLOWED_GUILD_IDS_ENV
 from fablabot.helpers.server_check import check_servers
 
@@ -137,4 +138,6 @@ class GuildAccess(commands.Cog):
         self._first_ready_done = True
         logger.info(f"Guild allow-list: {len(policy.allowed)} IDs listed, in {len(guilds)} guilds, leaving {leaving}.")
         if first_ready:
-            await check_servers(self.bot, [guild for guild in guilds if policy.is_served(guild.id)])
+            served = [guild for guild in guilds if policy.is_served(guild.id)]
+            await remove_leftover_commands(self.bot.tree, served, dev_guild_id=self.bot.dev_guild_id)
+            await check_servers(self.bot, served)

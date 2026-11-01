@@ -13,6 +13,8 @@ import discord
 from fablabot.helpers.guild_access import ALLOWED_GUILD_IDS_ENV
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from discord import app_commands
     from discord.abc import Snowflake
 
@@ -123,3 +125,36 @@ async def sync_commands_if_changed(
     store.save()
     logger.info(f"Commands synced ({len(synced)}, {target}).")
     return True
+
+
+async def remove_leftover_commands(
+    tree: app_commands.CommandTree,
+    guilds: Iterable[discord.Guild],
+    *,
+    dev_guild_id: int | None,
+) -> None:
+    """Remove the commands registered on a server alone, left by an older release.
+
+    The global commands and their Integrations settings are untouched. A server is written to only when
+    it holds a leftover. One failure is logged and the next server goes on. With ``dev_guild_id``, nothing
+    is done: the development bot's commands live on that server.
+
+    Args:
+        tree (app_commands.CommandTree): The tree holding the commands.
+        guilds (Iterable[discord.Guild]): The served servers.
+        dev_guild_id (int | None): The development server, or None.
+    """
+    if dev_guild_id is not None:
+        return
+    for guild in guilds:
+        try:
+            leftovers = await tree.fetch_commands(guild=guild)
+            if not leftovers:
+                continue
+            tree.clear_commands(guild=guild)
+            await tree.sync(guild=guild)
+        except Exception as exc:  # one server failing must not stop the next, nor the start
+            logger.warning(f"Could not remove leftover commands (guild_id={guild.id}): {type(exc).__name__}")
+            continue
+        names = ", ".join(sorted(f"/{command.name} command_id={command.id}" for command in leftovers))
+        logger.info(f"Removed leftover commands (guild_id={guild.id}): {names}")

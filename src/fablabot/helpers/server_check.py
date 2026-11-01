@@ -48,7 +48,7 @@ FIXES: Final[Mapping[str, tuple[Severity, str]]] = {
     "integrations_role_missing": ("warning", "allow these roles on the group in Integrations"),
     "integrations_everyone_allowed": ("warning", "remove @everyone from the group in Integrations"),
     "member_command_denied": ("blocking", "remove the deny on this command in Integrations"),
-    "leftover_commands": ("warning", "nothing to do yet: the bot reports them and a later release removes them"),
+    "leftover_commands": ("warning", "nothing to do: the bot removes them at the next start"),
     "check_failed": (
         "warning",
         "read the next start; HTTP 403 on commands means the invite lacked applications.commands",
