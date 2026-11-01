@@ -417,7 +417,7 @@ class UserManagement(commands.Cog):
             interaction.user,
             followup_mes.id,
             action="add",
-            check=lambda actor, target: self.assignment_refusal(actor, target, role, action="add"),
+            check=lambda actor, target: self.assignment_refusal(actor, target, self._live_role(actor, role), action="add"),
         )
         await interaction.followup.send(
             f"Sélectionnez les membres à qui ajouter {escape_md(role.name)} puis cliquez sur **Confirmer**.",
@@ -455,7 +455,7 @@ class UserManagement(commands.Cog):
             interaction.user,
             followup_mes.id,
             action="remove",
-            check=lambda actor, target: self.assignment_refusal(actor, target, role, action="remove"),
+            check=lambda actor, target: self.assignment_refusal(actor, target, self._live_role(actor, role), action="remove"),
         )
         await interaction.followup.send(
             f"Sélectionnez les membres à qui retirer {escape_md(role.name)} puis cliquez sur **Confirmer**.",
@@ -741,6 +741,20 @@ class UserManagement(commands.Cog):
         """Log a refusal by kind and tell the caller privately."""
         log_refusal(logger, command_name, interaction, kind)
         await interaction.response.send_message(text, ephemeral=True)
+
+    @staticmethod
+    def _live_role(actor: Member, role: Role) -> Role:
+        """Return the guild's current copy of ``role``, since the command's copy keeps the rank it had then.
+
+        Args:
+            actor (Member): A member of the guild the role belongs to.
+            role (Role): The role as the command received it.
+
+        Returns:
+            Role: The cached role with the same ID, or ``role`` itself when the role no longer exists (Discord then
+            refuses the change and the member is listed as failed).
+        """
+        return actor.guild.get_role(role.id) or role
 
     @staticmethod
     def assignment_refusal(

@@ -37,9 +37,10 @@ class Server:
             roles=[self.guild.create_role("Owner", permissions=Permissions(administrator=True))],
         )
         # A bot cannot give a role at or above its own highest one: lift its managed role over the staff roles.
-        for role in env.backend.get_guild(GUILD_ID).roles.values():
-            if role.managed:
-                role.position = BOT_ROLE_POSITION
+        bot_roles = [
+            {"id": r.id, "position": BOT_ROLE_POSITION} for r in env.backend.get_guild(GUILD_ID).roles.values() if r.managed
+        ]
+        env.backend.reorder_roles(GUILD_ID, bot_roles)
 
     async def show(self, name: str, *roles: str) -> None:
         """Allow roles on a command, as a server administrator does in Integrations."""

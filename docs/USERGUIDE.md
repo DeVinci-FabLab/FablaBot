@@ -96,7 +96,7 @@ In the tables below, "admin roles" means Administrateur, Président, Vice-Prési
 - Whoever gives or takes a role holds a role that sits strictly above it in the server's role list; the server
   owner is exempt. `Admin -temp-` does not count toward that rank. A role at or above your highest one is refused:
   ask a member who ranks higher.
-  `Admin -temp-` sits above the admin roles, so it is taken back with `/user deop`, not as a role.
+  Where `Admin -temp-` sits above your highest role, it is taken back with `/user deop`, not as a role.
 - Who can give or take which role:
 
   | Role given or taken | Who can |
@@ -106,7 +106,8 @@ In the tables below, "admin roles" means Administrateur, Président, Vice-Prési
   | `Pôle <area>` | The matching `Respo <area>` |
   | The `F - …` roles | Respo Formation: a training manager gives and takes them |
 
-- `/help` lists these four commands only when you can give or take at least one role of the server.
+- `/help` lists these four commands when your roles let you give or take at least one role by name. The rank is checked
+  when you run the command, so a listed command can still refuse a role.
 
 ## Welcoming newcomers
 

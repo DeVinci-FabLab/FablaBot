@@ -37,6 +37,8 @@ class Server:
         self.target = make_member(TARGET_ID)
         self.other = make_member(OTHER_ID)
         self.guild = make_guild(GUILD_ID, list(self.roles.values()), [self.caller, self.target, self.other])
+        for member in (self.caller, self.target, self.other):
+            member.guild = self.guild
 
     def interaction(self) -> MagicMock:
         """Return an interaction made by the caller in this server."""

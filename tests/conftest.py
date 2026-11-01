@@ -196,6 +196,7 @@ def make_guild(
     guild.roles = roles
     guild.members = members
     guild.get_member = lambda member_id: next((m for m in members if m.id == member_id), None)
+    guild.get_role = lambda role_id: next((r for r in roles if r.id == role_id), None)
     if channel is None:
         channel = MagicMock(spec=TextChannel)
         channel.send = AsyncMock()
