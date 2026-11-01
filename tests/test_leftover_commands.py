@@ -7,7 +7,8 @@ import re
 from typing import Any
 
 from conftest import LISTED_GUILD, OTHER_LISTED_GUILD
-from discord import AppCommandPermissionType
+import discord
+from discord import AppCommandPermissionType, app_commands
 import pytest
 import simcord
 
@@ -93,6 +94,24 @@ async def test_the_integrations_setting_of_a_global_command_survives(simcord_bot
     assert before
     assert [(c.id, c.name) for c in after] == [(c.id, c.name) for c in before]
     assert kept == entries
+
+
+async def test_a_server_command_held_by_the_local_tree_is_not_sent_back(simcord_bot: Any) -> None:
+    """The removal empties the server, even when the local tree holds a command scoped to it."""
+    env = await start(simcord_bot, GUILD)
+    try:
+        bot: Any = env.bot
+
+        async def held(interaction: discord.Interaction) -> None:
+            """Do nothing."""
+
+        bot.tree.add_command(app_commands.Command(name="held", description="x", callback=held), guild=discord.Object(id=GUILD))
+        env.backend.register_commands(GUILD, LEFTOVERS)
+        await remove_leftover_commands(bot.tree, [bot.get_guild(GUILD)], dev_guild_id=None)
+        remaining = commands_of(env, GUILD)
+    finally:
+        await env.shutdown()
+    assert remaining == set()
 
 
 async def test_a_server_present_but_not_served_keeps_its_commands(simcord_bot: Any) -> None:
