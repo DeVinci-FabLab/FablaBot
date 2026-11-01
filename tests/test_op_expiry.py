@@ -122,6 +122,30 @@ async def test_op_whose_record_and_role_removal_both_fail_is_settled_by_a_retry(
     assert cog.deop_tasks == {}
 
 
+@pytest.mark.parametrize("removal_works", [True, False], ids=["role-taken-back", "removal-refused"])
+async def test_the_reply_to_an_op_that_cannot_be_recorded_is_true_whether_or_not_the_removal_worked(
+    cog: UserManagement, storage_error: sqlite3.Error, removal_works: bool
+) -> None:
+    """One text serves both outcomes: it never says the role is gone when Discord refused and a retry still has to remove it."""
+    guild, target, caller = _server(GUILD_A)
+    if not removal_works:
+        target.remove_roles = AsyncMock(side_effect=Forbidden(MagicMock(status=403), "missing permissions"))
+        cog.bot.get_guild = MagicMock(return_value=guild)
+
+    with (
+        patch.object(user_management, "RECONCILE_RETRY_DELAYS", (3600,)),
+        patch.object(op_expiries, "record", side_effect=storage_error),
+    ):
+        interaction = await _op(cog, guild, caller, target, 10)
+        for retry in cog.reconcile_retries.values():
+            retry.cancel()
+
+    reply = interaction.response.send_message.await_args
+    assert reply.args[0] == user_management._OP_NOT_RECORDED
+    assert "ou le sera" in reply.args[0]
+    assert reply.kwargs["ephemeral"] is True
+
+
 async def test_op_that_cannot_be_recorded_does_not_start_a_retry_when_the_role_is_taken_back(
     cog: UserManagement, storage_error: sqlite3.Error
 ) -> None:

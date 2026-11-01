@@ -41,7 +41,10 @@ EXPIRY_RETRY_DELAY = timedelta(seconds=60)
 # Waits, in seconds, before each retry of a server whose records could not be settled at start; then it gives up.
 RECONCILE_RETRY_DELAYS = (30.0, 120.0, 600.0)
 
-_OP_NOT_RECORDED = "La durée n'a pas pu être enregistrée : le rôle est retiré. Vérifiez qu'il a bien disparu, puis réessayez."
+_OP_NOT_RECORDED = (
+    "La durée n'a pas pu être enregistrée : le rôle est retiré, ou le sera dès que possible. "
+    "Vérifiez qu'il a bien disparu, puis réessayez."
+)
 _SELF_OP_REFUSED = "Vous ne pouvez pas vous op vous-même : un autre membre du staff doit le faire."
 _TEMP_ROLE_REFUSED = f"Le rôle {RoleNames.ADMIN_TEMP} se donne uniquement avec `/user op`, qui fixe sa durée."
 _TEMP_ROLE_TAKE_REFUSED = f"Le rôle {RoleNames.ADMIN_TEMP} se retire uniquement avec `/user deop`."
