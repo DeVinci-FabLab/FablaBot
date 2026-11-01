@@ -279,13 +279,18 @@ person's name. Copy the ID into Discord's role search or Developer Mode to find 
 | `integrations_role_missing` | warning | Some roles that can use a staff group are not allowed on it in Integrations; the detail lists them. A role with the Administrator permission needs no setting. | allow these roles on the group in Integrations |
 | `integrations_everyone_allowed` | warning | `@everyone` is allowed on a staff group in Integrations, so every member sees it in the menu. | remove @everyone from the group in Integrations |
 | `member_command_denied` | blocking | A command for every member, such as `/suggest`, is denied for `@everyone` or for All Channels in Integrations, on the command itself or on the whole bot. A setting on the command wins over the bot-wide one. | remove the deny on this command in Integrations |
-| `leftover_commands` | warning | Commands registered on this server alone (`/user command_id=…`), left by an older release or a test. | nothing to do yet: the bot reports them and a later release removes them |
+| `leftover_commands` | warning | Commands registered on this server alone (`/user command_id=…`), left by an older release or a test. | the bot removes them at start; if this line stays, read the warning before it |
 | `check_failed` | warning | A check did not finish (`step=local status=<error type>`), a read of Discord failed (`step=global commands`, `step=server commands` or `step=integrations`, with `status=HTTP <code>` or the error type), a command of the bot is not on Discord (`step=integrations command=/<name> not on Discord`), the report of the server could not be written (`step=report status=<error type>`), or Discord has not delivered the server (`step=unavailable`). The report of that server is incomplete. | read the next start; HTTP 403 on commands means the invite lacked applications.commands |
 
 The check reads Discord once for the bot's global commands, then twice per server, for its commands and its
 Integrations settings: 11 reads for 5 servers. With `DEV_GUILD_ID` set, the commands live on that one server, so
 `leftover_commands`, `integrations_*` and `member_command_denied` are read there only, a command of the
 bot's own list is no leftover there, and the other servers get the checks that need no Discord call.
+
+Before the check, the first ready removes the commands registered on a served server alone: it reads them,
+and only when there are any, clears and syncs that server, then logs `Removed leftover commands` with the
+IDs and names. The global commands and their Integrations settings are untouched. With `DEV_GUILD_ID` set,
+nothing is removed. A failure is logged as a warning with the error type, and the next server goes on.
 
 ## "This command is outdated"
 
