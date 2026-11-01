@@ -93,6 +93,19 @@ async def test_secretary_general_cannot_give_president(cog: UserManagement) -> N
     interaction.response.send_message.assert_awaited_once_with(user_management._ROLE_NOT_BELOW_REFUSED, ephemeral=True)
 
 
+async def test_admin_temp_does_not_raise_the_ceiling(cog: UserManagement) -> None:
+    """Holding the temporary role gives no right to give or take a role above one's own rank."""
+    server = Server(RoleNames.SECRETARY, RoleNames.ADMIN_TEMP)
+    interaction = await _add(cog, server, RoleNames.PRESIDENT)
+    server.target.add_roles.assert_not_awaited()
+    interaction.response.send_message.assert_awaited_once_with(user_management._ROLE_NOT_BELOW_REFUSED, ephemeral=True)
+
+    removal = server.interaction()
+    await _call(UserManagement.user_remove_role)(cog, removal, member=server.target, role=server.roles[RoleNames.PRESIDENT])
+    server.target.remove_roles.assert_not_awaited()
+    removal.response.send_message.assert_awaited_once_with(user_management._ROLE_NOT_BELOW_REFUSED, ephemeral=True)
+
+
 async def test_secretary_general_cannot_take_president(cog: UserManagement) -> None:
     """Taking a role is held to the same rank rule."""
     server = Server(RoleNames.SECRETARY)

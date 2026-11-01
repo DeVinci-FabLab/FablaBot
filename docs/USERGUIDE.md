@@ -94,7 +94,8 @@ In the tables below, "admin roles" means Administrateur, Président, Vice-Prési
 - `/user add_role` never gives a role to oneself. `Admin -temp-` is given only by `/user op`, and nobody
   gives `Administrateur`.
 - Whoever gives or takes a role holds a role that sits strictly above it in the server's role list; the server
-  owner is exempt. A role at or above your highest one is refused: ask a member who ranks higher.
+  owner is exempt. `Admin -temp-` does not count toward that rank. A role at or above your highest one is refused:
+  ask a member who ranks higher.
 - Who can give or take which role:
 
   | Role given or taken | Who can |

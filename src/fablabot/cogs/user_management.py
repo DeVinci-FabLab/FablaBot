@@ -758,10 +758,11 @@ class UserManagement(commands.Cog):
 
         Returns:
             RefusalKind | None: The first reason to refuse, or None. Beyond the name rules, a role must sit strictly below the
-            actor's highest role, unless the actor owns the server.
+            actor's highest role, unless the actor owns the server. The temporary role does not count toward that rank.
         """
         kind = role_refusal(_role_names(actor), role.name, action=action)
-        if kind is None and actor.id != actor.guild.owner_id and role.position >= max(r.position for r in actor.roles):
+        rank = max((r.position for r in actor.roles if r.name != RoleNames.ADMIN_TEMP), default=0)
+        if kind is None and actor.id != actor.guild.owner_id and role.position >= rank:
             return RefusalKind.ROLE_NOT_BELOW
         if kind is None and action == "add" and target is not None and target.id == actor.id:
             return RefusalKind.SELF_TARGET
