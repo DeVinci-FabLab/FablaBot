@@ -111,6 +111,16 @@ def test_a_block_whose_transaction_ended_by_itself_raises_its_own_error() -> Non
     assert db.connection().execute("SELECT count(*) FROM guild_settings").fetchone()[0] == 0
 
 
+def test_a_block_cut_short_by_an_exit_signal_takes_back_its_writes() -> None:
+    """An interrupt is no ``Exception``, and still ends the block with a rollback."""
+    with pytest.raises(KeyboardInterrupt), db.transaction() as conn:
+        conn.execute("INSERT INTO guild_settings (guild_id) VALUES (1)")
+        raise KeyboardInterrupt
+
+    assert not db.connection().in_transaction
+    assert db.connection().execute("SELECT count(*) FROM guild_settings").fetchone()[0] == 0
+
+
 def test_a_closed_database_says_so() -> None:
     """Using the database before it is opened is an error, not a silent new file."""
     db.close_database()
