@@ -522,7 +522,7 @@ class UserManagement(commands.Cog):
         """Settle the holders and records of one server once.
 
         Returns:
-            bool: False when a storage failure left a holder or a record unsettled.
+            bool: False when a storage failure or a failed removal left a holder or a record unsettled.
         """
         admin_role = get(guild.roles, name=RoleNames.ADMIN_TEMP)
         if admin_role is None:
@@ -531,7 +531,7 @@ class UserManagement(commands.Cog):
         holders = {member.id: member for member in admin_role.members}
         for member in holders.values():
             try:
-                await self._reconcile_holder(guild, admin_role, member)
+                settled = await self._reconcile_holder(guild, admin_role, member) and settled
             except sqlite3.Error:
                 settled = False
                 logger.exception(f"Storage failure settling an op at start guild_id={guild.id} member_id={member.id}")
@@ -569,14 +569,18 @@ class UserManagement(commands.Cog):
             if self.reconcile_retries.get(guild_id) is asyncio.current_task():
                 self.reconcile_retries.pop(guild_id)
 
-    async def _reconcile_holder(self, guild: Guild, admin_role: Role, member: Member) -> None:
-        """Arm the timer of a holder whose expiry is ahead, and take the role off any other holder."""
+    async def _reconcile_holder(self, guild: Guild, admin_role: Role, member: Member) -> bool:
+        """Arm the timer of a holder whose expiry is ahead, and take the role off any other holder.
+
+        Returns:
+            bool: False when Discord refused the removal and the holder still has the role.
+        """
         expiry = self._load_op(guild.id, member.id)
         if expiry is not None and expiry.expires_at > _utcnow():
             task = self.deop_tasks.get((guild.id, member.id))
             if task is None or task.done():
                 self._arm_deop(guild.id, member.id, expiry.expires_at)
-            return
+            return True
         cause = "no recorded expiry" if expiry is None else "expiry passed"
         timer_before = self.deop_tasks.get((guild.id, member.id))
         success, _error = await safe_remove_roles(
@@ -587,12 +591,13 @@ class UserManagement(commands.Cog):
         )
         if not success:
             logger.error(f"Failed to remove temporary admin role at start guild_id={guild.id} member_id={member.id}")
-            return
+            return False
         logger.warning(f"Removed temporary admin role at start ({cause}) guild_id={guild.id} member_id={member.id}")
         # An op run while the removal was in flight owns a new timer and record: leave both alone.
         timer_now = self.deop_tasks.get((guild.id, member.id))
         if timer_now is None or timer_now is timer_before:
             self._clear_op(guild.id, member.id)
+        return True
 
     def _sweep_stale_records(self, guild: Guild, admin_role: Role) -> bool:
         """Drop this guild's records of ops that are over, and arm the ones the cache cannot vouch for.

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from conftest import make_guild, make_member, make_role, store_ops, stored_ops
-from discord import Forbidden
+from discord import Forbidden, HTTPException
 import pytest
 
 from fablabot.cogs import user_management
@@ -465,3 +465,20 @@ async def test_a_failed_sweep_at_start_is_retried_later_and_the_record_is_settle
         assert str(GUILD_ID) not in stored_ops()
     else:
         arm.assert_called_once_with(GUILD_ID, 999, future)
+
+
+async def test_a_failed_removal_at_start_is_retried_later_and_the_holder_is_settled() -> None:
+    """A removal Discord failed at start is retried by the delayed retry, so an expired op does not wait for a reconnect."""
+    store_ops(_record(GUILD_ID, HOLDER_ID, NOW - timedelta(minutes=1)))
+    guild, holder, _temp = _holder_guild()
+    holder.remove_roles = AsyncMock(side_effect=[HTTPException(MagicMock(status=503), "unavailable"), None])
+
+    with patch.object(user_management, "RECONCILE_RETRY_DELAYS", (0,)):
+        cog = await _start(guild)
+        assert holder.remove_roles.await_count == 1
+        assert str(HOLDER_ID) in stored_ops()[str(GUILD_ID)]
+        await cog.reconcile_retries[GUILD_ID]
+
+    assert holder.remove_roles.await_count == 2
+    assert str(GUILD_ID) not in stored_ops()
+    _stop(cog)
