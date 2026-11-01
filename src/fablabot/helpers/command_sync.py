@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Final
 import discord
 
 from fablabot.helpers.guild_access import ALLOWED_GUILD_IDS_ENV
+from fablabot.logging_handlers import guild_log_context
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -147,14 +148,15 @@ async def remove_leftover_commands(
     if dev_guild_id is not None:
         return
     for guild in guilds:
-        try:
-            leftovers = await tree.fetch_commands(guild=guild)
-            if not leftovers:
+        with guild_log_context(guild.id):
+            try:
+                leftovers = await tree.fetch_commands(guild=guild)
+                if not leftovers:
+                    continue
+                tree.clear_commands(guild=guild)
+                await tree.sync(guild=guild)
+            except Exception as exc:  # one server failing must not stop the next, nor the start
+                logger.warning(f"Could not remove leftover commands (guild_id={guild.id}): {type(exc).__name__}")
                 continue
-            tree.clear_commands(guild=guild)
-            await tree.sync(guild=guild)
-        except Exception as exc:  # one server failing must not stop the next, nor the start
-            logger.warning(f"Could not remove leftover commands (guild_id={guild.id}): {type(exc).__name__}")
-            continue
-        names = ", ".join(sorted(f"/{command.name} command_id={command.id}" for command in leftovers))
-        logger.info(f"Removed leftover commands (guild_id={guild.id}): {names}")
+            names = ", ".join(sorted(f"/{command.name} command_id={command.id}" for command in leftovers))
+            logger.info(f"Removed leftover commands (guild_id={guild.id}): {names}")

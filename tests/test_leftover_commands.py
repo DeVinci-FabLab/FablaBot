@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 from conftest import LISTED_GUILD, OTHER_LISTED_GUILD
 import discord
@@ -13,6 +14,7 @@ import pytest
 import simcord
 
 from fablabot.helpers.command_sync import remove_leftover_commands
+from fablabot.logging_handlers.guild_context import current_guild_id
 
 GUILD = int(LISTED_GUILD)
 OTHER = int(OTHER_LISTED_GUILD)
@@ -213,3 +215,18 @@ async def test_a_failure_on_one_server_does_not_stop_the_next(simcord_bot: Any, 
     assert f"guild_id={GUILD}" in warnings[0].getMessage()
     assert "RuntimeError" in warnings[0].getMessage()
     assert "secret text" not in caplog.text
+
+
+async def test_a_removal_is_logged_under_its_server() -> None:
+    """The removal runs in the server's log context, so its lines land in that server's own log."""
+    seen: list[int | None] = []
+
+    async def sync(**_: Any) -> list[Any]:
+        seen.append(current_guild_id.get())
+        return []
+
+    tree = MagicMock()
+    tree.fetch_commands = AsyncMock(return_value=[MagicMock(id=1)])
+    tree.sync = sync
+    await remove_leftover_commands(tree, [MagicMock(id=GUILD)], dev_guild_id=None)
+    assert seen == [GUILD]
