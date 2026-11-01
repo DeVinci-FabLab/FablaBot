@@ -241,8 +241,10 @@ class UserManagement(commands.Cog):
             self._record_op(interaction.guild.id, member.id, expiry)
         except sqlite3.Error:
             # Nothing would end an op without its record: take the role back at once.
-            logger.exception(f"Op expiry not recorded guild_id={interaction.guild.id} member_id={member.id}; role taken back")
-            await safe_remove_roles(logger, member, admin_role, reason="Op expiry could not be recorded")
+            logger.exception(
+                f"Op expiry not recorded guild_id={interaction.guild.id} member_id={member.id}; taking the role back"
+            )
+            await self._take_back_unrecorded_op(interaction.guild, member, admin_role)
             await interaction.response.send_message(_OP_NOT_RECORDED, ephemeral=True)
             return
         self._arm_deop(interaction.guild.id, member.id, expiry.expires_at)
@@ -251,6 +253,14 @@ class UserManagement(commands.Cog):
             f"{codir_role.mention} Droits admin donnés à {format_member_mention(member)} pour {time} minutes. "
             f"Raison: {escape_md(reason)}",
         )
+
+    async def _take_back_unrecorded_op(self, guild: Guild, member: Member, admin_role: Role) -> None:
+        """Remove the role of an op that could not be recorded; if Discord refuses, a retry removes it later."""
+        removed, _error = await safe_remove_roles(logger, member, admin_role, reason="Op expiry could not be recorded")
+        if not removed:
+            # A holder with no record is removed by the settle, which the retry runs until it succeeds or gives up.
+            logger.error(f"Op role not taken back guild_id={guild.id} member_id={member.id}; retrying later")
+            self._retry_reconcile_later(guild.id)
 
     @user_group.command(
         name="deop",

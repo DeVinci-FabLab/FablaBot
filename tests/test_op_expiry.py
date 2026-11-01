@@ -98,6 +98,42 @@ async def test_op_that_cannot_be_recorded_takes_the_role_back(cog: UserManagemen
     assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
 
 
+async def test_op_whose_record_and_role_removal_both_fail_is_settled_by_a_retry(
+    cog: UserManagement, storage_error: sqlite3.Error, caplog: pytest.LogCaptureFixture
+) -> None:
+    """When the role cannot be taken back either, the log says so and a retry removes it: no role without record or timer."""
+    guild, target, caller = _server(GUILD_A)
+    temp = guild.roles[0]
+    target.add_roles = AsyncMock(side_effect=lambda *_a, **_k: temp.members.append(target))
+    target.remove_roles = AsyncMock(side_effect=[Forbidden(MagicMock(status=403), "missing permissions"), None])
+    cog.bot.get_guild = MagicMock(return_value=guild)
+
+    with (
+        patch.object(user_management, "RECONCILE_RETRY_DELAYS", (0,)),
+        patch.object(op_expiries, "record", side_effect=storage_error),
+    ):
+        interaction = await _op(cog, guild, caller, target, 10)
+        assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+        errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+        assert any("not taken back" in m and f"guild_id={GUILD_A}" in m and f"member_id={TARGET_ID}" in m for m in errors)
+        await cog.reconcile_retries[GUILD_A]
+
+    assert target.remove_roles.await_count == 2
+    assert cog.deop_tasks == {}
+
+
+async def test_op_that_cannot_be_recorded_does_not_start_a_retry_when_the_role_is_taken_back(
+    cog: UserManagement, storage_error: sqlite3.Error
+) -> None:
+    """A role taken back at once needs no retry."""
+    guild, target, caller = _server(GUILD_A)
+
+    with patch.object(op_expiries, "record", side_effect=storage_error):
+        await _op(cog, guild, caller, target, 10)
+
+    assert cog.reconcile_retries == {}
+
+
 async def test_reop_replaces_expiry_and_keeps_one_timer(cog: UserManagement) -> None:
     """Opping again replaces the expiry and leaves a single timer."""
     guild, target, caller = _server(GUILD_A)
