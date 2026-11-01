@@ -34,6 +34,11 @@ def writes(env: simcord.Env) -> list[str]:
     return [r.path for r in env.http_requests if r.method == "PUT" and "/guilds/" in r.path and r.path.endswith("/commands")]
 
 
+def global_writes(env: simcord.Env) -> list[str]:
+    """Return the paths of the requests that changed the global commands."""
+    return [r.path for r in env.http_requests if r.method == "PUT" and "/guilds/" not in r.path and r.path.endswith("/commands")]
+
+
 def leftover_codes(caplog: pytest.LogCaptureFixture) -> list[str]:
     """Return the problem lines of the server check that report a leftover."""
     return [m for r in caplog.records if "code=leftover_commands" in (m := r.getMessage())]
@@ -81,15 +86,17 @@ async def test_the_integrations_setting_of_a_global_command_survives(simcord_bot
         entries = [{"id": "1", "type": AppCommandPermissionType.role.value, "permission": True}]
         env.backend.set_command_permissions(GUILD, before[0].id, entries)
         env.backend.register_commands(GUILD, LEFTOVERS)
-        writes_before = len(writes(env))
+        writes_before, global_writes_before = len(writes(env)), len(global_writes(env))
         await remove_leftover_commands(bot.tree, [bot.get_guild(GUILD)], dev_guild_id=None)
         removal_writes = len(writes(env)) - writes_before
+        removal_global_writes = len(global_writes(env)) - global_writes_before
         after = await bot.tree.fetch_commands()
         remaining = commands_of(env, GUILD)
         kept = env.backend.get_command_permissions(GUILD, before[0].id)
     finally:
         await env.shutdown()
     assert removal_writes == 1
+    assert removal_global_writes == 0
     assert remaining == set()
     assert before
     assert [(c.id, c.name) for c in after] == [(c.id, c.name) for c in before]
