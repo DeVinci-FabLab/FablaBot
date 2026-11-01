@@ -362,3 +362,69 @@ async def test_a_failed_read_on_one_record_does_not_stop_the_sweep_from_arming_t
     assert "998" in stored_ops()[str(GUILD_ID)]
     errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
     assert any(f"guild_id={GUILD_ID}" in m and "member_id=998" in m for m in errors)
+
+
+async def test_op_landing_during_the_removal_at_start_keeps_its_record_and_timer() -> None:
+    """An op granted to a holder while start removes their role keeps its new record and timer."""
+    guild, holder, _temp = _holder_guild()
+    due = NOW + timedelta(minutes=30)
+    bot = MagicMock()
+    bot.guilds = [guild]
+    cog = UserManagement(bot)
+
+    async def op_lands_during_removal(*_args: object, **_kwargs: object) -> None:
+        cog._record_op(GUILD_ID, HOLDER_ID, user_management.OpExpiry(due, 123))
+        cog._arm_deop(GUILD_ID, HOLDER_ID, due)
+
+    holder.remove_roles = AsyncMock(side_effect=op_lands_during_removal)
+
+    await cog.on_ready()
+
+    assert stored_ops()[str(GUILD_ID)][str(HOLDER_ID)]["expires_at"] == due.isoformat()
+    assert not cog.deop_tasks[GUILD_ID, HOLDER_ID].done()
+    _stop(cog)
+
+
+async def test_a_failed_read_at_start_is_retried_later_and_the_holder_is_settled(storage_error: sqlite3.Error) -> None:
+    """A holder whose record could not be read at start is settled by a delayed retry, without waiting for a reconnect."""
+    store_ops(_record(GUILD_ID, HOLDER_ID, NOW - timedelta(minutes=1)))
+    guild, holder, _temp = _holder_guild()
+    real = op_expiries.get
+    failures = [storage_error]
+
+    def flaky(guild_id: int, member_id: int) -> object:
+        if failures:
+            raise failures.pop()
+        return real(guild_id, member_id)
+
+    with patch.object(user_management, "RECONCILE_RETRY_DELAYS", (0,)), patch.object(op_expiries, "get", side_effect=flaky):
+        cog = await _start(guild)
+        holder.remove_roles.assert_not_awaited()
+        await cog.reconcile_retries[GUILD_ID]
+
+    holder.remove_roles.assert_awaited_once()
+    assert str(GUILD_ID) not in stored_ops()
+    _stop(cog)
+
+
+async def test_retries_of_a_failing_read_are_bounded_and_not_stacked(
+    caplog: pytest.LogCaptureFixture, storage_error: sqlite3.Error
+) -> None:
+    """A read that keeps failing is retried the planned number of times only, one retry at a time per server."""
+    store_ops(_record(GUILD_ID, HOLDER_ID, NOW - timedelta(minutes=1)))
+    guild, holder, _temp = _holder_guild()
+
+    with (
+        patch.object(user_management, "RECONCILE_RETRY_DELAYS", (0, 0)),
+        patch.object(op_expiries, "get", side_effect=storage_error) as get,
+    ):
+        cog = await _start(guild)
+        retry = cog.reconcile_retries[GUILD_ID]
+        await cog.on_ready()
+        assert cog.reconcile_retries[GUILD_ID] is retry
+        await retry
+
+    assert get.call_count == 4  # the start, the second ready, then two retries
+    holder.remove_roles.assert_not_awaited()
+    assert any("giving up" in r.getMessage() for r in caplog.records if r.levelname == "ERROR")
+    _stop(cog)

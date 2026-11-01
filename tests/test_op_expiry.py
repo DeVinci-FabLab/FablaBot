@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-import sqlite3
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from conftest import make_guild, make_interaction, make_member, make_role, stored_ops
@@ -16,6 +16,9 @@ from fablabot.cogs.user_management import UserManagement
 from fablabot.helpers.constants import RoleNames
 from fablabot.models.user import OpExpiry
 from fablabot.services import op_expiries
+
+if TYPE_CHECKING:
+    import sqlite3
 
 NOW = datetime(2026, 10, 28, 15, 0, tzinfo=UTC)
 GUILD_A, GUILD_B = 1001, 1002
@@ -82,11 +85,11 @@ async def test_op_records_expiry_before_replying(cog: UserManagement) -> None:
     assert set(cog.deop_tasks) == {(GUILD_A, TARGET_ID)}
 
 
-async def test_op_that_cannot_be_recorded_takes_the_role_back(cog: UserManagement) -> None:
+async def test_op_that_cannot_be_recorded_takes_the_role_back(cog: UserManagement, storage_error: sqlite3.Error) -> None:
     """Without a record nothing would end the op: the role leaves at once and the caller is told privately."""
     guild, target, caller = _server(GUILD_A)
 
-    with patch.object(op_expiries, "record", side_effect=sqlite3.OperationalError("disk I/O error")):
+    with patch.object(op_expiries, "record", side_effect=storage_error):
         interaction = await _op(cog, guild, caller, target, 10)
 
     target.add_roles.assert_awaited_once()
@@ -519,3 +522,40 @@ async def test_notice_for_text_channel_is_posted() -> None:
     await UserManagement._post_op_notice(guild, TARGET_ID, expiry, "text")
 
     guild.get_channel.return_value.send.assert_awaited_once_with("text")
+
+
+async def test_a_failed_clear_after_the_expiry_removal_still_posts_the_notice(
+    cog: UserManagement, storage_error: sqlite3.Error, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The role is gone at expiry even when the record cannot be dropped: the op channel is still told."""
+    guild, target, caller = _server(GUILD_A)
+    await _op(cog, guild, caller, target, 90)
+    target.roles.append(guild.roles[0])
+    cog.bot.get_guild = MagicMock(return_value=guild)
+
+    with (
+        patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=90)),
+        patch.object(op_expiries, "clear", side_effect=storage_error),
+    ):
+        done = await cog._expire(GUILD_A, TARGET_ID)
+
+    assert done is True
+    target.remove_roles.assert_awaited_once()
+    assert "<@501>" in guild.get_channel.return_value.send.await_args.args[0]
+    assert any(f"member_id={TARGET_ID}" in r.getMessage() for r in caplog.records if r.levelname == "ERROR")
+
+
+async def test_a_failed_clear_after_a_deop_removal_still_replies(
+    cog: UserManagement, storage_error: sqlite3.Error, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The role is gone after a deop even when the record cannot be dropped: the caller is still answered."""
+    guild, target, caller = _server(GUILD_A)
+    await _op(cog, guild, caller, target, 30)
+    interaction = _interaction(guild, caller)
+
+    monkeypatch.setattr(op_expiries, "clear", MagicMock(side_effect=storage_error))
+    deop: Any = UserManagement.user_deop.callback
+    await deop(cog, interaction, member=target)
+
+    target.remove_roles.assert_awaited_once()
+    interaction.followup.send.assert_awaited_once()
