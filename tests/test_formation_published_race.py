@@ -1,4 +1,7 @@
-"""The reminder tick and the registration update both rewrite the published message: neither undoes the other."""
+"""The reminder tick and the registration update both rewrite the published message: neither undoes the other.
+
+A storage failure on either write loses neither the reminder flags nor a registration.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 from discord import TextChannel
 import pytest
 
+from fablabot import db
 from fablabot.cogs import formation_management as fm_cog
 from fablabot.helpers.constants import PARIS_TZ
 from fablabot.models import FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
@@ -173,3 +177,85 @@ async def test_a_publish_during_an_update_stays_the_current_message(env: _Env) -
     assert pub is not None
     assert pub.message_id == MESSAGE_ID + 1
     assert pub.message.fms[0].registered_users == []
+
+
+def _flaky(real: Any, error: Exception, times: int = 1) -> Any:
+    """Wrap ``real`` so its first ``times`` calls raise ``error``."""
+    failures = [error] * times
+
+    def call(*args: Any, **kwargs: Any) -> Any:
+        if failures:
+            raise failures.pop()
+        return real(*args, **kwargs)
+
+    return call
+
+
+def _reaction_payload() -> MagicMock:
+    """The member's reaction to the published message."""
+    member = MagicMock(bot=False)
+    member.name = "alice"
+    return MagicMock(
+        guild_id=GUILD_ID, member=member, message_id=MESSAGE_ID, emoji=EMOJI, user_id=MEMBER_ID, event_type="REACTION_ADD"
+    )
+
+
+def _forget_logged_reactions() -> None:
+    """Empty the reaction log, so the member's reaction is the one under test."""
+    with db.transaction() as conn:
+        conn.execute("DELETE FROM reaction_event")
+
+
+async def test_a_reaction_whose_log_write_fails_is_kept_and_registers_once_storage_answers(
+    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
+) -> None:
+    """A reaction that could not be logged is neither raised nor lost: the next update writes it and registers the member."""
+    _forget_logged_reactions()
+    monkeypatch.setattr(env.cog._reaction_logs, "append", _flaky(env.cog._reaction_logs.append, storage_error))
+
+    await env.cog.on_raw_reaction_event(_reaction_payload())
+
+    assert GUILD_ID in env.cog._pending_update_tasks
+    await env.cog._update_published_message(GUILD_ID)
+    pub = env.cog._get_last_published_in_guild(GUILD_ID)
+    assert pub is not None
+    assert [entry["user_id"] for entry in pub.message.fms[0].registered_users] == [MEMBER_ID]
+    assert env.registration_dm.await_count == 1
+    assert len(env.cog._reaction_logs.history(GUILD_ID, MESSAGE_ID)) == 1
+
+
+async def test_a_member_whose_reaction_stays_unlogged_is_registered_once_the_log_answers(
+    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
+) -> None:
+    """While the log still cannot be written the update goes on without the member; the next one registers them."""
+    _forget_logged_reactions()
+    real = env.cog._reaction_logs.append
+    monkeypatch.setattr(env.cog._reaction_logs, "append", _flaky(real, storage_error, times=2))
+    await env.cog.on_raw_reaction_event(_reaction_payload())
+
+    await env.cog._update_published_message(GUILD_ID)
+
+    pub = env.cog._get_last_published_in_guild(GUILD_ID)
+    assert pub is not None
+    assert pub.message.fms[0].registered_users == []
+    assert env.registration_dm.await_count == 0
+
+    await env.cog._update_published_message(GUILD_ID)
+
+    pub = env.cog._get_last_published_in_guild(GUILD_ID)
+    assert pub is not None
+    assert [entry["user_id"] for entry in pub.message.fms[0].registered_users] == [MEMBER_ID]
+
+
+async def test_the_reminder_tick_schedules_the_update_of_kept_reactions(
+    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
+) -> None:
+    """A member whose reaction could not be logged is registered without waiting for another reaction."""
+    _forget_logged_reactions()
+    monkeypatch.setattr(env.cog._reaction_logs, "append", _flaky(env.cog._reaction_logs.append, storage_error))
+    await env.cog.on_raw_reaction_event(_reaction_payload())
+    env.cog._pending_update_tasks.pop(GUILD_ID).cancel()
+
+    await env.cog._check_upcoming_formations()
+
+    assert GUILD_ID in env.cog._pending_update_tasks

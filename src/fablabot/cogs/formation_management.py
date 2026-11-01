@@ -82,6 +82,9 @@ class FormationManagement(commands.Cog):
         self._reaction_lock = asyncio.Lock()
         self._published_locks: dict[int, asyncio.Lock] = {}
         self._pending_update_tasks: dict[int, asyncio.Task] = {}
+        # Reactions the log refused, kept so a storage failure loses no sign-up. Ceiling: they live in memory only, so a
+        # restart while the storage is still down drops them; the reminder tick tries to write them again.
+        self._unlogged_reactions: list[tuple[int, ReactionEvent]] = []
         self._reaction_logs.purge_all()
         self._check_upcoming_formations.start()
         logger.info("FormationManagement initialized")
@@ -604,8 +607,8 @@ class FormationManagement(commands.Cog):
                 ts_iso=datetime.now(PARIS_TZ).isoformat(timespec="seconds"),
             )
 
-            self._reaction_logs.append(payload.guild_id, reaction_event)
-
+            self._unlogged_reactions.append((payload.guild_id, reaction_event))
+            self._log_kept_reactions()
             self._schedule_update(payload.guild_id)
 
     # endregion Event Listeners
@@ -617,6 +620,8 @@ class FormationManagement(commands.Cog):
         """Check for formations starting soon and notify trainers/responsibles (Paris timezone)."""
         logger.debug("Checking for upcoming formations to notify trainers and responsibles (Paris time).")
         now = datetime.now(PARIS_TZ)
+        for guild_id in {guild_id for guild_id, _event in self._unlogged_reactions}:
+            self._schedule_update(guild_id, delay=0)
         # An exception other than a network one ends a tasks.loop for good: a storage failure waits for the next tick.
         try:
             # A snapshot: waiting on a guild's lock yields to code that may add a guild to the state.
@@ -737,6 +742,20 @@ class FormationManagement(commands.Cog):
         """Set the last published state for a specific guild."""
         formations.save_published(guild_id, published)
 
+    def _log_kept_reactions(self) -> None:
+        """Write the reactions the log refused, oldest first, until one fails."""
+        while self._unlogged_reactions:
+            guild_id, event = self._unlogged_reactions[0]
+            try:
+                self._reaction_logs.append(guild_id, event)
+            except sqlite3.Error:
+                logger.exception(
+                    f"Reaction log write failed guild_id={guild_id} message_id={event.message_id}; "
+                    f"{len(self._unlogged_reactions)} kept in memory, written with the next update"
+                )
+                return
+            self._unlogged_reactions.pop(0)
+
     # -- Reaction Updates --
 
     def _schedule_update(self, guild_id: int, delay: float = 2.0) -> None:
@@ -783,6 +802,7 @@ class FormationManagement(commands.Cog):
 
     async def _update_published_message_locked(self, guild_id: int) -> None:  # noqa: PLR0912, PLR0915 - split once formations have tests
         """Reload the published message, rebuild registrations from reactions, save and notify."""
+        self._log_kept_reactions()
         pub = self._get_last_published_in_guild(guild_id)
         if not pub:
             logger.debug(f"No published formations message recorded for guild {guild_id}; skipping update.")
