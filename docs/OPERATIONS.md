@@ -125,6 +125,8 @@ Order matters: the allow-list comes before the invite, otherwise the bot joins a
 5. In Server Settings, Integrations, show each staff group to the roles that use it, as in the
    [README](../README.md#staff-commands-in-the-slash-menu), "Staff commands in the slash menu". Until
    then, only members with the Administrator permission see the staff commands.
+6. Restart the stack and read the server's `Server check` lines (see "Server check at start"). The check
+   runs once per start, so a server invited since the last start is read at the next one.
 
 At the next start, the log shows one summary line:
 
@@ -230,6 +232,60 @@ At every start, the bot checks each holder of `Admin -temp-` (`cogs/user_managem
 - If Discord refuses the removal with a 403 (Missing Permissions), the bot's role sits below
   `Admin -temp-`. The log shows `Failed to remove temporary admin role at start`; move the bot's role above
   it (step 3 of "Add a server") and restart.
+
+## Server check at start
+
+At the first start of the process, once the allow-list is applied, the bot reads each server it serves
+and writes what that server lacks to the log. It changes nothing: no Discord write, no message in a
+channel, nothing in `data/`. A reconnection does not run it again, and a server invited after the start
+waits for the next restart.
+
+Each server gets one summary line, then one line per problem:
+
+```text
+Server check: guild_id=111111111111111111 blocking=1 warnings=0 locale=fr texts=fr
+Server check problem: guild_id=111111111111111111 severity=blocking code=log_channel_missing detail=[stored_id=None] fix: run /log set in the commands channel
+```
+
+`blocking=0 warnings=0` means the server is ready. `blocking` counts what makes a function fail on that
+server for the people who need it, so a server with a blocking problem is not ready. `warning` counts what
+degrades the bot without stopping it. A server that cannot be read counts as a warning, so an unreadable
+server never shows a clean summary. `locale` is the language the server declares to Discord and `texts`
+the language the bot answers in.
+
+One more line lists the optional roles a server does not have (`Server check: optional roles absent`). It
+counts for nothing: the roles are optional, as in "Roles".
+
+The lines are WARNING at most, so the Discord log handler, which takes ERROR and above, never posts them.
+They go to `logs/<date>.log` and to `logs/guilds/<server ID>/<date>.log`, so a server's staff reads its own
+lines with `/log export`. They name no member. A role appears by name only when the bot itself names it
+(the list in "Roles"); any other role is given as `role_id=<ID>`, since a name typed by the staff may hold a
+person's name. Copy the ID into Discord's role search or Developer Mode to find the role.
+
+| Code | Severity | What it means | Fix |
+| --- | --- | --- | --- |
+| `commands_channel_missing` | blocking | No stored commands channel is usable, and no text channel is named `commandes_bot`. | create a text channel named commandes_bot |
+| `commands_channel_no_post` | warning | The bot cannot view or post in the commands channel (`channel_id=`). Answers to commands still work; its notifications are lost. | let the bot view and post in the commands channel |
+| `log_channel_missing` | blocking | No `/log set` was run, or the stored channel (`stored_id=`) is gone or is not a text channel. | run /log set in the commands channel |
+| `log_channel_no_post` | blocking | The bot cannot view, post or attach files in the log channel (`channel_id=`). | let the bot view, post and attach files in the log channel, or run /log set |
+| `permissions_missing` | blocking | The bot's role lacks some permissions of the invitation; the detail lists their discord.py names (`read_messages` is View Channels). | give these permissions to the bot's role, or invite the bot again |
+| `role_order_temp` | blocking | `Admin -temp-` sits above the bot's role, or is the bot's own highest role, so `/user op` fails with a 403. | drag the bot's role above Admin -temp- |
+| `role_order` | warning | Roles the bot gives or removes sit above its role, or are its own highest role. The detail lists them. `Administrateur` is not counted, since no command gives it. | drag the bot's role above these roles |
+| `roles_missing` | blocking | `CoDir` or `Admin -temp-` is missing, or none of the four admin roles exists, so nobody can finish the setup. | create the role with this exact name |
+| `welcome_setup_missing` | blocking | The welcome flow is on, and the `Validation` category or the `Membre ✓` role is missing. | create what the welcome flow needs, or turn it off with /welcome verify |
+| `suggest_recipient_unreachable` | warning | A recipient of `/suggest` (the detail gives its key) has no member holding its role and no channel. | give the role to a member or create the channel |
+| `language_not_shipped` | warning | The language the server declares has no text file, so the help is in English. | pick a shipped language in Server Settings, Community, Overview |
+| `integrations_no_role` | blocking | None of the roles that can use a staff group (the detail gives `/fm`, for instance) is allowed on it in Integrations, so only administrators see it in the slash menu. | allow the group's roles in Integrations |
+| `integrations_role_missing` | warning | Some roles that can use a staff group are not allowed on it in Integrations; the detail lists them. A role with the Administrator permission needs no setting. | allow these roles on the group in Integrations |
+| `integrations_everyone_allowed` | warning | `@everyone` is allowed on a staff group in Integrations, so every member sees it in the menu. | remove @everyone from the group in Integrations |
+| `member_command_denied` | blocking | A command for every member, such as `/suggest`, is denied for `@everyone` or for All Channels in Integrations, on the command itself or on the whole bot. A setting on the command wins over the bot-wide one. | remove the deny on this command in Integrations |
+| `leftover_commands` | warning | Commands registered on this server alone (`/user command_id=…`), left by an older release or a test. | nothing to do yet: the bot reports them and a later release removes them |
+| `check_failed` | warning | A check did not finish (`step=local status=<error type>`), a read of Discord failed (`step=global commands`, `step=server commands` or `step=integrations`, with `status=HTTP <code>` or the error type), a command of the bot is not on Discord (`step=integrations command=/<name> not on Discord`), the report of the server could not be written (`step=report status=<error type>`), or Discord has not delivered the server (`step=unavailable`). The report of that server is incomplete. | read the next start; HTTP 403 on commands means the invite lacked applications.commands |
+
+The check reads Discord once for the bot's global commands, then twice per server, for its commands and its
+Integrations settings: 11 reads for 5 servers. With `DEV_GUILD_ID` set, the commands live on that one server, so
+`leftover_commands`, `integrations_*` and `member_command_denied` are read there only, a command of the
+bot's own list is no leftover there, and the other servers get the checks that need no Discord call.
 
 ## "This command is outdated"
 

@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from logging import Logger
 
-_COMMANDS_CHANNEL_NAME = "commandes_bot"
+COMMANDS_CHANNEL_NAME = "commandes_bot"
 _DISCORD_EMOJI_RE = re.compile(r"^<a?:\w+:\d+>$")
 _REGIONAL_INDICATOR_START = 0x1F1E6
 _REGIONAL_INDICATOR_END = 0x1F1FF
@@ -104,6 +104,25 @@ def log_request(
         logger.info(f"[{command_name}]: guild_id={interaction.guild_id} {details}")
 
 
+def find_commands_channel(guild: Guild) -> TextChannel | None:
+    """Find the commands channel of a guild the way a command does, without storing or fetching anything.
+
+    Args:
+        guild (Guild): The guild to look in.
+
+    Returns:
+        TextChannel | None: The stored channel when it is a cached text channel, else the text channel named
+            ``commandes_bot``, else None.
+    """
+    stored_id = get_commands_channel_id(guild.id)
+    if stored_id is not None:
+        stored = guild.get_channel(stored_id)
+        if isinstance(stored, TextChannel):
+            return stored
+    named = get(guild.channels, name=COMMANDS_CHANNEL_NAME)
+    return named if isinstance(named, TextChannel) else None
+
+
 async def _is_in_allowed_channel(
     logger: Logger, interaction: Interaction, *, wrong_channel_text: Callable[[str], str] | None = None
 ) -> bool:
@@ -151,7 +170,7 @@ async def _is_in_allowed_channel(
                 set_commands_channel_id(interaction.guild.id, None)
 
     if commands_channel is None:
-        maybe_channel = get(interaction.guild.channels, name=_COMMANDS_CHANNEL_NAME)
+        maybe_channel = get(interaction.guild.channels, name=COMMANDS_CHANNEL_NAME)
         if isinstance(maybe_channel, TextChannel):
             commands_channel = maybe_channel
             set_commands_channel_id(interaction.guild.id, maybe_channel.id)
@@ -166,7 +185,7 @@ async def _is_in_allowed_channel(
 
     if interaction.channel != commands_channel:
         logger.warning(
-            f"Attempt to use command in a different channel than {_COMMANDS_CHANNEL_NAME}: {interaction.channel.name}",
+            f"Attempt to use command in a different channel than {COMMANDS_CHANNEL_NAME}: {interaction.channel.name}",
         )
         await interaction.response.send_message(
             wrong_channel_text(commands_channel.mention)

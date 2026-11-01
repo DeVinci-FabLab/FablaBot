@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from types import ModuleType
 
 LISTED_GUILD = "111111111111111111"
+OTHER_LISTED_GUILD = "222222222222222222"
 
 
 @pytest.fixture(autouse=True)
@@ -54,6 +55,20 @@ async def started_bot(tmp_path, monkeypatch) -> AsyncIterator[Any]:
         yield bot
         for name in list(bot.cogs):
             await bot.remove_cog(name)
+
+
+@pytest.fixture
+def simcord_bot(tmp_path, monkeypatch) -> Any:
+    """Build the real bot, with a fake token and two listed guilds."""
+    token = tmp_path / "token"
+    token.write_text("fake-token")
+    monkeypatch.setenv("DISCORD_TOKEN_FILE", str(token))
+    monkeypatch.setenv(ALLOWED_GUILD_IDS_ENV, f"{LISTED_GUILD},{OTHER_LISTED_GUILD}")
+    import fablabot.main
+
+    main = importlib.reload(fablabot.main)
+    monkeypatch.setattr(main, "configure_logging", lambda _bot: (None, None))
+    return main.Fablabot()
 
 
 def make_interaction(
