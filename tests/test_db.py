@@ -101,6 +101,16 @@ def test_a_failed_commit_leaves_nothing_and_the_next_write_works() -> None:
     assert db.connection().execute("SELECT count(*) FROM guild_settings").fetchone()[0] == 1
 
 
+def test_a_block_whose_transaction_ended_by_itself_raises_its_own_error() -> None:
+    """A conflict that SQLite settles by rolling back leaves the block's error, not a second one about the rollback."""
+    with pytest.raises(sqlite3.IntegrityError, match="UNIQUE"), db.transaction() as conn:
+        conn.execute("INSERT INTO guild_settings (guild_id) VALUES (1)")
+        conn.execute("INSERT OR ROLLBACK INTO guild_settings (guild_id) VALUES (1)")
+
+    assert not db.connection().in_transaction
+    assert db.connection().execute("SELECT count(*) FROM guild_settings").fetchone()[0] == 0
+
+
 def test_a_closed_database_says_so() -> None:
     """Using the database before it is opened is an error, not a silent new file."""
     db.close_database()
@@ -120,6 +130,18 @@ def test_a_failed_migration_changes_nothing(tmp_path: Path) -> None:
     names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     conn.close()
     assert names == {"one"}
+
+
+def test_a_migration_whose_transaction_ended_by_itself_is_refused_for_its_own_error(tmp_path: Path) -> None:
+    """A file whose conflict rolls the transaction back is refused with that conflict."""
+    folder = _migrations(
+        tmp_path / "m", "CREATE TABLE one (a UNIQUE); INSERT INTO one VALUES (1); INSERT OR ROLLBACK INTO one VALUES (1);"
+    )
+
+    with pytest.raises(db.StorageError, match="UNIQUE"):
+        db.open_database(DB_FILE, migrations=folder)
+
+    assert _version(DB_FILE) == 0
 
 
 PARENT_AND_CHILD = (
