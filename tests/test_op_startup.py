@@ -540,3 +540,35 @@ async def test_a_failed_removal_at_start_is_retried_later_and_the_holder_is_sett
     assert holder.remove_roles.await_count == 2
     assert str(GUILD_ID) not in stored_ops()
     _stop(cog)
+
+
+async def test_a_removal_refused_for_the_first_of_two_holders_is_not_hidden_by_the_next_one() -> None:
+    """With two expired holders, a refusal on the first still starts the retry, which removes the role once Discord answers."""
+    past = NOW - timedelta(minutes=1)
+    store_ops(
+        {str(GUILD_ID): {str(m): {"expires_at": past.isoformat(), "channel_id": 777} for m in (HOLDER_ID, HOLDER_ID + 1)}}
+    )
+    guild, first, second = _two_holders_guild()
+    temp = guild.roles[0]
+    refusals = [HTTPException(MagicMock(status=503), "unavailable")]
+
+    def leave(member: MagicMock) -> Any:
+        async def remove(*_args: object, **_kwargs: object) -> None:
+            if member is first and refusals:
+                raise refusals.pop()
+            temp.members.remove(member)
+
+        return remove
+
+    first.remove_roles = AsyncMock(side_effect=leave(first))
+    second.remove_roles = AsyncMock(side_effect=leave(second))
+
+    with patch.object(user_management, "RECONCILE_RETRY_DELAYS", (0,)):
+        cog = await _start(guild)
+        assert GUILD_ID in cog.reconcile_retries
+        await cog.reconcile_retries[GUILD_ID]
+
+    assert first.remove_roles.await_count == 2
+    second.remove_roles.assert_awaited_once()
+    assert str(GUILD_ID) not in stored_ops()
+    _stop(cog)
