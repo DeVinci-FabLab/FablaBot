@@ -16,6 +16,7 @@ from fablabot.helpers import log_channels
 from fablabot.helpers.constants import PARIS_TZ
 from fablabot.helpers.logging_setup import configure_logging
 from fablabot.logging_handlers import DiscordLogHandler, GuildContextFilter, current_guild_id, guild_log_context
+from fablabot.models import FmMessageDraft, PublishedMessage
 
 GUILD_A = 111111111111111111
 GUILD_B = 222222222222222222
@@ -296,8 +297,9 @@ async def test_formation_loop_tags_each_guild_turn() -> None:
     bot.get_guild.side_effect = lambda guild_id: MagicMock(id=guild_id)
     cog = FormationManagement(bot)
     cog._check_upcoming_formations.cancel()
-    cog._state_store.state.clear()
-    cog._state_store.state.update({str(GUILD_A): {}, str(GUILD_B): {}})
+    message = FmMessageDraft(header="", role_id=0, intro="", fms=[], end="")
+    for guild_id in (GUILD_A, GUILD_B):
+        cog._set_last_published_in_guild(guild_id, PublishedMessage(message_id=1, channel_id=2, message=message))
 
     def failing(_guild_id: int) -> None:
         """Log an error from inside the guild's turn."""

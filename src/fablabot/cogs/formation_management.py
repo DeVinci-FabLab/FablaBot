@@ -8,7 +8,7 @@ import csv
 from datetime import datetime, timedelta
 import io
 import logging
-from pathlib import Path
+import sqlite3
 from typing import Any, override
 from warnings import deprecated
 
@@ -31,10 +31,10 @@ from fablabot.helpers.formation import (
     send_waitlist_dm,
 )
 from fablabot.helpers.reaction_log import ReactionLogManager
-from fablabot.helpers.state_store import JsonStateStore
 from fablabot.helpers.utils import ensure_command_context, is_valid_emoji
 from fablabot.logging_handlers import guild_log_context
 from fablabot.models import FmCommand, FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
+from fablabot.services import formations
 from fablabot.ui import fmui
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,6 @@ logger = logging.getLogger(__name__)
 
 ALLOWED_ROLES = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN_TEMP, RoleNames.ADMIN, RoleNames.CODIR}
 _ACCESS = AnyRole(ALLOWED_ROLES)
-FM_STATE_FILE = Path("data/formations_state.json")
 TRAINER_NOTIFICATION_ADVANCE = timedelta(hours=1)
 REACTION_LOG_RETENTION = timedelta(days=30)
 
@@ -75,26 +74,11 @@ class FormationManagement(commands.Cog):
             bot (commands.Bot): The bot instance.
         """
         self.bot = bot
-        self._state_store = JsonStateStore(logger, FM_STATE_FILE)
         self._reaction_logs = ReactionLogManager(
             "formation",
             retention=REACTION_LOG_RETENTION,
             logger=logger,
         )
-        """state structure (par guild):
-        ```
-        {
-          "<guild_id>": {
-              "draft": { "intro": str, "fms": [Formation as dict] },
-              "published": {
-                  "message_id": int,
-                  "channel_id": int,
-                  "message": { "intro": str, "end": str, "fms": [Formation as dict] }
-              }
-          }
-        }
-        ```
-        """
         self._reaction_lock = asyncio.Lock()
         self._published_locks: dict[int, asyncio.Lock] = {}
         self._pending_update_tasks: dict[int, asyncio.Task] = {}
@@ -633,66 +617,83 @@ class FormationManagement(commands.Cog):
         """Check for formations starting soon and notify trainers/responsibles (Paris timezone)."""
         logger.debug("Checking for upcoming formations to notify trainers and responsibles (Paris time).")
         now = datetime.now(PARIS_TZ)
+        # An exception other than a network one ends a tasks.loop for good: a storage failure waits for the next tick.
+        try:
+            # A snapshot: waiting on a guild's lock yields to code that may add a guild to the state.
+            guild_ids = formations.guilds_with_published()
+        except sqlite3.Error:
+            logger.exception("Reminder tick skipped: storage failure.")
+            return
+        for guild_id in guild_ids:
+            with guild_log_context(guild_id):
+                try:
+                    await self._send_due_reminders(guild_id, now)
+                except sqlite3.Error:
+                    logger.exception(f"Reminders of guild {guild_id} stopped by a storage failure; next tick tries again.")
+
+    async def _send_due_reminders(self, guild_id: int, now: datetime) -> None:
+        """Notify the people of one guild's formations that are due, and record that they were.
+
+        Args:
+            guild_id (int): The ID of the guild.
+            now (datetime): The time of this tick.
+        """
         window_tolerance = timedelta(minutes=5)
         notification_window_start = now + TRAINER_NOTIFICATION_ADVANCE - window_tolerance
         notification_window_end = now + TRAINER_NOTIFICATION_ADVANCE + window_tolerance
         start_window_start = now - window_tolerance
         start_window_end = now + window_tolerance
 
-        # A snapshot: waiting on a guild's lock yields to code that may add a guild to the state.
-        for guild_id_str in list(self._state_store.state):
-            guild_id = int(guild_id_str)
-            with guild_log_context(guild_id):
-                guild = self.bot.get_guild(guild_id)
-                if not guild:
+        guild = self.bot.get_guild(guild_id)
+        if not guild:
+            return
+
+        # One writer at a time: load, await and write back must not interleave with the registration update.
+        async with self._published_lock(guild_id):
+            pub = self._get_last_published_in_guild(guild_id)
+            if not pub:
+                return
+
+            fms = list(pub.message.fms)
+            if not fms:
+                return
+
+            send_contacts: str = format_respo_contacts(guild)
+
+            for fm in fms:
+                if fm.notified_at_start:
                     continue
 
-                # One writer at a time: load, await and write back must not interleave with the registration update.
-                async with self._published_lock(guild_id):
-                    pub = self._get_last_published_in_guild(guild_id)
-                    if not pub:
-                        continue
+                if not fm.notified_hour_before and notification_window_start <= fm.start_dt <= notification_window_end:
+                    await notify_trainer_before_formation(guild, fm, send_contacts, moment="hour_before")
+                    await notify_responsible_before_formation(guild, fm, moment="hour_before")
+                    await notify_participants_before_formation(guild, fm, send_contacts)
 
-                    fms = list(pub.message.fms)
-                    if not fms:
-                        continue
+                    fm.notified_hour_before = True
+                    continue
 
-                    send_contacts: str = format_respo_contacts(guild)
+                if start_window_start <= fm.start_dt <= start_window_end:
+                    await notify_trainer_before_formation(guild, fm, send_contacts, moment="start")
+                    await notify_responsible_before_formation(guild, fm, moment="start")
 
-                    for fm in fms:
-                        if fm.notified_at_start:
-                            continue
+                    fm.notified_at_start = True
 
-                        if not fm.notified_hour_before and notification_window_start <= fm.start_dt <= notification_window_end:
-                            await notify_trainer_before_formation(guild, fm, send_contacts, moment="hour_before")
-                            await notify_responsible_before_formation(guild, fm, moment="hour_before")
-                            await notify_participants_before_formation(guild, fm, send_contacts)
-
-                            fm.notified_hour_before = True
-                            continue
-
-                        if start_window_start <= fm.start_dt <= start_window_end:
-                            await notify_trainer_before_formation(guild, fm, send_contacts, moment="start")
-                            await notify_responsible_before_formation(guild, fm, moment="start")
-
-                            fm.notified_at_start = True
-
-                    updated_pub_msg = FmMessageDraft(
-                        header=pub.message.header,
-                        role_id=pub.message.role_id,
-                        intro=pub.message.intro,
-                        fms=fms,
-                        end=pub.message.end,
-                        request_forms_url=pub.message.request_forms_url,
-                    )
-                    self._set_last_published_in_guild(
-                        guild_id,
-                        PublishedMessage(
-                            message_id=pub.message_id,
-                            channel_id=pub.channel_id,
-                            message=updated_pub_msg,
-                        ),
-                    )
+            updated_pub_msg = FmMessageDraft(
+                header=pub.message.header,
+                role_id=pub.message.role_id,
+                intro=pub.message.intro,
+                fms=fms,
+                end=pub.message.end,
+                request_forms_url=pub.message.request_forms_url,
+            )
+            self._set_last_published_in_guild(
+                guild_id,
+                PublishedMessage(
+                    message_id=pub.message_id,
+                    channel_id=pub.channel_id,
+                    message=updated_pub_msg,
+                ),
+            )
 
     @_check_upcoming_formations.before_loop
     async def _before_check_upcoming_formations(self) -> None:
@@ -705,14 +706,6 @@ class FormationManagement(commands.Cog):
     # region ====== Helpers ======
     # -- State --
 
-    def _get_guild_state(self, guild_id: int) -> dict[str, Any]:
-        """Get state for a specific guild."""
-        return self._state_store.ensure_guild(guild_id)
-
-    def _set_guild_state(self, guild_id: int, payload: dict[str, Any]) -> None:
-        """Set the state for a specific guild."""
-        self._state_store.set_guild(guild_id, payload)
-
     def get_guild_draft(self, guild_id: int) -> FmMessageDraft:
         """Get the draft state for a specific guild.
 
@@ -722,13 +715,7 @@ class FormationManagement(commands.Cog):
         Returns:
             FmMessageDraft: The draft of the guild.
         """
-        guild_state = self._get_guild_state(guild_id)
-        if "draft" not in guild_state:
-            logger.debug(f"Initializing draft state for guild {guild_id}.")
-            self._set_guild_state(guild_id, guild_state)
-            guild_state["draft"] = {"header": "", "role_id": 0, "intro": "", "fms": [], "end": ""}
-        draft_dict = guild_state["draft"]
-        return FmMessageDraft.from_dict(draft_dict)
+        return formations.get_draft(guild_id) or FmMessageDraft(header="", role_id=0, intro="", fms=[], end="")
 
     def set_guild_draft(self, guild_id: int, draft: FmMessageDraft) -> None:
         """Set the draft for a specific guild.
@@ -737,24 +724,18 @@ class FormationManagement(commands.Cog):
             guild_id (int): The ID of the guild.
             draft (FmMessageDraft): The draft of the guild.
         """
-        guild_state = self._get_guild_state(guild_id)
-        guild_state["draft"] = draft.to_dict()
-        self._set_guild_state(guild_id, guild_state)
+        formations.save_draft(guild_id, draft)
 
     def _get_last_published_in_guild(self, guild_id: int) -> PublishedMessage | None:
         """Get the last published state for a specific guild."""
-        guild_state = self._get_guild_state(guild_id)
-        pub_dict = guild_state.get("published")
-        if not pub_dict:
+        published = formations.current_published(guild_id)
+        if published is None:
             logger.warning(f"No published formations data stored for guild {guild_id}.")
-            return None
-        return PublishedMessage.from_dict(pub_dict)
+        return published
 
     def _set_last_published_in_guild(self, guild_id: int, published: PublishedMessage) -> None:
         """Set the last published state for a specific guild."""
-        guild_state = self._get_guild_state(guild_id)
-        guild_state["published"] = published.to_dict()
-        self._set_guild_state(guild_id, guild_state)
+        formations.save_published(guild_id, published)
 
     # -- Reaction Updates --
 

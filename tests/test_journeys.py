@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import json
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from discord import Permissions
 import pytest
 
+from fablabot import db, guild_config
 from fablabot.cogs import user_management
 from fablabot.helpers.constants import PARIS_TZ, RoleNames
+from fablabot.services import op_expiries
 
 if TYPE_CHECKING:
     import simcord
@@ -349,3 +352,70 @@ async def test_president_ops_with_the_temporary_role_above_and_deop_revokes(rank
 
     await president.slash(ranked.commands, "user deop", member=target)
     assert RoleNames.ADMIN_TEMP not in role_names(target)
+
+
+def _restart() -> None:
+    """Close the database and open it again, as a new process would."""
+    path = db.connection().execute("PRAGMA database_list").fetchone()["file"]
+    db.close_database()
+    db.open_database(Path(path))
+
+
+async def test_a_sign_up_survives_a_restart(server: Server) -> None:
+    """A registration and the reaction history are read back after a restart."""
+    await _draft(server, later())
+    await server.admin.slash(server.commands, "fm publish", channel=server.general)
+    published = server.general.last_message
+    assert published is not None
+    await server.plain.react(published, "🔧")
+    await server.env.advance_time(120)
+
+    _restart()
+
+    export = await server.admin.slash(server.commands, "fm export")
+    log = await next(a for a in export.response.attachments if a.filename.endswith(".csv")).read()
+    assert str(server.plain.id).encode() in log
+    assert server.plain.name in export.response.content
+
+
+async def test_a_draft_survives_a_restart(server: Server) -> None:
+    """A draft in progress is still there after a restart."""
+    when = later()
+    await _draft(server, when)
+
+    _restart()
+
+    await server.admin.slash(server.commands, "fm preview")
+    assert f"<t:{int(when.timestamp())}:F>" in everything(server.commands)
+
+
+async def test_a_tracked_message_survives_a_restart(server: Server) -> None:
+    """A message followed with `/msg follow` is still listed after a restart."""
+    await server.show("msg", "Administrateur")
+    target = await server.admin.send(server.general, "Annonce")
+
+    await server.admin.slash(server.commands, "msg follow", channel=server.general, message=str(target.id))
+    _restart()
+
+    listed = await server.admin.slash(server.commands, "msg list")
+    assert str(target.id) in listed.response.content
+
+
+async def test_a_temporary_role_keeps_its_expiry_after_a_restart(ranked: Server) -> None:
+    """An op recorded before a restart is still recorded after it."""
+    president = ranked.member("president", RoleNames.PRESIDENT)
+    target = ranked.member("target")
+    await president.slash(ranked.commands, "user op", member=target, reason="atelier", time=30)
+
+    _restart()
+
+    assert op_expiries.get(GUILD_ID, target.id) is not None
+
+
+async def test_a_commands_channel_setting_survives_a_restart(server: Server) -> None:
+    """A server's setting stays across a restart."""
+    guild_config.set_commands_channel_id(GUILD_ID, server.commands.id)
+
+    _restart()
+
+    assert guild_config.get_commands_channel_id(GUILD_ID) == server.commands.id

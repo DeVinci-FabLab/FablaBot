@@ -145,6 +145,31 @@ async def test_tick_waiting_on_the_lock_survives_a_new_guild(started_bot: Any, m
     async with cog._published_lock(GUILD_ID):
         tick = asyncio.create_task(cog._check_upcoming_formations())
         await _let_others_run()
-        cog._get_guild_state(NEW_GUILD_ID)
+        cog.set_guild_draft(NEW_GUILD_ID, FmMessageDraft(header="", role_id=0, intro="", fms=[], end=""))
 
     await tick
+
+
+async def test_a_publish_during_an_update_stays_the_current_message(env: _Env) -> None:
+    """An update waiting on Discord for the old message writes it under its own ID: the new message stays current."""
+    env.fetch_gate.clear()
+    update = asyncio.create_task(env.cog._update_published_message(GUILD_ID))
+    await env.fetch_entered.wait()
+    fm = Formation(
+        emoji=EMOJI, name="Nouvelle", trainer_mention="<@1>", start_iso="2099-06-01T18:00:00+02:00", duration="2h", seats=5
+    )
+    env.cog._set_last_published_in_guild(
+        GUILD_ID,
+        PublishedMessage(
+            message_id=MESSAGE_ID + 1,
+            channel_id=77,
+            message=FmMessageDraft(header="h", role_id=9, intro="i", fms=[fm], end="e"),
+        ),
+    )
+    env.fetch_gate.set()
+    await update
+
+    pub = env.cog._get_last_published_in_guild(GUILD_ID)
+    assert pub is not None
+    assert pub.message_id == MESSAGE_ID + 1
+    assert pub.message.fms[0].registered_users == []
