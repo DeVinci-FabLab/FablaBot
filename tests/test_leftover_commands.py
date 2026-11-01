@@ -50,10 +50,10 @@ async def start(bot: Any, *guild_ids: int, leftovers: dict[int, list[dict[str, A
     return env
 
 
-async def test_a_leftover_goes_and_the_global_command_keeps_its_integrations_setting(
+async def test_a_leftover_goes_at_start_and_the_global_commands_stay(
     simcord_bot: Any, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Leftovers go at start, the global commands and their Integrations settings stay, and the check sees no leftover."""
+    """Leftovers go at start, the global commands stay, and the server check sees no leftover."""
     env = await start(simcord_bot, GUILD, leftovers={GUILD: LEFTOVERS})
     try:
         bot: Any = env.bot
@@ -62,6 +62,7 @@ async def test_a_leftover_goes_and_the_global_command_keeps_its_integrations_set
     finally:
         await env.shutdown()
     assert remaining == set()
+    assert globals_
     assert {command.name for command in globals_} == {command.name for command in bot.tree.get_commands()}
     assert leftover_codes(caplog) == []
     lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Removed leftover commands")]
@@ -71,21 +72,27 @@ async def test_a_leftover_goes_and_the_global_command_keeps_its_integrations_set
 
 
 async def test_the_integrations_setting_of_a_global_command_survives(simcord_bot: Any) -> None:
-    """A setting written on a global command is still there after the removal."""
-    env = simcord.Env(simcord_bot)
-    env.create_guild(id=GUILD)
-    env.backend.register_commands(GUILD, LEFTOVERS)
-    await env.start()
+    """A removal that runs after the setting exists leaves the global commands and the setting as they were."""
+    env = await start(simcord_bot, GUILD)
     try:
-        await env.settle()
         bot: Any = env.bot
-        command = (await bot.tree.fetch_commands())[0]
+        before = await bot.tree.fetch_commands()
         entries = [{"id": "1", "type": AppCommandPermissionType.role.value, "permission": True}]
-        env.backend.set_command_permissions(GUILD, command.id, entries)
+        env.backend.set_command_permissions(GUILD, before[0].id, entries)
+        env.backend.register_commands(GUILD, LEFTOVERS)
+        writes_before = len(writes(env))
         await remove_leftover_commands(bot.tree, [bot.get_guild(GUILD)], dev_guild_id=None)
-        assert env.backend.get_command_permissions(GUILD, command.id) == entries
+        removal_writes = len(writes(env)) - writes_before
+        after = await bot.tree.fetch_commands()
+        remaining = commands_of(env, GUILD)
+        kept = env.backend.get_command_permissions(GUILD, before[0].id)
     finally:
         await env.shutdown()
+    assert removal_writes == 1
+    assert remaining == set()
+    assert before
+    assert [(c.id, c.name) for c in after] == [(c.id, c.name) for c in before]
+    assert kept == entries
 
 
 async def test_a_server_present_but_not_served_keeps_its_commands(simcord_bot: Any) -> None:
