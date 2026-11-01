@@ -210,6 +210,17 @@ def test_a_newer_database_stops_the_start(tmp_path: Path) -> None:
     assert DB_FILE.read_bytes() == before
 
 
+def test_a_refused_start_leaves_the_database_closed(tmp_path: Path) -> None:
+    """After a refusal nothing is published: the database reads as closed, not as a connection that was closed."""
+    folder = _migrations(tmp_path / "m", "CREATE TABLE one (a);", "CREATE TABLE broken (;")
+
+    with pytest.raises(db.StorageError):
+        db.open_database(DB_FILE, migrations=folder)
+
+    with pytest.raises(RuntimeError, match="not open"):
+        db.connection()
+
+
 def test_a_file_that_is_no_database_stops_the_start() -> None:
     """A damaged file is refused, never replaced."""
     DB_FILE.parent.mkdir(parents=True)
