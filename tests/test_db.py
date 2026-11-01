@@ -421,6 +421,39 @@ def test_a_reaction_event_has_a_known_scope() -> None:
         db.connection().execute(insert, ("other",))
 
 
+def test_a_reaction_event_is_an_add_or_a_remove() -> None:
+    """The history takes the two actions it is read by and refuses any other."""
+    insert = (
+        "INSERT INTO reaction_event (scope, guild_id, message_id, user_id, emoji, action, ts_iso) "
+        "VALUES ('message', 1, 2, 3, '👍', ?, '2026-11-01T00:00:00+00:00')"
+    )
+    for action in ("add", "remove"):
+        db.connection().execute(insert, (action,))
+
+    with pytest.raises(sqlite3.IntegrityError):
+        db.connection().execute(insert, ("other",))
+
+
+def test_the_welcome_check_setting_is_on_off_or_unset() -> None:
+    """A server's welcome check is 0, 1 or empty, and nothing else."""
+    insert = "INSERT INTO guild_settings (guild_id, welcome_verify_enabled) VALUES (?, ?)"
+    for guild_id, value in ((1, 0), (2, 1), (3, None)):
+        db.connection().execute(insert, (guild_id, value))
+
+    with pytest.raises(sqlite3.IntegrityError):
+        db.connection().execute(insert, (4, 2))
+
+
+def test_every_table_is_strict() -> None:
+    """No table takes a value of the wrong type, so a table added without STRICT is caught here."""
+    loose = db.connection().execute(
+        "SELECT name FROM pragma_table_list "
+        "WHERE schema = 'main' AND type = 'table' AND strict = 0 AND name NOT LIKE 'sqlite_%'"
+    )
+
+    assert [row["name"] for row in loose] == []
+
+
 def test_main_stops_before_login_when_the_database_cannot_be_used(fablabot_main: ModuleType) -> None:
     """A bad database ends the process with one line, before the bot is even built."""
     db.close_database()
