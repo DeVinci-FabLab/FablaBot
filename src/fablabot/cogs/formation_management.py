@@ -624,8 +624,9 @@ class FormationManagement(commands.Cog):
             self._schedule_update(guild_id, delay=0)
         # An exception other than a network one ends a tasks.loop for good: a storage failure waits for the next tick.
         try:
-            # A snapshot: waiting on a guild's lock yields to code that may add a guild to the state.
-            guild_ids = formations.guilds_with_published()
+            # A snapshot: waiting on a guild's lock yields to code that may add a guild to the state. A guild whose only
+            # published message is in memory has no row yet; the tick serves it and saves the message.
+            guild_ids = sorted({*formations.guilds_with_published(), *self._unsaved_published})
         except sqlite3.Error:
             logger.exception("Reminder tick skipped: storage failure.")
             return

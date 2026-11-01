@@ -563,3 +563,21 @@ async def test_a_reaction_checked_late_is_judged_as_of_when_it_arrived(
     registered = [entry["user_id"] for entry in pub.message.fms[0].registered_users]
     assert registered == ([MEMBER_ID] if counts else [])
     assert len(env.cog._reaction_logs.history(GUILD_ID, message_id)) == (1 if counts else 0)
+
+
+async def test_the_reminder_tick_serves_a_first_publish_the_database_refused_and_saves_it(
+    started_bot: Any, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
+) -> None:
+    """A server whose only published message is in memory still gets its reminders, and the tick saves the message."""
+    cog = started_bot.get_cog("FormationManagement")
+    monkeypatch.setattr(formations, "save_published", _flaky(formations.save_published, storage_error))
+    env = _Env(cog, monkeypatch)
+    assert formations.current_published(GUILD_ID) is None
+
+    await cog._check_upcoming_formations()
+
+    assert env.notify_participants.await_count == 1
+    stored = formations.current_published(GUILD_ID)
+    assert stored is not None
+    assert stored.message.fms[0].notified_hour_before is True
+    assert cog._unsaved_published == {}
