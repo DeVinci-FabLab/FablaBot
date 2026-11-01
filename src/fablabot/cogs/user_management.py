@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 import logging
-from pathlib import Path
+import sqlite3
 from typing import TYPE_CHECKING, Literal
 from warnings import deprecated
 
@@ -20,7 +20,6 @@ from discord.utils import get
 from fablabot.helpers.access import AnyRole, Check, access
 from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames, staff_default_permissions
 from fablabot.helpers.safe_discord_operations import safe_add_roles, safe_remove_roles
-from fablabot.helpers.state_store import JsonStateStore
 from fablabot.helpers.utils import (
     RefusalKind,
     ensure_command_context,
@@ -30,6 +29,7 @@ from fablabot.helpers.utils import (
     log_refusal,
 )
 from fablabot.models.user import OpExpiry
+from fablabot.services import op_expiries
 from fablabot.ui import uui
 
 if TYPE_CHECKING:
@@ -37,9 +37,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-OP_STATE_FILE = Path("data/temp_admin_state.json")
 EXPIRY_RETRY_DELAY = timedelta(seconds=60)
 
+_OP_NOT_RECORDED = "La durée n'a pas pu être enregistrée : le rôle est retiré. Vérifiez qu'il a bien disparu, puis réessayez."
 _SELF_OP_REFUSED = "Vous ne pouvez pas vous op vous-même : un autre membre du staff doit le faire."
 _TEMP_ROLE_REFUSED = f"Le rôle {RoleNames.ADMIN_TEMP} se donne uniquement avec `/user op`, qui fixe sa durée."
 _TEMP_ROLE_TAKE_REFUSED = f"Le rôle {RoleNames.ADMIN_TEMP} se retire uniquement avec `/user deop`."
@@ -162,12 +162,6 @@ class UserManagement(commands.Cog):
         """
         self.bot = bot
         self.deop_tasks: dict[tuple[int, int], asyncio.Task[None]] = {}
-        self._op_store = JsonStateStore(logger, OP_STATE_FILE)
-        if not isinstance(self._op_store.state, dict):
-            # Fail closed: with no readable expiry, every holder is removed at start.
-            logger.error(f"Op expiry state in {OP_STATE_FILE} is not a mapping; ignored")
-            self._op_store.state = {}
-        """state structure: ``{"<guild_id>": {"<member_id>": {"expires_at": iso8601 with offset, "channel_id": int}}}``"""
         logger.info("UserManagement initialized")
 
     # region ====== User Slash Commands Group ======
@@ -240,7 +234,14 @@ class UserManagement(commands.Cog):
 
         # Role first, then record: a crash in between leaves a holder with no record, removed at start.
         expiry = OpExpiry(expires_at=_utcnow() + timedelta(minutes=time), channel_id=interaction.channel_id or 0)
-        self._record_op(interaction.guild.id, member.id, expiry)
+        try:
+            self._record_op(interaction.guild.id, member.id, expiry)
+        except sqlite3.Error:
+            # Nothing would end an op without its record: take the role back at once.
+            logger.exception(f"Op expiry not recorded guild_id={interaction.guild.id} member_id={member.id}; role taken back")
+            await safe_remove_roles(logger, member, admin_role, reason="Op expiry could not be recorded")
+            await interaction.response.send_message(_OP_NOT_RECORDED, ephemeral=True)
+            return
         self._arm_deop(interaction.guild.id, member.id, expiry.expires_at)
         logger.info(f"Granted {member} temporary admin for {time} minutes for reason: {reason}")
         await interaction.response.send_message(
@@ -541,53 +542,24 @@ class UserManagement(commands.Cog):
         member cache is complete; with a partial cache the member may hold the role unseen, so the
         record gets its timer and ``_expire`` asks Discord when it fires (now, if the time has passed).
         """
-        state = self._op_store.state
-        entries = state.get(str(guild.id))
-        if str(guild.id) in state and not isinstance(entries, dict):
-            logger.error(f"Op state entry is not a mapping; reset guild_id={guild.id}")
-            state.pop(str(guild.id))
-            self._op_store.save()
-            return
-        if entries is None:
-            return
         holder_ids = {member.id for member in admin_role.members}
-        for key in list(entries):
-            if not key.isdigit():
-                entries.pop(key)
-                continue
-            member_id = int(key)
+        for member_id in op_expiries.member_ids(guild.id):
             task = self.deop_tasks.get((guild.id, member_id))
             if member_id in holder_ids or (task is not None and not task.done()):
                 continue
-            if guild.chunked:
-                entries.pop(key)
-                continue
-            expiry = self._load_op(guild.id, member_id)
+            expiry = None if guild.chunked else self._load_op(guild.id, member_id)
             if expiry is None:
-                entries.pop(key)
+                self._clear_op(guild.id, member_id)
             else:
                 self._arm_deop(guild.id, member_id, max(expiry.expires_at, _utcnow()))
-        if not entries:
-            self._op_store.state.pop(str(guild.id))
-        self._op_store.save()
 
     def _record_op(self, guild_id: int, member_id: int, expiry: OpExpiry) -> None:
         """Persist the expiry of a member's op on one guild, replacing any previous one."""
-        entries = self._op_store.ensure_guild(guild_id)
-        if not isinstance(entries, dict):
-            entries = self._op_store.state[str(guild_id)] = {}
-        entries[str(member_id)] = expiry.to_dict()
-        self._op_store.save()
+        op_expiries.record(guild_id, member_id, expiry.to_dict())
 
     def _clear_op(self, guild_id: int, member_id: int) -> None:
         """Forget the expiry of a member's op on one guild, if any."""
-        entries = self._op_store.state.get(str(guild_id))
-        if not isinstance(entries, dict) or str(member_id) not in entries:
-            return
-        entries.pop(str(member_id))
-        if not entries:
-            self._op_store.state.pop(str(guild_id))
-        self._op_store.save()
+        op_expiries.clear(guild_id, member_id)
 
     def _load_op(self, guild_id: int, member_id: int) -> OpExpiry | None:
         """Read the recorded expiry of a member's op on one guild.
@@ -595,11 +567,7 @@ class UserManagement(commands.Cog):
         Returns:
             OpExpiry | None: The expiry, or None when absent or unreadable (logged as an error).
         """
-        entries = self._op_store.state.get(str(guild_id))
-        if entries is not None and not isinstance(entries, dict):
-            logger.error(f"Unreadable op expiries for guild_id={guild_id}; treated as absent")
-            return None
-        raw = entries.get(str(member_id)) if entries else None
+        raw = op_expiries.get(guild_id, member_id)
         if raw is None:
             return None
         try:

@@ -106,6 +106,34 @@ def stored_settings() -> dict[str, dict[str, Any]]:
     return stored
 
 
+def store_ops(content: dict[str, dict[str, dict[str, Any]]]) -> None:
+    """Write op expiries as ``{guild_id: {member_id: {"expires_at": ..., "channel_id": ...}}}``.
+
+    Args:
+        content (dict[str, dict[str, dict[str, Any]]]): The expiries to store.
+    """
+    with db.transaction() as conn:
+        for guild_id, entries in content.items():
+            for member_id, entry in entries.items():
+                conn.execute(
+                    "INSERT INTO op_expiry (guild_id, member_id, expires_at, channel_id) VALUES (?, ?, ?, ?)",
+                    (int(guild_id), int(member_id), entry["expires_at"], entry["channel_id"]),
+                )
+
+
+def stored_ops() -> dict[str, dict[str, dict[str, Any]]]:
+    """Read op expiries back in the shape ``store_ops`` takes.
+
+    Returns:
+        dict[str, dict[str, dict[str, Any]]]: The expiries; a guild without one is absent.
+    """
+    stored: dict[str, dict[str, dict[str, Any]]] = {}
+    for row in db.connection().execute("SELECT * FROM op_expiry"):
+        entry = {"expires_at": row["expires_at"], "channel_id": row["channel_id"]}
+        stored.setdefault(str(row["guild_id"]), {})[str(row["member_id"])] = entry
+    return stored
+
+
 def make_interaction(
     *,
     user_id: int = 418003123456789012,

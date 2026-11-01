@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-import json
-from pathlib import Path
+import sqlite3
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from conftest import make_guild, make_interaction, make_member, make_role
+from conftest import make_guild, make_interaction, make_member, make_role, stored_ops
 from discord import CategoryChannel, Forbidden, ForumChannel, HTTPException, NotFound
 import pytest
 
@@ -16,12 +15,12 @@ from fablabot.cogs import user_management
 from fablabot.cogs.user_management import UserManagement
 from fablabot.helpers.constants import RoleNames
 from fablabot.models.user import OpExpiry
+from fablabot.services import op_expiries
 
 NOW = datetime(2026, 10, 28, 15, 0, tzinfo=UTC)
 GUILD_A, GUILD_B = 1001, 1002
 TARGET_ID = 501
 OP_CHANNEL_ID = 777
-STATE_FILE = Path("data/temp_admin_state.json")
 
 
 @pytest.fixture(autouse=True)
@@ -69,22 +68,31 @@ async def _op(cog: UserManagement, guild: MagicMock, caller: MagicMock, target: 
     return interaction
 
 
-def _saved() -> dict:
-    return json.loads(STATE_FILE.read_text(encoding="utf-8"))
-
-
 async def test_op_records_expiry_before_replying(cog: UserManagement) -> None:
     """An op is recorded with its expiry before the reply goes out."""
     guild, target, caller = _server(GUILD_A)
     interaction = _interaction(guild, caller)
     seen: list[dict] = []
-    interaction.response.send_message = AsyncMock(side_effect=lambda *_a, **_k: seen.append(_saved()))
+    interaction.response.send_message = AsyncMock(side_effect=lambda *_a, **_k: seen.append(stored_ops()))
 
     await UserManagement.user_op.callback(cog, interaction, member=target, reason="atelier", time=30)
 
     record = seen[0][str(GUILD_A)][str(TARGET_ID)]
     assert record == {"expires_at": "2026-10-28T15:30:00+00:00", "channel_id": OP_CHANNEL_ID}
     assert set(cog.deop_tasks) == {(GUILD_A, TARGET_ID)}
+
+
+async def test_op_that_cannot_be_recorded_takes_the_role_back(cog: UserManagement) -> None:
+    """Without a record nothing would end the op: the role leaves at once and the caller is told privately."""
+    guild, target, caller = _server(GUILD_A)
+
+    with patch.object(op_expiries, "record", side_effect=sqlite3.OperationalError("disk I/O error")):
+        interaction = await _op(cog, guild, caller, target, 10)
+
+    target.add_roles.assert_awaited_once()
+    target.remove_roles.assert_awaited_once()
+    assert cog.deop_tasks == {}
+    assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
 
 
 async def test_reop_replaces_expiry_and_keeps_one_timer(cog: UserManagement) -> None:
@@ -96,7 +104,7 @@ async def test_reop_replaces_expiry_and_keeps_one_timer(cog: UserManagement) -> 
     await _op(cog, guild, caller, target, 10)
     await asyncio.sleep(0)
 
-    assert _saved()[str(GUILD_A)][str(TARGET_ID)]["expires_at"] == "2026-10-28T15:10:00+00:00"
+    assert stored_ops()[str(GUILD_A)][str(TARGET_ID)]["expires_at"] == "2026-10-28T15:10:00+00:00"
     assert first.cancelled()
     assert len(cog.deop_tasks) == 1
 
@@ -113,7 +121,7 @@ async def test_expiry_removes_role_clears_record_and_posts_in_op_channel(cog: Us
         await cog._expire(GUILD_A, TARGET_ID)
 
     target.remove_roles.assert_awaited_once()
-    assert str(TARGET_ID) not in _saved().get(str(GUILD_A), {})
+    assert str(TARGET_ID) not in stored_ops().get(str(GUILD_A), {})
     guild.get_channel.assert_called_with(OP_CHANNEL_ID)
     notice = guild.get_channel.return_value.send.await_args.args[0]
     assert "<@501>" in notice
@@ -144,7 +152,7 @@ async def test_expiry_for_member_who_left_clears_record_quietly(cog: UserManagem
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=5)):
         await cog._expire(GUILD_A, TARGET_ID)
 
-    assert str(TARGET_ID) not in _saved().get(str(GUILD_A), {})
+    assert str(TARGET_ID) not in stored_ops().get(str(GUILD_A), {})
     assert not [r for r in caplog.records if r.levelname == "ERROR"]
 
 
@@ -159,7 +167,7 @@ async def test_failed_expiry_keeps_record_and_warns_op_channel(cog: UserManageme
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=5)):
         await cog._expire(GUILD_A, TARGET_ID)
 
-    assert str(TARGET_ID) in _saved()[str(GUILD_A)]
+    assert str(TARGET_ID) in stored_ops()[str(GUILD_A)]
     guild.get_channel.return_value.send.assert_awaited_once()
     errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
     assert any(f"guild_id={GUILD_A}" in m and f"member_id={TARGET_ID}" in m for m in errors)
@@ -176,7 +184,7 @@ async def test_deop_cancels_timer_and_clears_record(cog: UserManagement) -> None
 
     assert task.cancelled()
     assert (GUILD_A, TARGET_ID) not in cog.deop_tasks
-    assert str(TARGET_ID) not in _saved().get(str(GUILD_A), {})
+    assert str(TARGET_ID) not in stored_ops().get(str(GUILD_A), {})
 
 
 async def test_servers_are_kept_apart(cog: UserManagement) -> None:
@@ -191,8 +199,8 @@ async def test_servers_are_kept_apart(cog: UserManagement) -> None:
     await asyncio.sleep(0)
 
     assert not task_b.done()
-    assert _saved()[str(GUILD_B)][str(TARGET_ID)]["expires_at"] == "2026-10-28T16:00:00+00:00"
-    assert str(TARGET_ID) not in _saved().get(str(GUILD_A), {})
+    assert stored_ops()[str(GUILD_B)][str(TARGET_ID)]["expires_at"] == "2026-10-28T16:00:00+00:00"
+    assert str(TARGET_ID) not in stored_ops().get(str(GUILD_A), {})
 
 
 def test_op_expiry_round_trips_and_rejects_naive_time() -> None:
@@ -235,7 +243,7 @@ async def test_timer_that_wakes_before_the_clock_is_due_waits_again(cog: UserMan
 
     assert len(sleeps) == 2
     target.remove_roles.assert_awaited_once()
-    assert str(TARGET_ID) not in _saved().get(str(GUILD_A), {})
+    assert str(TARGET_ID) not in stored_ops().get(str(GUILD_A), {})
 
 
 async def test_expiry_keeps_record_and_asks_for_a_retry_while_the_guild_is_unavailable(
@@ -252,7 +260,7 @@ async def test_expiry_keeps_record_and_asks_for_a_retry_while_the_guild_is_unava
         settled = await cog._expire(GUILD_A, TARGET_ID)
 
     assert settled is False
-    assert str(TARGET_ID) in _saved()[str(GUILD_A)]
+    assert str(TARGET_ID) in stored_ops()[str(GUILD_A)]
     target.remove_roles.assert_not_awaited()
     warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
     assert any(f"guild_id={GUILD_A}" in m and f"member_id={TARGET_ID}" in m and "record kept" in m for m in warnings)
@@ -284,7 +292,7 @@ async def test_timer_waits_and_tries_again_until_the_guild_is_back(cog: UserMana
 
     assert sleeps == [60.0]
     target.remove_roles.assert_awaited_once()
-    assert str(TARGET_ID) not in _saved().get(str(GUILD_A), {})
+    assert str(TARGET_ID) not in stored_ops().get(str(GUILD_A), {})
     assert cog.deop_tasks == {}
 
 
@@ -304,7 +312,7 @@ async def test_expiry_removes_the_role_of_a_cached_member_in_a_guild_whose_cache
     assert settled is True
     target.remove_roles.assert_awaited_once()
     guild.fetch_member.assert_not_awaited()
-    assert str(TARGET_ID) not in _saved().get(str(GUILD_A), {})
+    assert str(TARGET_ID) not in stored_ops().get(str(GUILD_A), {})
 
 
 async def test_expiry_asks_discord_for_a_member_missing_from_an_incomplete_cache(cog: UserManagement) -> None:
@@ -323,7 +331,7 @@ async def test_expiry_asks_discord_for_a_member_missing_from_an_incomplete_cache
     assert settled is True
     guild.fetch_member.assert_awaited_once_with(TARGET_ID)
     target.remove_roles.assert_awaited_once()
-    assert str(TARGET_ID) not in _saved().get(str(GUILD_A), {})
+    assert str(TARGET_ID) not in stored_ops().get(str(GUILD_A), {})
 
 
 async def test_expiry_clears_quietly_a_member_discord_does_not_know(
@@ -341,7 +349,7 @@ async def test_expiry_clears_quietly_a_member_discord_does_not_know(
         settled = await cog._expire(GUILD_A, TARGET_ID)
 
     assert settled is True
-    assert str(TARGET_ID) not in _saved().get(str(GUILD_A), {})
+    assert str(TARGET_ID) not in stored_ops().get(str(GUILD_A), {})
     assert not [r for r in caplog.records if r.levelname == "ERROR"]
 
 
@@ -361,7 +369,7 @@ async def test_expiry_keeps_record_and_asks_for_a_retry_when_discord_cannot_say_
         settled = await cog._expire(GUILD_A, TARGET_ID)
 
     assert settled is False
-    assert str(TARGET_ID) in _saved()[str(GUILD_A)]
+    assert str(TARGET_ID) in stored_ops()[str(GUILD_A)]
     target.remove_roles.assert_not_awaited()
     warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
     assert any(f"guild_id={GUILD_A}" in m and f"member_id={TARGET_ID}" in m and "record kept" in m for m in warnings)
@@ -388,7 +396,7 @@ async def test_deop_does_not_erase_an_op_made_while_it_was_in_flight(cog: UserMa
     gate.set()
     await deop
 
-    assert _saved()[str(GUILD_A)][str(TARGET_ID)]["expires_at"] == "2026-10-28T16:01:00+00:00"
+    assert stored_ops()[str(GUILD_A)][str(TARGET_ID)]["expires_at"] == "2026-10-28T16:01:00+00:00"
     assert cog.deop_tasks[GUILD_A, TARGET_ID] is newer
     assert not newer.done()
 
