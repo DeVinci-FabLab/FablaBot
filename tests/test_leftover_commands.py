@@ -137,6 +137,23 @@ async def test_a_server_present_but_not_served_keeps_its_commands(simcord_bot: A
     assert touching == []
 
 
+async def test_a_later_ready_does_not_remove_again(simcord_bot: Any) -> None:
+    """A reconnection fires ready again; the removal runs at the first ready only."""
+    env = await start(simcord_bot, GUILD)
+    try:
+        bot: Any = env.bot
+        env.backend.register_commands(GUILD, LEFTOVERS)
+        requests_before = len(env.http_requests)
+        bot.dispatch("ready")
+        await env.settle()
+        remaining = commands_of(env, GUILD)
+        touching = [r for r in env.http_requests[requests_before:] if f"/guilds/{GUILD}/commands" in r.path]
+    finally:
+        await env.shutdown()
+    assert remaining == {"user", "bot"}
+    assert touching == []
+
+
 async def test_nothing_is_touched_with_a_development_server(simcord_bot: Any) -> None:
     """With DEV_GUILD_ID set, no server-scoped command is removed."""
     simcord_bot.dev_guild_id = GUILD
