@@ -187,6 +187,40 @@ def test_a_read_only_folder_stops_the_start_of_a_new_database() -> None:
         DB_FILE.parent.chmod(0o755)
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root writes anywhere")
+def test_a_read_only_file_stops_the_start() -> None:
+    """A database the bot can read but not write is refused at start, not at the first reaction."""
+    db.open_database(DB_FILE)
+    db.close_database()
+    DB_FILE.chmod(0o444)
+    try:
+        with pytest.raises(db.StorageError, match="cannot be used"):
+            db.open_database(DB_FILE)
+    finally:
+        DB_FILE.chmod(0o644)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root writes anywhere")
+def test_a_read_only_folder_stops_the_start_of_an_existing_database() -> None:
+    """A folder that takes no journal file is refused at start."""
+    db.open_database(DB_FILE)
+    db.close_database()
+    DB_FILE.parent.chmod(0o555)
+    try:
+        with pytest.raises(db.StorageError, match="cannot be used"):
+            db.open_database(DB_FILE)
+    finally:
+        DB_FILE.parent.chmod(0o755)
+
+
+def test_the_start_leaves_no_journal_and_no_open_transaction() -> None:
+    """Checking that the database takes writes changes nothing and leaves nothing behind."""
+    db.open_database(DB_FILE)
+
+    assert not db.connection().in_transaction
+    assert [path.name for path in DB_FILE.parent.iterdir()] == [DB_FILE.name]
+
+
 def test_an_upgrade_copies_the_database_first(tmp_path: Path) -> None:
     """Before a schema change the bot keeps a copy of the data at the old version."""
     db.open_database(DB_FILE, migrations=_migrations(tmp_path / "m", "CREATE TABLE one (a);"))

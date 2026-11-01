@@ -165,6 +165,21 @@ def _check_imported(conn: sqlite3.Connection, path: Path, files: list[Path]) -> 
         raise StorageError(msg)
 
 
+def _check_writable(conn: sqlite3.Connection) -> None:
+    """Refuse a database the bot can read but not write, by a write that is taken back.
+
+    Args:
+        conn (sqlite3.Connection): The open connection, in autocommit.
+    """
+    version: int = conn.execute("PRAGMA user_version").fetchone()[0]
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute(f"PRAGMA user_version = {version}")
+    finally:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+
+
 def _state_files(path: Path) -> list[Path]:
     """List the JSON state files next to the database, refusing them when it does not exist yet.
 
@@ -205,6 +220,7 @@ def open_database(path: Path = DATABASE_FILE, *, migrations: Path = MIGRATIONS_D
         conn = sqlite3.connect(path, autocommit=True)
         _configure(conn)
         _migrate(conn, path, migrations)
+        _check_writable(conn)
         _check_imported(conn, path, state_files)
     except (sqlite3.DatabaseError, OSError) as error:
         if conn is not None:
