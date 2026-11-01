@@ -351,6 +351,35 @@ async def test_timer_that_wakes_before_the_clock_is_due_waits_again(cog: UserMan
     assert str(TARGET_ID) not in stored_ops().get(str(GUILD_A), {})
 
 
+async def test_a_timer_armed_before_its_record_could_be_read_waits_for_the_recorded_time(cog: UserManagement) -> None:
+    """A timer that fires at once because the record was unreadable waits for the time the record holds, then ends the op."""
+    guild, target, _caller = _server(GUILD_A)
+    target.roles.append(guild.roles[0])
+    cog.bot.get_guild = MagicMock(return_value=guild)
+    expires_at = NOW + timedelta(minutes=30)
+    cog._record_op(GUILD_A, TARGET_ID, OpExpiry(expires_at=expires_at, channel_id=OP_CHANNEL_ID))
+    clock = {"now": NOW}
+    real_sleep = asyncio.sleep
+    sleeps: list[float] = []
+
+    async def advance(delay: float) -> None:
+        sleeps.append(delay)
+        clock["now"] += timedelta(seconds=delay)
+        await real_sleep(0)
+
+    with (
+        patch.object(user_management, "_utcnow", side_effect=lambda: clock["now"]),
+        patch.object(user_management.asyncio, "sleep", advance),
+    ):
+        cog._arm_deop(GUILD_A, TARGET_ID, NOW)
+        await cog.deop_tasks[GUILD_A, TARGET_ID]
+
+    assert sleeps == [1800.0]
+    target.remove_roles.assert_awaited_once()
+    assert str(TARGET_ID) not in stored_ops().get(str(GUILD_A), {})
+    assert cog.deop_tasks == {}
+
+
 async def test_expiry_keeps_record_and_asks_for_a_retry_while_the_guild_is_unavailable(
     cog: UserManagement, caplog: pytest.LogCaptureFixture
 ) -> None:

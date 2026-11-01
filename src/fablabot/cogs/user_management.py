@@ -644,7 +644,8 @@ class UserManagement(commands.Cog):
         record gets its timer and ``_expire`` asks Discord when it fires (now, if the time has passed).
         A record that cannot be read or dropped is logged and the others are still swept. With
         ``fail_closed``, a record the cache cannot vouch for and the storage cannot give gets a timer
-        that fires now and asks again every ``EXPIRY_RETRY_DELAY`` until it can be read.
+        that fires now and asks again every ``EXPIRY_RETRY_DELAY`` until it can be read, then waits for the
+        time it holds.
 
         Args:
             guild (Guild): The server.
@@ -748,7 +749,7 @@ class UserManagement(commands.Cog):
                 self.deop_tasks.pop((guild_id, member_id))
 
     async def _expire(self, guild_id: int, member_id: int) -> bool:
-        """End a member's op on one guild if its recorded time has come.
+        """End a member's op on one guild at its recorded time, waiting for it if it has not come.
 
         Removes the role, then forgets the record (a crash in between leaves an orphan record,
         cleared later), then posts the notice in the op channel. A failed removal keeps the record,
@@ -764,8 +765,12 @@ class UserManagement(commands.Cog):
         except sqlite3.Error:
             logger.exception(f"Storage failure reading the op expiry guild_id={guild_id} member_id={member_id}; record kept")
             return False
-        if expiry is None or expiry.expires_at > _utcnow():
+        if expiry is None:
             return True
+        # A timer armed while the record was unreadable (fail closed at start) fires early: wait for the recorded time.
+        # Whatever changes the record meanwhile (a new op, a deop) cancels this timer.
+        while (delay := _delay_until(expiry.expires_at)) > 0:
+            await asyncio.sleep(delay)
         guild = self.bot.get_guild(guild_id)
         if guild is None or guild.unavailable:
             logger.warning(f"Guild unreachable at op expiry guild_id={guild_id} member_id={member_id}; record kept")
