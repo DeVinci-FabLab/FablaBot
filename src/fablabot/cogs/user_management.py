@@ -507,32 +507,46 @@ class UserManagement(commands.Cog):
         await self._reconcile_guild(guild)
 
     async def _reconcile_guild(self, guild: Guild) -> None:
-        """Remove the temporary role from holders with no future expiry, arm the others, drop stale records."""
+        """Remove the temporary role from holders with no future expiry, arm the others, drop stale records.
+
+        A storage failure is logged and ends only the holder or the sweep it hit: the other holders and
+        servers are still settled, and the one it hit is settled at the next start or reconnect.
+        """
         admin_role = get(guild.roles, name=RoleNames.ADMIN_TEMP)
         if admin_role is None:
             return
         holders = {member.id: member for member in admin_role.members}
         for member in holders.values():
-            expiry = self._load_op(guild.id, member.id)
-            if expiry is not None and expiry.expires_at > _utcnow():
-                task = self.deop_tasks.get((guild.id, member.id))
-                if task is None or task.done():
-                    self._arm_deop(guild.id, member.id, expiry.expires_at)
-                continue
-            cause = "no recorded expiry" if expiry is None else "expiry passed"
-            success, _error = await safe_remove_roles(
-                logger,
-                member,
-                admin_role,
-                reason=f"Temporary admin role removed at bot start: {cause}",
-            )
-            if not success:
-                logger.error(f"Failed to remove temporary admin role at start guild_id={guild.id} member_id={member.id}")
-                continue
-            logger.warning(f"Removed temporary admin role at start ({cause}) guild_id={guild.id} member_id={member.id}")
-            self._clear_op(guild.id, member.id)
+            try:
+                await self._reconcile_holder(guild, admin_role, member)
+            except sqlite3.Error:
+                logger.exception(f"Storage failure settling an op at start guild_id={guild.id} member_id={member.id}")
 
-        self._sweep_stale_records(guild, admin_role)
+        try:
+            self._sweep_stale_records(guild, admin_role)
+        except sqlite3.Error:
+            logger.exception(f"Storage failure listing op records at start guild_id={guild.id}")
+
+    async def _reconcile_holder(self, guild: Guild, admin_role: Role, member: Member) -> None:
+        """Arm the timer of a holder whose expiry is ahead, and take the role off any other holder."""
+        expiry = self._load_op(guild.id, member.id)
+        if expiry is not None and expiry.expires_at > _utcnow():
+            task = self.deop_tasks.get((guild.id, member.id))
+            if task is None or task.done():
+                self._arm_deop(guild.id, member.id, expiry.expires_at)
+            return
+        cause = "no recorded expiry" if expiry is None else "expiry passed"
+        success, _error = await safe_remove_roles(
+            logger,
+            member,
+            admin_role,
+            reason=f"Temporary admin role removed at bot start: {cause}",
+        )
+        if not success:
+            logger.error(f"Failed to remove temporary admin role at start guild_id={guild.id} member_id={member.id}")
+            return
+        logger.warning(f"Removed temporary admin role at start ({cause}) guild_id={guild.id} member_id={member.id}")
+        self._clear_op(guild.id, member.id)
 
     def _sweep_stale_records(self, guild: Guild, admin_role: Role) -> None:
         """Drop this guild's records of ops that are over, and arm the ones the cache cannot vouch for.
@@ -541,17 +555,21 @@ class UserManagement(commands.Cog):
         started while the removals were awaited). Otherwise it is dropped only when the guild's
         member cache is complete; with a partial cache the member may hold the role unseen, so the
         record gets its timer and ``_expire`` asks Discord when it fires (now, if the time has passed).
+        A record that cannot be read or dropped is logged and the others are still swept.
         """
         holder_ids = {member.id for member in admin_role.members}
         for member_id in op_expiries.member_ids(guild.id):
             task = self.deop_tasks.get((guild.id, member_id))
             if member_id in holder_ids or (task is not None and not task.done()):
                 continue
-            expiry = None if guild.chunked else self._load_op(guild.id, member_id)
-            if expiry is None:
-                self._clear_op(guild.id, member_id)
-            else:
-                self._arm_deop(guild.id, member_id, max(expiry.expires_at, _utcnow()))
+            try:
+                expiry = None if guild.chunked else self._load_op(guild.id, member_id)
+                if expiry is None:
+                    self._clear_op(guild.id, member_id)
+                else:
+                    self._arm_deop(guild.id, member_id, max(expiry.expires_at, _utcnow()))
+            except sqlite3.Error:
+                logger.exception(f"Storage failure sweeping an op record at start guild_id={guild.id} member_id={member_id}")
 
     def _record_op(self, guild_id: int, member_id: int, expiry: OpExpiry) -> None:
         """Persist the expiry of a member's op on one guild, replacing any previous one."""

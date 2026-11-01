@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 import logging
+import sqlite3
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from conftest import make_guild, make_member, make_role, store_ops, stored_ops
@@ -13,6 +15,10 @@ import pytest
 from fablabot.cogs import user_management
 from fablabot.cogs.user_management import UserManagement
 from fablabot.helpers.constants import RoleNames
+from fablabot.services import op_expiries
+
+if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
 
 NOW = datetime(2026, 10, 28, 15, 0, tzinfo=UTC)
 GUILD_ID, OTHER_GUILD_ID = 1001, 1002
@@ -236,3 +242,112 @@ async def test_guild_back_from_an_outage_is_reconciled() -> None:
     assert (GUILD_ID, HOLDER_ID) in cog.deop_tasks
     holder.remove_roles.assert_not_awaited()
     _stop(cog)
+
+
+def _storage_fails_for(function: str, member_id: int) -> AbstractContextManager[Any]:
+    """Patch one ``op_expiries`` function so that it raises for one member and works for the others."""
+    real = getattr(op_expiries, function)
+
+    def flaky(guild_id: int, target_id: int) -> object:
+        if target_id == member_id:
+            raise sqlite3.OperationalError
+        return real(guild_id, target_id)
+
+    return patch.object(op_expiries, function, side_effect=flaky)
+
+
+def _two_holders_guild() -> tuple[MagicMock, MagicMock, MagicMock]:
+    temp = make_role(RoleNames.ADMIN_TEMP)
+    first, second = make_member(HOLDER_ID, temp), make_member(HOLDER_ID + 1, temp)
+    return make_guild(GUILD_ID, [temp], [first, second]), first, second
+
+
+@pytest.mark.parametrize(
+    ("function", "first_keeps_the_role"),
+    [("get", True), ("clear", False)],
+    ids=["failed-read", "failed-clear"],
+)
+async def test_a_storage_failure_on_one_holder_does_not_stop_the_other_holders(
+    caplog: pytest.LogCaptureFixture, function: str, first_keeps_the_role: bool
+) -> None:
+    """A storage failure on one holder at start is logged and the other holders of the server are still settled."""
+    past = NOW - timedelta(minutes=1)
+    store_ops(
+        {str(GUILD_ID): {str(m): {"expires_at": past.isoformat(), "channel_id": 777} for m in (HOLDER_ID, HOLDER_ID + 1)}}
+    )
+    guild, first, second = _two_holders_guild()
+
+    with _storage_fails_for(function, HOLDER_ID):
+        _stop(await _start(guild))
+
+    assert first.remove_roles.await_count == (0 if first_keeps_the_role else 1)
+    second.remove_roles.assert_awaited_once()
+    assert str(HOLDER_ID + 1) not in stored_ops()[str(GUILD_ID)]
+    assert str(HOLDER_ID) in stored_ops()[str(GUILD_ID)]
+    errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+    assert any(f"guild_id={GUILD_ID}" in m and f"member_id={HOLDER_ID}" in m for m in errors)
+
+
+async def test_a_storage_failure_in_one_server_does_not_stop_the_next_server() -> None:
+    """A storage failure while settling one server at start leaves the holders of the next server settled."""
+    past = NOW - timedelta(minutes=1)
+    guilds, holders = [], []
+    for guild_id, member_id in ((GUILD_ID, HOLDER_ID), (OTHER_GUILD_ID, HOLDER_ID + 1)):
+        store_ops(_record(guild_id, member_id, past))
+        temp = make_role(RoleNames.ADMIN_TEMP)
+        holder = make_member(member_id, temp)
+        guilds.append(make_guild(guild_id, [temp], [holder]))
+        holders.append(holder)
+
+    with patch.object(op_expiries, "clear", side_effect=sqlite3.OperationalError("disk I/O error")):
+        _stop(await _start(*guilds))
+
+    for holder in holders:
+        holder.remove_roles.assert_awaited_once()
+
+
+async def test_a_failed_listing_of_the_records_does_not_stop_the_next_server(caplog: pytest.LogCaptureFixture) -> None:
+    """A failed read of one server's records at start is logged and the next server is still settled."""
+    first_guild, _holder, _temp = _holder_guild()
+    temp = make_role(RoleNames.ADMIN_TEMP)
+    other_holder = make_member(HOLDER_ID + 1, temp)
+    other_guild = make_guild(OTHER_GUILD_ID, [temp], [other_holder])
+    real = op_expiries.member_ids
+
+    def flaky(guild_id: int) -> list[int]:
+        if guild_id == GUILD_ID:
+            raise sqlite3.OperationalError
+        return real(guild_id)
+
+    with patch.object(op_expiries, "member_ids", side_effect=flaky):
+        _stop(await _start(first_guild, other_guild))
+
+    other_holder.remove_roles.assert_awaited_once()
+    errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+    assert any(f"guild_id={GUILD_ID}" in m for m in errors)
+
+
+async def test_a_failed_clear_on_one_stale_record_does_not_stop_the_sweep() -> None:
+    """A stale record that cannot be dropped at start is logged and the other stale records are still dropped."""
+    future = NOW + timedelta(minutes=12)
+    store_ops({str(GUILD_ID): {str(m): {"expires_at": future.isoformat(), "channel_id": 777} for m in (998, 999)}})
+    guild, _holder, _temp = _holder_guild()
+
+    with _storage_fails_for("clear", 998):
+        _stop(await _start(guild))
+
+    assert "999" not in stored_ops()[str(GUILD_ID)]
+    assert "998" in stored_ops()[str(GUILD_ID)]
+
+
+async def test_a_failed_read_on_one_record_does_not_stop_the_sweep_from_arming_the_others() -> None:
+    """With a partial member cache, a record that cannot be read at start is logged and the others still get their timer."""
+    future = NOW + timedelta(minutes=12)
+    store_ops({str(GUILD_ID): {str(m): {"expires_at": future.isoformat(), "channel_id": 777} for m in (998, 999)}})
+    guild, _holder, _temp = _holder_guild()
+    guild.chunked = False
+
+    with _storage_fails_for("get", 998), patch.object(UserManagement, "_arm_deop") as arm:
+        await _start(guild)
+
+    arm.assert_called_once_with(GUILD_ID, 999, future)
