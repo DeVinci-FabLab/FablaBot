@@ -327,7 +327,7 @@ async def test_a_failed_listing_of_the_records_does_not_stop_the_next_server(cap
     assert any(f"guild_id={GUILD_ID}" in m for m in errors)
 
 
-async def test_a_failed_clear_on_one_stale_record_does_not_stop_the_sweep() -> None:
+async def test_a_failed_clear_on_one_stale_record_does_not_stop_the_sweep(caplog: pytest.LogCaptureFixture) -> None:
     """A stale record that cannot be dropped at start is logged and the other stale records are still dropped."""
     future = NOW + timedelta(minutes=12)
     store_ops({str(GUILD_ID): {str(m): {"expires_at": future.isoformat(), "channel_id": 777} for m in (998, 999)}})
@@ -338,9 +338,13 @@ async def test_a_failed_clear_on_one_stale_record_does_not_stop_the_sweep() -> N
 
     assert "999" not in stored_ops()[str(GUILD_ID)]
     assert "998" in stored_ops()[str(GUILD_ID)]
+    errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+    assert any(f"guild_id={GUILD_ID}" in m and "member_id=998" in m for m in errors)
 
 
-async def test_a_failed_read_on_one_record_does_not_stop_the_sweep_from_arming_the_others() -> None:
+async def test_a_failed_read_on_one_record_does_not_stop_the_sweep_from_arming_the_others(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """With a partial member cache, a record that cannot be read at start is logged and the others still get their timer."""
     future = NOW + timedelta(minutes=12)
     store_ops({str(GUILD_ID): {str(m): {"expires_at": future.isoformat(), "channel_id": 777} for m in (998, 999)}})
@@ -351,3 +355,6 @@ async def test_a_failed_read_on_one_record_does_not_stop_the_sweep_from_arming_t
         await _start(guild)
 
     arm.assert_called_once_with(GUILD_ID, 999, future)
+    assert "998" in stored_ops()[str(GUILD_ID)]
+    errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+    assert any(f"guild_id={GUILD_ID}" in m and "member_id=998" in m for m in errors)
