@@ -67,6 +67,39 @@ def test_servers_stay_apart() -> None:
     assert MESSAGE in messages.tracked_messages(GUILD_B)
 
 
+def test_each_server_lists_only_its_own_tracked_messages() -> None:
+    """A server's list holds its messages and their action texts, never another server's."""
+    messages.save_tracked(GUILD_A, _tracked(MESSAGE, _reaction("🅰")))
+    messages.save_tracked(GUILD_B, _tracked(OTHER_MESSAGE, _reaction("🅱")))
+
+    assert list(messages.tracked_messages(GUILD_A)) == [MESSAGE]
+    assert list(messages.tracked_messages(GUILD_B)) == [OTHER_MESSAGE]
+    assert messages.tracked_messages(GUILD_A) != messages.tracked_messages(GUILD_B)
+
+
+def test_each_server_keeps_its_own_draft() -> None:
+    """Saving, reading and clearing a draft touches one server: the other keeps its own."""
+    draft_a = MessageDraft(content="Pour A", reactions=[_reaction("🅰")])
+    draft_b = MessageDraft(content="Pour B", reactions=[_reaction("🅱")])
+    messages.save_draft(GUILD_A, draft_a)
+    messages.save_draft(GUILD_B, draft_b)
+
+    assert messages.get_draft(GUILD_A) == draft_a
+    assert messages.get_draft(GUILD_B) == draft_b
+
+    messages.clear_draft(GUILD_A)
+
+    assert messages.get_draft(GUILD_A) is None
+    assert messages.get_draft(GUILD_B) == draft_b
+
+
+def test_a_server_without_a_draft_does_not_read_another_servers() -> None:
+    """A server that never saved a draft reads none, whatever the others hold."""
+    messages.save_draft(GUILD_A, MessageDraft(content="Pour A", reactions=[]))
+
+    assert messages.get_draft(GUILD_B) is None
+
+
 def test_removing_a_message_removes_its_actions() -> None:
     """No orphan action stays behind."""
     messages.save_tracked(GUILD_A, _tracked(MESSAGE, _reaction()))
