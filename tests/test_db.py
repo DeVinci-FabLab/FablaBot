@@ -121,6 +121,49 @@ def test_a_failed_migration_changes_nothing(tmp_path: Path) -> None:
     assert names == {"one"}
 
 
+PARENT_AND_CHILD = (
+    "CREATE TABLE parent (id INTEGER PRIMARY KEY, label TEXT) STRICT;"
+    "CREATE TABLE child (parent_id INTEGER NOT NULL REFERENCES parent (id) ON DELETE CASCADE) STRICT;"
+)
+REBUILD_PARENT = (
+    "CREATE TABLE parent_new (id INTEGER PRIMARY KEY, label TEXT NOT NULL DEFAULT '') STRICT;"
+    "INSERT INTO parent_new SELECT id, coalesce(label, '') FROM parent;"
+    "DROP TABLE parent;"
+    "ALTER TABLE parent_new RENAME TO parent;"
+)
+
+
+def test_rebuilding_a_table_keeps_the_rows_that_point_to_it(tmp_path: Path) -> None:
+    """A migration that drops and recreates a parent table does not cascade into its children."""
+    db.open_database(DB_FILE, migrations=_migrations(tmp_path / "m", PARENT_AND_CHILD))
+    with db.transaction() as conn:
+        conn.execute("INSERT INTO parent VALUES (1, 'a')")
+        conn.execute("INSERT INTO child VALUES (1)")
+    db.close_database()
+
+    db.open_database(DB_FILE, migrations=_migrations(tmp_path / "m", PARENT_AND_CHILD, REBUILD_PARENT))
+
+    assert db.connection().execute("SELECT count(*) FROM child").fetchone()[0] == 1
+    assert db.connection().execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    with db.transaction() as conn:
+        conn.execute("DELETE FROM parent")
+    assert db.connection().execute("SELECT count(*) FROM child").fetchone()[0] == 0
+
+
+def test_a_migration_that_orphans_rows_is_refused(tmp_path: Path) -> None:
+    """A file that leaves a row pointing at nothing changes nothing and stops the start."""
+    folder = _migrations(tmp_path / "m", PARENT_AND_CHILD, "INSERT INTO child VALUES (404);")
+    db.open_database(DB_FILE, migrations=_migrations(tmp_path / "old", PARENT_AND_CHILD))
+    db.close_database()
+    before = DB_FILE.read_bytes()
+
+    with pytest.raises(db.StorageError, match="child"):
+        db.open_database(DB_FILE, migrations=folder)
+
+    assert _version(DB_FILE) == 1
+    assert DB_FILE.read_bytes() == before
+
+
 def test_a_newer_database_stops_the_start(tmp_path: Path) -> None:
     """A database from a later release is refused and left as it was."""
     folder = _migrations(tmp_path / "m", "CREATE TABLE one (a);")

@@ -112,19 +112,53 @@ def _migrate(conn: sqlite3.Connection, path: Path, migrations: Path) -> None:
         raise StorageError(msg)
     if 0 < current < latest:
         _backup(conn, path, current)
-    for file in files:
-        number = int(file.name[:4])
-        if number <= current:
-            continue
-        try:
-            conn.executescript(
-                f"BEGIN IMMEDIATE;\n{file.read_text(encoding='utf-8')}\nPRAGMA user_version = {number};\nCOMMIT;"
-            )
-        except sqlite3.Error:
-            if conn.in_transaction:
-                conn.execute("ROLLBACK")
-            raise
-        logger.info(f"Database schema moved to version {number} ({file.name}).")
+    # Off while files run: a table rebuild drops the old table, which would cascade into its children.
+    # The pragma does nothing inside a transaction, so it is set here, and each file is checked instead.
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        for file in files:
+            number = int(file.name[:4])
+            if number > current:
+                _apply(conn, path, file, number)
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _check_parents(conn: sqlite3.Connection, path: Path, file: Path) -> None:
+    """Refuse a migration that leaves a row pointing at a row that does not exist.
+
+    Args:
+        conn (sqlite3.Connection): The open connection, inside the migration's transaction.
+        path (Path): The database file.
+        file (Path): The migration file.
+
+    Raises:
+        StorageError: If a table holds such rows.
+    """
+    tables = sorted({row[0] for row in conn.execute("PRAGMA foreign_key_check")})
+    if tables:
+        msg = f"{path.as_posix()} cannot be used: {file.name} leaves rows without a parent in {', '.join(tables)}."
+        raise StorageError(msg)
+
+
+def _apply(conn: sqlite3.Connection, path: Path, file: Path, number: int) -> None:
+    """Run one migration file as one transaction, taken back if it fails or breaks a foreign key.
+
+    Args:
+        conn (sqlite3.Connection): The open connection, with foreign keys off.
+        path (Path): The database file.
+        file (Path): The migration file.
+        number (int): Its number, the schema version it leads to.
+    """
+    try:
+        conn.executescript(f"BEGIN IMMEDIATE;\n{file.read_text(encoding='utf-8')}\nPRAGMA user_version = {number};")
+        _check_parents(conn, path, file)
+        conn.execute("COMMIT")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+    logger.info(f"Database schema moved to version {number} ({file.name}).")
 
 
 def _not_imported(files: list[Path], path: Path) -> StorageError:
