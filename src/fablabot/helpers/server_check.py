@@ -1,4 +1,4 @@
-"""Report at start what each served server lacks, from what the bot already knows. Reads only, writes nothing."""
+"""Report at start what each served server lacks. Reads only, writes nothing."""
 
 from __future__ import annotations
 

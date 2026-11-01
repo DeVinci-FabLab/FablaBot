@@ -1,4 +1,4 @@
-"""At start, each served server gets a report of what it lacks, read from what the bot already knows."""
+"""At start, each served server gets a report of what it lacks."""
 
 from __future__ import annotations
 
