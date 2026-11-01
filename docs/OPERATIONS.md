@@ -235,7 +235,8 @@ At every start, the bot checks each holder of `Admin -temp-` (`cogs/user_managem
   `Admin -temp-`. The log shows `Failed to remove temporary admin role at start`; move the bot's role above
   it (step 3 of "Add a server") and restart.
 - A server whose database could not be read, or whose removal Discord refused, is settled again after 30 s,
-  2 min and 10 min. The last round takes the role off every holder whose expiry still cannot be read.
+  2 min and 10 min. This holds for a removal refused at the scheduled expiry of an op too, which also posts one
+  failure notice in the op channel; the retries post none. The last round takes the role off every holder whose expiry still cannot be read.
   If the holder is still in place after it, the log shows
   `Op records still unsettled, giving up until the next start or reconnect guild_id=...`: look for the
   `Storage failure` and `Failed to remove temporary admin role` lines above it, fix the cause, and restart.
