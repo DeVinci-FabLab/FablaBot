@@ -36,7 +36,7 @@ def writes(env: simcord.Env) -> list[str]:
 
 def global_writes(env: simcord.Env) -> list[str]:
     """Return the paths of the requests that changed the global commands."""
-    return [r.path for r in env.http_requests if r.method == "PUT" and "/guilds/" not in r.path and r.path.endswith("/commands")]
+    return [r.path for r in env.http_requests if r.method == "PUT" and re.fullmatch(r"/applications/\d+/commands", r.path)]
 
 
 def leftover_codes(caplog: pytest.LogCaptureFixture) -> list[str]:
