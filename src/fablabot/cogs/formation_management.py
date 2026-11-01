@@ -82,8 +82,11 @@ class FormationManagement(commands.Cog):
         self._reaction_lock = asyncio.Lock()
         self._published_locks: dict[int, asyncio.Lock] = {}
         self._pending_update_tasks: dict[int, asyncio.Task] = {}
-        # Reactions the log refused, kept so a storage failure loses no sign-up. Ceiling: they live in memory only, so a
-        # restart while the storage is still down drops them; the reminder tick tries to write them again.
+        # Reactions the log refused, or whose checks could not run because the published message could not be read,
+        # kept so a storage failure loses no sign-up. Ceiling: they live in memory only, so a restart while the storage
+        # is still down drops them, and the queue has no size limit and is written in one go once the storage answers;
+        # the upgrade path is a cap, or a write in batches. Each update and each reminder tick tries them again.
+        self._unchecked_reactions: list[tuple[int, ReactionEvent]] = []
         self._unlogged_reactions: list[tuple[int, ReactionEvent]] = []
         # The published message when the database refused it, so reminder flags and registrations are neither lost
         # nor redone. Same ceiling; every write of the message tries to save it again.
@@ -581,34 +584,27 @@ class FormationManagement(commands.Cog):
             return
 
         async with self._reaction_lock:
-            pub = self._get_last_published_in_guild(payload.guild_id)
-            if not pub or payload.message_id != pub.message_id:
-                return
-            emoji_str = str(payload.emoji)
-            fm_emojis = {fm.emoji for fm in pub.message.fms}
-            if fm_emojis and emoji_str not in fm_emojis:
-                return
-
-            formation = next((fm for fm in pub.message.fms if fm.emoji == emoji_str), None)
-            if formation:
-                now = datetime.now(PARIS_TZ)
-                registration_deadline = formation.start_dt + timedelta(minutes=20)
-                if now > registration_deadline:
-                    logger.info(
-                        f"Ignoring reaction {emoji_str} for formation {formation.name!r} "
-                        f"from user {payload.user_id} - registration closed.",
-                    )
-                    return
-
-            member_name = member.name if member else None
+            received_at = datetime.now(PARIS_TZ)
             reaction_event = ReactionEvent(
                 message_id=payload.message_id,
                 user_id=payload.user_id,
-                user_name=member_name,
-                emoji=emoji_str,
+                user_name=member.name if member else None,
+                emoji=str(payload.emoji),
                 action=ReactionAction[payload.event_type.removeprefix("REACTION_")],
-                ts_iso=datetime.now(PARIS_TZ).isoformat(timespec="seconds"),
+                ts_iso=received_at.isoformat(timespec="seconds"),
             )
+            try:
+                counts = self._reaction_counts(payload.guild_id, reaction_event)
+            except sqlite3.Error:
+                logger.exception(
+                    f"Reaction not checked guild_id={payload.guild_id} message_id={payload.message_id}; "
+                    "kept in memory, checked with the next update"
+                )
+                self._unchecked_reactions.append((payload.guild_id, reaction_event))
+                self._schedule_update(payload.guild_id)
+                return
+            if not counts:
+                return
 
             self._unlogged_reactions.append((payload.guild_id, reaction_event))
             # The queue holds every server's reactions: each server whose reaction is written gets its update.
@@ -624,7 +620,7 @@ class FormationManagement(commands.Cog):
         """Check for formations starting soon and notify trainers/responsibles (Paris timezone)."""
         logger.debug("Checking for upcoming formations to notify trainers and responsibles (Paris time).")
         now = datetime.now(PARIS_TZ)
-        for guild_id in {guild_id for guild_id, _event in self._unlogged_reactions}:
+        for guild_id in {guild_id for guild_id, _event in self._unchecked_reactions + self._unlogged_reactions}:
             self._schedule_update(guild_id, delay=0)
         # An exception other than a network one ends a tasks.loop for good: a storage failure waits for the next tick.
         try:
@@ -781,8 +777,61 @@ class FormationManagement(commands.Cog):
         if kept is not None and published.message_id >= kept.message_id:
             del self._unsaved_published[guild_id]
 
+    def _reaction_counts(self, guild_id: int, event: ReactionEvent) -> bool:
+        """Tell whether a reaction is on a server's published message, on one of its emojis, and not past the deadline.
+
+        The deadline is judged at the reaction's own time, so a check that runs late does not change the answer.
+
+        Args:
+            guild_id (int): The ID of the guild.
+            event (ReactionEvent): The reaction.
+
+        Returns:
+            bool: True when the reaction belongs in the log.
+
+        Raises:
+            sqlite3.Error: The published message cannot be read.
+        """
+        pub = self._get_last_published_in_guild(guild_id)
+        if not pub or event.message_id != pub.message_id:
+            return False
+        fm_emojis = {fm.emoji for fm in pub.message.fms}
+        if fm_emojis and event.emoji not in fm_emojis:
+            return False
+
+        formation = next((fm for fm in pub.message.fms if fm.emoji == event.emoji), None)
+        if formation:
+            registration_deadline = formation.start_dt + timedelta(minutes=20)
+            if datetime.fromisoformat(event.ts_iso) > registration_deadline:
+                logger.info(
+                    f"Ignoring reaction {event.emoji} for formation {formation.name!r} "
+                    f"from user {event.user_id} - registration closed.",
+                )
+                return False
+        return True
+
+    def _check_kept_reactions(self) -> None:
+        """Run the checks of the reactions that arrived while the published message could not be read.
+
+        Oldest first, until a read fails again; the reactions that pass join the queue to write.
+        """
+        while self._unchecked_reactions:
+            guild_id, event = self._unchecked_reactions[0]
+            with guild_log_context(guild_id):
+                try:
+                    counts = self._reaction_counts(guild_id, event)
+                except sqlite3.Error:
+                    logger.exception(
+                        f"Reaction not checked guild_id={guild_id} message_id={event.message_id}; "
+                        f"{len(self._unchecked_reactions)} kept in memory, checked with the next update"
+                    )
+                    return
+            self._unchecked_reactions.pop(0)
+            if counts:
+                self._unlogged_reactions.append((guild_id, event))
+
     def _log_kept_reactions(self) -> set[int]:
-        """Write the reactions the log refused, oldest first, until one fails.
+        """Check, then write, the reactions kept in memory, oldest first, until one fails.
 
         Each write runs in its own server's log context, so its log line goes to that server's log and not to
         the server whose event or update happens to write the queue.
@@ -790,6 +839,7 @@ class FormationManagement(commands.Cog):
         Returns:
             set[int]: The servers whose reactions were written; their registrations may have changed.
         """
+        self._check_kept_reactions()
         written: set[int] = set()
         while self._unlogged_reactions:
             guild_id, event = self._unlogged_reactions[0]

@@ -486,3 +486,80 @@ async def test_a_kept_reaction_is_logged_under_its_own_server_when_another_serve
     lines = [r for r in caplog.records if wanted in r.getMessage() and f"{GUILD_ID}" in r.getMessage()]
     assert lines
     assert {r.guild_id for r in lines} == {GUILD_ID}  # type: ignore[attr-defined]
+
+
+async def test_a_reaction_arriving_while_the_published_message_cannot_be_read_still_registers_the_member(
+    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
+) -> None:
+    """A read that fails in the listener neither raises nor drops the sign-up: the next update checks it and registers."""
+    _forget_logged_reactions()
+    monkeypatch.setattr(formations, "current_published", _flaky(formations.current_published, storage_error))
+
+    await env.cog.on_raw_reaction_event(_reaction_payload())
+
+    assert GUILD_ID in env.cog._pending_update_tasks
+    env.cog._pending_update_tasks.pop(GUILD_ID).cancel()
+    await env.cog._update_published_message(GUILD_ID)
+    pub = env.cog._get_last_published_in_guild(GUILD_ID)
+    assert pub is not None
+    assert [entry["user_id"] for entry in pub.message.fms[0].registered_users] == [MEMBER_ID]
+    assert len(env.cog._reaction_logs.history(GUILD_ID, MESSAGE_ID)) == 1
+    assert env.registration_dm.await_count == 1
+
+
+async def test_the_reminder_tick_schedules_the_update_of_reactions_not_yet_checked(
+    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
+) -> None:
+    """A member whose reaction arrived during a failed read is registered without waiting for another reaction."""
+    monkeypatch.setattr(formations, "current_published", _flaky(formations.current_published, storage_error))
+    await env.cog.on_raw_reaction_event(_reaction_payload())
+    env.cog._pending_update_tasks.pop(GUILD_ID).cancel()
+    scheduled: list[tuple[int, float]] = []
+    monkeypatch.setattr(env.cog, "_schedule_update", lambda guild_id, delay=2.0: scheduled.append((guild_id, delay)))
+
+    await env.cog._check_upcoming_formations()
+
+    assert (GUILD_ID, 0) in scheduled
+
+
+class _Clock(datetime):
+    """A ``datetime`` whose ``now`` answers a time the test sets."""
+
+    current: datetime
+
+    @classmethod
+    def now(cls, tz: Any = None) -> datetime:
+        return cls.current.astimezone(tz)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param((timedelta(minutes=10), MESSAGE_ID, True), id="registration-open"),
+        pytest.param((timedelta(minutes=30), MESSAGE_ID, False), id="registration-closed"),
+        pytest.param((timedelta(minutes=10), 999, False), id="other-message"),
+    ],
+)
+async def test_a_reaction_checked_late_is_judged_as_of_when_it_arrived(
+    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception, case: tuple[timedelta, int, bool]
+) -> None:
+    """The deadline and the message are checked against the reaction's own time, not the time of the late check."""
+    arrives_after_start, message_id, counts = case
+    _forget_logged_reactions()
+    pub = env.cog._get_last_published_in_guild(GUILD_ID)
+    assert pub is not None
+    start = pub.message.fms[0].start_dt
+    monkeypatch.setattr(fm_cog, "datetime", _Clock)
+    monkeypatch.setattr(formations, "current_published", _flaky(formations.current_published, storage_error))
+
+    _Clock.current = start + arrives_after_start
+    await env.cog.on_raw_reaction_event(_reaction_payload(message_id=message_id))
+    env.cog._pending_update_tasks.pop(GUILD_ID).cancel()
+    _Clock.current = start + timedelta(minutes=30)
+    await env.cog._update_published_message(GUILD_ID)
+
+    pub = env.cog._get_last_published_in_guild(GUILD_ID)
+    assert pub is not None
+    registered = [entry["user_id"] for entry in pub.message.fms[0].registered_users]
+    assert registered == ([MEMBER_ID] if counts else [])
+    assert len(env.cog._reaction_logs.history(GUILD_ID, message_id)) == (1 if counts else 0)
