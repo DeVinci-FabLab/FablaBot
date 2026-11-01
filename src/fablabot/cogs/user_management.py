@@ -635,13 +635,18 @@ class UserManagement(commands.Cog):
 
         Removes the role, then forgets the record (a crash in between leaves an orphan record,
         cleared later), then posts the notice in the op channel. A failed removal keeps the record
-        for the next start and posts a failure notice instead. An unavailable guild, or a member
-        Discord could not be asked about, keeps the record and asks the caller to try again.
+        for the next start and posts a failure notice instead. An unavailable guild, a member
+        Discord could not be asked about, or a record the database could not be asked for keeps the record
+        and asks the caller to try again.
 
         Returns:
             bool: False when the caller should wait and call again, True when there is nothing left to retry.
         """
-        expiry = self._load_op(guild_id, member_id)
+        try:
+            expiry = self._load_op(guild_id, member_id)
+        except sqlite3.Error:
+            logger.exception(f"Storage failure reading the op expiry guild_id={guild_id} member_id={member_id}; record kept")
+            return False
         if expiry is None or expiry.expires_at > _utcnow():
             return True
         guild = self.bot.get_guild(guild_id)
@@ -660,9 +665,8 @@ class UserManagement(commands.Cog):
             return False
         if member is None or admin_role not in member.roles:
             self._clear_op(guild_id, member_id)
-            return True
-
-        await self._revoke_at_expiry(guild, member, admin_role, expiry)
+        else:
+            await self._revoke_at_expiry(guild, member, admin_role, expiry)
         return True
 
     async def _revoke_at_expiry(self, guild: Guild, member: Member, admin_role: Role, expiry: OpExpiry) -> None:

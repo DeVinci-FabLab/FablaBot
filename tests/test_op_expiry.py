@@ -334,6 +334,66 @@ async def test_expiry_asks_discord_for_a_member_missing_from_an_incomplete_cache
     assert str(TARGET_ID) not in stored_ops().get(str(GUILD_A), {})
 
 
+async def test_expiry_asks_for_a_retry_when_the_record_cannot_be_read(
+    cog: UserManagement, caplog: pytest.LogCaptureFixture
+) -> None:
+    """When the record cannot be read at expiry, the role and the record stay and the caller is asked to try again."""
+    guild, target, caller = _server(GUILD_A)
+    await _op(cog, guild, caller, target, 31)
+    target.roles.append(guild.roles[0])
+    cog.bot.get_guild = MagicMock(return_value=guild)
+
+    with (
+        patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=31)),
+        patch.object(op_expiries, "get", side_effect=sqlite3.OperationalError("disk I/O error")),
+    ):
+        settled = await cog._expire(GUILD_A, TARGET_ID)
+
+    assert settled is False
+    assert str(TARGET_ID) in stored_ops()[str(GUILD_A)]
+    target.remove_roles.assert_not_awaited()
+    errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+    assert any(f"guild_id={GUILD_A}" in m and f"member_id={TARGET_ID}" in m for m in errors)
+
+
+async def test_timer_tries_again_after_a_failed_read_and_removes_the_role(cog: UserManagement) -> None:
+    """A timer whose first read fails waits and tries again, and the role still leaves."""
+    guild, target, _caller = _server(GUILD_A)
+    target.roles.append(guild.roles[0])
+    cog.bot.get_guild = MagicMock(return_value=guild)
+    cog._record_op(GUILD_A, TARGET_ID, OpExpiry(expires_at=NOW, channel_id=OP_CHANNEL_ID))
+    clock = {"now": NOW}
+    real_sleep = asyncio.sleep
+    sleeps: list[float] = []
+
+    async def advance(delay: float) -> None:
+        sleeps.append(delay)
+        clock["now"] += timedelta(seconds=delay)
+        await real_sleep(0)
+
+    real_get = op_expiries.get
+    reads = {"count": 0}
+
+    def fail_once(guild_id: int, member_id: int) -> dict | None:
+        reads["count"] += 1
+        if reads["count"] == 1:
+            raise sqlite3.OperationalError
+        return real_get(guild_id, member_id)
+
+    with (
+        patch.object(user_management, "_utcnow", side_effect=lambda: clock["now"]),
+        patch.object(user_management.asyncio, "sleep", advance),
+        patch.object(op_expiries, "get", side_effect=fail_once),
+    ):
+        cog._arm_deop(GUILD_A, TARGET_ID, NOW)
+        await cog.deop_tasks[GUILD_A, TARGET_ID]
+
+    assert sleeps == [60.0]
+    target.remove_roles.assert_awaited_once()
+    assert str(TARGET_ID) not in stored_ops().get(str(GUILD_A), {})
+    assert cog.deop_tasks == {}
+
+
 async def test_expiry_clears_quietly_a_member_discord_does_not_know(
     cog: UserManagement, caplog: pytest.LogCaptureFixture
 ) -> None:
