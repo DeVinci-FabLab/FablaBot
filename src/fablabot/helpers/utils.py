@@ -42,6 +42,7 @@ class RefusalKind(StrEnum):
     SELF_TARGET = "self_target"
     TEMP_ROLE_OUTSIDE_OP = "temp_role_outside_op"
     ROLE_NOT_BELOW = "role_not_below"
+    TEMP_ROLE_OUTSIDE_DEOP = "temp_role_outside_deop"
     RIGHT_LOST = "right_lost_before_confirm"
 
 

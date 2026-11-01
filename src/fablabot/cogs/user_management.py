@@ -42,6 +42,7 @@ EXPIRY_RETRY_DELAY = timedelta(seconds=60)
 
 _SELF_OP_REFUSED = "Vous ne pouvez pas vous op vous-même : un autre membre du staff doit le faire."
 _TEMP_ROLE_REFUSED = f"Le rôle {RoleNames.ADMIN_TEMP} se donne uniquement avec `/user op`, qui fixe sa durée."
+_TEMP_ROLE_TAKE_REFUSED = f"Le rôle {RoleNames.ADMIN_TEMP} se retire uniquement avec `/user deop`."
 _SELF_ADD_REFUSED = "Vous ne pouvez pas vous donner un rôle vous-même : un autre membre du staff doit le faire."
 _ROLE_NOT_BELOW_REFUSED = (
     "Ce rôle est au même rang que votre rôle le plus haut, ou au-dessus : "
@@ -56,6 +57,7 @@ _ADD_REFUSALS = {
 _REMOVE_REFUSALS = {
     RefusalKind.MISSING_RIGHT: ErrorMessages.NO_PERMISSION_REMOVE_ROLE,
     RefusalKind.ROLE_NOT_BELOW: _ROLE_NOT_BELOW_REFUSED,
+    RefusalKind.TEMP_ROLE_OUTSIDE_DEOP: _TEMP_ROLE_TAKE_REFUSED,
 }
 # Same audience as the other staff tools (/msg): the member lists it shows are personal data.
 _WITH_ROLES_ALLOWED = ADMIN_ROLES | {RoleNames.BUREAU}
@@ -763,7 +765,7 @@ class UserManagement(commands.Cog):
         kind = role_refusal(_role_names(actor), role.name, action=action)
         rank = max((r.position for r in actor.roles if r.name != RoleNames.ADMIN_TEMP), default=0)
         if kind is None and actor.id != actor.guild.owner_id and role.position >= rank:
-            return RefusalKind.ROLE_NOT_BELOW
+            return RefusalKind.TEMP_ROLE_OUTSIDE_DEOP if role.name == RoleNames.ADMIN_TEMP else RefusalKind.ROLE_NOT_BELOW
         if kind is None and action == "add" and target is not None and target.id == actor.id:
             return RefusalKind.SELF_TARGET
         return kind

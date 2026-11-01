@@ -9,12 +9,14 @@ from typing import TYPE_CHECKING, Any
 from discord import Permissions
 import pytest
 
-from fablabot.helpers.constants import PARIS_TZ
+from fablabot.cogs import user_management
+from fablabot.helpers.constants import PARIS_TZ, RoleNames
 
 if TYPE_CHECKING:
     import simcord
 
 GUILD_ID = 111111111111111111
+BOT_ROLE_POSITION = 100  # above every staff role, so the bot may give and take them
 
 
 class Server:
@@ -34,6 +36,10 @@ class Server:
             env.create_user("discord_admin"),
             roles=[self.guild.create_role("Owner", permissions=Permissions(administrator=True))],
         )
+        # A bot cannot give a role at or above its own highest one: lift its managed role over the staff roles.
+        for role in env.backend.get_guild(GUILD_ID).roles.values():
+            if role.managed:
+                role.position = BOT_ROLE_POSITION
 
     async def show(self, name: str, *roles: str) -> None:
         """Allow roles on a command, as a server administrator does in Integrations."""
@@ -41,9 +47,10 @@ class Server:
         command = next(c for c in await bot.tree.fetch_commands() if c.name == name)
         self.guild.set_command_permissions(command, {self.role(r): True for r in roles})
 
-    def role(self, name: str) -> Any:
-        """Find a role, creating it the first time."""
-        return self.guild.roles.get(name) or self.guild.create_role(name, permissions=Permissions.none())
+    def role(self, name: str, position: int | None = None) -> Any:
+        """Find a role, creating it the first time, at ``position`` when given (below the bot's role)."""
+        options = {} if position is None else {"position": position}
+        return self.guild.roles.get(name) or self.guild.create_role(name, permissions=Permissions.none(), **options)
 
     def member(self, name: str, *roles: str) -> Any:
         """Add a member holding these roles."""
@@ -277,3 +284,67 @@ async def test_bureau_cannot_rename_a_voice_channel(server: Server) -> None:
     result = await server.bureau.slash(server.commands, "vocal rename", channel=voice, new_name="autre")
     assert result.ephemeral
     assert "salon" in server.guild.channels
+
+
+STAFF_RANKS = {
+    RoleNames.ADMIN_TEMP: 50,
+    RoleNames.PRESIDENT: 40,
+    RoleNames.SECRETARY: 30,
+    RoleNames.DIGITAL_MANAGER: 20,
+    RoleNames.DIGITAL_POLE: 10,
+    RoleNames.CODIR: 5,
+}
+
+
+@pytest.fixture
+async def ranked(server: Server) -> Server:
+    """The server with the staff roles in their order and the `/user` group shown to the staff."""
+    for name, position in STAFF_RANKS.items():
+        server.role(name, position)
+    await server.show("user", RoleNames.PRESIDENT, RoleNames.SECRETARY, RoleNames.DIGITAL_MANAGER)
+    return server
+
+
+def role_names(member: Any) -> set[str]:
+    """Read the names of the roles a member holds, as the bot sees them."""
+    assert member.member is not None
+    return {role.name for role in member.member.roles}
+
+
+async def test_secretary_general_is_refused_president_and_nothing_changes(ranked: Server) -> None:
+    """A role above the caller's highest is refused with the way out, and the target keeps their roles."""
+    secretary = ranked.member("secretary", RoleNames.SECRETARY)
+    target = ranked.member("target")
+
+    result = await secretary.slash(ranked.commands, "user add_role", member=target, role=ranked.role(RoleNames.PRESIDENT))
+
+    assert result.ephemeral
+    assert result.response.content == user_management._ROLE_NOT_BELOW_REFUSED
+    assert RoleNames.PRESIDENT not in role_names(target)
+
+
+async def test_respo_gives_the_pole_below_them(ranked: Server) -> None:
+    """A Respo gives the matching Pôle, which sits below the Respo role."""
+    respo = ranked.member("respo", RoleNames.DIGITAL_MANAGER)
+    target = ranked.member("target")
+
+    await respo.slash(ranked.commands, "user add_role", member=target, role=ranked.role(RoleNames.DIGITAL_POLE))
+
+    assert RoleNames.DIGITAL_POLE in role_names(target)
+
+
+async def test_president_ops_with_the_temporary_role_above_and_deop_revokes(ranked: Server) -> None:
+    """Op works though Admin -temp- outranks the president; taking it as a role is refused, deop revokes."""
+    president = ranked.member("president", RoleNames.PRESIDENT)
+    target = ranked.member("target")
+
+    await president.slash(ranked.commands, "user op", member=target, reason="atelier", time=30)
+    assert RoleNames.ADMIN_TEMP in role_names(target)
+
+    refused = await president.slash(ranked.commands, "user remove_role", member=target, role=ranked.role(RoleNames.ADMIN_TEMP))
+    assert refused.ephemeral
+    assert refused.response.content == user_management._TEMP_ROLE_TAKE_REFUSED
+    assert RoleNames.ADMIN_TEMP in role_names(target)
+
+    await president.slash(ranked.commands, "user deop", member=target)
+    assert RoleNames.ADMIN_TEMP not in role_names(target)

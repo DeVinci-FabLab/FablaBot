@@ -12,6 +12,7 @@ import pytest
 from fablabot.cogs import user_management
 from fablabot.cogs.user_management import UserManagement
 from fablabot.helpers.constants import RoleNames
+from fablabot.ui.user import RIGHT_LOST_MESSAGE
 
 GUILD_ID = 1001
 CALLER_ID, TARGET_ID = 418003123456789012, 501
@@ -189,3 +190,44 @@ async def test_bulk_remove_refuses_a_role_above_the_caller(cog: UserManagement) 
 
     interaction.followup.send.assert_not_awaited()
     interaction.response.send_message.assert_awaited_once_with(user_management._ROLE_NOT_BELOW_REFUSED, ephemeral=True)
+
+
+async def test_president_cannot_take_admin_temp_by_role_and_is_sent_to_deop(cog: UserManagement) -> None:
+    """With the temporary role above them, a president is refused it as a role and told about /user deop."""
+    server = Server(RoleNames.PRESIDENT)
+    interaction = server.interaction()
+
+    await _call(UserManagement.user_remove_role)(
+        cog, interaction, member=server.target, role=server.roles[RoleNames.ADMIN_TEMP]
+    )
+
+    server.target.remove_roles.assert_not_awaited()
+    interaction.response.send_message.assert_awaited_once_with(user_management._TEMP_ROLE_TAKE_REFUSED, ephemeral=True)
+    assert "/user deop" in user_management._TEMP_ROLE_TAKE_REFUSED
+
+
+async def test_president_still_deops_with_admin_temp_above(cog: UserManagement) -> None:
+    """Deop revokes the temporary role although it outranks the president."""
+    server = Server(RoleNames.PRESIDENT, RoleNames.CODIR, ranks={RoleNames.CODIR: 5})
+    interaction = server.interaction()
+
+    await _call(UserManagement.user_deop)(cog, interaction, member=server.target)
+
+    server.target.remove_roles.assert_awaited_once()
+
+
+async def test_confirm_checks_the_rank_again(cog: UserManagement) -> None:
+    """A caller who dropped to the role's rank between the command and Confirm gets nothing applied."""
+    server = Server(RoleNames.SECRETARY, ranks={RoleNames.PRESIDENT: 29})
+    interaction = server.interaction()
+    await _call(UserManagement.user_add_roles)(cog, interaction, role=server.roles[RoleNames.PRESIDENT])
+    view = interaction.followup.send.await_args.kwargs["view"]
+    view.select_members._values = [server.target]  # discord.py exposes no public setter for a selection
+
+    server.roles[RoleNames.SECRETARY].position = 20
+    click = server.interaction()
+    await view.confirm_button.callback(click)
+
+    server.target.add_roles.assert_not_awaited()
+    click.response.send_message.assert_awaited_once_with(RIGHT_LOST_MESSAGE, ephemeral=True)
+    click.response.edit_message.assert_not_awaited()
