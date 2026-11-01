@@ -428,3 +428,40 @@ async def test_retries_of_a_failing_read_are_bounded_and_not_stacked(
     holder.remove_roles.assert_not_awaited()
     assert any("giving up" in r.getMessage() for r in caplog.records if r.levelname == "ERROR")
     _stop(cog)
+
+
+@pytest.mark.parametrize(
+    ("failing", "chunked"),
+    [("get", False), ("clear", True), ("member_ids", True)],
+    ids=["failed-read", "failed-clear", "failed-listing"],
+)
+async def test_a_failed_sweep_at_start_is_retried_later_and_the_record_is_settled(
+    storage_error: sqlite3.Error, failing: str, chunked: bool
+) -> None:
+    """A record the sweep could not read, drop or list at start is settled by the delayed retry."""
+    future = NOW + timedelta(minutes=12)
+    store_ops(_record(GUILD_ID, 999, future))
+    guild, _holder, _temp = _holder_guild()
+    guild.chunked = chunked
+    real = getattr(op_expiries, failing)
+    failures = [storage_error]
+    target = GUILD_ID if failing == "member_ids" else 999  # not the holder, whose own settling must not fail
+
+    def flaky(*args: int) -> object:
+        if failures and args[-1] == target:
+            raise failures.pop()
+        return real(*args)
+
+    with (
+        patch.object(user_management, "RECONCILE_RETRY_DELAYS", (0,)),
+        patch.object(op_expiries, failing, side_effect=flaky),
+        patch.object(UserManagement, "_arm_deop") as arm,
+    ):
+        cog = await _start(guild)
+        arm.assert_not_called()
+        await cog.reconcile_retries[GUILD_ID]
+
+    if chunked:
+        assert str(GUILD_ID) not in stored_ops()
+    else:
+        arm.assert_called_once_with(GUILD_ID, 999, future)
