@@ -15,7 +15,6 @@ import fablabot.guild_config as guild_config  # noqa: PLR0402 (imported after th
 from fablabot.helpers import log_channels
 from fablabot.helpers.constants import PARIS_TZ
 from fablabot.helpers.logging_setup import configure_logging
-from fablabot.helpers.state_store import JsonStateStore
 from fablabot.logging_handlers import DiscordLogHandler, GuildContextFilter, current_guild_id, guild_log_context
 
 GUILD_A = 111111111111111111
@@ -28,9 +27,7 @@ WRAPPING_FENCES = 2
 
 @pytest.fixture(autouse=True)
 def _clean_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Start from an empty config store, no operator channel and a cleared cache."""
-    path = Path("data/guild_config.json")
-    monkeypatch.setattr(guild_config, "_config_store", JsonStateStore(guild_config.logger, path))
+    """Start with no operator channel and a cleared cache."""
     monkeypatch.delenv(log_channels.OPERATOR_LOG_CHANNEL_ENV, raising=False)
     log_channels.operator_log_channel_id.cache_clear()
     yield

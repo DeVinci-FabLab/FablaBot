@@ -9,7 +9,7 @@ import re
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from conftest import LISTED_GUILD, OTHER_LISTED_GUILD, make_guild
+from conftest import LISTED_GUILD, OTHER_LISTED_GUILD, make_guild, stored_settings
 import discord
 from discord import AppCommandPermissionType, PermissionOverwrite, Permissions
 from discord.ext import commands
@@ -27,7 +27,6 @@ from fablabot.helpers.constants import ADMIN_ROLES, RoleNames
 from fablabot.helpers.guild_access import GuildAccessPolicy
 from fablabot.helpers.help_page import leaf_commands
 from fablabot.helpers.server_check import FIXES, INVITE_PERMISSIONS, Problem, check_servers
-from fablabot.helpers.state_store import JsonStateStore
 from fablabot.logging_handlers import GuildContextFilter
 from fablabot.models.message import SUGGESTION_OPTIONS
 
@@ -51,12 +50,6 @@ def _bulk_command_permissions(ctx: RequestContext) -> list[dict[str, Any]]:
         for (stored_guild, command_id), entries in ctx.backend.command_permissions.items()
         if stored_guild == guild_id
     ]
-
-
-@pytest.fixture(autouse=True)
-def _clean_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Start from an empty config store: the store is a module global and would leak between tests."""
-    monkeypatch.setattr(guild_config, "_config_store", JsonStateStore(guild_config.logger, Path("data/guild_config.json")))
 
 
 @pytest.fixture(autouse=True)
@@ -225,9 +218,9 @@ async def test_a_bare_server_reports_each_missing_part(simcord_env: simcord.Env,
 async def test_a_channel_found_by_name_is_not_stored(simcord_env: simcord.Env) -> None:
     """The commands channel found by its name is not written to the stored settings."""
     await ready_server(simcord_env)
-    stored = Path("data/guild_config.json").read_bytes()
+    stored = stored_settings()
     await run(simcord_env)
-    assert Path("data/guild_config.json").read_bytes() == stored
+    assert stored_settings() == stored
     assert guild_config.get_commands_channel_id(GUILD) is None
 
 

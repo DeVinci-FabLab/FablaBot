@@ -75,6 +75,37 @@ def simcord_bot(tmp_path, monkeypatch) -> Any:
     return main.Fablabot()
 
 
+def store_settings(content: dict[str, dict[str, Any]]) -> None:
+    """Write server settings as ``{guild_id: {column: value}}``, the legacy channel under ``__global__``.
+
+    Args:
+        content (dict[str, dict[str, Any]]): The settings to store.
+    """
+    with db.transaction() as conn:
+        for key, entry in content.items():
+            if key == "__global__":
+                conn.execute("INSERT INTO legacy_log_channel (singleton, channel_id) VALUES (1, ?)", (entry["log_channel_id"],))
+                continue
+            columns = ", ".join(entry)
+            marks = ", ".join("?" for _ in entry)
+            conn.execute(f"INSERT INTO guild_settings (guild_id, {columns}) VALUES (?, {marks})", (int(key), *entry.values()))
+
+
+def stored_settings() -> dict[str, dict[str, Any]]:
+    """Read server settings back in the shape ``store_settings`` takes.
+
+    Returns:
+        dict[str, dict[str, Any]]: The settings, unset columns left out.
+    """
+    conn = db.connection()
+    stored: dict[str, dict[str, Any]] = {}
+    for row in conn.execute("SELECT channel_id FROM legacy_log_channel"):
+        stored["__global__"] = {"log_channel_id": row["channel_id"]}
+    for row in conn.execute("SELECT * FROM guild_settings"):
+        stored[str(row["guild_id"])] = {key: row[key] for key in row.keys() if key != "guild_id" and row[key] is not None}  # noqa: SIM118
+    return stored
+
+
 def make_interaction(
     *,
     user_id: int = 418003123456789012,

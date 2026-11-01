@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from conftest import make_interaction
+from conftest import make_interaction, store_settings, stored_settings
 from discord import Permissions, TextChannel
 import pytest
 
@@ -15,7 +14,6 @@ from fablabot.cogs.log_management import LogManagement
 from fablabot.cogs.message_management import MessageManagement
 import fablabot.guild_config as guild_config  # noqa: PLR0402 (imported after the cogs: guild_config first is a circular import)
 from fablabot.helpers import log_channels
-from fablabot.helpers.state_store import JsonStateStore
 
 GUILD_A = 111111111111111111
 GUILD_B = 222222222222222222
@@ -27,18 +25,11 @@ USER_NAME = "kevin_secret_name"
 
 @pytest.fixture(autouse=True)
 def _clean_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Start from an empty config store, no operator channel and a cleared cache."""
-    path = guild_config.Path("data/guild_config.json")
-    monkeypatch.setattr(guild_config, "_config_store", JsonStateStore(guild_config.logger, path))
+    """Start with no operator channel and a cleared cache."""
     monkeypatch.delenv(log_channels.OPERATOR_LOG_CHANNEL_ENV, raising=False)
     log_channels.operator_log_channel_id.cache_clear()
     yield
     log_channels.operator_log_channel_id.cache_clear()
-
-
-def _file() -> dict:
-    """Read the config file back from disk."""
-    return json.loads(guild_config.Path("data/guild_config.json").read_text(encoding="utf-8"))
 
 
 def _text_channel(channel_id: int, guild_id: int, name: str = "salon") -> MagicMock:
@@ -92,10 +83,7 @@ async def test_log_set_refuses_a_channel_of_another_guild(caplog: pytest.LogCapt
 
 async def test_log_set_does_not_touch_the_legacy_entry() -> None:
     """``/log set`` never writes the legacy section."""
-    path = guild_config.Path("data/guild_config.json")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"__global__": {"log_channel_id": CHANNEL_A}}), encoding="utf-8")
-    guild_config._config_store = JsonStateStore(guild_config.logger, path)
+    store_settings({"__global__": {"log_channel_id": CHANNEL_A}})
     interaction = make_interaction(guild_id=GUILD_B)
 
     with patch("fablabot.cogs.log_management.ensure_command_context", AsyncMock(return_value=True)):
@@ -105,7 +93,7 @@ async def test_log_set_does_not_touch_the_legacy_entry() -> None:
             channel=_text_channel(CHANNEL_B, GUILD_B),
         )
 
-    assert _file() == {"__global__": {"log_channel_id": CHANNEL_A}, str(GUILD_B): {"log_channel_id": CHANNEL_B}}
+    assert stored_settings() == {"__global__": {"log_channel_id": CHANNEL_A}, str(GUILD_B): {"log_channel_id": CHANNEL_B}}
 
 
 def test_is_log_channel_is_per_guild() -> None:
