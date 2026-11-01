@@ -407,12 +407,10 @@ async def test_a_failed_read_at_start_is_retried_later_and_the_holder_is_settled
     _stop(cog)
 
 
-async def test_retries_of_a_failing_read_are_bounded_and_not_stacked(
-    caplog: pytest.LogCaptureFixture, storage_error: sqlite3.Error
-) -> None:
+async def test_retries_of_a_failing_read_are_bounded_and_not_stacked(storage_error: sqlite3.Error) -> None:
     """A read that keeps failing is retried the planned number of times only, one retry at a time per server."""
     store_ops(_record(GUILD_ID, HOLDER_ID, NOW - timedelta(minutes=1)))
-    guild, holder, _temp = _holder_guild()
+    guild, _holder, _temp = _holder_guild()
 
     with (
         patch.object(user_management, "RECONCILE_RETRY_DELAYS", (0, 0)),
@@ -425,9 +423,69 @@ async def test_retries_of_a_failing_read_are_bounded_and_not_stacked(
         await retry
 
     assert get.call_count == 4  # the start, the second ready, then two retries
-    holder.remove_roles.assert_not_awaited()
-    assert any("giving up" in r.getMessage() for r in caplog.records if r.levelname == "ERROR")
+    assert GUILD_ID not in cog.reconcile_retries
     _stop(cog)
+
+
+async def test_the_last_retry_takes_the_role_off_a_holder_whose_expiry_cannot_be_read(
+    caplog: pytest.LogCaptureFixture, storage_error: sqlite3.Error
+) -> None:
+    """When the retries run out on an unreadable expiry, the holder loses the role: a temporary right ends on time."""
+    store_ops(_record(GUILD_ID, HOLDER_ID, NOW + timedelta(minutes=12)))
+    guild, holder, temp = _holder_guild()
+
+    with (
+        patch.object(user_management, "RECONCILE_RETRY_DELAYS", (0, 0)),
+        patch.object(op_expiries, "get", side_effect=storage_error),
+    ):
+        cog = await _start(guild)
+        holder.remove_roles.assert_not_awaited()
+        await cog.reconcile_retries[GUILD_ID]
+
+    holder.remove_roles.assert_awaited_once()
+    assert holder.remove_roles.await_args.args == (temp,)
+    assert "unreadable" in holder.remove_roles.await_args.kwargs["reason"]
+    assert not [r for r in caplog.records if "giving up" in r.getMessage()]
+    _stop(cog)
+
+
+async def test_a_holder_still_unsettled_after_the_last_retry_is_logged_as_given_up(
+    caplog: pytest.LogCaptureFixture, storage_error: sqlite3.Error
+) -> None:
+    """A holder that neither storage nor Discord lets the retries settle leaves an error line naming the server."""
+    store_ops(_record(GUILD_ID, HOLDER_ID, NOW - timedelta(minutes=1)))
+    guild, holder, _temp = _holder_guild()
+    holder.remove_roles = AsyncMock(side_effect=Forbidden(MagicMock(status=403), "missing permissions"))
+
+    with (
+        patch.object(user_management, "RECONCILE_RETRY_DELAYS", (0, 0)),
+        patch.object(op_expiries, "get", side_effect=storage_error),
+    ):
+        cog = await _start(guild)
+        await cog.reconcile_retries[GUILD_ID]
+
+    errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+    assert any("giving up" in m and f"guild_id={GUILD_ID}" in m for m in errors)
+    _stop(cog)
+
+
+async def test_the_last_retry_arms_a_timer_for_a_record_it_cannot_read(storage_error: sqlite3.Error) -> None:
+    """With a partial member cache, the last retry arms an immediate timer for a record it cannot read."""
+    store_ops(_record(GUILD_ID, 999, NOW + timedelta(minutes=12)))
+    guild, _holder, _temp = _holder_guild()
+    guild.chunked = False
+
+    with (
+        patch.object(user_management, "RECONCILE_RETRY_DELAYS", (0, 0)),
+        _storage_fails_for("get", 999, storage_error),
+        patch.object(UserManagement, "_arm_deop") as arm,
+    ):
+        cog = await _start(guild)
+        arm.assert_not_called()
+        await cog.reconcile_retries[GUILD_ID]
+
+    arm.assert_called_once_with(GUILD_ID, 999, NOW)
+    assert str(999) in stored_ops()[str(GUILD_ID)]
 
 
 @pytest.mark.parametrize(

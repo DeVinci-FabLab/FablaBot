@@ -513,13 +513,20 @@ class UserManagement(commands.Cog):
         """Remove the temporary role from holders with no future expiry, arm the others, drop stale records.
 
         A storage failure is logged and ends only the holder or the sweep it hit: the other holders and
-        servers are still settled, and the server it hit is settled again by a bounded, delayed retry.
+        servers are still settled, and the server it hit is settled again by a bounded, delayed retry,
+        whose last round no longer waits for the storage to answer.
         """
         if not await self._settle_guild(guild):
             self._retry_reconcile_later(guild.id)
 
-    async def _settle_guild(self, guild: Guild) -> bool:
+    async def _settle_guild(self, guild: Guild, *, fail_closed: bool = False) -> bool:
         """Settle the holders and records of one server once.
+
+        Args:
+            guild (Guild): The server.
+            fail_closed (bool): Act without an expiry the storage cannot give: a holder loses the role, and a
+                record the cache cannot vouch for gets an immediate timer. Set on the last retry, so that a
+                temporary right does not outlive a storage that stays down.
 
         Returns:
             bool: False when a storage failure or a failed removal left a holder or a record unsettled.
@@ -531,13 +538,13 @@ class UserManagement(commands.Cog):
         holders = {member.id: member for member in admin_role.members}
         for member in holders.values():
             try:
-                settled = await self._reconcile_holder(guild, admin_role, member) and settled
+                settled = await self._reconcile_holder(guild, admin_role, member, fail_closed=fail_closed) and settled
             except sqlite3.Error:
                 settled = False
                 logger.exception(f"Storage failure settling an op at start guild_id={guild.id} member_id={member.id}")
 
         try:
-            settled = self._sweep_stale_records(guild, admin_role) and settled
+            settled = self._sweep_stale_records(guild, admin_role, fail_closed=fail_closed) and settled
         except sqlite3.Error:
             settled = False
             logger.exception(f"Storage failure listing op records at start guild_id={guild.id}")
@@ -552,13 +559,16 @@ class UserManagement(commands.Cog):
     async def _reconcile_later(self, guild_id: int) -> None:
         """Settle a server again after each delay of ``RECONCILE_RETRY_DELAYS``, until it is settled or they run out.
 
-        A server that is gone or unavailable ends the retry: ``on_guild_available`` settles it when it returns.
+        The last round fails closed (see ``_settle_guild``). A server that is gone or unavailable ends the
+        retry: ``on_guild_available`` settles it when it returns.
         """
         try:
-            for delay in RECONCILE_RETRY_DELAYS:
+            for round_number, delay in enumerate(RECONCILE_RETRY_DELAYS, start=1):
                 await asyncio.sleep(delay)
                 guild = self.bot.get_guild(guild_id)
-                if guild is None or guild.unavailable or await self._settle_guild(guild):
+                if guild is None or guild.unavailable:
+                    return
+                if await self._settle_guild(guild, fail_closed=round_number == len(RECONCILE_RETRY_DELAYS)):
                     return
             logger.error(f"Op records still unsettled, giving up until the next start or reconnect guild_id={guild_id}")
         except asyncio.CancelledError:
@@ -569,19 +579,32 @@ class UserManagement(commands.Cog):
             if self.reconcile_retries.get(guild_id) is asyncio.current_task():
                 self.reconcile_retries.pop(guild_id)
 
-    async def _reconcile_holder(self, guild: Guild, admin_role: Role, member: Member) -> bool:
+    async def _reconcile_holder(self, guild: Guild, admin_role: Role, member: Member, *, fail_closed: bool = False) -> bool:
         """Arm the timer of a holder whose expiry is ahead, and take the role off any other holder.
+
+        Args:
+            guild (Guild): The server.
+            admin_role (Role): The temporary admin role.
+            member (Member): The holder.
+            fail_closed (bool): Treat an expiry the storage cannot give as absent, so the role is removed.
 
         Returns:
             bool: False when Discord refused the removal and the holder still has the role.
         """
-        expiry = self._load_op(guild.id, member.id)
+        unreadable = False
+        try:
+            expiry = self._load_op(guild.id, member.id)
+        except sqlite3.Error:
+            if not fail_closed:
+                raise
+            logger.exception(f"Storage failure reading the op expiry at start guild_id={guild.id} member_id={member.id}")
+            expiry, unreadable = None, True
         if expiry is not None and expiry.expires_at > _utcnow():
             task = self.deop_tasks.get((guild.id, member.id))
             if task is None or task.done():
                 self._arm_deop(guild.id, member.id, expiry.expires_at)
             return True
-        cause = "no recorded expiry" if expiry is None else "expiry passed"
+        cause = "expiry unreadable" if unreadable else "no recorded expiry" if expiry is None else "expiry passed"
         timer_before = self.deop_tasks.get((guild.id, member.id))
         success, _error = await safe_remove_roles(
             logger,
@@ -599,14 +622,21 @@ class UserManagement(commands.Cog):
             self._clear_op(guild.id, member.id)
         return True
 
-    def _sweep_stale_records(self, guild: Guild, admin_role: Role) -> bool:
+    def _sweep_stale_records(self, guild: Guild, admin_role: Role, *, fail_closed: bool = False) -> bool:
         """Drop this guild's records of ops that are over, and arm the ones the cache cannot vouch for.
 
         A record is kept when its member holds the role or a live timer waits for them (an op that
         started while the removals were awaited). Otherwise it is dropped only when the guild's
         member cache is complete; with a partial cache the member may hold the role unseen, so the
         record gets its timer and ``_expire`` asks Discord when it fires (now, if the time has passed).
-        A record that cannot be read or dropped is logged and the others are still swept.
+        A record that cannot be read or dropped is logged and the others are still swept. With
+        ``fail_closed``, a record the cache cannot vouch for and the storage cannot give gets a timer
+        that fires now and asks again every ``EXPIRY_RETRY_DELAY`` until it can be read.
+
+        Args:
+            guild (Guild): The server.
+            admin_role (Role): The temporary admin role.
+            fail_closed (bool): Arm such a record instead of leaving it.
 
         Returns:
             bool: False when a record could not be read or dropped.
@@ -624,6 +654,12 @@ class UserManagement(commands.Cog):
                 else:
                     self._arm_deop(guild.id, member_id, max(expiry.expires_at, _utcnow()))
             except sqlite3.Error:
+                if fail_closed and not guild.chunked:
+                    logger.exception(
+                        f"Storage failure reading an op record, timer set now guild_id={guild.id} member_id={member_id}"
+                    )
+                    self._arm_deop(guild.id, member_id, _utcnow())
+                    continue
                 swept = False
                 logger.exception(f"Storage failure sweeping an op record at start guild_id={guild.id} member_id={member_id}")
         return swept
