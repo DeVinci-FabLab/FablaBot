@@ -125,7 +125,7 @@ def save_draft(guild_id: int, draft: FmMessageDraft) -> None:
 
 
 def current_published(guild_id: int) -> PublishedMessage | None:
-    """Read the current published message of a guild: the newest one.
+    """Read the current published message of a guild: the newest one, which has the highest message ID.
 
     Args:
         guild_id (int): The ID of the guild.
@@ -135,7 +135,7 @@ def current_published(guild_id: int) -> PublishedMessage | None:
     """
     conn = db.connection()
     row = conn.execute(
-        "SELECT * FROM fm_message WHERE guild_id = ? AND message_id IS NOT NULL ORDER BY id DESC LIMIT 1", (guild_id,)
+        "SELECT * FROM fm_message WHERE guild_id = ? AND message_id IS NOT NULL ORDER BY message_id DESC LIMIT 1", (guild_id,)
     ).fetchone()
     if row is None:
         return None
@@ -145,8 +145,9 @@ def current_published(guild_id: int) -> PublishedMessage | None:
 def save_published(guild_id: int, published: PublishedMessage) -> None:
     """Store a published message under its own ID.
 
-    A new ID becomes the current message. A known ID changes that message alone, so a late write
-    for an older message never takes the place of a newer one.
+    The current message is the one with the highest ID (message IDs grow with time). A known ID changes that
+    message alone, and an older message written for the first time late is stored without taking the place of
+    a newer one.
 
     Args:
         guild_id (int): The ID of the guild.

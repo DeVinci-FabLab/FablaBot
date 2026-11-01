@@ -129,6 +129,17 @@ def test_a_late_write_for_an_older_message_leaves_the_current_one() -> None:
     assert (current.message_id, current.message.intro) == (SECOND, "deux")
 
 
+def test_a_message_first_written_after_a_newer_one_is_not_the_current_one() -> None:
+    """An older message that reaches the database late is stored, and the newer message stays current."""
+    formations.save_published(GUILD_A, PublishedMessage(message_id=SECOND, channel_id=7, message=message(intro="deux")))
+
+    formations.save_published(GUILD_A, PublishedMessage(message_id=FIRST, channel_id=7, message=message(intro="un")))
+
+    current = formations.current_published(GUILD_A)
+    assert current is not None
+    assert (current.message_id, current.message.intro) == (SECOND, "deux")
+
+
 def test_servers_stay_apart() -> None:
     """One server's draft and message are not another's, even under one message ID."""
     formations.save_draft(GUILD_A, message(intro="a"))

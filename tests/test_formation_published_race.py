@@ -20,6 +20,7 @@ from fablabot.models import FmMessageDraft, Formation, PublishedMessage, Reactio
 from fablabot.services import formations
 
 GUILD_ID = 1234
+OTHER_GUILD_ID = 2222
 NEW_GUILD_ID = 98765
 MESSAGE_ID = 555
 EMOJI = "🔧"
@@ -305,3 +306,76 @@ async def test_an_unsaved_message_is_current_until_a_newer_one_is_saved(
 
     env.cog._set_last_published_in_guild(GUILD_ID, message(MESSAGE_ID + 2))
     assert current_id() == MESSAGE_ID + 2
+
+
+def _message(message_id: int, *, start_iso: str = "2099-06-01T18:00:00+02:00") -> PublishedMessage:
+    """A published message with one formation, under the given message ID."""
+    fm = Formation(emoji=EMOJI, name="Soudure", trainer_mention="<@1>", start_iso=start_iso, duration="2h", seats=5)
+    return PublishedMessage(
+        message_id=message_id,
+        channel_id=77,
+        message=FmMessageDraft(header="h", role_id=9, intro="i", fms=[fm], end="e"),
+    )
+
+
+def _current_id(cog: Any, guild_id: int = GUILD_ID) -> int | None:
+    """The ID of the message the cog treats as current on a server."""
+    current = cog._get_last_published_in_guild(guild_id)
+    return current.message_id if current else None
+
+
+async def test_a_failed_write_of_an_older_message_leaves_a_newer_unsaved_one_current(
+    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
+) -> None:
+    """A late write of the old message that fails too must not replace the newer message that exists only in memory."""
+    monkeypatch.setattr(formations, "save_published", _flaky(formations.save_published, storage_error, times=2))
+    env.cog._set_last_published_in_guild(GUILD_ID, _message(MESSAGE_ID + 1))
+
+    env.cog._set_last_published_in_guild(GUILD_ID, _message(MESSAGE_ID))
+
+    assert _current_id(env.cog) == MESSAGE_ID + 1
+
+
+async def test_a_failed_write_of_an_older_message_does_not_hide_a_newer_saved_one(
+    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
+) -> None:
+    """A late write of the old message that fails leaves the saved newer message current, and its reactions still count."""
+    env.cog._set_last_published_in_guild(GUILD_ID, _message(MESSAGE_ID + 1))
+    monkeypatch.setattr(formations, "save_published", _flaky(formations.save_published, storage_error))
+    env.cog._set_last_published_in_guild(GUILD_ID, _message(MESSAGE_ID))
+    _forget_logged_reactions()
+
+    assert _current_id(env.cog) == MESSAGE_ID + 1
+    payload = _reaction_payload()
+    payload.message_id = MESSAGE_ID + 1
+    await env.cog.on_raw_reaction_event(payload)
+
+    assert len(env.cog._reaction_logs.history(GUILD_ID, MESSAGE_ID + 1)) == 1
+
+
+async def test_an_unsaved_message_written_late_after_a_newer_one_does_not_become_current(
+    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
+) -> None:
+    """A message that was only in memory and reaches the database after a newer one is stored without taking its place."""
+    monkeypatch.setattr(formations, "save_published", _flaky(formations.save_published, storage_error))
+    env.cog._set_last_published_in_guild(GUILD_ID, _message(MESSAGE_ID + 1))
+    env.cog._set_last_published_in_guild(GUILD_ID, _message(MESSAGE_ID + 2))
+
+    env.cog._set_last_published_in_guild(GUILD_ID, _message(MESSAGE_ID + 1))
+
+    stored = formations.current_published(GUILD_ID)
+    assert stored is not None
+    assert stored.message_id == MESSAGE_ID + 2
+    assert _current_id(env.cog) == MESSAGE_ID + 2
+
+
+async def test_a_message_kept_in_memory_is_not_current_on_another_server(
+    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
+) -> None:
+    """The copy kept after a failed save belongs to its server: another server still sees its own message, or none."""
+    monkeypatch.setattr(formations, "save_published", _flaky(formations.save_published, storage_error))
+    env.cog._set_last_published_in_guild(OTHER_GUILD_ID, _message(MESSAGE_ID + 5))
+
+    assert _current_id(env.cog, OTHER_GUILD_ID) == MESSAGE_ID + 5
+    assert _current_id(env.cog, GUILD_ID) == MESSAGE_ID
+    assert _current_id(env.cog, NEW_GUILD_ID) is None

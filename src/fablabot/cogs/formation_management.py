@@ -735,28 +735,48 @@ class FormationManagement(commands.Cog):
         formations.save_draft(guild_id, draft)
 
     def _get_last_published_in_guild(self, guild_id: int) -> PublishedMessage | None:
-        """Get the last published state for a specific guild: the copy the database refused to take, else the stored one."""
-        published = self._unsaved_published.get(guild_id) or formations.current_published(guild_id)
-        if published is None:
+        """Get the last published state for a specific guild.
+
+        The copy the database refused to take wins over the stored message unless that one is newer (message IDs
+        grow with time): a stale copy never hides a newer message. When the database cannot be read, the copy
+        is the best the cog knows.
+
+        Raises:
+            sqlite3.Error: The database cannot be read and no copy is kept.
+        """
+        kept = self._unsaved_published.get(guild_id)
+        try:
+            stored = formations.current_published(guild_id)
+        except sqlite3.Error:
+            if kept is None:
+                raise
+            logger.exception(f"Published formations message not read guild_id={guild_id}; using the copy kept in memory")
+            return kept
+        if kept is not None:
+            if stored is None or kept.message_id >= stored.message_id:
+                return kept
+            del self._unsaved_published[guild_id]
+        if stored is None:
             logger.warning(f"No published formations data stored for guild {guild_id}.")
-        return published
+        return stored
 
     def _set_last_published_in_guild(self, guild_id: int, published: PublishedMessage) -> None:
         """Set the last published state for a specific guild.
 
         A storage failure is logged and the state is kept in memory, so the reminder flags and the registrations
-        it holds are not lost nor redone; the next write of the guild saves it. Message IDs grow with time, so a
-        saved message that is not older than the kept one replaces it.
+        it holds are not lost nor redone; the next write of the guild saves it. Message IDs grow with time, and a
+        message older than the kept one is never kept in its place, nor does it drop the kept one once saved.
         """
+        kept = self._unsaved_published.get(guild_id)
         try:
             formations.save_published(guild_id, published)
         except sqlite3.Error:
             logger.exception(
                 f"Published formations message not saved guild_id={guild_id}; kept in memory, saved with the next write"
             )
-            self._unsaved_published[guild_id] = published
+            if kept is None or published.message_id >= kept.message_id:
+                self._unsaved_published[guild_id] = published
             return
-        kept = self._unsaved_published.get(guild_id)
         if kept is not None and published.message_id >= kept.message_id:
             del self._unsaved_published[guild_id]
 
