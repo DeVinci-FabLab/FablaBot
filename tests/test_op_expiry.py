@@ -227,6 +227,33 @@ async def test_failed_expiry_keeps_record_and_warns_op_channel(cog: UserManageme
     assert any(f"guild_id={GUILD_A}" in m and f"member_id={TARGET_ID}" in m for m in errors)
 
 
+async def test_a_removal_refused_at_expiry_is_retried_and_the_role_leaves(cog: UserManagement) -> None:
+    """One refused removal at the scheduled expiry does not leave the role in place until the next start: a retry ends it."""
+    guild, target, caller = _server(GUILD_A)
+    await _op(cog, guild, caller, target, 5)
+    temp = guild.roles[0]
+    target.roles.append(temp)
+    temp.members.append(target)
+    target.remove_roles = AsyncMock(side_effect=[HTTPException(MagicMock(status=503), "unavailable"), None])
+    cog.bot.get_guild = MagicMock(return_value=guild)
+
+    timer = cog.deop_tasks[GUILD_A, TARGET_ID]
+
+    with (
+        patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=5)),
+        patch.object(user_management, "RECONCILE_RETRY_DELAYS", (0,)),
+    ):
+        await timer
+        assert target.remove_roles.await_count == 1
+        assert str(TARGET_ID) in stored_ops()[str(GUILD_A)]
+        await cog.reconcile_retries[GUILD_A]
+
+    assert target.remove_roles.await_count == 2
+    assert stored_ops() == {}
+    assert guild.get_channel.return_value.send.await_count == 1
+    assert cog.reconcile_retries == {}
+
+
 async def test_deop_cancels_timer_and_clears_record(cog: UserManagement) -> None:
     """Deopping cancels the timer and clears the record."""
     guild, target, caller = _server(GUILD_A)

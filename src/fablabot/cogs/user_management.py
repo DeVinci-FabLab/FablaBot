@@ -748,8 +748,8 @@ class UserManagement(commands.Cog):
         """End a member's op on one guild if its recorded time has come.
 
         Removes the role, then forgets the record (a crash in between leaves an orphan record,
-        cleared later), then posts the notice in the op channel. A failed removal keeps the record
-        for the next start and posts a failure notice instead. An unavailable guild, a member
+        cleared later), then posts the notice in the op channel. A failed removal keeps the record,
+        posts a failure notice instead and starts the bounded retry of the server. An unavailable guild, a member
         Discord could not be asked about, or a record the database could not be asked for keeps the record
         and asks the caller to try again.
 
@@ -794,6 +794,8 @@ class UserManagement(commands.Cog):
                 expiry,
                 f"Impossible de retirer le rôle {RoleNames.ADMIN_TEMP} à {format_member_mention(member)} : {error}",
             )
+            # The settle removes an expired holder again, bounded, and posts no notice: the failure is not repeated.
+            self._retry_reconcile_later(guild.id)
             return
 
         self._clear_op_after_removal(guild.id, member.id)
