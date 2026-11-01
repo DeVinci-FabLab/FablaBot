@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.2.0...v0.3.0) (2026-11-01)
+
+
+### Features
+
+* **startup:** report what each server lacks at start ([#126](https://github.com/DeVinci-FabLab/FablaBot/issues/126)) ([8226c24](https://github.com/DeVinci-FabLab/FablaBot/commit/8226c24918955f7198d1fd1bcbce1b339badd2ac))
+
+
+### Bug Fixes
+
+* **startup:** remove leftover server commands at start ([#128](https://github.com/DeVinci-FabLab/FablaBot/issues/128)) ([c4915e7](https://github.com/DeVinci-FabLab/FablaBot/commit/c4915e714b7f24964925542531874b3aaea6e482))
+* **user:** refuse giving a role at or above your own ([#129](https://github.com/DeVinci-FabLab/FablaBot/issues/129)) ([3b73b9b](https://github.com/DeVinci-FabLab/FablaBot/commit/3b73b9b531e04c0fe7efc43f2af6bd87234de7ab))
+
 ## [0.2.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.1.0...v0.2.0) (2026-10-31)
 
 
