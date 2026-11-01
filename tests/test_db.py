@@ -300,6 +300,36 @@ def test_a_read_only_folder_stops_the_start_of_an_existing_database() -> None:
         DB_FILE.parent.chmod(0o755)
 
 
+def test_a_write_check_ended_by_sqlite_is_refused_for_its_own_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A write check that SQLite rolls back itself is reported with its cause, not as a rollback with nothing to roll back."""
+    db.open_database(DB_FILE)
+    db.close_database()
+    connect = sqlite3.connect
+    writing: list[str] = []
+
+    def interrupt(database: Path, *, autocommit: bool) -> sqlite3.Connection:
+        conn = connect(database, autocommit=autocommit)
+
+        def note_the_check(sql: str) -> None:
+            if sql.startswith("PRAGMA user_version = "):
+                writing.append(sql)
+
+        def stop_the_check() -> int:
+            # A write that SQLite is told to stop takes its transaction back by itself.
+            stop = bool(writing)
+            writing.clear()
+            return int(stop)
+
+        conn.set_trace_callback(note_the_check)
+        conn.set_progress_handler(stop_the_check, 1)
+        return conn
+
+    monkeypatch.setattr(sqlite3, "connect", interrupt)
+
+    with pytest.raises(db.StorageError, match="interrupted"):
+        db.open_database(DB_FILE)
+
+
 def test_the_start_leaves_no_journal_and_no_open_transaction() -> None:
     """Checking that the database takes writes changes nothing and leaves nothing behind."""
     db.open_database(DB_FILE)
