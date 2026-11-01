@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 import logging
-import sqlite3
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -19,6 +18,7 @@ from fablabot.services import op_expiries
 
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
+    import sqlite3
 
 NOW = datetime(2026, 10, 28, 15, 0, tzinfo=UTC)
 GUILD_ID, OTHER_GUILD_ID = 1001, 1002
@@ -244,13 +244,13 @@ async def test_guild_back_from_an_outage_is_reconciled() -> None:
     _stop(cog)
 
 
-def _storage_fails_for(function: str, member_id: int) -> AbstractContextManager[Any]:
-    """Patch one ``op_expiries`` function so that it raises for one member and works for the others."""
+def _storage_fails_for(function: str, member_id: int, error: sqlite3.Error) -> AbstractContextManager[Any]:
+    """Patch one ``op_expiries`` function so that it raises ``error`` for one member and works for the others."""
     real = getattr(op_expiries, function)
 
     def flaky(guild_id: int, target_id: int) -> object:
         if target_id == member_id:
-            raise sqlite3.OperationalError
+            raise error
         return real(guild_id, target_id)
 
     return patch.object(op_expiries, function, side_effect=flaky)
@@ -268,7 +268,7 @@ def _two_holders_guild() -> tuple[MagicMock, MagicMock, MagicMock]:
     ids=["failed-read", "failed-clear"],
 )
 async def test_a_storage_failure_on_one_holder_does_not_stop_the_other_holders(
-    caplog: pytest.LogCaptureFixture, function: str, first_keeps_the_role: bool
+    caplog: pytest.LogCaptureFixture, storage_error: sqlite3.Error, function: str, first_keeps_the_role: bool
 ) -> None:
     """A storage failure on one holder at start is logged and the other holders of the server are still settled."""
     past = NOW - timedelta(minutes=1)
@@ -277,7 +277,7 @@ async def test_a_storage_failure_on_one_holder_does_not_stop_the_other_holders(
     )
     guild, first, second = _two_holders_guild()
 
-    with _storage_fails_for(function, HOLDER_ID):
+    with _storage_fails_for(function, HOLDER_ID, storage_error):
         _stop(await _start(guild))
 
     assert first.remove_roles.await_count == (0 if first_keeps_the_role else 1)
@@ -288,7 +288,7 @@ async def test_a_storage_failure_on_one_holder_does_not_stop_the_other_holders(
     assert any(f"guild_id={GUILD_ID}" in m and f"member_id={HOLDER_ID}" in m for m in errors)
 
 
-async def test_a_storage_failure_in_one_server_does_not_stop_the_next_server() -> None:
+async def test_a_storage_failure_in_one_server_does_not_stop_the_next_server(storage_error: sqlite3.Error) -> None:
     """A storage failure while settling one server at start leaves the holders of the next server settled."""
     past = NOW - timedelta(minutes=1)
     guilds, holders = [], []
@@ -299,14 +299,16 @@ async def test_a_storage_failure_in_one_server_does_not_stop_the_next_server() -
         guilds.append(make_guild(guild_id, [temp], [holder]))
         holders.append(holder)
 
-    with patch.object(op_expiries, "clear", side_effect=sqlite3.OperationalError("disk I/O error")):
+    with patch.object(op_expiries, "clear", side_effect=storage_error):
         _stop(await _start(*guilds))
 
     for holder in holders:
         holder.remove_roles.assert_awaited_once()
 
 
-async def test_a_failed_listing_of_the_records_does_not_stop_the_next_server(caplog: pytest.LogCaptureFixture) -> None:
+async def test_a_failed_listing_of_the_records_does_not_stop_the_next_server(
+    caplog: pytest.LogCaptureFixture, storage_error: sqlite3.Error
+) -> None:
     """A failed read of one server's records at start is logged and the next server is still settled."""
     first_guild, _holder, _temp = _holder_guild()
     temp = make_role(RoleNames.ADMIN_TEMP)
@@ -316,7 +318,7 @@ async def test_a_failed_listing_of_the_records_does_not_stop_the_next_server(cap
 
     def flaky(guild_id: int) -> list[int]:
         if guild_id == GUILD_ID:
-            raise sqlite3.OperationalError
+            raise storage_error
         return real(guild_id)
 
     with patch.object(op_expiries, "member_ids", side_effect=flaky):
@@ -327,13 +329,15 @@ async def test_a_failed_listing_of_the_records_does_not_stop_the_next_server(cap
     assert any(f"guild_id={GUILD_ID}" in m for m in errors)
 
 
-async def test_a_failed_clear_on_one_stale_record_does_not_stop_the_sweep(caplog: pytest.LogCaptureFixture) -> None:
+async def test_a_failed_clear_on_one_stale_record_does_not_stop_the_sweep(
+    caplog: pytest.LogCaptureFixture, storage_error: sqlite3.Error
+) -> None:
     """A stale record that cannot be dropped at start is logged and the other stale records are still dropped."""
     future = NOW + timedelta(minutes=12)
     store_ops({str(GUILD_ID): {str(m): {"expires_at": future.isoformat(), "channel_id": 777} for m in (998, 999)}})
     guild, _holder, _temp = _holder_guild()
 
-    with _storage_fails_for("clear", 998):
+    with _storage_fails_for("clear", 998, storage_error):
         _stop(await _start(guild))
 
     assert "999" not in stored_ops()[str(GUILD_ID)]
@@ -343,7 +347,7 @@ async def test_a_failed_clear_on_one_stale_record_does_not_stop_the_sweep(caplog
 
 
 async def test_a_failed_read_on_one_record_does_not_stop_the_sweep_from_arming_the_others(
-    caplog: pytest.LogCaptureFixture,
+    caplog: pytest.LogCaptureFixture, storage_error: sqlite3.Error
 ) -> None:
     """With a partial member cache, a record that cannot be read at start is logged and the others still get their timer."""
     future = NOW + timedelta(minutes=12)
@@ -351,7 +355,7 @@ async def test_a_failed_read_on_one_record_does_not_stop_the_sweep_from_arming_t
     guild, _holder, _temp = _holder_guild()
     guild.chunked = False
 
-    with _storage_fails_for("get", 998), patch.object(UserManagement, "_arm_deop") as arm:
+    with _storage_fails_for("get", 998, storage_error), patch.object(UserManagement, "_arm_deop") as arm:
         await _start(guild)
 
     arm.assert_called_once_with(GUILD_ID, 999, future)

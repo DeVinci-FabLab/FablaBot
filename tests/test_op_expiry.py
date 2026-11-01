@@ -335,7 +335,7 @@ async def test_expiry_asks_discord_for_a_member_missing_from_an_incomplete_cache
 
 
 async def test_expiry_asks_for_a_retry_when_the_record_cannot_be_read(
-    cog: UserManagement, caplog: pytest.LogCaptureFixture
+    cog: UserManagement, caplog: pytest.LogCaptureFixture, storage_error: sqlite3.Error
 ) -> None:
     """When the record cannot be read at expiry, the role and the record stay and the caller is asked to try again."""
     guild, target, caller = _server(GUILD_A)
@@ -345,7 +345,7 @@ async def test_expiry_asks_for_a_retry_when_the_record_cannot_be_read(
 
     with (
         patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=31)),
-        patch.object(op_expiries, "get", side_effect=sqlite3.OperationalError("disk I/O error")),
+        patch.object(op_expiries, "get", side_effect=storage_error),
     ):
         settled = await cog._expire(GUILD_A, TARGET_ID)
 
@@ -356,7 +356,9 @@ async def test_expiry_asks_for_a_retry_when_the_record_cannot_be_read(
     assert any(f"guild_id={GUILD_A}" in m and f"member_id={TARGET_ID}" in m for m in errors)
 
 
-async def test_timer_tries_again_after_a_failed_read_and_removes_the_role(cog: UserManagement) -> None:
+async def test_timer_tries_again_after_a_failed_read_and_removes_the_role(
+    cog: UserManagement, storage_error: sqlite3.Error
+) -> None:
     """A timer whose first read fails waits and tries again, and the role still leaves."""
     guild, target, _caller = _server(GUILD_A)
     target.roles.append(guild.roles[0])
@@ -377,7 +379,7 @@ async def test_timer_tries_again_after_a_failed_read_and_removes_the_role(cog: U
     def fail_once(guild_id: int, member_id: int) -> dict | None:
         reads["count"] += 1
         if reads["count"] == 1:
-            raise sqlite3.OperationalError
+            raise storage_error
         return real_get(guild_id, member_id)
 
     with (

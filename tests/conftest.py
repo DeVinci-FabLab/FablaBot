@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import sqlite3
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -73,6 +74,12 @@ def simcord_bot(tmp_path, monkeypatch) -> Any:
     main = importlib.reload(fablabot.main)
     monkeypatch.setattr(main, "configure_logging", lambda _bot: (None, None))
     return main.Fablabot()
+
+
+@pytest.fixture(params=[sqlite3.OperationalError, sqlite3.DatabaseError], ids=["operational", "database"])
+def storage_error(request: pytest.FixtureRequest) -> sqlite3.Error:
+    """A storage failure a guard must contain: a locked database, then the rest of the family, such as a damaged file."""
+    return request.param("storage failed")
 
 
 def store_settings(content: dict[str, dict[str, Any]]) -> None:
