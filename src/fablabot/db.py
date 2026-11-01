@@ -165,6 +165,24 @@ def _check_imported(conn: sqlite3.Connection, path: Path, files: list[Path]) -> 
         raise StorageError(msg)
 
 
+def _state_files(path: Path) -> list[Path]:
+    """List the JSON state files next to the database, refusing them when it does not exist yet.
+
+    Args:
+        path (Path): The database file.
+
+    Returns:
+        list[Path]: The state files found.
+
+    Raises:
+        StorageError: If there are state files and no database to hold them.
+    """
+    files = [file for name in STATE_FILES if (file := path.parent / name).exists()]
+    if files and not path.exists():
+        raise _not_imported(files, path)
+    return files
+
+
 def open_database(path: Path = DATABASE_FILE, *, migrations: Path = MIGRATIONS_DIR) -> None:
     """Open the database, creating it when missing, and bring its schema up to date.
 
@@ -180,21 +198,22 @@ def open_database(path: Path = DATABASE_FILE, *, migrations: Path = MIGRATIONS_D
     """
     global _connection
     close_database()
-    state_files = [file for name in STATE_FILES if (file := path.parent / name).exists()]
-    if state_files and not path.exists():
-        raise _not_imported(state_files, path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path, autocommit=True)
+    conn: sqlite3.Connection | None = None
     try:
+        state_files = _state_files(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(path, autocommit=True)
         _configure(conn)
         _migrate(conn, path, migrations)
         _check_imported(conn, path, state_files)
-    except sqlite3.DatabaseError as error:
-        conn.close()
+    except (sqlite3.DatabaseError, OSError) as error:
+        if conn is not None:
+            conn.close()
         msg = f"{path.as_posix()} cannot be used: {error}."
         raise StorageError(msg) from error
     except BaseException:
-        conn.close()
+        if conn is not None:
+            conn.close()
         raise
     _connection = conn
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import sqlite3
 from typing import TYPE_CHECKING
@@ -143,6 +144,47 @@ def test_a_file_that_is_no_database_stops_the_start() -> None:
         db.open_database(DB_FILE)
 
     assert DB_FILE.read_bytes() == before
+
+
+def test_a_directory_in_place_of_the_file_stops_the_start() -> None:
+    """A database path that cannot be opened is a one-line refusal, not a traceback."""
+    DB_FILE.mkdir(parents=True)
+
+    with pytest.raises(db.StorageError, match="cannot be used"):
+        db.open_database(DB_FILE)
+
+
+def test_a_file_in_place_of_the_folder_stops_the_start() -> None:
+    """A data folder that cannot be created is a one-line refusal."""
+    DB_FILE.parent.write_bytes(b"")
+
+    with pytest.raises(db.StorageError, match="cannot be used"):
+        db.open_database(DB_FILE)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads any file")
+def test_an_unreadable_file_stops_the_start() -> None:
+    """A database the bot has no right to read is refused with one line."""
+    db.open_database(DB_FILE)
+    db.close_database()
+    DB_FILE.chmod(0o000)
+    try:
+        with pytest.raises(db.StorageError, match="cannot be used"):
+            db.open_database(DB_FILE)
+    finally:
+        DB_FILE.chmod(0o644)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root writes anywhere")
+def test_a_read_only_folder_stops_the_start_of_a_new_database() -> None:
+    """A folder the bot cannot write to refuses a database that does not exist yet."""
+    DB_FILE.parent.mkdir(parents=True)
+    DB_FILE.parent.chmod(0o555)
+    try:
+        with pytest.raises(db.StorageError, match="cannot be used"):
+            db.open_database(DB_FILE)
+    finally:
+        DB_FILE.parent.chmod(0o755)
 
 
 def test_an_upgrade_copies_the_database_first(tmp_path: Path) -> None:
