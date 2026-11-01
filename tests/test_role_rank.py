@@ -79,13 +79,18 @@ async def _add(cog: UserManagement, server: Server, role: str) -> MagicMock:
     return interaction
 
 
+def test_refusal_names_the_way_out() -> None:
+    """The refusal says who to ask, not only that the role is refused."""
+    assert "demandez à un membre" in user_management._ROLE_NOT_BELOW_REFUSED
+
+
 async def test_secretary_general_cannot_give_president(cog: UserManagement) -> None:
     """A role above the caller's highest is refused, with the way out."""
     server = Server(RoleNames.SECRETARY)
     interaction = await _add(cog, server, RoleNames.PRESIDENT)
 
     server.target.add_roles.assert_not_awaited()
-    assert "au-dessus" in interaction.response.send_message.await_args.args[0]
+    interaction.response.send_message.assert_awaited_once_with(user_management._ROLE_NOT_BELOW_REFUSED, ephemeral=True)
 
 
 async def test_secretary_general_cannot_take_president(cog: UserManagement) -> None:
@@ -96,7 +101,7 @@ async def test_secretary_general_cannot_take_president(cog: UserManagement) -> N
     await _call(UserManagement.user_remove_role)(cog, interaction, member=server.target, role=server.roles[RoleNames.PRESIDENT])
 
     server.target.remove_roles.assert_not_awaited()
-    interaction.response.send_message.assert_awaited_once()
+    interaction.response.send_message.assert_awaited_once_with(user_management._ROLE_NOT_BELOW_REFUSED, ephemeral=True)
 
 
 async def test_equal_rank_is_refused(cog: UserManagement) -> None:
@@ -159,7 +164,7 @@ async def test_bulk_add_refuses_a_role_above_the_caller(cog: UserManagement) -> 
     await _call(UserManagement.user_add_roles)(cog, interaction, role=server.roles[RoleNames.PRESIDENT])
 
     interaction.followup.send.assert_not_awaited()
-    assert "au-dessus" in interaction.response.send_message.await_args.args[0]
+    interaction.response.send_message.assert_awaited_once_with(user_management._ROLE_NOT_BELOW_REFUSED, ephemeral=True)
 
 
 async def test_bulk_remove_refuses_a_role_above_the_caller(cog: UserManagement) -> None:
@@ -170,4 +175,4 @@ async def test_bulk_remove_refuses_a_role_above_the_caller(cog: UserManagement) 
     await _call(UserManagement.user_remove_roles)(cog, interaction, role=server.roles[RoleNames.PRESIDENT])
 
     interaction.followup.send.assert_not_awaited()
-    interaction.response.send_message.assert_awaited_once()
+    interaction.response.send_message.assert_awaited_once_with(user_management._ROLE_NOT_BELOW_REFUSED, ephemeral=True)
