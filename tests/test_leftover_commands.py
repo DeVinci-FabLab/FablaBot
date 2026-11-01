@@ -88,6 +88,22 @@ async def test_the_integrations_setting_of_a_global_command_survives(simcord_bot
         await env.shutdown()
 
 
+async def test_a_server_present_but_not_served_keeps_its_commands(simcord_bot: Any) -> None:
+    """With an allow-list matching none of the servers, the bot stays and neither reads nor writes their commands."""
+    stranger = 333333333333333333
+    env = await start(simcord_bot, stranger, leftovers={stranger: LEFTOVERS})
+    try:
+        bot: Any = env.bot
+        present = bot.get_guild(stranger) is not None
+        remaining = commands_of(env, stranger)
+        touching = [r for r in env.http_requests if f"/guilds/{stranger}/commands" in r.path]
+    finally:
+        await env.shutdown()
+    assert present
+    assert remaining == {"user", "bot"}
+    assert touching == []
+
+
 async def test_nothing_is_touched_with_a_development_server(simcord_bot: Any) -> None:
     """With DEV_GUILD_ID set, no server-scoped command is removed."""
     simcord_bot.dev_guild_id = GUILD
