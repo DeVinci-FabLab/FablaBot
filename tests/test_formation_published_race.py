@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta
+import logging
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -16,6 +17,8 @@ import pytest
 from fablabot import db
 from fablabot.cogs import formation_management as fm_cog
 from fablabot.helpers.constants import PARIS_TZ
+from fablabot.logging_handlers import guild_log_context
+from fablabot.logging_handlers.guild_context import GuildContextFilter
 from fablabot.models import FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
 from fablabot.services import formations
 
@@ -23,8 +26,10 @@ GUILD_ID = 1234
 OTHER_GUILD_ID = 2222
 NEW_GUILD_ID = 98765
 MESSAGE_ID = 555
+OTHER_MESSAGE_ID = 777
 EMOJI = "🔧"
 MEMBER_ID = 42
+OTHER_MEMBER_ID = 43
 
 
 class _Env:
@@ -193,12 +198,12 @@ def _flaky(real: Any, error: Exception, times: int = 1) -> Any:
     return call
 
 
-def _reaction_payload() -> MagicMock:
-    """The member's reaction to the published message."""
+def _reaction_payload(guild_id: int = GUILD_ID, message_id: int = MESSAGE_ID, user_id: int = MEMBER_ID) -> MagicMock:
+    """A member's reaction to the published message of a server."""
     member = MagicMock(bot=False)
     member.name = "alice"
     return MagicMock(
-        guild_id=GUILD_ID, member=member, message_id=MESSAGE_ID, emoji=EMOJI, user_id=MEMBER_ID, event_type="REACTION_ADD"
+        guild_id=guild_id, member=member, message_id=message_id, emoji=EMOJI, user_id=user_id, event_type="REACTION_ADD"
     )
 
 
@@ -379,3 +384,105 @@ async def test_a_message_kept_in_memory_is_not_current_on_another_server(
     assert _current_id(env.cog, OTHER_GUILD_ID) == MESSAGE_ID + 5
     assert _current_id(env.cog, GUILD_ID) == MESSAGE_ID
     assert _current_id(env.cog, NEW_GUILD_ID) is None
+
+
+def _two_servers_with_kept_reactions(
+    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception, *, refusals: int = 2
+) -> Any:
+    """Publish on a second server, then let the reaction log refuse its first ``refusals`` writes.
+
+    Returns:
+        The recorded calls of ``_schedule_update``, as ``(guild_id, delay)``.
+    """
+    _forget_logged_reactions()
+    env.cog._set_last_published_in_guild(OTHER_GUILD_ID, _message(OTHER_MESSAGE_ID))
+    scheduled: list[tuple[int, float]] = []
+    monkeypatch.setattr(env.cog, "_schedule_update", lambda guild_id, delay=2.0: scheduled.append((guild_id, delay)))
+    monkeypatch.setattr(env.cog._reaction_logs, "append", _flaky(env.cog._reaction_logs.append, storage_error, times=refusals))
+    return scheduled
+
+
+async def test_a_reaction_kept_for_one_server_is_written_and_scheduled_when_another_servers_reaction_arrives(
+    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
+) -> None:
+    """Whoever writes the shared queue updates the server whose reaction it wrote, or its member stays unregistered."""
+    scheduled = _two_servers_with_kept_reactions(env, monkeypatch, storage_error, refusals=1)
+    await env.cog.on_raw_reaction_event(_reaction_payload())
+    scheduled.clear()
+
+    await env.cog.on_raw_reaction_event(_reaction_payload(OTHER_GUILD_ID, OTHER_MESSAGE_ID, OTHER_MEMBER_ID))
+
+    assert {guild_id for guild_id, _delay in scheduled} == {GUILD_ID, OTHER_GUILD_ID}
+    await env.cog._update_published_message(GUILD_ID)
+    pub = env.cog._get_last_published_in_guild(GUILD_ID)
+    assert pub is not None
+    assert [entry["user_id"] for entry in pub.message.fms[0].registered_users] == [MEMBER_ID]
+
+
+async def test_an_update_that_writes_another_servers_kept_reaction_schedules_that_servers_update(
+    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
+) -> None:
+    """The update of one server writes the whole queue: the server whose reaction it wrote gets its own update."""
+    scheduled = _two_servers_with_kept_reactions(env, monkeypatch, storage_error, refusals=1)
+    await env.cog.on_raw_reaction_event(_reaction_payload(OTHER_GUILD_ID, OTHER_MESSAGE_ID, OTHER_MEMBER_ID))
+    scheduled.clear()
+
+    await env.cog._update_published_message(GUILD_ID)
+
+    assert [guild_id for guild_id, _delay in scheduled] == [OTHER_GUILD_ID]
+    assert len(env.cog._reaction_logs.history(OTHER_GUILD_ID, OTHER_MESSAGE_ID)) == 1
+
+
+async def test_kept_reactions_of_two_servers_are_each_written_under_their_own_server(
+    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
+) -> None:
+    """A queue holding two servers' reactions writes each one under the server it came from."""
+    _two_servers_with_kept_reactions(env, monkeypatch, storage_error)
+    await env.cog.on_raw_reaction_event(_reaction_payload())
+    await env.cog.on_raw_reaction_event(_reaction_payload(OTHER_GUILD_ID, OTHER_MESSAGE_ID, OTHER_MEMBER_ID))
+
+    written = env.cog._log_kept_reactions()
+
+    assert written == {GUILD_ID, OTHER_GUILD_ID}
+    assert [ev.user_id for ev in env.cog._reaction_logs.history(GUILD_ID, MESSAGE_ID)] == [MEMBER_ID]
+    assert [ev.user_id for ev in env.cog._reaction_logs.history(OTHER_GUILD_ID, OTHER_MESSAGE_ID)] == [OTHER_MEMBER_ID]
+    assert env.cog._reaction_logs.history(GUILD_ID, OTHER_MESSAGE_ID) == []
+    assert env.cog._reaction_logs.history(OTHER_GUILD_ID, MESSAGE_ID) == []
+
+
+async def test_the_reminder_tick_schedules_the_update_of_every_server_with_kept_reactions(
+    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
+) -> None:
+    """Each server holding a kept reaction gets its update at the tick, not only the first one."""
+    scheduled = _two_servers_with_kept_reactions(env, monkeypatch, storage_error)
+    await env.cog.on_raw_reaction_event(_reaction_payload())
+    await env.cog.on_raw_reaction_event(_reaction_payload(OTHER_GUILD_ID, OTHER_MESSAGE_ID, OTHER_MEMBER_ID))
+    scheduled.clear()
+
+    await env.cog._check_upcoming_formations()
+
+    assert {guild_id for guild_id, delay in scheduled if delay == 0} == {GUILD_ID, OTHER_GUILD_ID}
+
+
+@pytest.mark.parametrize("log_works", [True, False], ids=["written", "still-refused"])
+async def test_a_kept_reaction_is_logged_under_its_own_server_when_another_server_drains_it(
+    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception, caplog: pytest.LogCaptureFixture, log_works: bool
+) -> None:
+    """The log line of a kept reaction, written or failing, never lands in the log of the server that happened to drain it."""
+    caplog.set_level(logging.DEBUG)
+    caplog.handler.addFilter(GuildContextFilter())
+    _forget_logged_reactions()
+    env.cog._set_last_published_in_guild(OTHER_GUILD_ID, _message(OTHER_MESSAGE_ID))
+    real = env.cog._reaction_logs.append
+    refusals = 1 if log_works else 3
+    monkeypatch.setattr(env.cog._reaction_logs, "append", _flaky(real, storage_error, times=refusals))
+    await env.cog.on_raw_reaction_event(_reaction_payload())
+    caplog.clear()
+
+    with guild_log_context(OTHER_GUILD_ID):
+        await env.cog.on_raw_reaction_event(_reaction_payload(OTHER_GUILD_ID, OTHER_MESSAGE_ID, OTHER_MEMBER_ID))
+
+    wanted = "Logged reaction" if log_works else "Reaction log write failed"
+    lines = [r for r in caplog.records if wanted in r.getMessage() and f"{GUILD_ID}" in r.getMessage()]
+    assert lines
+    assert {r.guild_id for r in lines} == {GUILD_ID}  # type: ignore[attr-defined]

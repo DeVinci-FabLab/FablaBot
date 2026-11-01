@@ -611,8 +611,9 @@ class FormationManagement(commands.Cog):
             )
 
             self._unlogged_reactions.append((payload.guild_id, reaction_event))
-            self._log_kept_reactions()
-            self._schedule_update(payload.guild_id)
+            # The queue holds every server's reactions: each server whose reaction is written gets its update.
+            for guild_id in self._log_kept_reactions() | {payload.guild_id}:
+                self._schedule_update(guild_id)
 
     # endregion Event Listeners
 
@@ -780,19 +781,30 @@ class FormationManagement(commands.Cog):
         if kept is not None and published.message_id >= kept.message_id:
             del self._unsaved_published[guild_id]
 
-    def _log_kept_reactions(self) -> None:
-        """Write the reactions the log refused, oldest first, until one fails."""
+    def _log_kept_reactions(self) -> set[int]:
+        """Write the reactions the log refused, oldest first, until one fails.
+
+        Each write runs in its own server's log context, so its log line goes to that server's log and not to
+        the server whose event or update happens to write the queue.
+
+        Returns:
+            set[int]: The servers whose reactions were written; their registrations may have changed.
+        """
+        written: set[int] = set()
         while self._unlogged_reactions:
             guild_id, event = self._unlogged_reactions[0]
-            try:
-                self._reaction_logs.append(guild_id, event)
-            except sqlite3.Error:
-                logger.exception(
-                    f"Reaction log write failed guild_id={guild_id} message_id={event.message_id}; "
-                    f"{len(self._unlogged_reactions)} kept in memory, written with the next update"
-                )
-                return
+            with guild_log_context(guild_id):
+                try:
+                    self._reaction_logs.append(guild_id, event)
+                except sqlite3.Error:
+                    logger.exception(
+                        f"Reaction log write failed guild_id={guild_id} message_id={event.message_id}; "
+                        f"{len(self._unlogged_reactions)} kept in memory, written with the next update"
+                    )
+                    return written
             self._unlogged_reactions.pop(0)
+            written.add(guild_id)
+        return written
 
     # -- Reaction Updates --
 
@@ -840,7 +852,9 @@ class FormationManagement(commands.Cog):
 
     async def _update_published_message_locked(self, guild_id: int) -> None:  # noqa: PLR0912, PLR0915 - split once formations have tests
         """Reload the published message, rebuild registrations from reactions, save and notify."""
-        self._log_kept_reactions()
+        # This server's own reactions are read below; the other servers whose reactions were written get their update.
+        for other_guild_id in self._log_kept_reactions() - {guild_id}:
+            self._schedule_update(other_guild_id)
         pub = self._get_last_published_in_guild(guild_id)
         if not pub:
             logger.debug(f"No published formations message recorded for guild {guild_id}; skipping update.")
