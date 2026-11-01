@@ -70,6 +70,21 @@ def test_a_guild_with_no_setting_left_keeps_no_row() -> None:
     assert stored_settings() == {}
 
 
+def test_unsetting_one_setting_keeps_the_others() -> None:
+    """Unsetting the commands channel leaves the log channel and the welcome flag where they were."""
+    guild_config.set_commands_channel_id(GUILD_A, COMMANDS_CHANNEL)
+    guild_config.set_log_channel_id(GUILD_A, LEGACY_CHANNEL)
+    guild_config.set_welcome_verify_enabled(GUILD_A, enabled=True)
+    guild_config.set_commands_channel_id(GUILD_B, COMMANDS_CHANNEL)
+
+    guild_config.set_commands_channel_id(GUILD_A, None)
+
+    assert stored_settings() == {
+        str(GUILD_A): {"log_channel_id": LEGACY_CHANNEL, "welcome_verify_enabled": 1},
+        str(GUILD_B): {"commands_channel_id": COMMANDS_CHANNEL},
+    }
+
+
 def test_welcome_off_stays_stored_and_reads_false() -> None:
     """Turning the welcome flow off is a value, not an absence."""
     guild_config.set_welcome_verify_enabled(GUILD_A, enabled=True)
