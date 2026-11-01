@@ -226,6 +226,8 @@ async def test_confirm_checks_the_rank_again(cog: UserManagement) -> None:
 
     server.roles[RoleNames.SECRETARY].position = 20
     click = server.interaction()
+    click.followup.edit_message = AsyncMock()
+    click.delete_original_response = AsyncMock()
     await view.confirm_button.callback(click)
 
     server.target.add_roles.assert_not_awaited()
