@@ -2,44 +2,49 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-from typing import TYPE_CHECKING
+from datetime import datetime
+from typing import TYPE_CHECKING, Final, Literal
 
+from fablabot import db
 from fablabot.helpers.constants import PARIS_TZ
 from fablabot.models.common import ReactionEvent
 
 if TYPE_CHECKING:
+    from datetime import timedelta
     from logging import Logger
 
-    from fablabot.helpers.state_store import JsonStateStore
+type ReactionScope = Literal["formation", "message"]
+
+# Above SQLite's largest integer, which a message ID typed by a member can pass.
+_MAX_ID: Final = 2**63 - 1
 
 
 class ReactionLogManager:
-    """Shared reaction log handler that persists alongside a guild-scoped state mapping."""
+    """Shared reaction log handler, one instance per scope."""
 
     def __init__(
         self,
-        state_store: JsonStateStore,
+        scope: ReactionScope,
         retention: timedelta,
         logger: Logger,
     ) -> None:
         """Initialize the manager.
 
         Args:
-            state_store (JsonStateStore): Shared JSON-backed state store.
+            scope (ReactionScope): Which history this manager keeps.
             retention (timedelta): Duration to retain reaction events.
             logger (Logger): Logger used for diagnostics.
         """
-        self.state_store = state_store
-        self.state = state_store.state
+        self._scope = scope
         self._retention = retention
         self.logger = logger
 
     def purge_all(self) -> None:
         """Purge all guild reaction logs according to retention."""
-        if self._purge_all_internal():
-            self.state_store.save()
-            self.logger.debug("Purged reaction logs and persisted state.")
+        with db.transaction():
+            removed = self._purge()
+        if removed:
+            self.logger.debug(f"Purged {removed} reaction log entries across guilds.")
         else:
             self.logger.debug("No reaction log entries required purging.")
 
@@ -50,15 +55,24 @@ class ReactionLogManager:
             guild_id (int): Guild identifier.
             event (ReactionEvent): Event payload to store.
         """
-        self._purge_all_internal()
-        guild_state = self._get_guild_state(guild_id)
-        raw_log = guild_state.get("reactions_log") or []
-        log = [ReactionEvent.from_dict(entry) for entry in raw_log]
-        if event.user_name is None:
-            event.user_name = self._last_known_name(log, event.user_id)
-        log.append(event)
-        guild_state["reactions_log"] = [ev.to_dict() for ev in log]
-        self.state_store.save()
+        with db.transaction() as conn:
+            self._purge()
+            if event.user_name is None:
+                event.user_name = self._last_known_name(guild_id, event.user_id)
+            conn.execute(
+                "INSERT INTO reaction_event (scope, guild_id, message_id, user_id, user_name, emoji, action, ts_iso) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    self._scope,
+                    guild_id,
+                    event.message_id,
+                    event.user_id,
+                    event.user_name,
+                    event.emoji,
+                    event.action.value,
+                    event.ts_iso,
+                ),
+            )
         self.logger.debug(
             f"Logged reaction {event.action} on message {event.message_id} in guild {guild_id} "
             f"for user {event.user_id} with emoji {event.emoji}.",
@@ -74,56 +88,39 @@ class ReactionLogManager:
         Returns:
             list[ReactionEvent]: List of reaction events for the message, sorted by timestamp.
         """
-        guild_state = self._get_guild_state(guild_id)
-        raw_log = guild_state.get("reactions_log", []) or []
-        history = [ev for entry in raw_log if (ev := ReactionEvent.from_dict(entry)).message_id == message_id]
-        history.sort(key=lambda ev: ev.ts_iso or "")
+        if abs(message_id) > _MAX_ID:
+            return []
+        rows = db.connection().execute(
+            "SELECT message_id, user_id, user_name, emoji, action, ts_iso FROM reaction_event "
+            "WHERE scope = ? AND guild_id = ? AND message_id = ? ORDER BY ts_iso, id",
+            (self._scope, guild_id, message_id),
+        )
+        history = [ReactionEvent.from_dict(dict(row)) for row in rows]
         self.logger.debug(f"Loaded {len(history)} reaction events for guild {guild_id} message {message_id}.")
         return history
 
-    def _get_guild_state(self, guild_id: int) -> dict:
-        """Retrieve or initialize the state mapping for a specific guild."""
-        return self.state_store.ensure_guild(guild_id)
+    def _purge(self) -> int:
+        """Delete this scope's events past retention, inside the caller's transaction; a date SQLite cannot read stays.
 
-    def _purge_all_internal(self) -> bool:
-        """Purge reaction logs across all guilds according to retention."""
-        changed = False
-        removed_total = 0
-        for _, guild_state in self.state_store.guild_items():
-            raw_log = guild_state.get("reactions_log")
-            if not raw_log:
-                continue
-            filtered = self._purge_entries([ReactionEvent.from_dict(entry) for entry in raw_log])
-            if len(filtered) != len(raw_log):
-                removed_total += len(raw_log) - len(filtered)
-                guild_state["reactions_log"] = [event.to_dict() for event in filtered]
-                changed = True
-        if changed:
-            self.logger.debug(f"Purged {removed_total} reaction log entries across guilds.")
-        return changed
+        Returns:
+            int: The number of events removed.
+        """
+        cutoff = int((datetime.now(PARIS_TZ) - self._retention).timestamp())
+        return (
+            db.connection()
+            .execute("DELETE FROM reaction_event WHERE scope = ? AND unixepoch(ts_iso) < ?", (self._scope, cutoff))
+            .rowcount
+        )
 
-    def _purge_entries(self, log: list[ReactionEvent]) -> list[ReactionEvent]:
-        """Purge reaction log entries according to retention."""
-        cutoff = datetime.now(PARIS_TZ) - self._retention
-        filtered: list[ReactionEvent] = []
-        for entry in log:
-            ts_iso = entry.ts_iso
-            if not ts_iso:
-                filtered.append(entry)
-                continue
-            try:
-                ts = datetime.fromisoformat(ts_iso).astimezone(PARIS_TZ)
-            except Exception:
-                filtered.append(entry)
-                continue
-            if ts >= cutoff:
-                filtered.append(entry)
-        return filtered
-
-    @staticmethod
-    def _last_known_name(log: list[ReactionEvent], user_id: int) -> str | None:
+    def _last_known_name(self, guild_id: int, user_id: int) -> str | None:
         """Retrieve the last known username for a user from the reaction log."""
-        for entry in reversed(log):
-            if entry.user_id == user_id and entry.user_name:
-                return entry.user_name
-        return None
+        row = (
+            db.connection()
+            .execute(
+                "SELECT user_name FROM reaction_event WHERE scope = ? AND guild_id = ? AND user_id = ? "
+                "AND user_name IS NOT NULL AND user_name <> '' ORDER BY id DESC LIMIT 1",
+                (self._scope, guild_id, user_id),
+            )
+            .fetchone()
+        )
+        return row["user_name"] if row else None

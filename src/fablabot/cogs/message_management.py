@@ -97,7 +97,7 @@ class MessageManagement(commands.Cog):
         self.bot = bot
         self._state_store = JsonStateStore(logger, MESSAGES_STATE_FILE)
         self._reaction_logs = ReactionLogManager(
-            self._state_store,
+            "message",
             retention=REACTION_LOG_RETENTION,
             logger=logger,
         )

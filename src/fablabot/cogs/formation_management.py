@@ -77,7 +77,7 @@ class FormationManagement(commands.Cog):
         self.bot = bot
         self._state_store = JsonStateStore(logger, FM_STATE_FILE)
         self._reaction_logs = ReactionLogManager(
-            self._state_store,
+            "formation",
             retention=REACTION_LOG_RETENTION,
             logger=logger,
         )
@@ -90,17 +90,7 @@ class FormationManagement(commands.Cog):
                   "message_id": int,
                   "channel_id": int,
                   "message": { "intro": str, "end": str, "fms": [Formation as dict] }
-              },
-              "reactions_log": [
-                {
-                  "message_id": int,
-                  "user_id": int,
-                  "user_name": str,
-                  "emoji": str,
-                  "action": Literal["add", "remove"],
-                  "ts_iso": str
-                }
-              ]
+              }
           }
         }
         ```
