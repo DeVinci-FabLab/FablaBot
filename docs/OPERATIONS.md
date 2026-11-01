@@ -8,9 +8,13 @@ the problems seen in production. Commands for members and staff are in the [user
 
 Every push to `main` publishes `:edge` and `:sha-<commit>`. `:latest`, `:X.Y.Z` and `:X.Y` move only
 when the release pull request is merged (see the [README](../README.md#releases), "Releases").
-Production follows `:latest`; a test server can follow `:edge`. A merge is not a deploy: the host
-must redeploy the stack (pull the image, recreate the container) to run the new version. In Komodo,
+Production follows `:latest`; a test server can follow `:edge`. A merge to `main` is not a deploy, but a
+release can be: production restarted on its own within the hour after two image builds (2026-10-29 15:01 and
+2026-11-01 19:00 UTC), which points to an automatic update in Komodo. Treat merging the release pull request
+as deploying. The stack can also be redeployed by hand (pull the image, recreate the container). In Komodo,
 the production container is named `fablabot`.
+
+The host also reboots every Sunday at 03:00, which restarts the bot on the same image.
 
 Example `compose.yml` (the repository's `compose.yml` is the reference):
 
@@ -76,11 +80,12 @@ is a decision for the association (GDPR), not for the bot.
 
 ### Releasing and redeploying
 
-1. Merge the release pull request `chore(main): release X.Y.Z`.
-2. Wait for the "Build and Push Docker Image" run to finish green: `:latest` is then `:X.Y.Z`.
-3. Archive `logs/` and `data/`, as in "Before every redeploy".
-4. Redeploy the stack in Komodo.
-5. Check the start in the log, as usual.
+1. Archive `logs/` and `data/`, as in "Before every redeploy": do it before the merge, since the release can
+   deploy itself.
+2. Merge the release pull request `chore(main): release X.Y.Z`.
+3. Wait for the "Build and Push Docker Image" run to finish green: `:latest` is then `:X.Y.Z`.
+4. Read the running revision. If it is still the old one, redeploy the stack in Komodo, or wait for the update.
+5. Check the start in the log, as usual: the `Server check` lines give each server's state.
 
 The production stack stays on `:latest`; a test server can follow `:edge`.
 
@@ -317,7 +322,7 @@ The log tells which case applies: `Commands synced (9, global).` after a sync, a
 | The bot joins a new server and leaves at once | Its ID is not in `ALLOWED_GUILD_IDS`, or the host was not redeployed | Add the ID, redeploy, then invite again. |
 | The bot does not leave a removed server | The change was not deployed, or the list now matches none of the current servers | Redeploy; read the "Guild allow-list" line, and check the IDs. |
 | Bot stops at start with "entry N is not a numeric guild ID" | `ALLOWED_GUILD_IDS` has quotes, spaces or a non-numeric entry | Use `id1,id2`, digits only. |
-| A merged fix is not live | A merge does not deploy | Archive, then redeploy the stack. |
+| A merged fix is not live | A merge does not deploy; only a release reaches `:latest` | Archive, then merge the release pull request. |
 | "Vous ne pouvez pas utiliser de commandes en dehors du salon ..." | The command ran outside the commands channel | Use the channel named in the message. A member who cannot open it uses `/suggest` or a private `/help`, which work in any channel where they can use application commands. |
 | "A public list only goes in ..." | `/help show:True` ran outside the commands channel | Run `/help` without `show`, or use the commands channel. |
 | "Le salon de commandes du bot n'est pas configuré sur ce serveur." | No stored channel and no `commandes_bot` channel | Create a text channel named `commandes_bot`. |
