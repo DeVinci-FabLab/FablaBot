@@ -17,6 +17,7 @@ from fablabot import db
 from fablabot.cogs import formation_management as fm_cog
 from fablabot.helpers.constants import PARIS_TZ
 from fablabot.models import FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
+from fablabot.services import formations
 
 GUILD_ID = 1234
 NEW_GUILD_ID = 98765
@@ -259,3 +260,48 @@ async def test_the_reminder_tick_schedules_the_update_of_kept_reactions(
     await env.cog._check_upcoming_formations()
 
     assert GUILD_ID in env.cog._pending_update_tasks
+
+
+async def test_a_reminder_is_not_sent_again_when_saving_its_flag_fails(
+    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
+) -> None:
+    """A failed save of the notified flag keeps the flag in memory: the next tick sends nothing and saves it."""
+    monkeypatch.setattr(formations, "save_published", _flaky(formations.save_published, storage_error))
+
+    await env.cog._check_upcoming_formations()
+    await env.cog._check_upcoming_formations()
+
+    assert env.notify_participants.await_count == 1
+    stored = formations.current_published(GUILD_ID)
+    assert stored is not None
+    assert stored.message.fms[0].notified_hour_before is True
+
+
+async def test_an_unsaved_message_is_current_until_a_newer_one_is_saved(
+    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
+) -> None:
+    """A message kept in memory after a failed save stays current against a late write of an older one, not a newer one."""
+    fm = Formation(
+        emoji=EMOJI, name="Soudure", trainer_mention="<@1>", start_iso="2099-06-01T18:00:00+02:00", duration="2h", seats=5
+    )
+
+    def message(message_id: int) -> PublishedMessage:
+        return PublishedMessage(
+            message_id=message_id,
+            channel_id=77,
+            message=FmMessageDraft(header="h", role_id=9, intro="i", fms=[fm], end="e"),
+        )
+
+    def current_id() -> int | None:
+        current = env.cog._get_last_published_in_guild(GUILD_ID)
+        return current.message_id if current else None
+
+    monkeypatch.setattr(formations, "save_published", _flaky(formations.save_published, storage_error))
+    env.cog._set_last_published_in_guild(GUILD_ID, message(MESSAGE_ID + 1))
+    assert current_id() == MESSAGE_ID + 1
+
+    env.cog._set_last_published_in_guild(GUILD_ID, message(MESSAGE_ID))
+    assert current_id() == MESSAGE_ID + 1
+
+    env.cog._set_last_published_in_guild(GUILD_ID, message(MESSAGE_ID + 2))
+    assert current_id() == MESSAGE_ID + 2

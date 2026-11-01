@@ -13,9 +13,11 @@ import pytest
 from fablabot import db, guild_config
 from fablabot.cogs import user_management
 from fablabot.helpers.constants import PARIS_TZ, RoleNames
-from fablabot.services import op_expiries
+from fablabot.services import formations, op_expiries
 
 if TYPE_CHECKING:
+    import sqlite3
+
     import simcord
 
 GUILD_ID = 111111111111111111
@@ -260,6 +262,33 @@ async def test_fm_publish_then_a_reaction_counts_as_a_sign_up(server: Server) ->
     await server.plain.react(published, "🔧")
     await server.env.advance_time(120)
     export = await server.admin.slash(server.commands, "fm export")
+    log = await next(a for a in export.response.attachments if a.filename.endswith(".csv")).read()
+    assert str(server.plain.id).encode() in log
+
+
+async def test_fm_publish_whose_record_cannot_be_saved_still_completes_and_counts_sign_ups(
+    server: Server, monkeypatch: pytest.MonkeyPatch, storage_error: sqlite3.Error
+) -> None:
+    """A storage failure after the post leaves a finished publish: the reply comes and reactions still count."""
+    real = formations.save_published
+    failures = [storage_error]
+
+    def flaky(*args: Any) -> None:
+        if failures:
+            raise failures.pop()
+        real(*args)
+
+    monkeypatch.setattr(formations, "save_published", flaky)
+    await _draft(server, later())
+    await server.admin.slash(server.commands, "fm publish", channel=server.general)
+    assert "Message publié dans" in everything(server.commands)
+    published = server.general.last_message
+    assert published is not None
+
+    await server.plain.react(published, "🔧")
+    await server.env.advance_time(120)
+    export = await server.admin.slash(server.commands, "fm export")
+
     log = await next(a for a in export.response.attachments if a.filename.endswith(".csv")).read()
     assert str(server.plain.id).encode() in log
 

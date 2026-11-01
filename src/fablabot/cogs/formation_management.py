@@ -85,6 +85,9 @@ class FormationManagement(commands.Cog):
         # Reactions the log refused, kept so a storage failure loses no sign-up. Ceiling: they live in memory only, so a
         # restart while the storage is still down drops them; the reminder tick tries to write them again.
         self._unlogged_reactions: list[tuple[int, ReactionEvent]] = []
+        # The published message when the database refused it, so reminder flags and registrations are neither lost
+        # nor redone. Same ceiling; every write of the message tries to save it again.
+        self._unsaved_published: dict[int, PublishedMessage] = {}
         self._reaction_logs.purge_all()
         self._check_upcoming_formations.start()
         logger.info("FormationManagement initialized")
@@ -732,15 +735,30 @@ class FormationManagement(commands.Cog):
         formations.save_draft(guild_id, draft)
 
     def _get_last_published_in_guild(self, guild_id: int) -> PublishedMessage | None:
-        """Get the last published state for a specific guild."""
-        published = formations.current_published(guild_id)
+        """Get the last published state for a specific guild: the copy the database refused to take, else the stored one."""
+        published = self._unsaved_published.get(guild_id) or formations.current_published(guild_id)
         if published is None:
             logger.warning(f"No published formations data stored for guild {guild_id}.")
         return published
 
     def _set_last_published_in_guild(self, guild_id: int, published: PublishedMessage) -> None:
-        """Set the last published state for a specific guild."""
-        formations.save_published(guild_id, published)
+        """Set the last published state for a specific guild.
+
+        A storage failure is logged and the state is kept in memory, so the reminder flags and the registrations
+        it holds are not lost nor redone; the next write of the guild saves it. Message IDs grow with time, so a
+        saved message that is not older than the kept one replaces it.
+        """
+        try:
+            formations.save_published(guild_id, published)
+        except sqlite3.Error:
+            logger.exception(
+                f"Published formations message not saved guild_id={guild_id}; kept in memory, saved with the next write"
+            )
+            self._unsaved_published[guild_id] = published
+            return
+        kept = self._unsaved_published.get(guild_id)
+        if kept is not None and published.message_id >= kept.message_id:
+            del self._unsaved_published[guild_id]
 
     def _log_kept_reactions(self) -> None:
         """Write the reactions the log refused, oldest first, until one fails."""
