@@ -86,6 +86,19 @@ def test_a_failed_block_leaves_nothing() -> None:
         conn.execute("INSERT INTO guild_settings (guild_id) VALUES (1)")
 
 
+def test_a_failed_commit_leaves_nothing_and_the_next_write_works() -> None:
+    """A commit that SQLite refuses is rolled back: reads show the old state and later writes go through."""
+    with pytest.raises(sqlite3.IntegrityError), db.transaction() as conn:
+        conn.execute("PRAGMA defer_foreign_keys = ON")
+        conn.execute("INSERT INTO registration VALUES (404, 0, 0, 1, 'a', '')")
+
+    assert not db.connection().in_transaction
+    assert db.connection().execute("SELECT count(*) FROM registration").fetchone()[0] == 0
+    with db.transaction() as conn:
+        conn.execute("INSERT INTO guild_settings (guild_id) VALUES (1)")
+    assert db.connection().execute("SELECT count(*) FROM guild_settings").fetchone()[0] == 1
+
+
 def test_a_closed_database_says_so() -> None:
     """Using the database before it is opened is an error, not a silent new file."""
     db.close_database()

@@ -53,10 +53,12 @@ def transaction() -> Iterator[sqlite3.Connection]:
     conn.execute("BEGIN IMMEDIATE")
     try:
         yield conn
+        conn.execute("COMMIT")
     except BaseException:
-        conn.execute("ROLLBACK")
+        # A refused COMMIT can leave the transaction open: it must not outlive the block.
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
         raise
-    conn.execute("COMMIT")
 
 
 def _configure(conn: sqlite3.Connection) -> None:
