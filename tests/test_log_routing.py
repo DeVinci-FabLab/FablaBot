@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 import logging
 from pathlib import Path
+import sqlite3
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from discord import AllowedMentions, HTTPException, TextChannel
@@ -156,6 +157,18 @@ async def test_send_failure_of_any_kind_logs_a_warning_and_never_reposts(caplog:
     with caplog.at_level(logging.DEBUG):
         await handler._send(GUILD_A, "boom")
     assert channel.send.await_count == 1
+    assert [r.levelno for r in caplog.records] == [logging.WARNING]
+    assert f"guild_id={GUILD_A}" in caplog.records[0].getMessage()
+
+
+async def test_a_failed_channel_lookup_logs_a_warning_and_never_raises(caplog: pytest.LogCaptureFixture) -> None:
+    """A storage failure while finding the log channel is logged as a warning and posts nothing."""
+    handler = DiscordLogHandler(_bot())
+    with (
+        caplog.at_level(logging.DEBUG),
+        patch("fablabot.logging_handlers.discord_log_handler.get_log_channel_id", side_effect=sqlite3.OperationalError("x")),
+    ):
+        await handler._send(GUILD_A, "boom")
     assert [r.levelno for r in caplog.records] == [logging.WARNING]
     assert f"guild_id={GUILD_A}" in caplog.records[0].getMessage()
 
