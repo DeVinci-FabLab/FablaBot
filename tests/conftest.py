@@ -132,12 +132,13 @@ def cog_bot() -> MagicMock:
     return MagicMock()
 
 
-def make_role(name: str, *, role_id: int = 0) -> MagicMock:
+def make_role(name: str, *, role_id: int = 0, position: int = 0) -> MagicMock:
     """Build a stub role with no holder yet.
 
     Args:
         name (str): The role name.
         role_id (int): The role ID.
+        position (int): The rank on the server; higher sits above.
 
     Returns:
         MagicMock: The stub role; ``members`` grows as ``make_member`` hands it out.
@@ -145,6 +146,7 @@ def make_role(name: str, *, role_id: int = 0) -> MagicMock:
     role = MagicMock(spec=Role)
     role.name = name
     role.id = role_id
+    role.position = position
     role.members = []
     return role
 
@@ -194,6 +196,7 @@ def make_guild(
     guild.roles = roles
     guild.members = members
     guild.get_member = lambda member_id: next((m for m in members if m.id == member_id), None)
+    guild.get_role = lambda role_id: next((r for r in roles if r.id == role_id), None)
     if channel is None:
         channel = MagicMock(spec=TextChannel)
         channel.send = AsyncMock()

@@ -42,13 +42,23 @@ EXPIRY_RETRY_DELAY = timedelta(seconds=60)
 
 _SELF_OP_REFUSED = "Vous ne pouvez pas vous op vous-même : un autre membre du staff doit le faire."
 _TEMP_ROLE_REFUSED = f"Le rôle {RoleNames.ADMIN_TEMP} se donne uniquement avec `/user op`, qui fixe sa durée."
+_TEMP_ROLE_TAKE_REFUSED = f"Le rôle {RoleNames.ADMIN_TEMP} se retire uniquement avec `/user deop`."
 _SELF_ADD_REFUSED = "Vous ne pouvez pas vous donner un rôle vous-même : un autre membre du staff doit le faire."
+_ROLE_NOT_BELOW_REFUSED = (
+    "Ce rôle est au même rang que votre rôle le plus haut, ou au-dessus : "
+    "demandez à un membre dont le rôle le plus haut est au-dessus de celui-ci."
+)
 _ADD_REFUSALS = {
     RefusalKind.MISSING_RIGHT: ErrorMessages.NO_PERMISSION_ADD_ROLE,
+    RefusalKind.ROLE_NOT_BELOW: _ROLE_NOT_BELOW_REFUSED,
     RefusalKind.TEMP_ROLE_OUTSIDE_OP: _TEMP_ROLE_REFUSED,
     RefusalKind.SELF_TARGET: _SELF_ADD_REFUSED,
 }
-_REMOVE_REFUSALS = {RefusalKind.MISSING_RIGHT: ErrorMessages.NO_PERMISSION_REMOVE_ROLE}
+_REMOVE_REFUSALS = {
+    RefusalKind.MISSING_RIGHT: ErrorMessages.NO_PERMISSION_REMOVE_ROLE,
+    RefusalKind.ROLE_NOT_BELOW: _ROLE_NOT_BELOW_REFUSED,
+    RefusalKind.TEMP_ROLE_OUTSIDE_DEOP: _TEMP_ROLE_TAKE_REFUSED,
+}
 # Same audience as the other staff tools (/msg): the member lists it shows are personal data.
 _WITH_ROLES_ALLOWED = ADMIN_ROLES | {RoleNames.BUREAU}
 
@@ -407,7 +417,7 @@ class UserManagement(commands.Cog):
             interaction.user,
             followup_mes.id,
             action="add",
-            check=lambda actor, target: self.assignment_refusal(actor, target, role, action="add"),
+            check=lambda actor, target: self.assignment_refusal(actor, target, self._live_role(actor, role), action="add"),
         )
         await interaction.followup.send(
             f"Sélectionnez les membres à qui ajouter {escape_md(role.name)} puis cliquez sur **Confirmer**.",
@@ -445,7 +455,7 @@ class UserManagement(commands.Cog):
             interaction.user,
             followup_mes.id,
             action="remove",
-            check=lambda actor, target: self.assignment_refusal(actor, target, role, action="remove"),
+            check=lambda actor, target: self.assignment_refusal(actor, target, self._live_role(actor, role), action="remove"),
         )
         await interaction.followup.send(
             f"Sélectionnez les membres à qui retirer {escape_md(role.name)} puis cliquez sur **Confirmer**.",
@@ -733,6 +743,20 @@ class UserManagement(commands.Cog):
         await interaction.response.send_message(text, ephemeral=True)
 
     @staticmethod
+    def _live_role(actor: Member, role: Role) -> Role:
+        """Return the guild's current copy of ``role``, since the command's copy keeps the rank it had then.
+
+        Args:
+            actor (Member): A member of the guild the role belongs to.
+            role (Role): The role as the command received it.
+
+        Returns:
+            Role: The cached role with the same ID, or ``role`` itself when the role no longer exists (Discord then
+            refuses the change and the member is listed as failed).
+        """
+        return actor.guild.get_role(role.id) or role
+
+    @staticmethod
     def assignment_refusal(
         actor: Member,
         target: Member | None,
@@ -749,9 +773,13 @@ class UserManagement(commands.Cog):
             action (Literal["add", "remove"]): Whether the role is given or taken.
 
         Returns:
-            RefusalKind | None: The first reason to refuse, or None.
+            RefusalKind | None: The first reason to refuse, or None. Beyond the name rules, a role must sit strictly below the
+            actor's highest role, unless the actor owns the server. The temporary role does not count toward that rank.
         """
         kind = role_refusal(_role_names(actor), role.name, action=action)
+        rank = max((r.position for r in actor.roles if r.name != RoleNames.ADMIN_TEMP), default=0)
+        if kind is None and actor.id != actor.guild.owner_id and role.position >= rank:
+            return RefusalKind.TEMP_ROLE_OUTSIDE_DEOP if role.name == RoleNames.ADMIN_TEMP else RefusalKind.ROLE_NOT_BELOW
         if kind is None and action == "add" and target is not None and target.id == actor.id:
             return RefusalKind.SELF_TARGET
         return kind

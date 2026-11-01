@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
 SERVER_ROLES: list[str] = [value for key, value in vars(RoleNames).items() if key.isupper()]
 F_ROLE = "F - Découpe laser"
+CALLER_RANK = 10  # above the server's roles, which sit at 0, so the rank rule never turns a profile away here
 NO_RIGHT = (
     ErrorMessages.ROLE_REQUIRED.split("{")[0],
     ErrorMessages.INSUFFICIENT_PERMISSIONS,
@@ -32,6 +33,8 @@ NO_RIGHT = (
     ErrorMessages.NO_PERMISSION_REMOVE_ROLE,
     ErrorMessages.NO_PERMISSION_MANAGE_MESSAGES,
     user_management._TEMP_ROLE_REFUSED,
+    user_management._ROLE_NOT_BELOW_REFUSED,
+    user_management._TEMP_ROLE_TAKE_REFUSED,
     "Seuls les administrateurs peuvent utiliser cette commande",
     "Rôles administratifs manquants",
     ErrorMessages.ROLE_NOT_FOUND.split("{")[0],
@@ -66,10 +69,11 @@ class _Answered(BaseException):
     """Raised by the armed reply mocks to stop a callback once it has answered."""
 
 
-def _role(name: str) -> MagicMock:
-    """Build a role stub with a name."""
+def _role(name: str, position: int = 0) -> MagicMock:
+    """Build a role stub with a name and a rank."""
     role = MagicMock(spec=Role)
     role.name = name
+    role.position = position
     return role
 
 
@@ -88,7 +92,7 @@ def _world(profile: Profile, *, absent: tuple[str, ...] = ()) -> World:
     names = [name for name in (*SERVER_ROLES, *([F_ROLE] if profile.f_roles else [])) if name not in absent]
     server_roles = [_role(name) for name in names]
     interaction.guild.roles = server_roles
-    interaction.user.roles = [_role(name) for name in profile.roles]
+    interaction.user.roles = [_role(name, CALLER_RANK) for name in profile.roles]
     interaction.user.guild_permissions = profile.permissions
     interaction.permissions = profile.permissions
     for mock in (
@@ -310,7 +314,7 @@ def test_role_refusal_agrees_with_assignment_refusal() -> None:
     for profile in PROFILES.values():
         actor = MagicMock(spec=Member)
         actor.id = 1
-        actor.roles = [_role(name) for name in profile.roles]
+        actor.roles = [_role(name, 10) for name in profile.roles]
         names = user_management._role_names(actor)
         for name in roles:
             for action in ("add", "remove"):
@@ -323,7 +327,7 @@ def _member(member_id: int, *names: str) -> MagicMock:
     """Build a member stub with an id and the roles named."""
     member = MagicMock(spec=Member)
     member.id = member_id
-    member.roles = [_role(name) for name in names]
+    member.roles = [_role(name, 10) for name in names]
     return member
 
 
@@ -344,10 +348,12 @@ def test_giving_a_role_to_oneself_reports_the_first_refusal(held: str, role: str
     assert refusal is expected
 
 
-def test_the_temporary_role_is_given_by_op_only_but_taken_like_any_other() -> None:
-    """Adding the temporary role is left to /user op; whoever may take a role may take it too."""
-    actor, target, role = _member(1, RoleNames.PRESIDENT), _member(2), _role(RoleNames.ADMIN_TEMP)
+def test_the_temporary_role_is_given_by_op_only_and_taken_by_role_only_from_above_it() -> None:
+    """/user op alone gives the temporary role; taking it by role is for members who rank above it, others use /user deop."""
+    president = RoleNames.PRESIDENT
+    actor, target, role = _member(1, president), _member(2), _role(RoleNames.ADMIN_TEMP, 20)
     assignment_refusal = user_management.UserManagement.assignment_refusal
     assert assignment_refusal(actor, target, role, action="add") is utils.RefusalKind.TEMP_ROLE_OUTSIDE_OP
-    assert assignment_refusal(actor, target, role, action="remove") is None
-    assert user_management.role_refusal({RoleNames.PRESIDENT}, RoleNames.ADMIN_TEMP, action="remove") is None
+    assert assignment_refusal(actor, target, role, action="remove") is utils.RefusalKind.TEMP_ROLE_OUTSIDE_DEOP
+    assert assignment_refusal(actor, target, _role(RoleNames.ADMIN_TEMP, 5), action="remove") is None
+    assert user_management.role_refusal({president}, RoleNames.ADMIN_TEMP, action="remove") is None
