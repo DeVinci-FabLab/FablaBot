@@ -156,6 +156,21 @@ async def test_expiry_for_member_who_left_clears_record_quietly(cog: UserManagem
     assert not [r for r in caplog.records if r.levelname == "ERROR"]
 
 
+async def test_expiry_leaves_a_member_without_the_role_alone_and_clears_the_record(cog: UserManagement) -> None:
+    """A member who no longer holds the role gets no removal and no notice, and the record is cleared."""
+    guild, target, caller = _server(GUILD_A)
+    await _op(cog, guild, caller, target, 5)
+    cog.bot.get_guild = MagicMock(return_value=guild)
+
+    with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=5)):
+        settled = await cog._expire(GUILD_A, TARGET_ID)
+
+    assert settled is True
+    assert str(TARGET_ID) not in stored_ops().get(str(GUILD_A), {})
+    target.remove_roles.assert_not_awaited()
+    guild.get_channel.return_value.send.assert_not_awaited()
+
+
 async def test_failed_expiry_keeps_record_and_warns_op_channel(cog: UserManagement, caplog: pytest.LogCaptureFixture) -> None:
     """A failed expiry keeps the record and warns the op channel."""
     guild, target, caller = _server(GUILD_A)
