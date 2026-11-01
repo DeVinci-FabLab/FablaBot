@@ -8,10 +8,8 @@ import csv
 from datetime import datetime, timedelta
 import io
 import logging
-from pathlib import Path
 import random
 import re
-from typing import Any
 from warnings import deprecated
 
 from discord import (
@@ -41,7 +39,6 @@ from discord.ext import commands
 from fablabot.helpers.access import EVERYONE, AnyRole, ServerPermission, access
 from fablabot.helpers.constants import ADMIN_ROLES, PARIS_TZ, ErrorMessages, RoleNames, staff_default_permissions
 from fablabot.helpers.reaction_log import ReactionLogManager
-from fablabot.helpers.state_store import JsonStateStore
 from fablabot.helpers.utils import (
     ensure_command_context,
     get_members_by_role,
@@ -51,11 +48,11 @@ from fablabot.helpers.utils import (
 )
 from fablabot.models.common import ReactionAction, ReactionEvent
 from fablabot.models.message import EASTER_EGGS, EASTER_EGGS_ENABLED, MessageDraft, MsgCommand, MsgReactionEvent, TrackedMessage
+from fablabot.services import messages
 from fablabot.ui import mui
 
 logger = logging.getLogger(__name__)
 
-MESSAGES_STATE_FILE = Path("data/messages_state.json")
 REACTION_LOG_RETENTION = timedelta(days=30)
 ALLOWED_ROLES = ADMIN_ROLES | {RoleNames.BUREAU}
 _ACCESS = AnyRole(ALLOWED_ROLES)
@@ -95,7 +92,6 @@ class MessageManagement(commands.Cog):
             bot (commands.Bot): The bot instance.
         """
         self.bot = bot
-        self._state_store = JsonStateStore(logger, MESSAGES_STATE_FILE)
         self._reaction_logs = ReactionLogManager(
             "message",
             retention=REACTION_LOG_RETENTION,
@@ -931,15 +927,7 @@ class MessageManagement(commands.Cog):
 
     def _get_tracked_messages(self, guild_id: int) -> dict[int, TrackedMessage]:
         """Retrieve all tracked messages for a guild."""
-        guild_state = self._state_store.ensure_guild(guild_id)
-        tracked_raw = guild_state.get("tracked", {}) or {}
-        tracked: dict[int, TrackedMessage] = {}
-        for msg_id_str, payload in tracked_raw.items():
-            try:
-                tracked[int(msg_id_str)] = TrackedMessage.from_dict(payload)
-            except Exception:
-                logger.warning(f"Ignoring invalid tracked message payload for guild {guild_id}: {payload}")
-        return tracked
+        return messages.tracked_messages(guild_id)
 
     def _get_tracked_message(self, guild_id: int, message_id: int) -> TrackedMessage | None:
         """Retrieve a specific tracked message for a guild."""
@@ -964,10 +952,7 @@ class MessageManagement(commands.Cog):
             guild_id (int): The ID of the guild.
             tracked (TrackedMessage): The tracked message to set or update.
         """
-        guild_state = self._state_store.ensure_guild(guild_id)
-        tracked_map = guild_state.setdefault("tracked", {})
-        tracked_map[str(tracked.message_id)] = tracked.to_dict()
-        self._state_store.set_guild(guild_id, guild_state)
+        messages.save_tracked(guild_id, tracked)
 
     def remove_tracked_message(self, guild_id: int, message_id: int) -> bool:
         """Remove a tracked message for a guild.
@@ -979,14 +964,7 @@ class MessageManagement(commands.Cog):
         Returns:
             bool: True if the message was removed, False if it was not found.
         """
-        guild_state = self._state_store.ensure_guild(guild_id)
-        tracked_map: dict[str, Any] = guild_state.get("tracked") or {}
-        if str(message_id) not in tracked_map:
-            return False
-        tracked_map.pop(str(message_id), None)
-        guild_state["tracked"] = tracked_map
-        self._state_store.set_guild(guild_id, guild_state)
-        return True
+        return messages.remove_tracked(guild_id, message_id)
 
     def get_draft(self, guild_id: int) -> MessageDraft | None:
         """Retrieve the message draft for a guild.
@@ -997,9 +975,7 @@ class MessageManagement(commands.Cog):
         Returns:
             MessageDraft | None: The message draft for the guild, or None if not found.
         """
-        guild_state = self._state_store.ensure_guild(guild_id)
-        draft_raw = guild_state.get("draft")
-        return MessageDraft.from_dict(draft_raw) if draft_raw else None
+        return messages.get_draft(guild_id)
 
     def set_draft(self, guild_id: int, draft: MessageDraft) -> None:
         """Set the message draft for a guild.
@@ -1008,18 +984,13 @@ class MessageManagement(commands.Cog):
             guild_id (int): The ID of the guild.
             draft (MessageDraft): The message draft to set.
         """
-        guild_state = self._state_store.ensure_guild(guild_id)
-        guild_state["draft"] = draft.to_dict()
-        self._state_store.set_guild(guild_id, guild_state)
+        messages.save_draft(guild_id, draft)
         logger.debug(f"Draft updated for guild {guild_id} with {len(draft.reactions)} reactions")
 
     def _clear_draft(self, guild_id: int) -> None:
         """Clear the message draft for a guild."""
-        guild_state = self._state_store.ensure_guild(guild_id)
-        if "draft" in guild_state:
-            guild_state.pop("draft", None)
-            self._state_store.set_guild(guild_id, guild_state)
-            logger.debug(f"Draft cleared for guild {guild_id}")
+        messages.clear_draft(guild_id)
+        logger.debug(f"Draft cleared for guild {guild_id}")
 
     async def register_reaction_action(self, guild_id: int, reaction: MsgReactionEvent) -> str:
         """Register a reaction action for a tracked message or draft.
