@@ -19,7 +19,7 @@ include = ["fablabot*"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-fablabot = ["locales/*.toml"]
+fablabot = ["locales/*.toml", "migrations/*.sql"]
 
 [project.scripts]
 doc_builder = "fablabot._build_docs:build_docs"

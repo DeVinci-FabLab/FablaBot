@@ -9,10 +9,11 @@ from unittest.mock import AsyncMock, MagicMock
 from discord import Guild, Member, Role, TextChannel, ui
 import pytest
 
+from fablabot import db
 from fablabot.helpers.guild_access import ALLOWED_GUILD_IDS_ENV
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Iterator
     from types import ModuleType
 
 LISTED_GUILD = "111111111111111111"
@@ -20,9 +21,12 @@ OTHER_LISTED_GUILD = "222222222222222222"
 
 
 @pytest.fixture(autouse=True)
-def _isolated_cwd(tmp_path, monkeypatch) -> None:
-    """Run every test from an empty temporary directory so nothing lands in ``data/`` or ``logs/``."""
+def _isolated_cwd(tmp_path, monkeypatch) -> Iterator[None]:
+    """Run every test from an empty temporary directory with its own database, outside ``data/`` so that folder stays empty."""
     monkeypatch.chdir(tmp_path)
+    db.open_database(tmp_path / "test-database" / "fablabot.db")
+    yield
+    db.close_database()
 
 
 @pytest.fixture

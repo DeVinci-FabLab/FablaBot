@@ -1,0 +1,229 @@
+"""The database opens itself on an empty folder, moves forward only, and keeps a transaction whole."""
+
+from __future__ import annotations
+
+from pathlib import Path
+import sqlite3
+from typing import TYPE_CHECKING
+
+import pytest
+
+from fablabot import db
+
+if TYPE_CHECKING:
+    from types import ModuleType
+
+DB_FILE = Path("elsewhere/test.db")
+
+
+def _migrations(folder: Path, *sql: str) -> Path:
+    """Write one numbered migration per statement."""
+    folder.mkdir(exist_ok=True)
+    for number, statement in enumerate(sql, start=1):
+        (folder / f"{number:04d}_step.sql").write_text(statement, encoding="utf-8")
+    return folder
+
+
+def _version(path: Path) -> int:
+    """Read the schema version of a database file."""
+    conn = sqlite3.connect(path)
+    try:
+        return conn.execute("PRAGMA user_version").fetchone()[0]
+    finally:
+        conn.close()
+
+
+def _tables() -> set[str]:
+    """List the tables of the open database."""
+    return {row["name"] for row in db.connection().execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+
+
+def test_an_empty_folder_gets_the_whole_schema() -> None:
+    """A fresh start creates the folder and the database at the latest version."""
+    db.open_database(DB_FILE)
+
+    assert DB_FILE.exists()
+    assert _version(DB_FILE) == 1
+    assert {"guild_settings", "fm_message", "formation", "registration", "tracked_message", "reaction_event"} <= _tables()
+    assert {"op_expiry", "state_import", "legacy_log_channel", "tracked_reaction"} <= _tables()
+
+
+def test_the_connection_keeps_its_settings() -> None:
+    """Foreign keys are on, the journal is a plain file, temporary data stays in memory."""
+    conn = db.connection()
+
+    assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+    assert conn.execute("PRAGMA temp_store").fetchone()[0] == 2
+
+
+def test_no_journal_is_left_at_rest() -> None:
+    """After a commit the database is one file."""
+    db.open_database(DB_FILE)
+    with db.transaction() as conn:
+        conn.execute("INSERT INTO guild_settings (guild_id) VALUES (1)")
+
+    assert [path.name for path in DB_FILE.parent.iterdir()] == [DB_FILE.name]
+
+
+def test_a_transaction_commits_as_a_whole() -> None:
+    """Rows written in a block are there after it."""
+    with db.transaction() as conn:
+        conn.execute("INSERT INTO guild_settings (guild_id) VALUES (1)")
+        conn.execute("INSERT INTO guild_settings (guild_id) VALUES (2)")
+
+    assert db.connection().execute("SELECT count(*) FROM guild_settings").fetchone()[0] == 2
+
+
+def test_a_failed_block_leaves_nothing() -> None:
+    """A block that raises takes back its earlier writes, and the next one works."""
+    with pytest.raises(ZeroDivisionError), db.transaction() as conn:
+        conn.execute("INSERT INTO guild_settings (guild_id) VALUES (1)")
+        _ = 1 / 0
+
+    assert db.connection().execute("SELECT count(*) FROM guild_settings").fetchone()[0] == 0
+    with db.transaction() as conn:
+        conn.execute("INSERT INTO guild_settings (guild_id) VALUES (1)")
+
+
+def test_a_closed_database_says_so() -> None:
+    """Using the database before it is opened is an error, not a silent new file."""
+    db.close_database()
+
+    with pytest.raises(RuntimeError, match="not open"):
+        db.connection()
+
+
+def test_a_failed_migration_changes_nothing(tmp_path: Path) -> None:
+    """A migration that fails halfway keeps the version and undoes its own statements."""
+    folder = _migrations(tmp_path / "m", "CREATE TABLE one (a);", "CREATE TABLE two (a); CREATE TABLE broken (;")
+    with pytest.raises(db.StorageError):
+        db.open_database(DB_FILE, migrations=folder)
+
+    assert _version(DB_FILE) == 1
+    conn = sqlite3.connect(DB_FILE)
+    names = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    conn.close()
+    assert names == {"one"}
+
+
+def test_a_newer_database_stops_the_start(tmp_path: Path) -> None:
+    """A database from a later release is refused and left as it was."""
+    folder = _migrations(tmp_path / "m", "CREATE TABLE one (a);")
+    db.open_database(DB_FILE, migrations=_migrations(tmp_path / "newer", "CREATE TABLE one (a);", "CREATE TABLE two (a);"))
+    db.close_database()
+    before = DB_FILE.read_bytes()
+
+    with pytest.raises(db.StorageError, match="newer than this release"):
+        db.open_database(DB_FILE, migrations=folder)
+
+    assert DB_FILE.read_bytes() == before
+
+
+def test_a_file_that_is_no_database_stops_the_start() -> None:
+    """A damaged file is refused, never replaced."""
+    DB_FILE.parent.mkdir(parents=True)
+    DB_FILE.write_bytes(b"not a database, at least not one the bot can read")
+    before = DB_FILE.read_bytes()
+
+    with pytest.raises(db.StorageError, match="cannot be used"):
+        db.open_database(DB_FILE)
+
+    assert DB_FILE.read_bytes() == before
+
+
+def test_an_upgrade_copies_the_database_first(tmp_path: Path) -> None:
+    """Before a schema change the bot keeps a copy of the data at the old version."""
+    db.open_database(DB_FILE, migrations=_migrations(tmp_path / "m", "CREATE TABLE one (a);"))
+    with db.transaction() as conn:
+        conn.execute("INSERT INTO one VALUES ('kept')")
+    db.close_database()
+
+    db.open_database(DB_FILE, migrations=_migrations(tmp_path / "m", "CREATE TABLE one (a);", "CREATE TABLE two (a);"))
+
+    [copy] = DB_FILE.parent.glob("backups/test-v1-*.db")
+    conn = sqlite3.connect(copy)
+    assert conn.execute("SELECT a FROM one").fetchall() == [("kept",)]
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+    conn.close()
+    assert _version(DB_FILE) == 2
+
+
+def test_an_up_to_date_database_is_not_copied() -> None:
+    """A restart at the same version writes no backup."""
+    db.open_database(DB_FILE)
+    db.open_database(DB_FILE)
+
+    assert not (DB_FILE.parent / "backups").exists()
+
+
+def test_a_new_database_is_not_copied() -> None:
+    """There is nothing to keep before the first migration."""
+    db.open_database(DB_FILE)
+
+    assert not (DB_FILE.parent / "backups").exists()
+
+
+def test_migrations_are_numbered_without_a_gap() -> None:
+    """The file names count 1, 2, 3, as the version does."""
+    numbers = [int(file.name[:4]) for file in sorted(db.MIGRATIONS_DIR.glob("*.sql"))]
+
+    assert numbers == list(range(1, len(numbers) + 1))
+
+
+def test_migrations_ship_with_the_package() -> None:
+    """The image installs a wheel: the SQL files must be declared as package data."""
+    pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+
+    assert '"migrations/*.sql"' in pyproject.read_text(encoding="utf-8")
+
+
+def test_no_transaction_can_span_an_await() -> None:
+    """Storage code is synchronous, and commands and views never open a transaction themselves."""
+    package = Path(db.__file__).parent
+    storage = [package / "db.py", *package.glob("services/*.py")]
+    callers = [*package.glob("cogs/*.py"), *package.glob("ui/*.py")]
+
+    assert not [path.name for path in storage if "async " in path.read_text(encoding="utf-8")]
+    assert not [path.name for path in callers if "transaction(" in path.read_text(encoding="utf-8")]
+
+
+def test_an_emoji_can_appear_twice_in_a_draft() -> None:
+    """The schema accepts what two open add forms can already store."""
+    with db.transaction() as conn:
+        conn.execute(
+            "INSERT INTO fm_message (id, guild_id, header, role_id, intro, end_text, request_forms_url) "
+            "VALUES (1, 1, '', 0, '', '', '')"
+        )
+        for position in (0, 1):
+            conn.execute(
+                "INSERT INTO formation (fm_message_id, position, emoji, name, trainer_mention, start_iso, duration, seats, "
+                "description, excusable, notified_hour_before, notified_at_start) "
+                "VALUES (1, ?, '🔧', '', '', '', '', 1, '', 1, 0, 0)",
+                (position,),
+            )
+
+    assert db.connection().execute("SELECT count(*) FROM formation").fetchone()[0] == 2
+
+
+def test_a_server_has_one_draft() -> None:
+    """A second draft row for a server is refused by the schema."""
+    insert = (
+        "INSERT INTO fm_message (guild_id, header, role_id, intro, end_text, request_forms_url) VALUES (1, '', 0, '', '', '')"
+    )
+    db.connection().execute(insert)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        db.connection().execute(insert)
+
+
+def test_main_stops_before_login_when_the_database_cannot_be_used(fablabot_main: ModuleType) -> None:
+    """A bad database ends the process with one line, before the bot is even built."""
+    db.close_database()
+    db.DATABASE_FILE.parent.mkdir(exist_ok=True)
+    db.DATABASE_FILE.write_bytes(b"not a database, at least not one the bot can read")
+
+    with pytest.raises(SystemExit) as stopped:
+        fablabot_main.main()
+
+    assert str(stopped.value).startswith("Cannot start: data/fablabot.db cannot be used")
