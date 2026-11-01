@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from fablabot import db
+from fablabot.services import op_expiries
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -347,6 +348,45 @@ def test_a_server_has_one_draft() -> None:
 
     with pytest.raises(sqlite3.IntegrityError):
         db.connection().execute(insert)
+
+
+def test_a_server_has_one_tracked_draft() -> None:
+    """A second tracked draft on one server is refused, another server keeps its own."""
+    insert = "INSERT INTO tracked_message (guild_id, content) VALUES (?, 'draft')"
+    db.connection().execute(insert, (1,))
+
+    with pytest.raises(sqlite3.IntegrityError):
+        db.connection().execute(insert, (1,))
+    db.connection().execute(insert, (2,))
+
+
+def test_an_expiry_is_kept_per_server_and_member() -> None:
+    """The same member on two servers keeps two expiries, and two members on one server keep two."""
+    for guild_id, member_id in ((1, 7), (2, 7), (1, 8)):
+        op_expiries.record(guild_id, member_id, {"expires_at": f"2026-11-01T0{guild_id}:00:00+00:00", "channel_id": 99})
+
+    assert op_expiries.get(1, 7) == {"expires_at": "2026-11-01T01:00:00+00:00", "channel_id": 99}
+    assert op_expiries.get(2, 7) == {"expires_at": "2026-11-01T02:00:00+00:00", "channel_id": 99}
+    assert sorted(op_expiries.member_ids(1)) == [7, 8]
+
+
+def test_a_text_value_in_a_number_column_is_refused() -> None:
+    """Settings tables are strict: a channel ID that is text does not get stored."""
+    with pytest.raises(sqlite3.IntegrityError):
+        db.connection().execute("INSERT INTO guild_settings (guild_id, commands_channel_id) VALUES (1, 'general')")
+
+
+def test_a_reaction_event_has_a_known_scope() -> None:
+    """The history takes the two scopes it is read by and refuses any other."""
+    insert = (
+        "INSERT INTO reaction_event (scope, guild_id, message_id, user_id, emoji, action, ts_iso) "
+        "VALUES (?, 1, 2, 3, '👍', 'add', '2026-11-01T00:00:00+00:00')"
+    )
+    for scope in ("formation", "message"):
+        db.connection().execute(insert, (scope,))
+
+    with pytest.raises(sqlite3.IntegrityError):
+        db.connection().execute(insert, ("other",))
 
 
 def test_main_stops_before_login_when_the_database_cannot_be_used(fablabot_main: ModuleType) -> None:
