@@ -6,9 +6,9 @@ from http import HTTPStatus
 import logging
 import os
 import sys
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, override
 
-from discord import Intents
+from discord import Intents, Message
 from discord.app_commands import AppCommandContext
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
@@ -190,15 +190,16 @@ class Fablabot(commands.Bot):
         self.gateway_up = False
 
     @override
-    async def on_command_error(self, ctx: commands.Context[Any], exception: Exception) -> None:
-        """Handle uncaught command errors.
+    async def on_message(self, message: Message, /) -> None:
+        """Ignore the message instead of looking for a prefix command.
+
+        No prefix command exists. Looking for one made a mention followed by a word reply with an error and log part of
+        the message, on any server, and the allow-list guards slash commands only. The cogs' ``on_message`` listeners
+        are not affected.
 
         Args:
-            ctx (commands.Context[Any]): The invocation context of the command.
-            exception (Exception): The raised exception.
+            message (Message): The message received.
         """
-        logger.exception("Unhandled command error", exc_info=exception)
-        await ctx.send("Une erreur inattendue est survenue lors de l'exécution de la commande.")
 
 
 def main() -> None:

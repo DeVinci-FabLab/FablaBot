@@ -36,6 +36,8 @@ from fablabot.ui import uui
 if TYPE_CHECKING:
     from collections.abc import Collection
 
+    from fablabot.main import Fablabot
+
 logger = logging.getLogger(__name__)
 
 EXPIRY_RETRY_DELAY = timedelta(seconds=60)
@@ -155,11 +157,11 @@ class UserManagement(commands.Cog):
         user_group (app_commands.Group): Command group for user management commands.
     """
 
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: Fablabot) -> None:
         """Initialize the cog and register its command groups.
 
         Args:
-            bot (commands.Bot): The bot instance.
+            bot (Fablabot): The bot instance.
         """
         self.bot = bot
         self.deop_tasks: dict[tuple[int, int], asyncio.Task[None]] = {}
@@ -507,7 +509,9 @@ class UserManagement(commands.Cog):
 
         This round is the only retry of a temporary right: a removal Discord refused or raised on, a timer that
         died and a failed read leave a holder or a record that the next round sees, so no failure path has to reach
-        a retry, and nothing gives up. Unavailable guilds keep their records until they are back.
+        a retry, and nothing gives up. Unavailable guilds keep their records until they are back. The allow-list is
+        not asked: a temporary admin right ends on time on any server the bot is in, served or not, because least
+        privilege comes before the list. Each server's lines stay under its own log context.
         """
         for guild in self.bot.guilds:
             if guild.unavailable:
@@ -817,10 +821,10 @@ class UserManagement(commands.Cog):
 
 
 @deprecated("Load the cog using `bot.add_cog()` instead.")
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: Fablabot) -> None:
     """Setup function to load the UserManagement cog.
 
     Args:
-        bot (commands.Bot): The bot instance.
+        bot (Fablabot): The bot instance.
     """
     await bot.add_cog(UserManagement(bot))

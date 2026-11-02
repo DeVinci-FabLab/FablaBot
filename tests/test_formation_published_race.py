@@ -17,6 +17,7 @@ import pytest
 from fablabot import db
 from fablabot.cogs import formation_management as fm_cog
 from fablabot.helpers.constants import PARIS_TZ
+from fablabot.helpers.guild_access import GuildAccessPolicy
 from fablabot.logging_handlers.guild_context import GuildContextFilter
 from fablabot.models import FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
 from fablabot.services import formations
@@ -46,6 +47,7 @@ class _Env:
         reactors: tuple[int, ...] = (MEMBER_ID,),
     ) -> None:
         self.cog = cog
+        monkeypatch.setattr(cog.bot, "guild_access", GuildAccessPolicy(frozenset({GUILD_ID, OTHER_GUILD_ID, NEW_GUILD_ID})))
         self.gate = asyncio.Event()
         self.entered = asyncio.Event()
         self.fetch_gate = asyncio.Event()
@@ -663,6 +665,7 @@ async def test_an_update_leaves_the_marks_of_another_server_alone(started_bot: A
 async def test_the_tick_runs_the_update_of_every_marked_server(started_bot: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """A server marked stale and another marked for a retry both get their update at the same tick."""
     cog = started_bot.get_cog("FormationManagement")
+    monkeypatch.setattr(cog.bot, "guild_access", GuildAccessPolicy(frozenset({OTHER_GUILD_ID, NEW_GUILD_ID})))
     schedule = MagicMock()
     monkeypatch.setattr(cog, "_schedule_update", schedule)
     cog._stale_guilds.add(NEW_GUILD_ID)

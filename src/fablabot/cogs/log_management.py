@@ -71,6 +71,7 @@ class LogManagement(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self) -> None:
         """Give the legacy instance-wide log channel to the server that owns it."""
+        # Exempt from the allow-list on purpose: a one-shot channel pointer, no member data.
         migrate_legacy_log_channel(self._guild_of_channel)
 
     # region ====== Log Slash Commands Group ======

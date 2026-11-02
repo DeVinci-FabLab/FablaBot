@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from typing import TYPE_CHECKING
 from warnings import deprecated
 
 from discord import (
@@ -33,6 +34,9 @@ from fablabot.helpers.safe_discord_operations import (
     safe_edit_channel,
 )
 from fablabot.helpers.utils import ensure_command_context, escape_md, format_channel_mention
+
+if TYPE_CHECKING:
+    from fablabot.main import Fablabot
 
 logger = logging.getLogger(__name__)
 
@@ -67,11 +71,11 @@ class ChannelManagement(commands.Cog):
         vocal_group (app_commands.Group): Command group for voice channel management commands.
     """
 
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: Fablabot) -> None:
         """Initialize the cog and register its command groups.
 
         Args:
-            bot (commands.Bot): The bot instance.
+            bot (Fablabot): The bot instance.
         """
         self.bot = bot
         self.remove_tasks: dict[int, asyncio.Task[None]] = {}
@@ -393,6 +397,8 @@ class ChannelManagement(commands.Cog):
         Args:
             msg (Message): The deleted message.
         """
+        if not self.bot.guild_access.is_served(msg.guild.id if msg.guild else None):
+            return
         logger.debug(f"Message {msg.id} deleted")
         if not isinstance(msg.channel, TextChannel):
             logger.debug(f"Message {msg.id} deleted in non-text channel {msg.channel}")
@@ -434,10 +440,10 @@ class ChannelManagement(commands.Cog):
         Args:
             payload (RawMessageDeleteEvent): The raw event payload data.
         """
+        if payload.guild_id is None or not self.bot.guild_access.is_served(payload.guild_id):
+            return
         logger.debug(f"raw_message_delete: {payload.message_id} in channel {payload.channel_id} in guild {payload.guild_id}")
         if payload.cached_message:
-            return
-        if payload.guild_id is None:
             return
         guild = self.bot.get_guild(payload.guild_id)
         if guild is None:
@@ -484,6 +490,8 @@ class ChannelManagement(commands.Cog):
             before (VoiceState): The voice state before the change.
             after (VoiceState): The voice state after the change.
         """
+        if not self.bot.guild_access.is_served(member.guild.id):
+            return
         logger.debug(f"voice_state_update: user_id={member.id} before={before.channel} after={after.channel}")
         if isinstance(after.channel, VoiceChannel):
             task = self.remove_tasks.pop(after.channel.id, None)
@@ -573,10 +581,10 @@ class ChannelManagement(commands.Cog):
 
 
 @deprecated("Load the cog using `bot.add_cog()` instead.")
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: Fablabot) -> None:
     """Setup function to load the ChannelManagement cog.
 
     Args:
-        bot (commands.Bot): The bot instance.
+        bot (Fablabot): The bot instance.
     """
     await bot.add_cog(ChannelManagement(bot))

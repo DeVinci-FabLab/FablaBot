@@ -80,7 +80,7 @@ class GuildAccessPolicy:
         return cls(allowed=parse_allowed_guild_ids(source.get(ALLOWED_GUILD_IDS_ENV)))
 
     def is_served(self, guild_id: int | None) -> bool:
-        """Tell whether commands from ``guild_id`` are served.
+        """Tell whether the bot serves ``guild_id``: its commands, its event listeners and its background tasks.
 
         Args:
             guild_id (int | None): The guild ID, None for a DM.

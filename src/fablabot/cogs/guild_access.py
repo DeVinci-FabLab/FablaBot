@@ -99,6 +99,18 @@ class GuildAccess(commands.Cog):
         return True
 
     @commands.Cog.listener()
+    async def on_connect(self) -> None:
+        """Serve the guilds of the first connection while the list is empty, before any event reaches another listener.
+
+        Ready comes seconds later, and a reaction or a join in that gap would find its guild refused and be lost,
+        as would the first reminder tick. The listeners start in the order their events were created, so this one
+        runs first. Ready still checks the owner of each guild and warns.
+        """
+        policy = self.bot.guild_access
+        if not policy.allowed and not self._first_ready_done:
+            policy.tolerated.update(guild.id for guild in self.bot.guilds)
+
+    @commands.Cog.listener()
     async def on_ready(self) -> None:
         """Reconcile the current guilds with the allow-list, on every full connection."""
         policy = self.bot.guild_access
@@ -124,10 +136,12 @@ class GuildAccess(commands.Cog):
                     leaving += 1
         elif guilds and not any(guild.id in policy.allowed for guild in guilds):
             # A list matching nothing is more likely a typo than a wish to leave everywhere, and a
-            # departure is costly to undo: commands stay refused by the tree.
+            # departure is costly to undo: the bot stays but serves none, and nothing is caught up at
+            # the next start, as for a reaction made while it is down.
             logger.error(
-                f"{ALLOWED_GUILD_IDS_ENV} matches none of the {len(guilds)} current guilds: "
-                "leaving none and refusing their commands; check the IDs.",
+                f"{ALLOWED_GUILD_IDS_ENV} matches none of the {len(guilds)} current guilds: leaving none, "
+                "serving none. Commands are refused; reactions, joins, messages and reminders are ignored "
+                "and not caught up once fixed; check the IDs and redeploy.",
             )
         else:
             unlisted = [guild for guild in guilds if guild.id not in policy.allowed]
