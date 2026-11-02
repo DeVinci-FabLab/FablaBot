@@ -223,6 +223,13 @@ def test_operator_guide_says_how_a_failed_import_rolls_back() -> None:
     section = _section(_read("docs/OPERATIONS.md"), "### If a step fails")
     for detail in ("still holds the old release", "leaves no row", "Never delete the journal", "`key #3`", "counted from 0"):
         assert detail in section, detail
+    rows = {line.split("|")[1].strip(): line for line in section.splitlines() if line.startswith("| ") and line[2].isdigit()}
+    assert "8, 9 or 10" not in rows
+    assert "leaves no row" in rows["8 or 9"]
+    # Step 10 follows a committed import: the old release, if it ran, leaves the database behind the files.
+    assert "committed" in rows["10"]
+    assert "set `data/fablabot.db` aside" in rows["10"]
+    assert "mv" in rows["10"]
 
 
 def test_operator_guide_warns_of_stale_json_and_exports_first() -> None:
@@ -307,12 +314,16 @@ def test_the_archive_steps_take_the_private_export_folder(host: _Host) -> None:
     done = host.run(_blocks(section))
 
     assert done.returncode == 0, done.stderr
-    archive_count, disk_count = done.stdout.split()
+    archive_count, disk_count, archived_exports, exports = done.stdout.split()
     assert archive_count == disk_count
+    assert int(archive_count) > 0
+    assert archived_exports == exports == str(len(EXPORTED))
     archive = next((host.home / "fablabot-archive").glob("*.tar.gz"))
     with tarfile.open(archive) as opened:
         assert f"data/exports/{STAMP}/guild_config.json" in opened.getnames()
     assert stat.S_IMODE(archive.stat().st_mode) == 0o600
+    assert "above 0" in section
+    assert "sudo" in section.split("4. ", 1)[1]
 
 
 @needs_a_user
@@ -321,14 +332,21 @@ def test_the_rollback_copies_the_private_export_in_place_of_the_json_files(host:
     section = _section(_read("docs/OPERATIONS.md"), "#### Back to a release before the database")
     step = section.split("\n3. ", 1)[1].split("\n4. ", 1)[0]
 
-    done = host.run(_blocks(step), STAMP=STAMP)
+    blocks = _blocks(step)
+    # The first block only lists the export and moves nothing: its output is the start of the full run's.
+    listing = host.run(blocks[:1], STAMP=STAMP)
+    done = host.run(blocks, STAMP=STAMP)
 
+    assert listing.returncode == 0, listing.stderr
     assert done.returncode == 0, done.stderr
     for name in EXPORTED:
         assert (host.data / name).read_text(encoding="utf-8") == f"new {name}"
     for name in EXPORTED[:3]:
         assert (host.data / f"json-before-{STAMP}" / name).read_text(encoding="utf-8") == f"old {name}"
-    assert set(done.stdout.split()) >= set(EXPORTED)
+    assert set(listing.stdout.split()) >= set(EXPORTED)
+    # The check after the copy is what the second block prints: the four files, as the guide says it must.
+    after_copy = done.stdout.removeprefix(listing.stdout)
+    assert sorted(line.split()[-1] for line in after_copy.splitlines()) == sorted(EXPORTED)
 
 
 @needs_a_user

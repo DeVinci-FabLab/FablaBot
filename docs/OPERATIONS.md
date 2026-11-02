@@ -66,11 +66,21 @@ Stop the stack, then archive `logs/` and `data/`: an archive of a running databa
    chmod 600 ~/fablabot-archive/fablabot-$STAMP.tar.gz
    ```
 
-4. Check the file counts match:
+4. Check the file counts. The two numbers must be the same and above 0: a 0 is an archive of nothing, as a wrong
+   `VOLUMES_PATH` gives.
 
    ```bash
    tar -tzf ~/fablabot-archive/fablabot-$STAMP.tar.gz | grep -vc '/$'
    sudo find "$VOLUMES_PATH/fablabot/data" "$VOLUMES_PATH/fablabot/logs" -type f | wc -l
+   ```
+
+   Then count the export files alone, the ones a `tar` or `find` run without `sudo` drops without a word. Again the two
+   numbers must be the same: 4 for each export folder, 0 only while there is none (`find` then says the folder does not
+   exist).
+
+   ```bash
+   tar -tzf ~/fablabot-archive/fablabot-$STAMP.tar.gz | grep -c '^data/exports/.*\.json$'
+   sudo find "$VOLUMES_PATH/fablabot/data/exports" -name '*.json' | wc -l
    ```
 
 5. Redeploy the stack.
@@ -405,7 +415,9 @@ file and in `data/backups/` until the association sets a retention period.
   channel, and keeps the row. A server that is no longer allowed keeps its settings; nothing reads them until it is
   listed again.
 - `data/exports/<name>/` holds what `fablabot.export_state` wrote. These folders carry the same data, count in the
-  archive, and are never removed by the bot. Each is private to the image's user: read it with `sudo`.
+  archive, and are never removed by the bot. Each is private to the image's user: read it with `sudo`, and archive it
+  with `sudo` too, or `tar` skips it without an error. Step 4 of "Before every redeploy" checks that the archive holds
+  them.
 
 ## Moving to the database
 
@@ -519,8 +531,9 @@ that runs as `10001`, `data/` must belong to `10001` before you start; otherwise
 | Step | What you see | What to do |
 | --- | --- | --- |
 | 3 | `Cannot import: <file>/<place>: ...` | Production has not moved. The line gives the place in the file, never its value: a key that is no ID and no field name shows as `key #3`, its position counted from 0. Fix the cause in a release, then start again from step 2. |
-| 8, 9 or 10 | `Cannot import: ...`, or the import dies | Deploy the stack as it is: it still holds the old release, which reads the JSON files the import left alone. A failed import leaves no row. `data/fablabot.db` stays, the old release ignores it, and the next import fills it. |
+| 8 or 9 | `Cannot import: ...`, or the import dies | Deploy the stack as it is: it still holds the old release, which reads the JSON files the import left alone. A failed import leaves no row. `data/fablabot.db` stays, the old release ignores it, and the next import fills it. |
 | 9 | `data/fablabot.db-journal` next to the database | The import was killed. Run step 9 again: it finishes the recovery and starts over. Never delete the journal. |
+| 10 | The line is not `data/fablabot.db matches the files.` | The import is committed: the database holds the state of the files. The old release ignores it and reads the JSON files. If it ran, it wrote to them and the database is behind: the next import would stop on `changed since the import`. Before starting again from step 7, set `data/fablabot.db` aside with the `mv` at the end of "Back to a release before the database". It keeps the data and counts in the archive. If the old release did not run, leave it in place. |
 | 11, or the update was not held | `Cannot start: data/... not imported`, in a restart loop | Nothing was changed and the bot never logged in. Stop the stack, then go on from step 7. |
 | 12 | The new release misbehaves | Go to "Back to a release before the database". |
 
