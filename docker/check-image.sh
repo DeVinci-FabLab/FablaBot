@@ -53,6 +53,14 @@ content=$(docker run --rm --network none --entrypoint sh fablabot:check -c \
 [ "$content" = "$(printf '10001:10001\n.venv')" ] || fail "unexpected user or content: $content"
 echo "ok: runs as 10001:10001, /app holds only .venv, no uv or compiler"
 
+# The database reads its schema from these files at start: an image without one cannot create its tables.
+expected=$(cd "$root/src/fablabot/migrations" && ls ./*.sql | sed 's|^\./||')
+[ -n "$expected" ] || fail "the source holds no migration file"
+shipped=$(docker run --rm --network none --entrypoint python fablabot:check -c \
+    'from fablabot.db import MIGRATIONS_DIR; print("\n".join(sorted(p.name for p in MIGRATIONS_DIR.glob("*.sql"))))')
+[ "$shipped" = "$expected" ] || fail "the image misses migration files: expected $expected, found ${shipped:-none}"
+echo "ok: the image holds every migration file"
+
 # Without volumes or token, the bot stops before connecting and names each problem.
 set +e
 stopped=$(docker run --rm --network none $hardening fablabot:check 2>&1)
@@ -72,15 +80,17 @@ set -e
     || fail "unexpected stop message: $stopped"
 echo "ok: stops before connecting when a folder or the token cannot be used"
 
-# A full start without network: cogs, log files, command record and one heartbeat, then the health check.
+# A full start without network: the database, cogs, log files, command record and one heartbeat, then the health check.
 start='
 import asyncio
 from unittest.mock import AsyncMock
 
+from fablabot import db
 from fablabot.main import Fablabot
 
 
 async def start() -> None:
+    db.open_database()
     bot = Fablabot()
     bot.tree.sync = AsyncMock(return_value=[])
     await bot.setup_hook()
