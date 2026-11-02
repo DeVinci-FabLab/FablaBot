@@ -375,7 +375,7 @@ async def test_op_settling_tags_each_guild_turn() -> None:
 
         def emit(self, record: logging.LogRecord) -> None:
             """Remember the message and the record's guild ID."""
-            seen.append((record.getMessage(), record.guild_id))
+            seen.append((record.getMessage(), getattr(record, "guild_id", None)))
 
     capture = Capture()
     capture.addFilter(GuildContextFilter())

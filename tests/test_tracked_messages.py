@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from conftest import make_interaction
@@ -245,7 +245,7 @@ async def test_msg_follow_moves_the_links_of_the_draft_to_the_message() -> None:
 
     assert [(r.emoji, r.message_id) for r in messages.tracked_messages(1234)[MESSAGE].reactions] == [("🔧", MESSAGE)]
     assert messages.get_draft(1234) == MessageDraft(content="x", reactions=[])
-    cog._sync_reactions_on_message.assert_awaited_once()
+    cast("AsyncMock", cog._sync_reactions_on_message).assert_awaited_once()
 
 
 @pytest.mark.parametrize(
@@ -276,7 +276,7 @@ async def test_msg_follow_a_refused_write_leaves_the_links_in_the_draft_and_trac
 
     assert messages.get_draft(1234) == draft
     assert messages.tracked_messages(1234) == {}
-    cog._sync_reactions_on_message.assert_not_awaited()
+    cast("AsyncMock", cog._sync_reactions_on_message).assert_not_awaited()
     interaction.response.send_message.assert_not_awaited()
 
 
