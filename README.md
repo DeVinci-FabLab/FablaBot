@@ -126,6 +126,117 @@ On each server, a member with the Administrator permission shows each group to t
 - The settings stay across restarts and redeploys as long as the commands keep their names.
 - Members may need to reload Discord before their menu changes: Ctrl+R (Windows, Linux), Cmd+R (macOS), or close and reopen the mobile app.
 
+## Deployment
+
+The production image runs the bot as the unprivileged user `10001:10001`, from start to stop. It writes only to `data/` and `logs/` (the two volumes) and to a heartbeat file in `/tmp`. `compose.yml` is the reference stack; on top of the image, it takes away what the bot does not need:
+
+```yaml
+    read_only: true
+    tmpfs:
+      - /tmp:size=1m,mode=1777,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+```
+
+- `read_only` mounts the image read-only; `/tmp` is a 1 MB in-memory folder, for the heartbeat only.
+- `cap_drop` removes every Linux capability, and `no-new-privileges` stops any process from gaining rights.
+
+At start, before connecting, the bot checks that it can read and write every folder and file under `data/` and `logs/`, and read the token file. Otherwise it stops with one line per problem, for example `Cannot start: data/ is not writable by uid 10001.`, and Docker restarts it until the problem is fixed. A refused start deletes nothing and writes nothing, except that it creates a missing `data/` or `logs/` folder.
+
+The container reports `healthy` while the bot is connected to Discord, and `unhealthy` when its last heartbeat is more than 90 seconds old. It is a status only: nothing restarts the bot on its own.
+
+To check an image locally (needs Docker): `sh docker/check-image.sh`. It builds the image with planted secrets, then checks its user, its content, the start messages, and that nothing is written outside `data/`, `logs/` and `/tmp`.
+
+### Moving a host to the non-root image
+
+The production host already runs a release that keeps its state in `data/fablabot.db`, beside the JSON files of the older releases. The release that brings the non-root image needs `data/`, `logs/` and the token file to belong to `10001`, which today they do not. Do this once, on the host. The `sudo` steps ask for the operator's password. Keep the previous image's version at hand: it is the way back.
+
+Merging a release deploys it: the stack updates itself every 30 minutes. The pull request that brings the image, titled `feat(docker)!: run the bot as an unprivileged user in a hardened container`, is what cuts that release, so the update is held before it is merged, and the stack is stopped only once the new image is in.
+
+Set the volumes path in the shell you use for the steps below, to the value the stack uses:
+
+```bash
+VOLUMES_PATH=/path/to/volumes
+```
+
+1. **Archive.** Follow steps 2 to 4 of ["Before every redeploy"](docs/OPERATIONS.md#before-every-redeploy) in the operator guide, skipping its step 1: the bot keeps running, and this copy is a safety net taken before the merge. The archive goes to `~/fablabot-archive`, outside the volumes, and the two counts must be the same. Never delete `data/` or `logs/`.
+
+2. **Hold the update.** Read the state now, with the container (it is called `fablabot`) still on its current image. The first command prints the release running, and the second keeps the `Server check:` lines, one per server, to compare with after the move.
+
+   ```bash
+   docker inspect fablabot --format '{{index .Config.Labels "org.opencontainers.image.version"}}'
+   docker logs fablabot 2>&1 | grep 'Server check:' > ~/fablabot-archive/server-check-before.txt
+   ```
+
+   Then set the stack's `image:` to that version in place of `:latest` and deploy. The container restarts once on the same image. The stack updates itself every 30 minutes, and a tag that does not move gives it nothing to pull.
+
+   ```bash
+   docker inspect fablabot --format '{{.Config.Image}}'
+   ```
+
+   This command must print the tag you set.
+
+3. **Merge the pull requests.** First the pull request that brings the image, `feat(docker)!: run the bot as an unprivileged user in a hardened container`. It is a breaking `feat`, and with `bump-minor-pre-major` on it gives a minor release. Then the release pull request `chore(main): release X.Y.Z`, which that merge updates. Wait for the "Build and Push Docker Image" run to finish green, then pull the new image. The bot keeps running on the held tag.
+
+   ```bash
+   docker pull ghcr.io/devinci-fablab/fablabot:X.Y.Z   # the new release
+   ```
+
+4. **Stop the stack.** The bot is down from here. Archive again, with all four steps of "Before every redeploy": an archive of a running database can be inconsistent, and the volumes are about to change owner.
+
+5. **Give the folders to the bot's user.** First check that nothing on the host already uses id 10001. The command must print nothing. If it prints a line, stop: giving the files to that id would give the token and the state to that host account.
+
+   ```bash
+   getent passwd 10001; getent group 10001
+   ```
+
+   Then give both folders to the bot's user, whole: the database, its journal, `data/backups/`, the exports and the JSON files all belong to it.
+
+   ```bash
+   sudo chown -R 10001:10001 "$VOLUMES_PATH/fablabot/data" "$VOLUMES_PATH/fablabot/logs"
+   ```
+
+6. **Give the token file to the bot's user.** It is the file named under `secrets: discord_token: file:` in the stack.
+
+   ```bash
+   sudo chown 10001:10001 /path/to/discord_token.secret && sudo chmod 400 /path/to/discord_token.secret
+   ```
+
+7. **Add the hardening lines.** Add the seven lines above to the bot's service in the stack, and set `image:` to the new version, `ghcr.io/devinci-fablab/fablabot:X.Y.Z`.
+
+8. **Deploy.**
+
+9. **Read the start.** The first command prints `0`. The second prints `starting`, then `healthy` within two minutes. The third prints the `Server check:` lines, one per server: each `blocking=` and `warnings=` count is the one in `~/fablabot-archive/server-check-before.txt`, saved in step 2 (the timestamps differ).
+
+   ```bash
+   docker logs fablabot 2>&1 | grep -c 'Cannot start'
+   docker inspect --format '{{.State.Health.Status}}' fablabot
+   docker logs fablabot 2>&1 | grep 'Server check:'
+   ```
+
+   A `Cannot start:` line names the folder, file or setting to fix; once fixed, the bot starts at its next restart. Use your stack's container name if it is not `fablabot`.
+
+10. **Release the hold.** Pull `:latest`, so that the next start is the release you merged.
+
+    ```bash
+    docker pull ghcr.io/devinci-fablab/fablabot:latest
+    ```
+
+    Set `image:` back to `:latest` and deploy. The container restarts once, with the hardening lines kept. Then read the version label, which must be the release you merged, and the health, `healthy` within two minutes.
+
+    ```bash
+    docker inspect fablabot --format '{{index .Config.Labels "org.opencontainers.image.version"}}'
+    docker inspect --format '{{.State.Health.Status}}' fablabot
+    ```
+
+To roll back, set the image back to the previous image, the `:X.Y.Z` read in step 2, and restore the stack as it was before step 7. The rollback stays on the tag: `:latest` brings the non-root image back. The older image runs as root and reads the volumes without a `chown` back, but root without capabilities cannot write files owned by 10001: the seven lines must go with it.
+
+After a rollback, the root image writes root-owned files. Run step 5 again (and step 6 if the token file was replaced) before you redeploy the non-root image.
+
+After restoring an archive, run step 5 again: `tar` run as root restores the files as root.
+
 ## Documentation
 
 We **highly recommend** you to read the user guide before using the bot. It will help you understand the bot's features
