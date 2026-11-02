@@ -235,3 +235,16 @@ async def test_msg_follow_a_refused_write_leaves_the_links_in_the_draft_and_trac
     assert messages.tracked_messages(1234) == {}
     cog._sync_reactions_on_message.assert_not_awaited()
     interaction.response.send_message.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("draft_links", "expected"), [([], ["🅰"]), (["🅱"], ["🅰", "🅱"])], ids=["empty-draft", "draft-with-a-link"]
+)
+async def test_msg_follow_on_a_message_already_tracked_keeps_its_links(draft_links: list[str], expected: list[str]) -> None:
+    """Following again adds the draft's links to the message's own; it never wipes them."""
+    messages.save_tracked(1234, _tracked(MESSAGE, _reaction("🅰", message_id=MESSAGE)))
+    interaction, cog, channel = _follow_setup(MessageDraft(content="x", reactions=[_reaction(emoji) for emoji in draft_links]))
+
+    await _follow(interaction, cog, channel)
+
+    assert [r.emoji for r in messages.tracked_messages(1234)[MESSAGE].reactions] == expected

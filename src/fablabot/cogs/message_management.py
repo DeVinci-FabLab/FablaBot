@@ -424,11 +424,13 @@ class MessageManagement(commands.Cog):
             cloned.message_id = fetched.id
             migrated_reactions.append(cloned)
 
+        # Following a message again adds to its links; saving it with only the draft's would delete the others.
+        already = self._get_tracked_message(interaction.guild.id, fetched.id)
         tracked = TrackedMessage(
             message_id=fetched.id,
             channel_id=channel.id,
             content=fetched.content or "(contenu vide ou embed)",
-            reactions=migrated_reactions,
+            reactions=[*(already.reactions if already else []), *migrated_reactions],
             created_by=interaction.user.id,
             created_at_iso=datetime.now(PARIS_TZ).isoformat(),
         )
