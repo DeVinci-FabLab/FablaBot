@@ -15,7 +15,6 @@ from warnings import deprecated
 from discord import (
     Embed,
     File,
-    Forbidden,
     Interaction,
     Member,
     NotFound,
@@ -812,13 +811,13 @@ class FormationManagement(commands.Cog):
         """
         now = datetime.now(PARIS_TZ)
         for emoji, users in reactions.items():
-            for user_id in users:
+            for user_id, user_name in users.items():
                 if (emoji, user_id) in last_add:
                     continue
                 event = ReactionEvent(
                     message_id=message_id,
                     user_id=user_id,
-                    user_name=None,
+                    user_name=user_name,
                     emoji=emoji,
                     action=ReactionAction.ADD,
                     ts_iso=now.isoformat(timespec="seconds"),
@@ -909,7 +908,7 @@ class FormationManagement(commands.Cog):
             msg = await channel.fetch_message(message_id)
         except Exception as exc:
             logger.exception(f"Failed to fetch message {message_id} in channel {channel_id}.")
-            if not isinstance(exc, NotFound | Forbidden):  # a deleted post or a refused read stays so at the next tick
+            if not isinstance(exc, NotFound):  # a deleted post stays so at the next tick; a refused read can be repaired
                 self._retry_guilds.add(guild_id)
             return
         logger.debug(f"Fetched published message {message_id} in channel {channel_id} for guild {guild_id}.")
@@ -947,7 +946,7 @@ class FormationManagement(commands.Cog):
                 ts = datetime.fromisoformat(event.ts_iso).astimezone(PARIS_TZ)
             except (TypeError, ValueError):
                 ts = datetime.min.replace(tzinfo=PARIS_TZ)
-            if key not in last_add or ts > last_add[key]:
+            if key not in last_add or ts.timestamp() > last_add[key].timestamp():
                 last_add[key] = ts
 
         reactions_snapshot: dict[str, dict[int, str]] = {}
@@ -980,7 +979,7 @@ class FormationManagement(commands.Cog):
                     (uid, last_add.get((fm.emoji, uid), datetime.min.replace(tzinfo=PARIS_TZ)), username)
                     for uid, username in current_logged_user.items()
                 ),
-                key=lambda item: (item[1], item[0]),
+                key=lambda item: (item[1].timestamp(), item[0]),
             )
 
             registered: list[dict[str, Any]] = []

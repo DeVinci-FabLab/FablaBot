@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 EXPIRY_RETRY_DELAY = timedelta(seconds=60)
 
-_OP_NOT_RECORDED = "La durée n'a pas pu être enregistrée : aucun droit n'a été donné ni prolongé. Réessayez plus tard."
+_OP_NOT_RECORDED = "La durée n'a pas pu être enregistrée : aucun droit n'a été donné ni prolongé. Réessaie plus tard."
 _SELF_OP_REFUSED = "Vous ne pouvez pas vous op vous-même : un autre membre du staff doit le faire."
 _TEMP_ROLE_REFUSED = f"Le rôle {RoleNames.ADMIN_TEMP} se donne uniquement avec `/user op`, qui fixe sa durée."
 _TEMP_ROLE_TAKE_REFUSED = f"Le rôle {RoleNames.ADMIN_TEMP} se retire uniquement avec `/user deop`."
@@ -603,7 +603,7 @@ class UserManagement(commands.Cog):
         """Forget an expiry whose role has just been taken off; a storage failure is logged and leaves the record.
 
         The role is already gone, so the caller goes on and tells the member. A record left behind is
-        dropped by the sweep at the next start.
+        dropped by the next settling turn.
         """
         try:
             self._clear_op(guild_id, member_id)

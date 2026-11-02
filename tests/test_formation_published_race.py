@@ -620,6 +620,33 @@ async def test_the_tick_runs_the_update_of_every_marked_server(started_bot: Any,
     assert {call.args[0] for call in schedule.call_args_list} == {NEW_GUILD_ID, OTHER_GUILD_ID}
 
 
+@pytest.mark.parametrize("reverse_in_log", [False, True], ids=["log-order", "text-order"])
+async def test_two_members_in_the_hour_the_clock_repeats_keep_their_real_order(
+    started_bot: Any, monkeypatch: pytest.MonkeyPatch, *, reverse_in_log: bool
+) -> None:
+    """Alice at 02:50+02:00 came 15 minutes before Bob at 02:05+01:00, though the wall clock reads the other way."""
+    env = _Env(started_bot.get_cog("FormationManagement"), monkeypatch, seats=1, reactors=(MEMBER_ID, OTHER_MEMBER_ID))
+    _forget_logged_reactions()
+    events = [(MEMBER_ID, "2026-10-25T02:50:00+02:00"), (OTHER_MEMBER_ID, "2026-10-25T02:05:00+01:00")]
+    for user_id, ts_iso in reversed(events) if reverse_in_log else events:
+        env.cog._reaction_logs.append(
+            GUILD_ID,
+            ReactionEvent(
+                message_id=MESSAGE_ID,
+                user_id=user_id,
+                user_name=NAMES[user_id],
+                emoji=EMOJI,
+                action=ReactionAction.ADD,
+                ts_iso=ts_iso,
+            ),
+        )
+
+    env.cog._schedule_update(GUILD_ID, delay=0)
+    await env.cog._pending_update_tasks[GUILD_ID]
+
+    assert _seats(env) == ([MEMBER_ID], [OTHER_MEMBER_ID])
+
+
 async def test_a_member_who_left_and_came_back_in_the_hour_the_clock_repeats_keeps_the_seat(
     started_bot: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -698,23 +725,24 @@ async def test_a_published_message_that_cannot_be_fetched_is_tried_again_at_the_
     assert env.registration_dm.await_count == 1
 
 
-@pytest.mark.parametrize(
-    "refusal",
-    [
-        NotFound(MagicMock(status=404, reason="Not Found"), "gone"),
-        Forbidden(MagicMock(status=403, reason="Forbidden"), "missing access"),
-    ],
-    ids=["deleted-post", "no-access"],
-)
-async def test_a_published_message_discord_will_not_return_is_not_fetched_again(env: _Env, refusal: Exception) -> None:
-    """Nothing is left to update on a deleted post or one the bot may not read: the tick does not keep asking for it."""
-    env.channel.fetch_message = AsyncMock(side_effect=refusal)
+async def test_a_deleted_published_message_is_not_fetched_again(env: _Env) -> None:
+    """Nothing is left to update on a deleted post: the tick does not keep asking for it."""
+    env.channel.fetch_message = AsyncMock(side_effect=NotFound(MagicMock(status=404, reason="Not Found"), "gone"))
 
     env.cog._schedule_update(GUILD_ID, delay=0)
     await env.cog._pending_update_tasks[GUILD_ID]
     await _tick_update(env)
 
     env.channel.fetch_message.assert_awaited_once()
+
+
+async def test_a_post_the_bot_may_not_read_is_retried_at_the_tick(env: _Env) -> None:
+    """An admin can repair a refused read, so the tick keeps asking until the update runs."""
+    env.channel.fetch_message = AsyncMock(side_effect=Forbidden(MagicMock(status=403, reason="Forbidden"), "missing access"))
+
+    env.cog._schedule_update(GUILD_ID, delay=0)
+    await env.cog._pending_update_tasks[GUILD_ID]
+    assert env.cog._retry_guilds == {GUILD_ID}
 
 
 async def test_a_published_message_in_a_deleted_channel_is_not_tried_again(env: _Env) -> None:

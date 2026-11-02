@@ -71,7 +71,7 @@ Stop the stack, then archive `logs/` and `data/`: an archive of a running databa
    find "$VOLUMES_PATH/fablabot/data" "$VOLUMES_PATH/fablabot/logs" -type f | wc -l
    ```
 
-4. Redeploy the stack.
+5. Redeploy the stack.
 
 Never purge logs. Since the per-server log change, the bot deletes no log file. How long to keep them
 is a decision for the association (GDPR), not for the bot.
@@ -262,9 +262,10 @@ A restart during the failure forgets which servers to catch up: a member who rea
 
 An update of the training message that stops for another reason (Discord does not return the post, or the run
 fails) is run again at the next 5-minute tick: the log shows `Error during scheduled update` or `Failed to fetch
-message`, and a member whose reaction is logged gets their place and their DM then. A post that was deleted, a
-channel that is gone (`is gone for guild` in the log) or a post the bot may not read (403) is not asked for again at
-the tick: the next reaction runs the update. A restart forgets the retry, as above.
+message`, and a member whose reaction is logged gets their place and their DM then. This includes a post the bot
+may not read (403): an admin can repair the right, and the log gets one line per tick until then. A post that was
+deleted or a channel that is gone (`is gone for guild` in the log) is not asked for again at the tick: the next
+reaction runs the update. A restart forgets the retry, as above.
 
 ## Server check at start
 
@@ -379,5 +380,5 @@ The log tells which case applies: `Commands synced (9, global).` after a sync, a
 | `Cannot start: data/... not imported into data/fablabot.db` | JSON state of an older release sits in `data/` and the database does not hold it | Nothing was changed. Keep the files and import them; never delete them to get past the message. |
 | `Cannot start: data/... changed since it was imported` | An older image ran after the import, so the file holds what the database lacks | Nothing was changed. Do not start this release before you know which side holds the latest data. |
 | `Cannot start: data/fablabot.db is at schema version ...` | The database comes from a newer release | Run that release or a later one. |
-| `Cannot start: data/fablabot.db cannot be used: ...` | The file is damaged, or `data/` is not writable | Restore the file from an archive or from `data/backups/`, or fix the folder's owner. |
+| `Cannot start: data/fablabot.db cannot be used: ...` | The disk is full, `data/` is not writable, the file is damaged, or a migration left orphan rows | Check the disk and the folder's owner first. Restore the file from an archive or from `data/backups/` only if it is damaged. |
 | A release's image build failed | The tag exists but `:latest` did not move | Re-run the failed jobs of that run (re-running all jobs publishes `:edge` only). |
