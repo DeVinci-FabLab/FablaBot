@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import sqlite3
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from conftest import make_interaction
@@ -15,9 +16,6 @@ from fablabot.cogs.message_management import MessageManagement
 from fablabot.helpers.constants import ErrorMessages
 from fablabot.models.message import MessageDraft, MsgReactionEvent, TrackedMessage
 from fablabot.services import messages
-
-if TYPE_CHECKING:
-    import sqlite3
 
 GUILD_A = 111111111111111111
 GUILD_B = 222222222222222222
@@ -175,3 +173,65 @@ async def test_msg_publish_the_database_refuses_retracts_the_post_and_says_so(
     posted.delete.assert_awaited_once()
     cog._sync_reactions_on_message.assert_not_awaited()
     interaction.response.send_message.assert_awaited_once_with(reply, ephemeral=True)
+
+
+def _follow_setup(draft: MessageDraft | None) -> tuple[MagicMock, MessageManagement, MagicMock]:
+    """Build a `/msg follow` call on server 1234, over a message of that server, with an optional draft stored first."""
+    interaction = make_interaction(guild_id=1234)
+    cog = MessageManagement(MagicMock())
+    cog._sync_reactions_on_message = AsyncMock()
+    fetched = MagicMock(id=MESSAGE, content="Annonce")
+    channel = MagicMock(spec=TextChannel, id=7)
+    channel.fetch_message = AsyncMock(return_value=fetched)
+    if draft is not None:
+        messages.save_draft(1234, draft)
+    return interaction, cog, channel
+
+
+async def _follow(interaction: MagicMock, cog: MessageManagement, channel: MagicMock) -> None:
+    """Run `/msg follow` on the message of `_follow_setup`."""
+    with patch.object(message_management, "ensure_command_context", AsyncMock(return_value=True)):
+        await MessageManagement.msg_follow.callback(cog, interaction, channel=channel, message=str(MESSAGE))  # pyright: ignore[reportCallIssue]
+
+
+async def test_msg_follow_moves_the_links_of_the_draft_to_the_message() -> None:
+    """The message takes the draft's links and the draft keeps its text, with none left."""
+    interaction, cog, channel = _follow_setup(MessageDraft(content="x", reactions=[_reaction("🔧")]))
+
+    await _follow(interaction, cog, channel)
+
+    assert [(r.emoji, r.message_id) for r in messages.tracked_messages(1234)[MESSAGE].reactions] == [("🔧", MESSAGE)]
+    assert messages.get_draft(1234) == MessageDraft(content="x", reactions=[])
+    cog._sync_reactions_on_message.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    ("trigger", "table", "when"),
+    [
+        ("refuse_tracked", "tracked_message", "NEW.message_id IS NOT NULL"),
+        (
+            "refuse_draft_links",
+            "tracked_reaction",
+            "OLD.tracked_message_id IN (SELECT id FROM tracked_message WHERE message_id IS NULL)",
+        ),
+    ],
+    ids=["message-write-refused", "draft-write-refused"],
+)
+async def test_msg_follow_a_refused_write_leaves_the_links_in_the_draft_and_tracks_nothing(
+    trigger: str, table: str, when: str
+) -> None:
+    """The links move in one write: refused at either end, they stay in the draft and no message is tracked."""
+    draft = MessageDraft(content="x", reactions=[_reaction("🔧")])
+    interaction, cog, channel = _follow_setup(draft)
+    event = "INSERT" if table == "tracked_message" else "DELETE"
+    db.connection().execute(
+        f"CREATE TRIGGER {trigger} BEFORE {event} ON {table} WHEN {when} BEGIN SELECT RAISE(ABORT, 'refused'); END"
+    )
+
+    with pytest.raises(sqlite3.Error):
+        await _follow(interaction, cog, channel)
+
+    assert messages.get_draft(1234) == draft
+    assert messages.tracked_messages(1234) == {}
+    cog._sync_reactions_on_message.assert_not_awaited()
+    interaction.response.send_message.assert_not_awaited()

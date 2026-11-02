@@ -108,6 +108,18 @@ def tracked_messages(guild_id: int) -> dict[int, TrackedMessage]:
     }
 
 
+def _upsert_tracked(conn: sqlite3.Connection, guild_id: int, tracked: TrackedMessage) -> None:
+    """Store a tracked message, inside the caller's transaction."""
+    row_id = conn.execute(
+        "INSERT INTO tracked_message (guild_id, message_id, channel_id, content, created_by, created_at_iso) "
+        "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (guild_id, message_id) DO UPDATE SET "
+        "channel_id = excluded.channel_id, content = excluded.content, "
+        "created_by = excluded.created_by, created_at_iso = excluded.created_at_iso RETURNING id",
+        (guild_id, tracked.message_id, tracked.channel_id, tracked.content, tracked.created_by, tracked.created_at_iso),
+    ).fetchone()["id"]
+    _replace_reactions(conn, row_id, tracked.reactions)
+
+
 def save_tracked(guild_id: int, tracked: TrackedMessage) -> None:
     """Store a tracked message, replacing any previous version of it.
 
@@ -116,14 +128,29 @@ def save_tracked(guild_id: int, tracked: TrackedMessage) -> None:
         tracked (TrackedMessage): The tracked message.
     """
     with db.transaction() as conn:
-        row_id = conn.execute(
-            "INSERT INTO tracked_message (guild_id, message_id, channel_id, content, created_by, created_at_iso) "
-            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (guild_id, message_id) DO UPDATE SET "
-            "channel_id = excluded.channel_id, content = excluded.content, "
-            "created_by = excluded.created_by, created_at_iso = excluded.created_at_iso RETURNING id",
-            (guild_id, tracked.message_id, tracked.channel_id, tracked.content, tracked.created_by, tracked.created_at_iso),
-        ).fetchone()["id"]
-        _replace_reactions(conn, row_id, tracked.reactions)
+        _upsert_tracked(conn, guild_id, tracked)
+
+
+def track_from_draft(guild_id: int, tracked: TrackedMessage, *, keep_text: bool) -> None:
+    """Store a tracked message that takes the draft's reaction links, in one write.
+
+    The links are in the message or in the draft, never in neither: a refused write changes nothing.
+
+    Args:
+        guild_id (int): The ID of the guild.
+        tracked (TrackedMessage): The tracked message, holding the links it takes.
+        keep_text (bool): True to leave the draft with its text and no links, False to delete it.
+    """
+    with db.transaction() as conn:
+        _upsert_tracked(conn, guild_id, tracked)
+        if keep_text:
+            conn.execute(
+                "DELETE FROM tracked_reaction WHERE tracked_message_id IN "
+                "(SELECT id FROM tracked_message WHERE guild_id = ? AND message_id IS NULL)",
+                (guild_id,),
+            )
+        else:
+            conn.execute("DELETE FROM tracked_message WHERE guild_id = ? AND message_id IS NULL", (guild_id,))
 
 
 def remove_tracked(guild_id: int, message_id: int) -> bool:

@@ -419,13 +419,10 @@ class MessageManagement(commands.Cog):
         assert interaction.guild is not None
         draft = self.get_draft(interaction.guild.id)
         migrated_reactions: list[MsgReactionEvent] = []
-        if draft and draft.reactions:
-            for reaction in draft.reactions:
-                cloned = copy(reaction)
-                cloned.message_id = fetched.id
-                migrated_reactions.append(cloned)
-            draft.reactions.clear()
-            self.set_draft(interaction.guild.id, draft)
+        for reaction in draft.reactions if draft else []:
+            cloned = copy(reaction)
+            cloned.message_id = fetched.id
+            migrated_reactions.append(cloned)
 
         tracked = TrackedMessage(
             message_id=fetched.id,
@@ -435,7 +432,7 @@ class MessageManagement(commands.Cog):
             created_by=interaction.user.id,
             created_at_iso=datetime.now(PARIS_TZ).isoformat(),
         )
-        self.set_tracked_message(interaction.guild.id, tracked)
+        messages.track_from_draft(interaction.guild.id, tracked, keep_text=True)
         if migrated_reactions:
             await self._sync_reactions_on_message(interaction.guild.id, tracked)
 
