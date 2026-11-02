@@ -481,7 +481,7 @@ def _state_of_the_old_release(published: Any, journal: list[dict[str, Any]], *se
     live = formations.current_published(GUILD_ID)
     assert live is not None
     training = live.message.fms[0].to_dict()
-    first_stamp = datetime.now(PARIS_TZ) - timedelta(days=40)
+    first_stamp = datetime.now(PARIS_TZ) - timedelta(days=3 * 365 + 10)
     entries = [
         {"user_id": m.id, "username": m.name, "ts_iso": (first_stamp + timedelta(minutes=i)).isoformat(timespec="seconds")}
         for i, m in enumerate(seated)
@@ -533,7 +533,7 @@ async def test_a_published_training_keeps_its_seats_after_the_import(server: Ser
 
 
 async def test_a_member_who_signed_up_before_the_journal_retention_keeps_the_seat_after_the_import(server: Server) -> None:
-    """The journal keeps 30 days: a seat taken earlier, with its reaction still on the post, is not given away."""
+    """The journal keeps 3 years: a seat taken earlier, with its reaction still on the post, is not given away."""
     users = [server.env.create_user(name) for name in ("first", "second", "third")]
     first, second, third = (server.guild.add_member(user) for user in users)
     published = await _sign_up(server, first, second)

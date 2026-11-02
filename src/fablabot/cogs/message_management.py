@@ -55,7 +55,7 @@ from fablabot.ui import mui
 
 logger = logging.getLogger(__name__)
 
-REACTION_LOG_RETENTION = timedelta(days=30)
+REACTION_LOG_RETENTION = timedelta(days=3 * 365)
 ALLOWED_ROLES = ADMIN_ROLES | {RoleNames.BUREAU}
 _ACCESS = AnyRole(ALLOWED_ROLES)
 _DM_ROLES = {RoleNames.BUREAU}

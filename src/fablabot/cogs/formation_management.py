@@ -54,7 +54,7 @@ logger = logging.getLogger(__name__)
 ALLOWED_ROLES = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN_TEMP, RoleNames.ADMIN, RoleNames.CODIR}
 _ACCESS = AnyRole(ALLOWED_ROLES)
 TRAINER_NOTIFICATION_ADVANCE = timedelta(hours=1)
-REACTION_LOG_RETENTION = timedelta(days=30)
+REACTION_LOG_RETENTION = timedelta(days=3 * 365)
 REGISTRATION_WINDOW = timedelta(minutes=20)
 
 

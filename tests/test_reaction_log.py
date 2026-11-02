@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from fablabot import db
+from fablabot.cogs import formation_management, message_management
 from fablabot.helpers.constants import PARIS_TZ
 from fablabot.helpers.reaction_log import ReactionLogManager, ReactionScope
 from fablabot.models import ReactionAction, ReactionEvent
@@ -155,3 +156,9 @@ def test_an_id_too_large_for_the_database_has_no_history() -> None:
     """A member can type any number as a message ID: it reads as an empty history, not an error."""
     assert _log().history(GUILD_A, 10**30) == []
     assert _log().history(GUILD_A, -(10**30)) == []
+
+
+def test_the_bot_keeps_the_history_for_three_years() -> None:
+    """Both histories keep what the association decided, so a shorter value cannot slip in unseen."""
+    assert timedelta(days=3 * 365) == formation_management.REACTION_LOG_RETENTION
+    assert timedelta(days=3 * 365) == message_management.REACTION_LOG_RETENTION
