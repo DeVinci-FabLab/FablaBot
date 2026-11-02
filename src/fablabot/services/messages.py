@@ -52,6 +52,26 @@ def get_draft(guild_id: int) -> MessageDraft | None:
     return MessageDraft(content=row["content"], reactions=_reactions(conn, row["id"])) if row else None
 
 
+def write_draft(conn: sqlite3.Connection, guild_id: int, draft: MessageDraft) -> None:
+    """Store the message draft of a guild, inside the caller's transaction.
+
+    Args:
+        conn (sqlite3.Connection): The connection, inside a transaction.
+        guild_id (int): The ID of the guild.
+        draft (MessageDraft): The draft.
+    """
+    row = conn.execute("SELECT id FROM tracked_message WHERE guild_id = ? AND message_id IS NULL", (guild_id,)).fetchone()
+    if row:
+        row_id = row["id"]
+        conn.execute("UPDATE tracked_message SET content = ? WHERE id = ?", (draft.content, row_id))
+    else:
+        row_id = conn.execute(
+            "INSERT INTO tracked_message (guild_id, content) VALUES (?, ?)", (guild_id, draft.content)
+        ).lastrowid
+    assert row_id is not None
+    _replace_reactions(conn, row_id, draft.reactions)
+
+
 def save_draft(guild_id: int, draft: MessageDraft) -> None:
     """Store the message draft of a guild, replacing any previous one.
 
@@ -60,16 +80,7 @@ def save_draft(guild_id: int, draft: MessageDraft) -> None:
         draft (MessageDraft): The draft.
     """
     with db.transaction() as conn:
-        row = conn.execute("SELECT id FROM tracked_message WHERE guild_id = ? AND message_id IS NULL", (guild_id,)).fetchone()
-        if row:
-            row_id = row["id"]
-            conn.execute("UPDATE tracked_message SET content = ? WHERE id = ?", (draft.content, row_id))
-        else:
-            row_id = conn.execute(
-                "INSERT INTO tracked_message (guild_id, content) VALUES (?, ?)", (guild_id, draft.content)
-            ).lastrowid
-        assert row_id is not None
-        _replace_reactions(conn, row_id, draft.reactions)
+        write_draft(conn, guild_id, draft)
 
 
 def clear_draft(guild_id: int) -> None:
@@ -108,8 +119,14 @@ def tracked_messages(guild_id: int) -> dict[int, TrackedMessage]:
     }
 
 
-def _upsert_tracked(conn: sqlite3.Connection, guild_id: int, tracked: TrackedMessage) -> None:
-    """Store a tracked message, inside the caller's transaction."""
+def write_tracked(conn: sqlite3.Connection, guild_id: int, tracked: TrackedMessage) -> None:
+    """Store a tracked message, inside the caller's transaction.
+
+    Args:
+        conn (sqlite3.Connection): The connection, inside a transaction.
+        guild_id (int): The ID of the guild.
+        tracked (TrackedMessage): The tracked message.
+    """
     row_id = conn.execute(
         "INSERT INTO tracked_message (guild_id, message_id, channel_id, content, created_by, created_at_iso) "
         "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (guild_id, message_id) DO UPDATE SET "
@@ -128,7 +145,7 @@ def save_tracked(guild_id: int, tracked: TrackedMessage) -> None:
         tracked (TrackedMessage): The tracked message.
     """
     with db.transaction() as conn:
-        _upsert_tracked(conn, guild_id, tracked)
+        write_tracked(conn, guild_id, tracked)
 
 
 def track_from_draft(guild_id: int, tracked: TrackedMessage, *, keep_text: bool) -> None:
@@ -142,7 +159,7 @@ def track_from_draft(guild_id: int, tracked: TrackedMessage, *, keep_text: bool)
         keep_text (bool): True to leave the draft with its text and no links, False to delete it.
     """
     with db.transaction() as conn:
-        _upsert_tracked(conn, guild_id, tracked)
+        write_tracked(conn, guild_id, tracked)
         if keep_text:
             conn.execute(
                 "DELETE FROM tracked_reaction WHERE tracked_message_id IN "
