@@ -1,8 +1,32 @@
 # FablaBot
 
-> General purpose Discord bot for the DeVinci Fablab discord server.
+> A Discord bot that runs a makerspace community: trainings with sign-ups, role management, anonymous suggestions and bot messages, for several servers from one instance.
 
-![Banner](./assets/banner.png)
+[![check](https://github.com/DeVinci-FabLab/FablaBot/actions/workflows/ci.yml/badge.svg)](https://github.com/DeVinci-FabLab/FablaBot/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/DeVinci-FabLab/FablaBot)](https://github.com/DeVinci-FabLab/FablaBot/releases)
+[![Python 3.13](https://img.shields.io/badge/python-3.13-blue)](./.python-version)
+[![discord.py](https://img.shields.io/badge/discord.py-2.7-5865F2)](https://github.com/Rapptz/discord.py)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
+
+FablaBot serves the [DeVinci FabLab](https://github.com/DeVinci-FabLab) association on Discord. Its code is open. Another community can host it today if its server uses the same [role names](./docs/OPERATIONS.md#roles); per-server settings are planned.
+
+## What it does
+
+- **Trainings:** draft, publish, sign up by reaction, waitlist, reminders and exports.
+- **Help for each member:** `/help` lists what your roles open, in English, French or German.
+- **Anonymous suggestions:** `/suggest` reaches the right team, and an anonymous one leaves no trace of its author.
+- **Roles and temporary admin:** rules per role, with a rank check and rights that end on time.
+- **Channels and bot messages:** create and manage channels, publish messages, and link reactions to actions.
+- **Per-server logs:** each server has its own log channel and exports.
+- **Built to run unattended:** one SQLite file, a non-root hardened container, and a report at each start on what each server lacks.
+
+## Where to go next
+
+| You are | Read |
+| --- | --- |
+| A member or staff | The [user guide](./docs/USERGUIDE.md), or run `/help` in Discord |
+| Hosting an instance | The [operator guide](./docs/OPERATIONS.md) and [Deployment](#deployment) |
+| A contributor | [CONTRIBUTING](./CONTRIBUTING.md) and [Project setup](#project-setup) |
 
 ## Project setup
 

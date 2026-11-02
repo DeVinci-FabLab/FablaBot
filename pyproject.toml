@@ -5,11 +5,19 @@ dependencies = [
   "python-dotenv==1.2.4",
   "tzdata>=2025.2",
 ]
-description = "General purpose Discord bot for the DeVinci Fablab discord server."
+description = "Discord bot for makerspace communities: trainings with sign-ups, roles, anonymous suggestions and per-server logs."
+keywords = ["discord", "discord-bot", "discord-py", "fablab", "makerspace", "community", "sqlite"]
 name = "fablabot"
 readme = "README.md"
 requires-python = ">=3.13"
+license = "MIT"
 version = "0.6.0"
+
+[project.urls]
+Homepage = "https://github.com/DeVinci-FabLab/FablaBot"
+Documentation = "https://github.com/DeVinci-FabLab/FablaBot/blob/main/docs/USERGUIDE.md"
+Issues = "https://github.com/DeVinci-FabLab/FablaBot/issues"
+Changelog = "https://github.com/DeVinci-FabLab/FablaBot/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["setuptools"]
