@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import logging
+from typing import TYPE_CHECKING
 from warnings import deprecated
 
 from discord import Interaction, TextChannel, abc, app_commands
@@ -14,6 +15,9 @@ from fablabot.helpers.access import AnyRole, access
 from fablabot.helpers.constants import ADMIN_ROLES, PARIS_TZ, RoleNames, staff_default_permissions
 from fablabot.helpers.utils import ensure_command_context, format_channel_mention
 from fablabot.logging_handlers import DailyFileHandler
+
+if TYPE_CHECKING:
+    from fablabot.main import Fablabot
 
 logger = logging.getLogger(__name__)
 _SET_ACCESS = AnyRole(ADMIN_ROLES)
@@ -47,26 +51,28 @@ class LogManagement(commands.Cog):
         log_group (app_commands.Group): Command group for log management commands.
     """
 
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: Fablabot) -> None:
         """Initialize the cog and register its command groups.
 
         Args:
-            bot (commands.Bot): The bot instance.
+            bot (Fablabot): The bot instance.
         """
         self.bot = bot
         logger.info("LogManagement initialized")
 
     def _guild_of_channel(self, channel_id: int) -> int | None:
-        """Resolve a channel ID to the ID of its guild through the bot cache.
+        """Resolve a channel ID to the ID of its guild through the bot cache, when the policy serves that guild.
 
         Args:
             channel_id (int): The channel to look up.
 
         Returns:
-            int | None: The guild ID, or None when the channel is not a cached guild channel.
+            int | None: The guild ID, or None when the channel is not a cached guild channel or its guild is refused.
         """
         channel = self.bot.get_channel(channel_id)
-        return channel.guild.id if isinstance(channel, abc.GuildChannel) else None
+        if not isinstance(channel, abc.GuildChannel) or not self.bot.guild_access.is_served(channel.guild.id):
+            return None
+        return channel.guild.id
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
@@ -183,10 +189,10 @@ class LogManagement(commands.Cog):
 
 
 @deprecated("Load the cog using `bot.add_cog()` instead.")
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: Fablabot) -> None:
     """Setup function to load the MessageManagement cog.
 
     Args:
-        bot (commands.Bot): The bot instance.
+        bot (Fablabot): The bot instance.
     """
     await bot.add_cog(LogManagement(bot))

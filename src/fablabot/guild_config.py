@@ -113,7 +113,7 @@ def migrate_legacy_log_channel(guild_of_channel: Callable[[int], int | None]) ->
     The legacy entry stays, so the operator can still see where the channel came from.
 
     Args:
-        guild_of_channel (Callable[[int], int | None]): Resolves a channel ID to its guild ID, or None.
+        guild_of_channel (Callable[[int], int | None]): Resolves a channel ID to its served guild ID, or None.
 
     Returns:
         int | None: The guild ID that received the channel, or None when nothing was written.
@@ -123,7 +123,7 @@ def migrate_legacy_log_channel(guild_of_channel: Callable[[int], int | None]) ->
         return None
     guild_id = guild_of_channel(channel_id)
     if guild_id is None:
-        logger.warning(f"Legacy log channel not found (channel_id={channel_id}): not migrated, kept in place.")
+        logger.warning(f"Legacy log channel not found or not served (channel_id={channel_id}): not migrated, kept in place.")
         return None
     if get_log_channel_id(guild_id) is not None:
         logger.debug(f"Legacy log channel already migrated or replaced (guild_id={guild_id}).")

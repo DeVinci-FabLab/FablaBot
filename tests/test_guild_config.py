@@ -13,6 +13,7 @@ from discord.ext import commands
 from fablabot import db
 from fablabot.cogs.log_management import LogManagement
 import fablabot.guild_config as guild_config  # noqa: PLR0402 (imported after the cogs: guild_config first is a circular import)
+from fablabot.helpers.guild_access import GuildAccessPolicy
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -141,7 +142,9 @@ def test_migration_channel_not_found_warns_and_writes_nothing(caplog: pytest.Log
     with caplog.at_level(logging.WARNING):
         assert guild_config.migrate_legacy_log_channel(_resolver({})) is None
 
-    assert f"Legacy log channel not found (channel_id={LEGACY_CHANNEL}): not migrated, kept in place." in caplog.text
+    assert (
+        f"Legacy log channel not found or not served (channel_id={LEGACY_CHANNEL}): not migrated, kept in place." in caplog.text
+    )
     assert stored_settings() == content
 
 
@@ -155,15 +158,46 @@ def test_migration_without_legacy_entry_does_nothing() -> None:
     assert stored_settings() == {str(GUILD_A): {"commands_channel_id": COMMANDS_CHANNEL}}
 
 
-async def test_ready_listener_migrates_through_the_bot_cache() -> None:
-    """The ready listener resolves the legacy channel's guild from the bot cache."""
+def _bot_holding_legacy_channel(policy: GuildAccessPolicy) -> MagicMock:
+    """Build a stub bot under ``policy`` whose cache holds the legacy channel in ``GUILD_A``."""
     store_settings({"__global__": {"log_channel_id": LEGACY_CHANNEL}})
     channel = MagicMock(spec=TextChannel)
     channel.guild.id = GUILD_A
     bot = MagicMock(spec=commands.Bot)
+    bot.guild_access = policy
     bot.get_channel.return_value = channel
+    return bot
+
+
+async def test_ready_listener_migrates_through_the_bot_cache() -> None:
+    """The ready listener resolves the legacy channel's guild from the bot cache."""
+    bot = _bot_holding_legacy_channel(GuildAccessPolicy(frozenset({GUILD_A})))
 
     await LogManagement(bot).on_ready()
 
     bot.get_channel.assert_called_once_with(LEGACY_CHANNEL)
+    assert stored_settings()[str(GUILD_A)] == {"log_channel_id": LEGACY_CHANNEL}
+
+
+async def test_ready_listener_writes_nothing_for_a_server_the_policy_refuses() -> None:
+    """The legacy channel of an unserved server is not given to it, and the legacy entry stays."""
+    bot = _bot_holding_legacy_channel(GuildAccessPolicy(frozenset({GUILD_B})))
+
+    await LogManagement(bot).on_ready()
+
+    assert stored_settings() == {"__global__": {"log_channel_id": LEGACY_CHANNEL}}
+
+
+async def test_ready_listener_migrates_once_the_server_is_served() -> None:
+    """A legacy channel held back for an unserved server moves at the next ready, when that server is served."""
+    policy = GuildAccessPolicy(frozenset())
+    bot = _bot_holding_legacy_channel(policy)
+    cog = LogManagement(bot)
+
+    await cog.on_ready()
+    assert str(GUILD_A) not in stored_settings()
+
+    policy.tolerated.add(GUILD_A)
+    await cog.on_ready()
+
     assert stored_settings()[str(GUILD_A)] == {"log_channel_id": LEGACY_CHANNEL}
