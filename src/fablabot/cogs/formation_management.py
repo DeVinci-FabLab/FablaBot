@@ -781,7 +781,6 @@ class FormationManagement(commands.Cog):
         message_id: int,
         reactions: dict[str, dict[int, str]],
         last_add: dict[tuple[str, int], datetime],
-        left: set[tuple[str, int]],
     ) -> None:
         """Log the reactions Discord shows and the log misses after a storage failure, as of now.
 
@@ -793,13 +792,12 @@ class FormationManagement(commands.Cog):
             guild_id (int): The ID of the guild.
             message_id (int): The published message.
             reactions (dict[str, dict[int, str]]): The members who reacted, by emoji.
-            last_add (dict[tuple[str, int], datetime]): The last logged time of each reaction, completed here.
-            left (set[tuple[str, int]]): The reactions whose latest logged event is a removal.
+            last_add (dict[tuple[str, int], datetime]): The logged time of each reaction still in place, completed here.
         """
         now = datetime.now(PARIS_TZ)
         for emoji, users in reactions.items():
             for user_id in users:
-                if (emoji, user_id) in last_add and (emoji, user_id) not in left:
+                if (emoji, user_id) in last_add:
                     continue
                 event = ReactionEvent(
                     message_id=message_id,
@@ -909,8 +907,9 @@ class FormationManagement(commands.Cog):
 
         history = self._reaction_logs.history(guild_id, message_id)
 
+        # The time of each reaction still in place: a logged removal takes the member out, so a reaction the log does
+        # not hold again never gets the old place back.
         last_add: dict[tuple[str, int], datetime] = {}
-        left: set[tuple[str, int]] = set()  # members whose latest logged event is a removal
         for event in history:
             emoji = str(event.emoji)
             user_id = event.user_id
@@ -918,9 +917,8 @@ class FormationManagement(commands.Cog):
                 continue
             key = (emoji, int(user_id))
             if event.action != ReactionAction.ADD:
-                left.add(key)
+                last_add.pop(key, None)
                 continue
-            left.discard(key)
             try:
                 ts = datetime.fromisoformat(event.ts_iso).astimezone(PARIS_TZ)
             except (TypeError, ValueError):
@@ -941,7 +939,7 @@ class FormationManagement(commands.Cog):
         if guild_id in self._stale_guilds:
             # Cleared first: a reaction refused from here on marks the server again, and a failure is marked by the caller.
             self._stale_guilds.discard(guild_id)
-            self._log_missed_reactions(guild_id, message_id, reactions_snapshot, last_add, left)
+            self._log_missed_reactions(guild_id, message_id, reactions_snapshot, last_add)
 
         waitlist_notifications: list[tuple[int, str, int]] = []
         promotion_notifications: list[tuple[int, Formation]] = []

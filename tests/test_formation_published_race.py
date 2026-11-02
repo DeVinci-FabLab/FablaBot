@@ -245,6 +245,32 @@ def _forget_logged_reactions() -> None:
         conn.execute("DELETE FROM reaction_event")
 
 
+def _log_events(env: _Env, *events: tuple[int, ReactionAction, int]) -> None:
+    """Replace the reaction log by events given as (member, action, minutes ago), oldest first."""
+    _forget_logged_reactions()
+    now = datetime.now(PARIS_TZ)
+    for user_id, action, minutes_ago in events:
+        env.cog._reaction_logs.append(
+            GUILD_ID,
+            ReactionEvent(
+                message_id=MESSAGE_ID,
+                user_id=user_id,
+                user_name=NAMES[user_id],
+                emoji=EMOJI,
+                action=action,
+                ts_iso=(now - timedelta(minutes=minutes_ago)).isoformat(timespec="seconds"),
+            ),
+        )
+
+
+def _seats(env: _Env) -> tuple[list[int], list[int]]:
+    """The registered and the waitlisted member IDs of the published message."""
+    pub = env.cog._get_last_published_in_guild(GUILD_ID)
+    assert pub is not None
+    fm = pub.message.fms[0]
+    return [e["user_id"] for e in fm.registered_users], [e["user_id"] for e in fm.waitlisted_users]
+
+
 async def _tick_update(env: _Env) -> None:
     """Run a reminder tick and let the update it schedules finish."""
     await env.cog._check_upcoming_formations()
@@ -280,22 +306,12 @@ async def test_a_member_who_left_and_came_back_during_an_outage_queues_behind_th
 ) -> None:
     """A refused re-add is logged at the tick, as of then: the member does not take back the place left."""
     env = _Env(started_bot.get_cog("FormationManagement"), monkeypatch, seats=1, reactors=(MEMBER_ID, OTHER_MEMBER_ID))
-    _forget_logged_reactions()
-    now = datetime.now(PARIS_TZ)
-    for user_id, action, minutes_ago in (
+    _log_events(
+        env,
         (MEMBER_ID, ReactionAction.ADD, 30),
         (MEMBER_ID, ReactionAction.REMOVE, 20),
         (OTHER_MEMBER_ID, ReactionAction.ADD, 10),
-    ):
-        event = ReactionEvent(
-            message_id=MESSAGE_ID,
-            user_id=user_id,
-            user_name=NAMES[user_id],
-            emoji=EMOJI,
-            action=action,
-            ts_iso=(now - timedelta(minutes=minutes_ago)).isoformat(timespec="seconds"),
-        )
-        env.cog._reaction_logs.append(GUILD_ID, event)
+    )
     monkeypatch.setattr(env.cog._reaction_logs, "append", _flaky(env.cog._reaction_logs.append, storage_error))
 
     await env.cog.on_raw_reaction_event(_reaction_payload())
@@ -459,3 +475,65 @@ async def test_a_reaction_taken_back_at_the_tick_is_logged_under_its_own_server(
     lines = [r for r in caplog.records if "Logged reaction" in r.getMessage()]
     assert lines
     assert {r.guild_id for r in lines} == {GUILD_ID}  # type: ignore[attr-defined]
+
+
+async def test_a_member_whose_last_logged_event_is_leaving_is_not_seated_by_an_update(
+    started_bot: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reaction on Discord that the log never saw, after a logged removal, does not take the old place back."""
+    env = _Env(started_bot.get_cog("FormationManagement"), monkeypatch, seats=1, reactors=(MEMBER_ID, OTHER_MEMBER_ID))
+    _log_events(
+        env,
+        (MEMBER_ID, ReactionAction.ADD, 30),
+        (MEMBER_ID, ReactionAction.REMOVE, 20),
+        (OTHER_MEMBER_ID, ReactionAction.ADD, 10),
+    )
+
+    await env.cog._update_published_message(GUILD_ID)
+
+    assert _seats(env) == ([OTHER_MEMBER_ID], [])
+
+
+async def test_a_re_add_past_the_deadline_does_not_give_the_old_place_back_at_the_tick(
+    started_bot: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pass leaves out a re-add the listener would have refused, and the removal before it still stands."""
+    env = _Env(
+        started_bot.get_cog("FormationManagement"),
+        monkeypatch,
+        seats=1,
+        start_in=timedelta(minutes=-30),
+        reactors=(MEMBER_ID, OTHER_MEMBER_ID),
+    )
+    _log_events(
+        env,
+        (MEMBER_ID, ReactionAction.ADD, 60),
+        (MEMBER_ID, ReactionAction.REMOVE, 50),
+        (OTHER_MEMBER_ID, ReactionAction.ADD, 40),
+    )
+    env.cog._stale_guilds.add(GUILD_ID)
+
+    await _tick_update(env)
+
+    assert _seats(env) == ([OTHER_MEMBER_ID], [])
+    assert len(env.cog._reaction_logs.history(GUILD_ID, MESSAGE_ID)) == 3
+
+
+async def test_a_member_who_left_and_came_back_in_the_log_keeps_the_new_place_through_the_pass(
+    started_bot: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Add, remove, add are all logged: the pass logs nothing again and the place is the last add's."""
+    env = _Env(started_bot.get_cog("FormationManagement"), monkeypatch, seats=1, reactors=(MEMBER_ID, OTHER_MEMBER_ID))
+    _log_events(
+        env,
+        (MEMBER_ID, ReactionAction.ADD, 30),
+        (MEMBER_ID, ReactionAction.REMOVE, 20),
+        (MEMBER_ID, ReactionAction.ADD, 10),
+        (OTHER_MEMBER_ID, ReactionAction.ADD, 5),
+    )
+    env.cog._stale_guilds.add(GUILD_ID)
+
+    await _tick_update(env)
+
+    assert _seats(env) == ([MEMBER_ID], [OTHER_MEMBER_ID])
+    assert len(env.cog._reaction_logs.history(GUILD_ID, MESSAGE_ID)) == 4
