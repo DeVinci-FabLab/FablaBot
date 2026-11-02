@@ -178,6 +178,8 @@ def _not_imported(files: list[Path], path: Path) -> StorageError:
 def _check_imported(conn: sqlite3.Connection, path: Path, files: list[Path]) -> None:
     """Refuse state files the database does not hold, or that changed since it took them.
 
+    This runs before the schema moves: a refused start changes nothing, backups included.
+
     Args:
         conn (sqlite3.Connection): The open connection.
         path (Path): The database file.
@@ -188,7 +190,10 @@ def _check_imported(conn: sqlite3.Connection, path: Path, files: list[Path]) -> 
     """
     if not files:
         return
-    imported = {row["file_name"]: row["sha256"] for row in conn.execute("SELECT file_name, sha256 FROM state_import")}
+    # A file with no schema yet has imported nothing, and nothing may create the schema before this check says so.
+    imported: dict[str, str] = {}
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'state_import'").fetchone():
+        imported = {row["file_name"]: row["sha256"] for row in conn.execute("SELECT file_name, sha256 FROM state_import")}
     missing = [file for file in files if file.name not in imported]
     if missing:
         raise _not_imported(missing, path)
@@ -236,7 +241,7 @@ def open_database(path: Path = DATABASE_FILE, *, migrations: Path = MIGRATIONS_D
     """Open the database, creating it when missing, and bring its schema up to date.
 
     JSON state left by an older release must have been imported first: the bot never starts over
-    it, and a refused start creates nothing.
+    it, and a refused start creates and changes nothing.
 
     Args:
         path (Path): The database file.
@@ -253,9 +258,9 @@ def open_database(path: Path = DATABASE_FILE, *, migrations: Path = MIGRATIONS_D
         path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(path, autocommit=True)
         _configure(conn)
+        _check_imported(conn, path, state_files)
         _migrate(conn, path, migrations)
         _check_writable(conn)
-        _check_imported(conn, path, state_files)
     except (sqlite3.DatabaseError, OSError) as error:
         if conn is not None:
             conn.close()

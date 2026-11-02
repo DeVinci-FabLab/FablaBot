@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import hashlib
 from pathlib import Path
+import shutil
+import sqlite3
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
@@ -35,8 +37,8 @@ def _write(*names: str) -> dict[str, bytes]:
 
 
 def _content() -> dict[str, bytes]:
-    """Read every file under ``data/``."""
-    return {path.name: path.read_bytes() for path in DATA.iterdir()}
+    """Read every file under ``data/``, in its folders too."""
+    return {path.relative_to(DATA).as_posix(): path.read_bytes() for path in DATA.rglob("*") if path.is_file()}
 
 
 def _imported(*names: str) -> None:
@@ -134,6 +136,35 @@ def test_a_file_changed_since_its_import_stops_the_start() -> None:
         db.open_database()
 
     assert _content() == before
+
+
+def test_a_refused_start_leaves_a_pending_migration_alone(tmp_path: Path) -> None:
+    """A file changed since its import and a migration waiting: refused, schema, backups and files stay as they were."""
+    _imported("formations_state.json")
+    (DATA / "formations_state.json").write_text('{"changed": true}', encoding="utf-8")
+    newer = tmp_path / "newer"
+    shutil.copytree(db.MIGRATIONS_DIR, newer)
+    (newer / "0002_later.sql").write_text("CREATE TABLE later (a);\n", encoding="utf-8")
+    before = _content()
+
+    with pytest.raises(db.StorageError, match="changed since"):
+        db.open_database(migrations=newer)
+
+    assert _content() == before
+    assert sqlite3.connect(DATABASE).execute("PRAGMA user_version").fetchone()[0] == 1
+
+
+def test_an_empty_database_file_holds_no_import_and_stays_empty() -> None:
+    """A file with no schema is not a database that imported anything: refused as never imported, and left at zero bytes."""
+    DATA.mkdir()
+    DATABASE.write_bytes(b"")
+    before = _write("formations_state.json")
+
+    with pytest.raises(db.StorageError, match="not imported"):
+        db.open_database()
+
+    assert _content() == before
+    assert DATABASE.stat().st_size == 0
 
 
 def test_main_stops_before_the_bot_exists(fablabot_main: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
