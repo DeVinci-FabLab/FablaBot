@@ -10,6 +10,7 @@ import io
 import logging
 import random
 import re
+import sqlite3
 from warnings import deprecated
 
 from discord import (
@@ -39,6 +40,7 @@ from discord.ext import commands
 from fablabot.helpers.access import EVERYONE, AnyRole, ServerPermission, access
 from fablabot.helpers.constants import ADMIN_ROLES, PARIS_TZ, ErrorMessages, RoleNames, staff_default_permissions
 from fablabot.helpers.reaction_log import ReactionLogManager
+from fablabot.helpers.safe_discord_operations import retract_unsaved_post
 from fablabot.helpers.utils import (
     ensure_command_context,
     get_members_by_role,
@@ -659,19 +661,24 @@ class MessageManagement(commands.Cog):
             cloned = copy(reaction)
             cloned.message_id = msg.id
             updated_reactions.append(cloned)
+        tracked = TrackedMessage(
+            message_id=msg.id,
+            channel_id=channel.id,
+            content=draft.content,
+            reactions=updated_reactions,
+            created_by=interaction.user.id,
+            created_at_iso=datetime.now(PARIS_TZ).isoformat(),
+        )
+        try:
+            if updated_reactions:
+                self.set_tracked_message(interaction.guild.id, tracked)
+            self._clear_draft(interaction.guild.id)
+        except sqlite3.Error:
+            logger.exception(f"Message {msg.id} not saved in guild {interaction.guild.id}; retracting it.")
+            await interaction.response.send_message(await retract_unsaved_post(logger, msg), ephemeral=True)
+            return
         if updated_reactions:
-            tracked = TrackedMessage(
-                message_id=msg.id,
-                channel_id=channel.id,
-                content=draft.content,
-                reactions=updated_reactions,
-                created_by=interaction.user.id,
-                created_at_iso=datetime.now(PARIS_TZ).isoformat(),
-            )
-            self.set_tracked_message(interaction.guild.id, tracked)
-
             await self._sync_reactions_on_message(interaction.guild.id, tracked)
-        self._clear_draft(interaction.guild.id)
 
         logger.info(
             f"Published message {msg.id} in guild {interaction.guild.id} with {len(updated_reactions)} reaction actions",

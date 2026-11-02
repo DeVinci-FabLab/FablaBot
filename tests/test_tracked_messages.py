@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
-from typing import Any
-from unittest.mock import MagicMock
+from typing import TYPE_CHECKING, Any
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from conftest import make_interaction
+from discord import TextChannel
+import pytest
 
 from fablabot import db
+from fablabot.cogs import message_management
 from fablabot.cogs.message_management import MessageManagement
+from fablabot.helpers.constants import ErrorMessages
 from fablabot.models.message import MessageDraft, MsgReactionEvent, TrackedMessage
 from fablabot.services import messages
+
+if TYPE_CHECKING:
+    import sqlite3
 
 GUILD_A = 111111111111111111
 GUILD_B = 222222222222222222
@@ -136,3 +145,33 @@ def test_the_cog_answers_none_for_an_id_too_large_for_the_database() -> None:
     cog = MessageManagement(MagicMock())
 
     assert cog._get_tracked_message(GUILD_A, 10**24) is None
+
+
+@pytest.mark.parametrize(
+    ("delete_error", "reply"),
+    [(None, ErrorMessages.PUBLISH_NOT_SAVED), (OSError(), ErrorMessages.PUBLISH_NOT_SAVED_STILL_UP)],
+    ids=["post-deleted", "post-still-up"],
+)
+@pytest.mark.parametrize("failing", ["save_tracked", "clear_draft"])
+async def test_msg_publish_the_database_refuses_retracts_the_post_and_says_so(
+    failing: str, delete_error: Exception | None, reply: str, storage_error: sqlite3.Error
+) -> None:
+    """A post that cannot be recorded is taken down, or the caller is told to; no reaction is synced on it."""
+    interaction = make_interaction(guild_id=1234)
+    cog = MessageManagement(MagicMock())
+    posted = MagicMock(id=999)
+    posted.delete = AsyncMock(side_effect=delete_error)
+    channel = MagicMock(spec=TextChannel)
+    channel.send = AsyncMock(return_value=posted)
+    cog._sync_reactions_on_message = AsyncMock()
+    messages.save_draft(1234, MessageDraft(content="x", reactions=[_reaction()]))
+
+    with (
+        patch.object(message_management, "ensure_command_context", AsyncMock(return_value=True)),
+        patch.object(messages, failing, side_effect=storage_error),
+    ):
+        await MessageManagement.msg_publish.callback(cog, interaction, channel=channel)  # pyright: ignore[reportCallIssue]
+
+    posted.delete.assert_awaited_once()
+    cog._sync_reactions_on_message.assert_not_awaited()
+    interaction.response.send_message.assert_awaited_once_with(reply, ephemeral=True)
