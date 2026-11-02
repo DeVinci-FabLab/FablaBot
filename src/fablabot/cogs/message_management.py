@@ -655,23 +655,27 @@ class MessageManagement(commands.Cog):
             )
             return
 
-        updated_reactions: list[MsgReactionEvent] = []
-        for reaction in draft.reactions:
-            cloned = copy(reaction)
-            cloned.message_id = msg.id
-            updated_reactions.append(cloned)
-        tracked = TrackedMessage(
-            message_id=msg.id,
-            channel_id=channel.id,
-            content=draft.content,
-            reactions=updated_reactions,
-            created_by=interaction.user.id,
-            created_at_iso=datetime.now(PARIS_TZ).isoformat(),
-        )
         try:
+            # The draft may have changed while the post went out. The links it holds now go with the post, and a text
+            # written meanwhile stays as the draft; the read and the write have no await between them.
+            current = self.get_draft(interaction.guild.id) or draft
+            updated_reactions: list[MsgReactionEvent] = []
+            for reaction in current.reactions:
+                cloned = copy(reaction)
+                cloned.message_id = msg.id
+                updated_reactions.append(cloned)
+            tracked = TrackedMessage(
+                message_id=msg.id,
+                channel_id=channel.id,
+                content=draft.content,
+                reactions=updated_reactions,
+                created_by=interaction.user.id,
+                created_at_iso=datetime.now(PARIS_TZ).isoformat(),
+            )
+            text_changed = current.content != draft.content
             if updated_reactions:
-                messages.track_from_draft(interaction.guild.id, tracked, keep_text=False)
-            else:
+                messages.track_from_draft(interaction.guild.id, tracked, keep_text=text_changed)
+            elif not text_changed:
                 self._clear_draft(interaction.guild.id)
         except sqlite3.Error:
             logger.exception(f"Message {msg.id} not saved in guild {interaction.guild.id}; retracting it.")

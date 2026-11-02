@@ -218,6 +218,67 @@ async def test_msg_publish_moves_the_links_to_the_post_and_deletes_the_draft() -
     cog._sync_reactions_on_message.assert_awaited_once()
 
 
+@pytest.mark.parametrize(
+    ("during", "linked", "draft_after"),
+    [
+        pytest.param(MessageDraft("x", [_reaction("🔧"), _reaction("🎉")]), ["🔧", "🎉"], None, id="link-added"),
+        pytest.param(
+            MessageDraft("neuf", [_reaction("🔧"), _reaction("🎉")]), ["🔧", "🎉"], MessageDraft("neuf", []), id="text-and-link"
+        ),
+        pytest.param(MessageDraft("neuf", [_reaction("🔧")]), ["🔧"], MessageDraft("neuf", []), id="text-changed"),
+        pytest.param(None, ["🔧"], None, id="draft-deleted"),
+    ],
+)
+async def test_msg_publish_keeps_what_the_draft_gained_while_the_post_went_out(
+    during: MessageDraft | None, linked: list[str], draft_after: MessageDraft | None
+) -> None:
+    """The links on the draft when the post is recorded go with it, and a text written meanwhile stays as the draft."""
+    interaction = make_interaction(guild_id=1234)
+    cog = MessageManagement(MagicMock())
+    cog._sync_reactions_on_message = AsyncMock()
+
+    async def _send(_content: str) -> MagicMock:
+        if during is None:
+            messages.clear_draft(1234)
+        else:
+            messages.save_draft(1234, during)
+        return MagicMock(id=999)
+
+    channel = MagicMock(spec=TextChannel, id=7)
+    channel.send = AsyncMock(side_effect=_send)
+    messages.save_draft(1234, MessageDraft(content="x", reactions=[_reaction("🔧")]))
+
+    with patch.object(message_management, "ensure_command_context", AsyncMock(return_value=True)):
+        await MessageManagement.msg_publish.callback(cog, interaction, channel=channel)  # pyright: ignore[reportCallIssue]
+
+    tracked = messages.tracked_messages(1234)[999]
+    assert tracked.content == "x"
+    assert [r.emoji for r in tracked.reactions] == linked
+    assert messages.get_draft(1234) == draft_after
+    assert f"avec {len(linked)} réaction(s)" in interaction.response.send_message.await_args.args[0]
+
+
+async def test_msg_publish_leaves_a_text_written_while_the_post_went_out_when_there_are_no_links() -> None:
+    """A draft without links is not tracked after the post; a newer text of it is not deleted with the old one."""
+    interaction = make_interaction(guild_id=1234)
+    cog = MessageManagement(MagicMock())
+    cog._sync_reactions_on_message = AsyncMock()
+
+    async def _send(_content: str) -> MagicMock:
+        messages.save_draft(1234, MessageDraft(content="neuf", reactions=[]))
+        return MagicMock(id=999)
+
+    channel = MagicMock(spec=TextChannel, id=7)
+    channel.send = AsyncMock(side_effect=_send)
+    messages.save_draft(1234, MessageDraft(content="x", reactions=[]))
+
+    with patch.object(message_management, "ensure_command_context", AsyncMock(return_value=True)):
+        await MessageManagement.msg_publish.callback(cog, interaction, channel=channel)  # pyright: ignore[reportCallIssue]
+
+    assert messages.tracked_messages(1234) == {}
+    assert messages.get_draft(1234) == MessageDraft(content="neuf", reactions=[])
+
+
 def _follow_setup(draft: MessageDraft | None) -> tuple[MagicMock, MessageManagement, MagicMock]:
     """Build a `/msg follow` call on server 1234, over a message of that server, with an optional draft stored first."""
     interaction = make_interaction(guild_id=1234)
