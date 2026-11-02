@@ -66,7 +66,7 @@ class Server:
 
 @pytest.fixture
 async def server(simcord_env) -> Server:
-    """Open a server set up as the README says, with `/fm` and `/vocal` shown to their roles."""
+    """Open a server set up as the operator guide says, with `/fm` and `/vocal` shown to their roles."""
     built = Server(simcord_env)
     await built.show("fm", "Administrateur")
     await built.show("vocal", "Bureau")

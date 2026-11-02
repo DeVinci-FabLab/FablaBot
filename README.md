@@ -25,318 +25,33 @@ FablaBot serves the [DeVinci FabLab](https://github.com/DeVinci-FabLab) associat
 | You are | Read |
 | --- | --- |
 | A member or staff | The [user guide](./docs/USERGUIDE.md), or run `/help` in Discord |
-| Hosting an instance | The [operator guide](./docs/OPERATIONS.md) and [Deployment](#deployment) |
-| A contributor | [CONTRIBUTING](./CONTRIBUTING.md) and [Project setup](#project-setup) |
+| Hosting an instance | The [operator guide](./docs/OPERATIONS.md): settings, servers, roles, staff commands in the slash menu, troubleshooting. Then [deployment and releases](./docs/DEPLOYMENT.md) |
+| A contributor | [CONTRIBUTING](./CONTRIBUTING.md): setup, checks, pull requests, the code documentation |
 
-## Project setup
+All the guides are listed in [docs/](./docs/README.md).
 
-This library is managed with [`uv`](https://docs.astral.sh/uv/), a fast Python package and project manager written in Rust.
+## Quick start
 
-Start by [installing `uv`](https://docs.astral.sh/uv/getting-started/installation/).
-
-While using `uv` is not mandatory, it is the simplest way to get started with this project. If you know what you're doing feel free to use any other tool.
-
-### Installing dependencies
-
-To create a Virtual Environment for the project and install the dependencies, you can simply use:
+Install [`uv`](https://docs.astral.sh/uv/getting-started/installation/), then, with a Discord token in `secrets/discord_token.secret`:
 
 ```bash
 uv sync
-```
-
-### Environment variables
-
-You will need to create a `secrets/` folder into the project root directory and add one file:
-
-- `secrets/discord_token.secret`
-
-Here are some commands to help you create it:
-
-```bash
-mkdir secrets
-```
-
-```bash
-# Token for authenticating with the Discord API (https://discord.com/developers/applications)
-echo -n 'my_discord_token' > secrets/discord_token.secret
-```
-
-#### Allowed servers
-
-`ALLOWED_GUILD_IDS` holds the IDs of the servers the bot may serve, separated by commas. Each ID can carry a name after a colon, so the list reads by itself; the bot ignores the name, which cannot hold a comma:
-
-```bash
-ALLOWED_GUILD_IDS=111111111111111111:Main server,222222222222222222:Test server
-```
-
-- When it is empty, the bot keeps serving the servers it is in at start and logs a warning. After that, it only stays in a server it joins if the application owner, or an admin or developer of its team, owns it.
-- A malformed value stops the bot at start.
-
-To keep other people from adding the bot to their servers, set these in the [Developer Portal](https://discord.com/developers/applications):
-
-1. Installation: set Install Link to None and uncheck User Install.
-2. Bot: turn Public Bot off.
-
-To copy a server ID, enable Developer Mode in Discord (User Settings, Advanced), then right-click the server and choose Copy Server ID. The [operator guide](./docs/OPERATIONS.md) has the full steps to add or remove a server.
-
-#### Log channels
-
-Each server picks its log channel with `/log set` and receives its own errors only.
-
-`OPERATOR_LOG_CHANNEL_ID` holds one channel ID and receives the errors that belong to no server. Pick a channel only the bot's administrators can read: those errors come from every server's tasks.
-
-```bash
-OPERATOR_LOG_CHANNEL_ID=888888888888888888
-```
-
-- When it is empty, those errors stay in the log files.
-- A malformed value is ignored, with a warning at start.
-
-Log files live in `logs/`:
-
-- `logs/<date>.log` holds every line, stays on the host and is never sent.
-- `logs/guilds/<server ID>/<date>.log` holds one server's lines. `/log export` sends that file to that server only.
-- The bot deletes no log file. See the [operator guide](./docs/OPERATIONS.md) for archiving before a redeploy.
-
-#### Slash commands
-
-At start, the bot sends its slash commands to Discord only when they changed since the last sync. It keeps a fingerprint of the last sync in `data/command_sync_state.json`.
-
-- To force a sync, stop the bot, delete that file and start it again.
-- After rolling back to an older image, delete that file before you upgrade again: the older image syncs at every start without updating it.
-
-`DEV_GUILD_ID` holds one server ID, for a development bot only. When it is set, the bot syncs its commands to that server alone, where they show at once, and leaves the global commands as they are.
-
-```bash
-DEV_GUILD_ID=111111111111111111
-```
-
-- Use a separate Discord application for the development bot, one that never synced without `DEV_GUILD_ID`: otherwise each command shows twice on that server.
-- Never set it on the production bot: its commands would stop updating on every other server.
-- The server must be in `ALLOWED_GUILD_IDS` when that list is set. A malformed value, or a server outside the list, stops the bot at start.
-
-### Running the project
-
-To run the code, you can then use:
-
-```bash
 DISCORD_TOKEN_FILE=secrets/discord_token.secret ALLOWED_GUILD_IDS=<your server ID> uv run main
 ```
 
-### Staff commands in the slash menu
-
-The staff command groups (`/text`, `/vocal`, `/fm`, `/log`, `/msg`, `/user`, `/welcome`) are hidden from the slash menu by default: only members with the Administrator permission see them. `/suggest` and `/help` stay visible to everyone. This changes what the menu shows, not who may run a command: each command still checks the caller's roles when it runs.
-
-On each server, a member with the Administrator permission shows each group to the roles that use it:
-
-1. Open Server Settings > Integrations, then Manage next to the bot.
-2. Under Commands, open a command, choose Add Roles or Members, add the roles listed below for it, and save.
-3. Leave the Roles & Members section at the top of that page alone: a role added there sees every staff group.
-4. Check with an account that has no staff role: after a reload, it sees `/suggest` and `/help` and no staff group. If a group still shows, open that command and make sure `@everyone` is not allowed there.
-
-| Command | Roles to add |
-| --- | --- |
-| `/text`, `/welcome` | Administrateur, Président, Vice-Président, Secrétaire Général |
-| `/vocal` | Administrateur, Président, Vice-Président, Secrétaire Général, Bureau |
-| `/log` | Administrateur, Président, Vice-Président, Secrétaire Général, Respo Numérique, Pôle Numérique |
-| `/fm` | Administrateur, CoDir, Respo Formation, Admin -temp- |
-| `/msg` | Administrateur, Président, Vice-Président, Secrétaire Général, Bureau |
-| `/user` | Administrateur, Président, Vice-Président, Secrétaire Général, Bureau, Respo Communication, Respo Event, Respo Formation, Respo Numérique, Respo Partenariat, Respo Projet |
-
-- These are the role names the bot checks today (`src/fablabot/helpers/constants.py`). Skip a role the server does not have, and a role that already has the Administrator permission.
-- `/vocal` allows Bureau for `/vocal create` of a temporary channel only: the bot still refuses `/vocal rename` and `/vocal delete` for Bureau at run time.
-- Discord applies this per command, not per subcommand: a role added to `/msg` sees all of `/msg`, and the bot still refuses the subcommands that role may not run. `/msg clear` needs Manage Messages in the channel and `/msg purge` the Administrator permission; a role that only uses `/msg clear` is added to `/msg` too.
-- For `/user`, also add any other `Respo <area>` role whose `Pôle <area>` role exists on the server.
-- The settings stay across restarts and redeploys as long as the commands keep their names.
-- Members may need to reload Discord before their menu changes: Ctrl+R (Windows, Linux), Cmd+R (macOS), or close and reopen the mobile app.
-
-## Deployment
-
-The production image runs the bot as the unprivileged user `10001:10001`, from start to stop. It writes only to `data/` and `logs/` (the two volumes) and to a heartbeat file in `/tmp`. `compose.yml` is the reference stack; on top of the image, it takes away what the bot does not need:
-
-```yaml
-    read_only: true
-    tmpfs:
-      - /tmp:size=1m,mode=1777,noexec,nosuid,nodev
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-```
-
-- `read_only` mounts the image read-only; `/tmp` is a 1 MB in-memory folder, for the heartbeat only.
-- `cap_drop` removes every Linux capability, and `no-new-privileges` stops any process from gaining rights.
-
-At start, before connecting, the bot checks that it can read and write every folder and file under `data/` and `logs/`, and read the token file. Otherwise it stops with one line per problem, for example `Cannot start: data/ is not writable by uid 10001.`, and Docker restarts it until the problem is fixed. A refused start deletes nothing and writes nothing, except that it creates a missing `data/` or `logs/` folder.
-
-The container reports `healthy` while the bot is connected to Discord, and `unhealthy` when its last heartbeat is more than 90 seconds old. It is a status only: nothing restarts the bot on its own.
-
-To check an image locally (needs Docker): `sh docker/check-image.sh`. It builds the image with planted secrets, then checks its user, its content, the start messages, and that nothing is written outside `data/`, `logs/` and `/tmp`.
-
-### Moving a host to the non-root image
-
-The production host already runs a release that keeps its state in `data/fablabot.db`, beside the JSON files of the older releases. The release that brings the non-root image needs `data/`, `logs/` and the token file to belong to `10001`, which today they do not. Do this once, on the host. The `sudo` steps ask for the operator's password. Keep the previous image's version at hand: it is the way back.
-
-Merging a release deploys it: the stack updates itself every 30 minutes. The pull request that brings the image, titled `feat(docker)!: run the bot as an unprivileged user in a hardened container`, is what cuts that release, so the update is held before it is merged, and the stack is stopped only once the new image is in.
-
-Set the volumes path in the shell you use for the steps below, to the value the stack uses:
-
-```bash
-VOLUMES_PATH=/path/to/volumes
-```
-
-1. **Archive.** Follow steps 2 to 4 of ["Before every redeploy"](docs/OPERATIONS.md#before-every-redeploy) in the operator guide, skipping its step 1: the bot keeps running, and this copy is a safety net taken before the merge. The archive goes to `~/fablabot-archive`, outside the volumes, and the two counts must be the same. Never delete `data/` or `logs/`.
-
-2. **Hold the update.** Read the state now, with the container (it is called `fablabot`) still on its current image. The first command prints the release running, and the second keeps the `Server check:` lines, one per server, to compare with after the move.
-
-   ```bash
-   docker inspect fablabot --format '{{index .Config.Labels "org.opencontainers.image.version"}}'
-   docker logs fablabot 2>&1 | grep 'Server check:' > ~/fablabot-archive/server-check-before.txt
-   ```
-
-   Then set the stack's `image:` to that version in place of `:latest` and deploy. The container restarts once on the same image. The stack updates itself every 30 minutes, and a tag that does not move gives it nothing to pull.
-
-   ```bash
-   docker inspect fablabot --format '{{.Config.Image}}'
-   ```
-
-   This command must print the tag you set.
-
-3. **Merge the pull requests.** First the pull request that brings the image, `feat(docker)!: run the bot as an unprivileged user in a hardened container`. It is a breaking `feat`, and with `bump-minor-pre-major` on it gives a minor release. Then the release pull request `chore(main): release X.Y.Z`, which that merge updates. Wait for the "Build and Push Docker Image" run to finish green, then pull the new image. The bot keeps running on the held tag.
-
-   ```bash
-   docker pull ghcr.io/devinci-fablab/fablabot:X.Y.Z   # the new release
-   ```
-
-4. **Stop the stack.** The bot is down from here. Archive again, with all four steps of "Before every redeploy": an archive of a running database can be inconsistent, and the volumes are about to change owner.
-
-5. **Give the folders to the bot's user.** First check that nothing on the host already uses id 10001. The command must print nothing. If it prints a line, stop: giving the files to that id would give the token and the state to that host account.
-
-   ```bash
-   getent passwd 10001; getent group 10001
-   ```
-
-   Then give both folders to the bot's user, whole: the database, its journal, `data/backups/`, the exports and the JSON files all belong to it.
-
-   ```bash
-   sudo chown -R 10001:10001 "$VOLUMES_PATH/fablabot/data" "$VOLUMES_PATH/fablabot/logs"
-   ```
-
-6. **Give the token file to the bot's user.** It is the file named under `secrets: discord_token: file:` in the stack.
-
-   ```bash
-   sudo chown 10001:10001 /path/to/discord_token.secret && sudo chmod 400 /path/to/discord_token.secret
-   ```
-
-7. **Add the hardening lines.** Add the seven lines above to the bot's service in the stack, and set `image:` to the new version, `ghcr.io/devinci-fablab/fablabot:X.Y.Z`.
-
-8. **Deploy.**
-
-9. **Read the start.** The first command prints `0`. The second prints `starting`, then `healthy` within two minutes. The third prints the `Server check:` lines, one per server: each `blocking=` and `warnings=` count is the one in `~/fablabot-archive/server-check-before.txt`, saved in step 2 (the timestamps differ).
-
-   ```bash
-   docker logs fablabot 2>&1 | grep -c 'Cannot start'
-   docker inspect --format '{{.State.Health.Status}}' fablabot
-   docker logs fablabot 2>&1 | grep 'Server check:'
-   ```
-
-   A `Cannot start:` line names the folder, file or setting to fix; once fixed, the bot starts at its next restart. Use your stack's container name if it is not `fablabot`.
-
-10. **Release the hold.** Pull `:latest`, so that the next start is the release you merged.
-
-    ```bash
-    docker pull ghcr.io/devinci-fablab/fablabot:latest
-    ```
-
-    Set `image:` back to `:latest` and deploy. The container restarts once, with the hardening lines kept. Then read the version label, which must be the release you merged, and the health, `healthy` within two minutes.
-
-    ```bash
-    docker inspect fablabot --format '{{index .Config.Labels "org.opencontainers.image.version"}}'
-    docker inspect --format '{{.State.Health.Status}}' fablabot
-    ```
-
-To roll back, set the image back to the previous image, the `:X.Y.Z` read in step 2, and restore the stack as it was before step 7. The rollback stays on the tag: `:latest` brings the non-root image back. The older image runs as root and reads the volumes without a `chown` back, but root without capabilities cannot write files owned by 10001: the seven lines must go with it.
-
-After a rollback, the root image writes root-owned files. Run step 5 again (and step 6 if the token file was replaced) before you redeploy the non-root image.
-
-After restoring an archive, run step 5 again: `tar` run as root restores the files as root.
-
-## Documentation
-
-We **highly recommend** you to read the user guide before using the bot. It will help you understand the bot's features
-and how to use them. You can find the user guide [here](./docs/USERGUIDE.md).
-
-Whoever hosts an instance should read the [operator guide](./docs/OPERATIONS.md): deployment, adding and removing servers, Developer Portal settings and troubleshooting.
-
-### Building the technical documentation
-
-To build the documentation of a version of this project, you can use the provided `doc_builder` utility.
-
-```bash
-uv run doc_builder
-```
-
-You can then open the `docs/index.html` file in your browser to view the codebase's documentation.
-
-Add the `--help` flag to this command to see available options.
-
-## Releases
-
-Each release has a version `vX.Y.Z`, a GitHub release and an entry in `CHANGELOG.md`. The version is set in `pyproject.toml`; each release copies it to `uv.lock` and `.release-please-manifest.json`, and a test checks that the three agree. Images are published to `ghcr.io/devinci-fablab/fablabot`:
-
-| Tag | Moves when | Use it for |
-| --- | --- | --- |
-| `:latest`, `:X.Y.Z`, `:X.Y` | a release is published | production |
-| `:edge`, `:sha-<commit>` | every push to `main`, once the check passes | a test server, or trying one commit |
-
-Images published before the first release keep their `:<commit sha>` tags.
-
-### Making a release
-
-1. Every push to `main` updates one pull request titled `chore(main): release X.Y.Z`. It holds the next version and its changelog, worked out from the commit titles on `main`: `fix:` bumps Z, `feat:` bumps Y, and below 1.0.0 a breaking change (`feat!:`) bumps Y as well.
-2. The check runs on that pull request too. Review it and merge it like any other.
-3. The merge tags `vX.Y.Z`, publishes the GitHub release, and builds the image under `:latest`, `:X.Y.Z`, `:X.Y`, `:edge` and `:sha-<commit>`.
-4. Publishing restarts production: the stack updates itself every 30 minutes. Archive before merging, as the [operator guide](docs/OPERATIONS.md#releasing-and-redeploying) says, and redeploy the stack if the running revision stays old.
-
-If the image build of a release fails, the tag exists but `:latest` has not moved. Open that run in the Actions tab and choose "Re-run failed jobs": re-running all jobs would publish `:edge` only.
-
-If the build stops with "The release is not this commit", the release was cut for an earlier merge than the push being built. Nothing is published for that run, so `:latest` stays on the previous release. The tag exists without an image; the next release publishes normally.
-
-### Rolling back
-
-Set the stack's image to the previous release, `ghcr.io/devinci-fablab/fablabot:X.Y.Z`, or to one commit with `:sha-<commit>`, and redeploy. Read the changelog entries in between first: a release that changed the files in `data/` says so there. Go back to `:latest` once a fixed release is out.
-
-Going back past the first release that keeps its state in the database takes one more step, or the older release reads stale files with no error: see [the operator guide](docs/OPERATIONS.md#back-to-a-release-before-the-database).
-
-### Repository settings
-
-Releases need two settings, once, by a repository admin:
-
-- Settings, Actions, General, Workflow permissions: tick "Allow GitHub Actions to create and approve pull requests", so the release pull request can be opened. No workflow approves pull requests. Each job asks for its own permissions, so the default should be "Read repository contents and packages permissions".
-- Settings, General, Pull Requests, Allow squash merging: set the default commit message to "Pull request title", since the release reads the squash commit titles.
-
-A pull request opened by a workflow does not start other workflows, so the release workflow starts the check on the release pull request itself. A required `check` status is met without a personal token.
+[CONTRIBUTING](./CONTRIBUTING.md#run-the-bot-locally) has the setup in full.
 
 ## Roadmap
 
-The bot is still in active development. The next feature and bug resolutions are listed in
-the [Project](https://github.com/orgs/DeVinci-FabLab/projects/5/views/2) section of the GitHub repository.
+The next features and fixes are listed in the [Project](https://github.com/orgs/DeVinci-FabLab/projects/5/views/2) section of the GitHub repository.
 
 ## Security Policy
 
-Please do not report security issues in a public issue. Use GitHub's private
-[vulnerability reporting](https://github.com/DeVinci-FabLab/FablaBot/security/advisories/new) instead, and we will
-answer there.
-
-## Acknowledgments
-
-Thanks to everyone who has contributed to the bot: see the
-[contributors](https://github.com/DeVinci-FabLab/FablaBot/graphs/contributors) page.
+Please do not report security issues in a public issue. Use GitHub's private [vulnerability reporting](https://github.com/DeVinci-FabLab/FablaBot/security/advisories/new) instead, and we will answer there.
 
 ## Contributing
 
-To contribute, follow the steps in the [CONTRIBUTING](./CONTRIBUTING.md) file. Questions, bugs and ideas are welcome as
-[issues](https://github.com/DeVinci-FabLab/FablaBot/issues).
+Follow the steps in [CONTRIBUTING](./CONTRIBUTING.md). Questions, bugs and ideas are welcome as [issues](https://github.com/DeVinci-FabLab/FablaBot/issues). Thanks to everyone on the [contributors](https://github.com/DeVinci-FabLab/FablaBot/graphs/contributors) page.
 
 ## License
 

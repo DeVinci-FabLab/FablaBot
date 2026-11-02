@@ -4,13 +4,43 @@ Every pull request runs one check, called `check`. It covers formatting, lint, t
 The image is built only when that check passes on `main`.
 This page shows how to run the same commands locally.
 
+- [Set up](#set-up)
+- [Run the bot locally](#run-the-bot-locally)
+- [Run the checks](#run-the-checks)
+- [Fix what they report](#fix-what-they-report)
+- [Preview a screen as an image](#preview-a-screen-as-an-image)
+- [Type errors and the baseline](#type-errors-and-the-baseline)
+- [Change the stored data](#change-the-stored-data)
+- [Build the technical documentation](#build-the-technical-documentation)
+- [Pull requests](#pull-requests)
+- [Dependency updates](#dependency-updates)
+
 ## Set up
 
-Install [uv](https://docs.astral.sh/uv/) (0.13.6 or later), then run:
+The project is managed with [uv](https://docs.astral.sh/uv/), a Python package and project manager. [Install it](https://docs.astral.sh/uv/getting-started/installation/) (0.13.6 or later), then create the virtual environment and install the dependencies:
 
 ```bash
 uv sync --locked
 ```
+
+Using uv is not mandatory. If you know what you are doing, any other tool works.
+
+## Run the bot locally
+
+Create a `secrets/` folder in the project root and put the Discord token in it. The token comes from the [Developer Portal](https://discord.com/developers/applications):
+
+```bash
+mkdir secrets
+echo -n 'my_discord_token' > secrets/discord_token.secret
+```
+
+Then start the bot on your own server. `ALLOWED_GUILD_IDS` takes its ID (see "Allowed servers" in the [operator guide](docs/OPERATIONS.md#allowed-servers)):
+
+```bash
+DISCORD_TOKEN_FILE=secrets/discord_token.secret ALLOWED_GUILD_IDS=<your server ID> uv run main
+```
+
+Use a separate Discord application for a development bot, and set `DEV_GUILD_ID` so its commands show at once on your server only: see ["Development bot"](docs/OPERATIONS.md#development-bot). The other settings are in the [operator guide](docs/OPERATIONS.md#environment-variables).
 
 ## Run the checks
 
@@ -94,13 +124,23 @@ The schema lives in `src/fablabot/migrations/`, one numbered SQL file per step, 
 the next number. Never edit a file that has shipped: databases in production already ran it. A file may rebuild a table (create the new one, copy, drop the old one, rename, recreate its indexes): foreign keys are off while it runs, and the start refuses the file if it leaves a row without its parent. A local `data/` holding JSON
 state from an older release stops the bot at start, as it does in production.
 
+## Build the technical documentation
+
+To build the documentation of the code, use the provided `doc_builder` utility:
+
+```bash
+uv run doc_builder
+```
+
+Open `docs/index.html` in your browser to read it. The generated files are not committed. Add the `--help` flag to see the options.
+
 ## Pull requests
 
 - Titles follow Conventional Commits, for example `fix(log): ...`, since the title becomes the squash commit.
 - One maintainer approval is needed to merge.
 - The title also decides the next version: `feat:` bumps the minor number; `fix:`, `perf:`, `deps:`, `revert:` and `docs:` bump the patch number and appear in the changelog. `build:`, `ci:`, `chore:`, `test:`, `refactor:` and `style:` do not start a release on their own.
 - A push to `main` runs the check, then builds and publishes `ghcr.io/devinci-fablab/fablabot:edge` and `:sha-<commit>`. A red check publishes nothing.
-- `:latest` moves only when the release pull request is merged; the README's Releases section explains the steps.
+- `:latest` moves only when the release pull request is merged; the [deployment guide](docs/DEPLOYMENT.md#making-a-release) explains the steps.
 - Publishing does not restart a running bot. The deployment is updated by hand.
 
 ## Dependency updates

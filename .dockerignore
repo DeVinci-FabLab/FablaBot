@@ -2,6 +2,7 @@
 *
 !pyproject.toml
 !uv.lock
+# The build reads the file `readme` names in pyproject.toml.
 !README.md
 !src/
 # Compiled caches from the host add nothing to the image.

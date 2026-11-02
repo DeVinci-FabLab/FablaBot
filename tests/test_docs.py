@@ -80,10 +80,10 @@ def test_operator_guide_explains_the_server_language() -> None:
     assert "Commands synced (9, global)." in _section(text, '## "This command is outdated"')
 
 
-def test_readme_check_names_help() -> None:
-    """The slash-menu section of the README names /help next to /suggest, in its paragraph and in step 4."""
-    text = _read("README.md")
-    section = _section(text, "### Staff commands in the slash menu")
+def test_operator_guide_slash_menu_names_help() -> None:
+    """The slash-menu section of the operator guide names /help next to /suggest, in its paragraph and in step 4."""
+    text = _read("docs/OPERATIONS.md")
+    section = _section(text, "## Staff commands in the slash menu")
     assert "`/suggest` and `/help` stay visible to everyone" in section
     assert "it sees `/suggest` and `/help` and no staff group" in section
 
@@ -262,7 +262,7 @@ def test_operator_guide_warns_of_stale_json_and_exports_first() -> None:
     row = next(line for line in troubleshooting.splitlines() if "not imported into" in line)
     assert "rollback by export" in row
     assert "fablabot.db" in row
-    assert "docs/OPERATIONS.md#back-to-a-release-before-the-database" in _read("README.md")
+    assert "OPERATIONS.md#back-to-a-release-before-the-database" in _read("docs/DEPLOYMENT.md")
 
 
 STAMP = "20261102-120000"
@@ -386,6 +386,8 @@ def test_the_rollback_moves_nothing_when_the_export_is_not_there(host: _Host) ->
     assert sorted(path.name for path in host.data.glob("*.json")) == sorted(EXPORTED[:3])
 
 
+NON_ROOT = "## Moving a host to the non-root image"
+IMAGE_PR = "feat(docker)!: run the bot as an unprivileged user in a hardened container"
 MOVE_STEPS = (
     "**Archive.**",
     "**Hold the update.**",
@@ -400,9 +402,14 @@ MOVE_STEPS = (
 )
 
 
-def test_readme_moves_a_host_to_the_non_root_image_in_order() -> None:
+def _non_root_move() -> str:
+    """Return the one list that moves a host to the non-root image, in the deployment guide."""
+    return _section(_read("docs/DEPLOYMENT.md"), NON_ROOT)
+
+
+def test_deployment_guide_moves_a_host_to_the_non_root_image_in_order() -> None:
     """The host on the database holds, merges, stops, gives the files away, hardens, deploys and only then follows `:latest`."""
-    section = _section(_read("README.md"), "### Moving a host to the non-root image")
+    section = _non_root_move()
     places = [section.index(step) for step in MOVE_STEPS]
     assert places == sorted(places)
     hold = section.split("**Hold the update.**", 1)[1].split("**Merge the pull requests.**", 1)[0]
@@ -420,47 +427,31 @@ def test_readme_moves_a_host_to_the_non_root_image_in_order() -> None:
     assert ":latest" in section.split("**Release the hold.**", 1)[1].split("\n\n", 1)[0]
 
 
-def test_readme_rolls_the_non_root_move_back_with_the_old_image_and_no_hardening() -> None:
+def test_deployment_guide_rolls_the_non_root_move_back_with_the_old_image_and_no_hardening() -> None:
     """The rollback needs both: the previous image, and the stack without the hardening lines."""
-    section = _section(_read("README.md"), "### Moving a host to the non-root image")
-    rollback = section.split("To roll back", 1)[1]
+    rollback = _non_root_move().split("To roll back", 1)[1]
     assert "previous image" in rollback
     assert "without the hardening lines" in rollback or "the seven lines must go" in rollback
 
 
 def test_the_non_root_move_uses_the_guides_archive_and_the_real_container() -> None:
     """The archive is `~/fablabot-archive`, never a folder inside the volumes, and the container is `fablabot`."""
-    readme = _section(_read("README.md"), "### Moving a host to the non-root image")
-    guide = _section(_read("docs/OPERATIONS.md"), "## Moving to the non-root image")
-    for text in (readme, guide):
-        assert "fablabot/archive" not in text
-        assert "~/fablabot-archive" in text
-        assert "password" in text
-        assert "fablabot-prod" not in text
-        assert "docker inspect --format '{{.State.Health.Status}}' fablabot" in text
-    assert "fablabot/archive" not in _read("README.md")
-    assert "fablabot/archive" not in _read("docs/OPERATIONS.md")
+    section = _non_root_move()
+    assert "fablabot/archive" not in section
+    assert "~/fablabot-archive" in section
+    assert "password" in section
+    assert "fablabot-prod" not in section
+    assert "docker inspect --format '{{.State.Health.Status}}' fablabot" in section
+    for guide in ("README.md", "docs/OPERATIONS.md", "docs/DEPLOYMENT.md"):
+        assert "fablabot/archive" not in _read(guide)
 
 
-def test_operator_guide_lists_the_non_root_move_in_the_same_order() -> None:
-    """The guide's list follows the README's: the same steps, in the same order."""
-    section = _section(_read("docs/OPERATIONS.md"), "## Moving to the non-root image")
-    keywords = (
-        "Archive",
-        "Hold the update",
-        "Merge the pull request",
-        "Stop the stack",
-        "chown -R 10001:10001",
-        "chmod 400",
-        "hardening lines",
-        "Deploy",
-        "Read the start",
-        ":latest",
-    )
-    places = [section.index(keyword) for keyword in keywords]
-    assert places == sorted(places)
-    assert "the stack without the hardening lines" in section
+def test_the_non_root_move_keeps_the_whole_folder_rule_and_the_other_owner() -> None:
+    """The files belong to another user than 10001, and `data/` goes whole."""
+    section = _non_root_move()
     assert "`data/` whole" in section
+    assert "another user" in section
+    assert "the stack without the hardening lines" in section
 
 
 def test_moving_to_the_database_keeps_the_whole_folder_rule_for_the_later_move() -> None:
@@ -468,97 +459,77 @@ def test_moving_to_the_database_keeps_the_whole_folder_rule_for_the_later_move()
     section = _section(_read("docs/OPERATIONS.md"), "## Moving to the database")
     assert "`chown -R`" in section
     assert "`data/` whole" in section
-    assert "Moving to the non-root image" in section
-
-
-IMAGE_PR = "feat(docker)!: run the bot as an unprivileged user in a hardened container"
-NON_ROOT_README = "### Moving a host to the non-root image"
-NON_ROOT_GUIDE = "## Moving to the non-root image"
+    assert "Moving a host to the non-root image" in section
 
 
 def test_the_hold_comes_before_the_pull_request_that_brings_the_image_then_the_release() -> None:
     """The image's own pull request cuts the release: it waits for the hold, and the release pull request follows it."""
-    section = _section(_read("README.md"), NON_ROOT_README)
+    section = _non_root_move()
     merge = section.split("**Merge the pull requests.**", 1)[1].split("**Stop the stack.**", 1)[0]
     assert IMAGE_PR in merge
     assert "minor release" in merge
     assert merge.index(IMAGE_PR) < merge.index("chore(main): release X.Y.Z")
     assert "Build and Push Docker Image" in merge
-    guide = _section(_read("docs/OPERATIONS.md"), NON_ROOT_GUIDE)
-    step = guide.split("\n3. ", 1)[1].split("\n4. ", 1)[0]
-    assert "pull request that brings the image" in step
-    assert step.index("pull request that brings the image") < step.index("release pull request")
+    assert "pull request that brings the image" in merge
+    assert merge.index("pull request that brings the image") < merge.index("release pull request")
 
 
 def test_the_volumes_path_is_set_once_before_step_one() -> None:
     """Steps 1 and 4 use `$VOLUMES_PATH`: it is set before them, once, and not again at step 5."""
-    readme = _section(_read("README.md"), NON_ROOT_README)
-    guide = _section(_read("docs/OPERATIONS.md"), NON_ROOT_GUIDE)
-    for text, first in ((readme, "1. **Archive.**"), (guide, "\n1. Archive")):
-        assert text.count("VOLUMES_PATH=/path/to/volumes") == 1
-        assert text.index("VOLUMES_PATH=/path/to/volumes") < text.index(first)
-    assert "VOLUMES_PATH=" not in readme.split("**Give the folders to the bot's user.**", 1)[1]
+    section = _non_root_move()
+    assert section.count("VOLUMES_PATH=/path/to/volumes") == 1
+    assert section.index("VOLUMES_PATH=/path/to/volumes") < section.index("1. **Archive.**")
+    assert "VOLUMES_PATH=" not in section.split("**Give the folders to the bot's user.**", 1)[1]
 
 
-def test_archive_then_hold_are_steps_one_and_two_of_both_guides() -> None:
-    """The archive is step 1 and the hold step 2, in the README and in the operator guide."""
-    readme = _section(_read("README.md"), NON_ROOT_README)
-    guide = _section(_read("docs/OPERATIONS.md"), NON_ROOT_GUIDE)
-    for text in (readme, guide):
-        assert re.search(r"^1\. (\*\*)?Archive", text, re.MULTILINE)
-        assert re.search(r"^2\. (\*\*)?Hold the update", text, re.MULTILINE)
-        assert not re.search(r"^0\. ", text, re.MULTILINE)
+def test_archive_then_hold_are_steps_one_and_two() -> None:
+    """The archive is step 1 and the hold step 2."""
+    section = _non_root_move()
+    assert re.search(r"^1\. \*\*Archive", section, re.MULTILINE)
+    assert re.search(r"^2\. \*\*Hold the update", section, re.MULTILINE)
+    assert not re.search(r"^0\. ", section, re.MULTILINE)
 
 
 def test_the_hold_saves_the_server_check_lines_for_the_comparison() -> None:
     """The lines are saved while the old container runs, before the hold's deploy, and read back after the move."""
-    readme = _section(_read("README.md"), NON_ROOT_README)
-    hold = readme.split("**Hold the update.**", 1)[1].split("**Merge the pull requests.**", 1)[0]
+    section = _non_root_move()
+    hold = section.split("**Hold the update.**", 1)[1].split("**Merge the pull requests.**", 1)[0]
     command = "docker logs fablabot 2>&1 | grep 'Server check:'"
     assert command in hold
     assert "~/fablabot-archive/" in hold.split(command, 1)[1].split("\n", 1)[0]
     assert hold.index(command) < hold.index("deploy")
-    assert "saved in step 2" in readme.split("**Read the start.**", 1)[1].split("**Release the hold.**", 1)[0]
-    guide = _section(_read("docs/OPERATIONS.md"), NON_ROOT_GUIDE)
-    assert "Server check:" in guide.split("\n2. ", 1)[1].split("\n3. ", 1)[0]
+    assert "saved in step 2" in section.split("**Read the start.**", 1)[1].split("**Release the hold.**", 1)[0]
 
 
 def test_the_non_root_move_has_no_fallback_for_an_image_that_cannot_be_edited() -> None:
     """Step 7 edits `image:`, so the hold does not offer a way around editing it."""
-    for text in (
-        _section(_read("README.md"), NON_ROOT_README),
-        _section(_read("docs/OPERATIONS.md"), NON_ROOT_GUIDE),
-    ):
-        assert "cannot be edited" not in text
-        assert "automatic update off" not in text
-        assert "turned it off" not in text
+    section = _non_root_move()
+    assert "cannot be edited" not in section
+    assert "automatic update off" not in section
+    assert "turned it off" not in section
 
 
 def test_releasing_the_hold_pulls_latest_and_reads_the_result() -> None:
     """The last step pulls `:latest` before the deploy, then reads the version label and the health."""
-    readme = _section(_read("README.md"), NON_ROOT_README)
-    release = readme.split("**Release the hold.**", 1)[1].split("To roll back", 1)[0]
+    section = _non_root_move()
+    release = section.split("**Release the hold.**", 1)[1].split("To roll back", 1)[0]
     pull = "docker pull ghcr.io/devinci-fablab/fablabot:latest"
     label = "org.opencontainers.image.version"
     assert pull in release
     assert release.index(pull) < release.index("deploy") < release.index(label, release.index(pull))
     assert "State.Health.Status" in release.split(label, 1)[1]
-    guide = _section(_read("docs/OPERATIONS.md"), NON_ROOT_GUIDE)
-    last = guide.split("\n10. ", 1)[1].split("\n\n", 1)[0]
-    assert "docker pull" in last
-    assert "version label" in last
-    assert "health" in last
+    assert "version label" in release
+    assert "health" in release
 
 
 def test_the_rollback_stays_on_the_tag_and_the_guide_names_the_hardening_lines() -> None:
     """`:latest` brings the non-root image back, so a rollback stays on the previous tag."""
-    readme = _section(_read("README.md"), NON_ROOT_README)
-    rollback = readme.split("To roll back", 1)[1]
+    rollback = _non_root_move().split("To roll back", 1)[1]
     assert "stays on the tag" in rollback
     assert "`:latest` brings the non-root image back" in rollback
     rolling = _section(_read("docs/OPERATIONS.md"), "### Rolling back").split("#### Back to a release", 1)[0]
     assert "hardening lines" in rolling
-    assert "Moving to the non-root image" in rolling
+    assert "Moving a host to the non-root image" in rolling
 
 
 def test_the_troubleshooting_names_the_real_symptoms_of_a_rollback_with_the_hardening_lines() -> None:
@@ -580,11 +551,63 @@ def test_the_owner_of_a_folder_or_the_token_is_another_user_not_root() -> None:
         row = next(line for line in troubleshooting.splitlines() if line.startswith(start))
         assert "another user" in row
         assert "root" not in row
-    assert "another user" in _section(guide, NON_ROOT_GUIDE)
+    assert "belong to root" not in _read("docs/DEPLOYMENT.md")
 
 
 def test_a_refused_start_may_create_a_missing_folder() -> None:
-    """The check creates `data/` or `logs/` when absent: the README does not say it writes nothing."""
+    """The check creates `data/` or `logs/` when absent: the deployment guide does not say it writes nothing."""
+    text = _read("docs/DEPLOYMENT.md")
+    assert "writes and deletes nothing meanwhile" not in text
+    assert "creates a missing `data/` or `logs/` folder" in text
+
+
+GUIDES = ("USERGUIDE.md", "OPERATIONS.md", "DEPLOYMENT.md")
+
+
+def test_the_readme_is_a_landing_page_that_links_every_guide() -> None:
+    """The README stays short and points at each guide; `docs/` lists them too."""
     readme = _read("README.md")
-    assert "writes and deletes nothing meanwhile" not in readme
-    assert "creates a missing `data/` or `logs/` folder" in readme
+    assert len(readme.splitlines()) <= 80
+    docs_index = _read("docs/README.md")
+    for guide in GUIDES:
+        assert f"(./docs/{guide})" in readme, guide
+        assert f"({guide})" in docs_index, guide
+    assert "(./CONTRIBUTING.md)" in readme
+    assert "(../CONTRIBUTING.md)" in docs_index
+
+
+def test_the_long_guides_open_with_a_table_of_contents() -> None:
+    """The operator guide, the deployment guide and the contributor guide list their sections before the first one."""
+    for name in ("docs/OPERATIONS.md", "docs/DEPLOYMENT.md", "CONTRIBUTING.md"):
+        text = _read(name)
+        first = text.index("\n## ")
+        assert "\n- [" in text[:first], name
+
+
+def _slug(heading: str) -> str:
+    """Return the anchor GitHub gives a heading."""
+    text = re.sub(r"[^\w\- ]", "", heading.strip().lower().replace("`", ""))
+    return text.replace(" ", "-")
+
+
+def _anchors(text: str) -> set[str]:
+    """Return the anchors of the headings of a Markdown file, leaving out those in code blocks."""
+    outside = re.sub(r"^ *```.*?^ *```", "", text, flags=re.MULTILINE | re.DOTALL)
+    return {_slug(match["title"]) for match in re.finditer(r"^#{1,6} (?P<title>.+)$", outside, re.MULTILINE)}
+
+
+def test_every_relative_link_and_anchor_in_the_docs_resolves() -> None:
+    """A link in the README, CONTRIBUTING or a guide points at a file that exists and at a heading it holds."""
+    files = [ROOT / "README.md", ROOT / "CONTRIBUTING.md", *sorted((ROOT / "docs").glob("*.md"))]
+    broken: list[str] = []
+    for source in files:
+        text = re.sub(r"^ *```.*?^ *```", "", source.read_text(encoding="utf-8"), flags=re.MULTILINE | re.DOTALL)
+        for target in re.findall(r"\]\(([^)\s]+)\)", text):
+            if re.match(r"[a-z]+:", target):
+                continue
+            path, _, anchor = target.partition("#")
+            found = (source.parent / path).resolve() if path else source
+            has_anchors = found.exists() and found.suffix == ".md"
+            if not found.exists() or (anchor and has_anchors and anchor not in _anchors(found.read_text(encoding="utf-8"))):
+                broken.append(f"{source.name}: {target}")
+    assert not broken, "\n".join(broken)

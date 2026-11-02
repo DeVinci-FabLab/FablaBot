@@ -8,7 +8,7 @@ from fablabot.healthcheck import HEARTBEAT_FILE
 
 ROOT = Path(__file__).resolve().parent.parent
 COMPOSE = (ROOT / "compose.yml").read_text()
-README = (ROOT / "README.md").read_text()
+DEPLOYMENT = (ROOT / "docs" / "DEPLOYMENT.md").read_text()
 CHECK_SCRIPT = (ROOT / "docker" / "check-image.sh").read_text()
 
 HARDENING = """\
@@ -57,12 +57,12 @@ def test_tmpfs_is_the_heartbeat_folder() -> None:
     assert entry.startswith(f"{HEARTBEAT_FILE.parent}:")
 
 
-def test_readme_shows_the_compose_hardening() -> None:
-    """The README shows the same hardening lines as the stack."""
+def test_deployment_guide_shows_the_compose_hardening() -> None:
+    """The deployment guide shows the same hardening lines as the stack."""
     block = hardening_block(COMPOSE)
 
     assert block
-    assert block in README
+    assert block in DEPLOYMENT
 
 
 def test_image_check_uses_the_compose_restrictions() -> None:

@@ -17,7 +17,7 @@ A member without a staff role sees `/suggest` and `/help`.
 - It answers in the language the server declares to Discord, `fr` or `de`, else English. The menu shows
   `/help`, `/aide` or `/hilfe` after each member's own Discord language.
 - A command that is listed but hidden in the menu means the server has not allowed that role in
-  Integrations. Ask a server administrator to follow the [README](../README.md#staff-commands-in-the-slash-menu).
+  Integrations. Ask a server administrator to follow [Staff commands in the slash menu](OPERATIONS.md#staff-commands-in-the-slash-menu).
 - `/help` only reads the rules. It gives no right and changes no check.
 
 In the tables below, "admin roles" means Administrateur, Président, Vice-Président and Secrétaire Général.
