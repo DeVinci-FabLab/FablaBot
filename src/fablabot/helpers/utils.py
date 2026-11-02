@@ -28,11 +28,13 @@ from fablabot.helpers.constants import ErrorMessages
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from logging import Logger
+    from types import CoroutineType
 
 COMMANDS_CHANNEL_NAME = "commandes_bot"
 _DISCORD_EMOJI_RE = re.compile(r"^<a?:\w+:\d+>$")
 _REGIONAL_INDICATOR_START = 0x1F1E6
 _REGIONAL_INDICATOR_END = 0x1F1FF
+RIGHT_LOST_MESSAGE = "Vous n'avez plus les droits pour cette action. Rien n'a été modifié."
 
 
 class RefusalKind(StrEnum):
@@ -65,6 +67,35 @@ def log_refusal(
     """
     who = f" user_id={interaction.user.id}" if log_identity else ""
     logger.warning(f"[{command_name}] refused kind={kind} guild_id={interaction.guild_id}{who}")
+
+
+def right_check(
+    logger: Logger, command_name: str, roles: set[str]
+) -> Callable[[Any, Interaction], CoroutineType[Any, Any, bool]]:
+    """Build the ``interaction_check`` of a staff view or modal, which asks for the roles of its command again.
+
+    A view that outlives its command, or a modal submitted after it, may be used by a member who has lost the role
+    since. Assign the result to ``interaction_check`` in the class body.
+
+    Args:
+        logger (Logger): The logger of the view's module.
+        command_name (str): The command that opened the view, for the refusal line.
+        roles (set[str]): The role names of that command, the very constant it checks.
+
+    Returns:
+        Callable[[Any, Interaction], CoroutineType[Any, Any, bool]]: A check that refuses privately and lets nothing
+            run when the member holds none of the roles.
+    """
+
+    async def check(_view: Any, interaction: Interaction) -> bool:
+        user = interaction.user
+        if isinstance(user, Member) and any(role.name in roles for role in user.roles):
+            return True
+        log_refusal(logger, command_name, interaction, RefusalKind.RIGHT_LOST)
+        await interaction.response.send_message(RIGHT_LOST_MESSAGE, ephemeral=True)
+        return False
+
+    return check
 
 
 def _log_value(key: str, value: Any) -> str:

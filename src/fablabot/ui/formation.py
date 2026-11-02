@@ -9,9 +9,9 @@ from typing import TYPE_CHECKING, cast
 from discord import ButtonStyle, Embed, Interaction, TextStyle, ui
 from emoji import emojize
 
-from fablabot.helpers.constants import MAX_TRACKED_OPTIONS, PARIS_TZ, ErrorMessages
+from fablabot.helpers.constants import FORMATION_ROLES, MAX_TRACKED_OPTIONS, PARIS_TZ, ErrorMessages
 from fablabot.helpers.formation import Emojis, is_past, parse_date_time, render_formation, render_message
-from fablabot.helpers.utils import is_valid_emoji, log_request
+from fablabot.helpers.utils import is_valid_emoji, log_request, right_check
 from fablabot.models.formation import FmCommand, FmMessageDraft, Formation
 
 if TYPE_CHECKING:
@@ -36,6 +36,8 @@ class StartFmModal(ui.Modal, title="Commencer une annonce de formation"):
         end_input (ui.TextInput): Text input for the conclusion.
         request_forms_url_input (ui.TextInput): Optional text input for custom forms URL.
     """
+
+    interaction_check = right_check(logger, "fm.start", FORMATION_ROLES)
 
     intro_input: ui.TextInput = ui.TextInput(
         label="Intro",
@@ -120,6 +122,8 @@ class EditTextModal(ui.Modal, title="Modifier le texte de l'annonce de formation
         end_input (ui.TextInput): Text input for the conclusion.
         request_forms_url_input (ui.TextInput): Optional text input for custom forms URL.
     """
+
+    interaction_check = right_check(logger, "fm.edit_text", FORMATION_ROLES)
 
     intro_input: ui.TextInput = ui.TextInput(
         label="Intro",
@@ -236,6 +240,8 @@ class AddFmModal(ui.Modal, title="Ajouter une formation"):
         name_input (ui.TextInput): Text input for the formation name.
         description_input (ui.TextInput): Text input for the description (optional).
     """
+
+    interaction_check = right_check(logger, "fm.add", FORMATION_ROLES)
 
     name_input: ui.TextInput = ui.TextInput(
         label="Nom de la formation",
@@ -377,6 +383,8 @@ class _FormationSelectButton(ui.Button["FormationSelectView"]):
 class FormationSelectView(ui.View):
     """View to select which formation to edit."""
 
+    interaction_check = right_check(logger, "fm.select", FORMATION_ROLES)
+
     def __init__(self, cog: FormationManagement, formations: list[Formation], cmd: FmCommand) -> None:
         """Initialize the FormationSelectView.
 
@@ -451,6 +459,8 @@ class _EditEmojiModal(ui.Modal, title="Modifier l'émoji"):
         emoji_input (ui.TextInput): Text input for the formation emoji.
     """
 
+    interaction_check = right_check(logger, "fm.edit", FORMATION_ROLES)
+
     emoji_input: ui.TextInput[_EditEmojiModal] = ui.TextInput(
         label="Émoji",
         style=TextStyle.short,
@@ -510,6 +520,8 @@ class _EditNameDescriptionModal(ui.Modal, title="Modifier nom et description"):
         description_input (ui.TextInput): Text input for the description.
     """
 
+    interaction_check = right_check(logger, "fm.edit", FORMATION_ROLES)
+
     name_input: ui.TextInput[_EditNameDescriptionModal] = ui.TextInput(
         label="Nom de la formation",
         style=TextStyle.short,
@@ -556,6 +568,8 @@ class _EditNameDescriptionModal(ui.Modal, title="Modifier nom et description"):
 class _SelectTrainerView(ui.View):
     """View to select a trainer using UserSelect."""
 
+    interaction_check = right_check(logger, "fm.edit", FORMATION_ROLES)
+
     def __init__(self, edit_formation_view: _EditFormationView) -> None:
         """Initialize the SelectTrainerView.
 
@@ -596,6 +610,8 @@ class _EditDatetimeModal(ui.Modal, title="Modifier date et heure"):
     Attributes:
         datetime_input (ui.TextInput): Text input for the formation datetime.
     """
+
+    interaction_check = right_check(logger, "fm.edit", FORMATION_ROLES)
 
     datetime_input: ui.TextInput[_EditDatetimeModal] = ui.TextInput(
         label="Date et heure (DD/MM/YYYY HH:MM)",
@@ -651,6 +667,8 @@ class _EditDurationSeatsModal(ui.Modal, title="Modifier durée et places"):
     Attributes:
         duration_seats_input (ui.TextInput): Text input for the formation duration and seats.
     """
+
+    interaction_check = right_check(logger, "fm.edit", FORMATION_ROLES)
 
     duration_seats_input: ui.TextInput[_EditDurationSeatsModal] = ui.TextInput(
         label="Durée - Places",
@@ -715,6 +733,8 @@ class _EditDurationSeatsModal(ui.Modal, title="Modifier durée et places"):
 
 class _EditFormationView(ui.View):
     """View to edit a formation with selects and modals."""
+
+    interaction_check = right_check(logger, "fm.edit", FORMATION_ROLES)
 
     def __init__(self, cog: FormationManagement, formation_index: int, original: Formation) -> None:
         """Initialize the EditFormationView.

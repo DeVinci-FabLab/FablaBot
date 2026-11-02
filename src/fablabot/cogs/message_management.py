@@ -39,7 +39,9 @@ from discord import (
 from discord.ext import commands
 
 from fablabot.helpers.access import EVERYONE, AnyRole, ServerPermission, access
-from fablabot.helpers.constants import ADMIN_ROLES, PARIS_TZ, ErrorMessages, RoleNames, staff_default_permissions
+from fablabot.helpers.constants import MESSAGE_DM_ROLES as _DM_ROLES
+from fablabot.helpers.constants import MESSAGE_ROLES as ALLOWED_ROLES
+from fablabot.helpers.constants import PARIS_TZ, ErrorMessages, staff_default_permissions
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.safe_discord_operations import retract_unsaved_post
 from fablabot.helpers.utils import (
@@ -60,9 +62,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 REACTION_LOG_RETENTION = timedelta(days=3 * 365)
-ALLOWED_ROLES = ADMIN_ROLES | {RoleNames.BUREAU}
 _ACCESS = AnyRole(ALLOWED_ROLES)
-_DM_ROLES = {RoleNames.BUREAU}
 _DM_ACCESS = AnyRole(_DM_ROLES)
 
 

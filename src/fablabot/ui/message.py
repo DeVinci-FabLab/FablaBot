@@ -14,10 +14,18 @@ from fablabot.helpers.constants import (
     EMBED_PREVIEW_MIN_CHARS,
     EMBED_TOTAL_FIELD_CHAR_BUDGET,
     MAX_TRACKED_OPTIONS,
+    MESSAGE_DM_ROLES,
+    MESSAGE_ROLES,
     PARIS_TZ,
     ErrorMessages,
 )
-from fablabot.helpers.utils import format_member_mention, format_preview_content, get_members_by_role, send_dm_to_member
+from fablabot.helpers.utils import (
+    format_member_mention,
+    format_preview_content,
+    get_members_by_role,
+    right_check,
+    send_dm_to_member,
+)
 from fablabot.models.message import (
     ANONYMOUS_ICON_URL,
     SUGGESTION_OPTIONS,
@@ -40,6 +48,8 @@ logger = logging.getLogger(__name__)
 
 class _BulkDMView(ui.View):
     """View for bulk direct message sending."""
+
+    interaction_check = right_check(logger, "message.dm", MESSAGE_DM_ROLES)
 
     def __init__(self, sender: Member, followup_id: int, message: str) -> None:
         """Initialize the view for bulk direct messages.
@@ -119,6 +129,8 @@ class BulkDMModal(ui.Modal, title="Envoyer un MP à plusieurs utilisateurs"):
         message_input (ui.TextInput): Input field for the bulk direct message content.
     """
 
+    interaction_check = right_check(logger, "message.dm", MESSAGE_DM_ROLES)
+
     message_input: ui.TextInput = ui.TextInput(
         label="Message à envoyer",
         style=TextStyle.long,
@@ -182,6 +194,8 @@ class StartMessageModal(ui.Modal, title="Préparer un message"):
         content_input (ui.TextInput): Input field for the message content.
     """
 
+    interaction_check = right_check(logger, "msg.start", MESSAGE_ROLES)
+
     content_input: ui.TextInput = ui.TextInput(
         label="Contenu du message",
         style=TextStyle.long,
@@ -229,6 +243,8 @@ class _ReactionMessageInputModal(ui.Modal, title="Message à envoyer"):
         message_input (ui.TextInput): Input field for the reaction message content.
     """
 
+    interaction_check = right_check(logger, "msg.link_reaction", MESSAGE_ROLES)
+
     message_input: ui.TextInput = ui.TextInput(
         label="Utilise {username} pour le nom du réacteur.",
         style=TextStyle.long,
@@ -269,6 +285,8 @@ class _ReactionMessageInputModal(ui.Modal, title="Message à envoyer"):
 
 class _ReactionTargetView(ui.View):
     """View for selecting the target of a reaction action if it's necessary and the content of the message."""
+
+    interaction_check = right_check(logger, "msg.link_reaction", MESSAGE_ROLES)
 
     def __init__(
         self,
@@ -338,6 +356,8 @@ class _ReactionTargetView(ui.View):
 
 class _ReactionActionTypeSelectView(ui.View):
     """View to pick an action type before selecting the reaction target."""
+
+    interaction_check = right_check(logger, "msg.link_reaction", MESSAGE_ROLES)
 
     def __init__(
         self,
@@ -508,6 +528,8 @@ class _DraftSelectButton(ui.Button["TrackedMessageSelectView"]):
 
 class TrackedMessageSelectView(ui.View):
     """View to pick a tracked message or draft before running message commands."""
+
+    interaction_check = right_check(logger, "msg.select", MESSAGE_ROLES)
 
     def __init__(  # noqa: PLR0913 - keyword-only options; group them past eight
         self,
@@ -720,6 +742,8 @@ class _UnlinkReactionButton(ui.Button["_UnlinkReactionSelectView"]):
 
 class _UnlinkReactionSelectView(ui.View):
     """View to pick which reaction action to remove from a tracked message."""
+
+    interaction_check = right_check(logger, "msg.unlink_reaction", MESSAGE_ROLES)
 
     def __init__(self, cog: MessageManagement, target: TrackedMessage | MessageDraft) -> None:
         """Initialize the unlink reaction select view.

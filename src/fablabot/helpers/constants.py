@@ -79,6 +79,11 @@ ADMIN_ROLES = {
     RoleNames.SECRETARY,
 }
 
+# Who may run each family of staff commands. The cogs check them on the command, the views and modals again on each click.
+MESSAGE_ROLES = ADMIN_ROLES | {RoleNames.BUREAU}
+MESSAGE_DM_ROLES = {RoleNames.BUREAU}
+FORMATION_ROLES = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN_TEMP, RoleNames.ADMIN, RoleNames.CODIR}
+
 
 def staff_default_permissions() -> Permissions:
     """Return the default permissions of a staff command group, which hide it from members.
