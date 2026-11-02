@@ -2,19 +2,22 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 import logging
 from pathlib import Path
 import sqlite3
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from discord import AllowedMentions, HTTPException, TextChannel
+from conftest import make_guild, make_member, make_role, store_ops
+from discord import AllowedMentions, Forbidden, HTTPException, TextChannel
 import pytest
 
+from fablabot.cogs import user_management
 from fablabot.cogs.formation_management import FormationManagement
+from fablabot.cogs.user_management import UserManagement
 import fablabot.guild_config as guild_config  # noqa: PLR0402 (imported after the cogs: guild_config first is a circular import)
 from fablabot.helpers import log_channels
-from fablabot.helpers.constants import PARIS_TZ
+from fablabot.helpers.constants import PARIS_TZ, RoleNames
 from fablabot.helpers.logging_setup import configure_logging
 from fablabot.logging_handlers import DiscordLogHandler, GuildContextFilter, current_guild_id, guild_log_context
 from fablabot.models import FmMessageDraft, PublishedMessage
@@ -24,6 +27,7 @@ GUILD_B = 222222222222222222
 CHANNEL_A = 555555555555555555
 CHANNEL_B = 666666666666666666
 OPERATOR = 888888888888888888
+OTHER_GUILD = 333333333333333333
 WRAPPING_FENCES = 2
 
 
@@ -337,3 +341,59 @@ async def test_formation_loop_tags_each_guild_turn() -> None:
     finally:
         target.removeHandler(capture)
     assert seen == [GUILD_A, GUILD_B]
+
+
+async def test_op_settling_tags_each_guild_turn() -> None:
+    """Each server's turn of a settling round, and the timers it arms, run inside that server's log context."""
+    now = datetime(2026, 10, 28, 15, 0, tzinfo=UTC)
+    guilds, holders = [], {}
+    for guild_id, member_id in ((GUILD_A, 501), (GUILD_B, 502), (OTHER_GUILD, 503)):
+        temp = make_role(RoleNames.ADMIN_TEMP)
+        holders[guild_id] = make_member(member_id, temp)
+        guilds.append(make_guild(guild_id, [temp], [holders[guild_id]]))
+    # GUILD_A's holder has no record and Discord refuses the removal; GUILD_B's holder has an op still running.
+    holders[GUILD_A].remove_roles = AsyncMock(side_effect=Forbidden(MagicMock(status=403), "missing permissions"))
+    store_ops({str(GUILD_B): {"502": {"expires_at": (now + timedelta(minutes=12)).isoformat(), "channel_id": 777}}})
+    bot = MagicMock()
+    bot.guilds = guilds
+    bot.get_guild = lambda guild_id: next((guild for guild in guilds if guild.id == guild_id), None)
+    cog = UserManagement(bot)
+    cog._settle_ops.cancel()
+    reconcile = cog._reconcile_guild
+
+    async def reconcile_or_fail(guild: MagicMock) -> None:
+        """Settle the server, except one where the round itself breaks."""
+        if guild.id == OTHER_GUILD:
+            msg = "round boom"
+            raise RuntimeError(msg)
+        await reconcile(guild)
+
+    seen: list[tuple[str, int | None]] = []
+
+    class Capture(logging.Handler):
+        """Collect each line with the server it was tied to."""
+
+        def emit(self, record: logging.LogRecord) -> None:
+            """Remember the message and the record's guild ID."""
+            seen.append((record.getMessage(), record.guild_id))
+
+    capture = Capture()
+    capture.addFilter(GuildContextFilter())
+    target = logging.getLogger("fablabot.cogs.user_management")
+    target.addHandler(capture)
+    try:
+        with (
+            patch.object(user_management, "_utcnow", return_value=now),
+            patch.object(cog, "_reconcile_guild", side_effect=reconcile_or_fail),
+        ):
+            await cog._settle_ops.coro(cog)
+    finally:
+        target.removeHandler(capture)
+    timer = cog.deop_tasks[GUILD_B, 502]
+    timer.cancel()
+
+    lines = {(message.split(" guild_id=")[0], guild_id) for message, guild_id in seen if " guild_id=" in message}
+    assert ("Failed to remove temporary admin role", GUILD_A) in lines
+    assert ("Op settling failed", OTHER_GUILD) in lines
+    assert all(str(guild_id) in message for message, guild_id in seen if " guild_id=" in message)
+    assert timer.get_context().get(current_guild_id) == GUILD_B

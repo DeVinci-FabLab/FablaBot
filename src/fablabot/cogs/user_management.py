@@ -28,6 +28,7 @@ from fablabot.helpers.utils import (
     format_role_mention,
     log_refusal,
 )
+from fablabot.logging_handlers import guild_log_context
 from fablabot.models.user import OpExpiry
 from fablabot.services import op_expiries
 from fablabot.ui import uui
@@ -511,11 +512,13 @@ class UserManagement(commands.Cog):
         for guild in self.bot.guilds:
             if guild.unavailable:
                 continue
-            # An exception other than a network one ends a tasks.loop for good.
-            try:
-                await self._reconcile_guild(guild)
-            except Exception:
-                logger.exception(f"Op settling failed guild_id={guild.id}; the next round tries again")
+            # The timers armed in the turn inherit the server too, so their lines reach its log channel.
+            with guild_log_context(guild.id):
+                # An exception other than a network one ends a tasks.loop for good.
+                try:
+                    await self._reconcile_guild(guild)
+                except Exception:
+                    logger.exception(f"Op settling failed guild_id={guild.id}; the next round tries again")
 
     @_settle_ops.before_loop
     async def _before_settle_ops(self) -> None:
