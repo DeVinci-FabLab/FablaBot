@@ -78,6 +78,8 @@ def _configure(conn: sqlite3.Connection) -> None:
 def _backup(conn: sqlite3.Connection, path: Path, version: int) -> None:
     """Copy the database next to it before its schema changes; copies are never removed.
 
+    A failed upgrade restarts in a loop, so a copy newer than the database stands for it: one copy per data.
+
     Args:
         conn (sqlite3.Connection): The open connection.
         path (Path): The database file.
@@ -85,8 +87,20 @@ def _backup(conn: sqlite3.Connection, path: Path, version: int) -> None:
     """
     folder = path.parent / "backups"
     folder.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    copy = sqlite3.connect(folder / f"{path.stem}-v{version}-{stamp}.db")
+    changed = path.stat().st_mtime_ns
+    if any(copy.stat().st_mtime_ns >= changed for copy in folder.glob(f"{path.stem}-v{version}-*.db")):
+        return
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    target = folder / f"{path.stem}-v{version}-{stamp}.db"
+    partial = target.with_suffix(".partial")
+    partial.unlink(missing_ok=True)
+    _copy_to(conn, partial)
+    partial.replace(target)
+
+
+def _copy_to(conn: sqlite3.Connection, target: Path) -> None:
+    """Write a whole copy of the database to ``target``."""
+    copy = sqlite3.connect(target)
     try:
         conn.backup(copy)
     finally:
