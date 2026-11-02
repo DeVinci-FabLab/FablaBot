@@ -92,10 +92,14 @@ def _backup(conn: sqlite3.Connection, path: Path, version: int) -> None:
         return
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     target = folder / f"{path.stem}-v{version}-{stamp}.db"
-    partial = target.with_suffix(".partial")
+    partial = folder / f"{path.stem}-v{version}.partial"
     partial.unlink(missing_ok=True)
-    _copy_to(conn, partial)
-    partial.replace(target)
+    try:
+        _copy_to(conn, partial)
+        partial.replace(target)
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
 
 
 def _copy_to(conn: sqlite3.Connection, target: Path) -> None:
