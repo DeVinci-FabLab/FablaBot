@@ -440,12 +440,10 @@ class ChannelManagement(commands.Cog):
         Args:
             payload (RawMessageDeleteEvent): The raw event payload data.
         """
-        if not self.bot.guild_access.is_served(payload.guild_id):
+        if payload.guild_id is None or not self.bot.guild_access.is_served(payload.guild_id):
             return
         logger.debug(f"raw_message_delete: {payload.message_id} in channel {payload.channel_id} in guild {payload.guild_id}")
         if payload.cached_message:
-            return
-        if payload.guild_id is None:
             return
         guild = self.bot.get_guild(payload.guild_id)
         if guild is None:

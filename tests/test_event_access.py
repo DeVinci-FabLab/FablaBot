@@ -19,7 +19,7 @@ from fablabot.cogs.user_management import UserManagement
 from fablabot.cogs.welcome_management import WelcomeManagement
 from fablabot.helpers.constants import RoleNames
 from fablabot.helpers.guild_access import GuildAccessPolicy
-from fablabot.services import formations, op_expiries
+from fablabot.services import formations
 
 if TYPE_CHECKING:
     import sqlite3
@@ -294,24 +294,25 @@ def _record_op(guild_id: int, *, expires_in: timedelta) -> None:
     store_ops({str(guild_id): {str(USER_ID): {"expires_at": expires_at.isoformat(), "channel_id": CHANNEL_ID}}})
 
 
-async def test_op_settling_reconciles_a_served_server_and_skips_an_unserved_one_without_a_record() -> None:
-    """The round reconciles a served server, and leaves an unserved server with no recorded right alone."""
-    served, unserved = MagicMock(spec=Guild), MagicMock(spec=Guild)
-    served.id, unserved.id = LISTED, UNLISTED
+async def test_op_settling_reconciles_every_available_server_served_or_not() -> None:
+    """The round reconciles a served and an unserved server alike: a temporary right ends on any server the bot is in."""
+    served, unserved, away = MagicMock(spec=Guild), MagicMock(spec=Guild), MagicMock(spec=Guild)
+    served.id, unserved.id, away.id = LISTED, UNLISTED, THIRD
     served.unavailable = unserved.unavailable = False
+    away.unavailable = True
     bot = _bot()
-    bot.guilds = [served, unserved]
+    bot.guilds = [served, unserved, away]
     cog = UserManagement(bot)
     reconcile = AsyncMock()
 
     with patch.object(cog, "_reconcile_guild", reconcile):
         await cog._settle_ops.coro(cog)
 
-    assert [call.args[0] for call in reconcile.call_args_list] == [served]
+    assert [call.args[0] for call in reconcile.call_args_list] == [served, unserved]
 
 
-async def test_op_settling_leaves_the_same_named_role_of_an_unserved_server_alone() -> None:
-    """A stranger's server where the bot recorded no right keeps its holders of a role named like the temporary one."""
+async def test_op_settling_takes_the_role_off_a_holder_with_no_record_on_an_unserved_server() -> None:
+    """Least privilege: a holder of the temporary role with no recorded end loses it on an unserved server too."""
     guild, holder = _guild_with_a_holder(UNLISTED)
     bot = _bot()
     bot.guilds = [guild]
@@ -319,7 +320,7 @@ async def test_op_settling_leaves_the_same_named_role_of_an_unserved_server_alon
 
     await cog._settle_ops.coro(cog)
 
-    holder.remove_roles.assert_not_awaited()
+    holder.remove_roles.assert_awaited_once()
 
 
 async def test_op_settling_still_ends_an_expired_right_on_a_server_the_policy_refuses() -> None:
@@ -354,23 +355,20 @@ async def test_op_settling_arms_the_timer_of_a_right_still_running_on_a_server_t
             task.cancel()
 
 
-async def test_a_storage_failure_reading_the_records_does_not_stop_the_settling_round(storage_error: sqlite3.Error) -> None:
-    """A failed read of an unserved server's records is logged inside the round, and the next server is still settled."""
+async def test_a_storage_failure_settling_one_server_does_not_stop_the_round(storage_error: sqlite3.Error) -> None:
+    """A storage failure while settling an unserved server is logged inside the round, and the next server is still settled."""
     unserved, served = MagicMock(spec=Guild), MagicMock(spec=Guild)
     unserved.id, served.id = UNLISTED, LISTED
     unserved.unavailable = served.unavailable = False
     bot = _bot()
     bot.guilds = [unserved, served]
     cog = UserManagement(bot)
-    reconcile = AsyncMock()
+    reconcile = AsyncMock(side_effect=[storage_error, None])
 
-    with (
-        patch.object(op_expiries, "member_ids", side_effect=storage_error),
-        patch.object(cog, "_reconcile_guild", reconcile),
-    ):
+    with patch.object(cog, "_reconcile_guild", reconcile):
         await cog._settle_ops.coro(cog)
 
-    assert [call.args[0] for call in reconcile.call_args_list] == [served]
+    assert [call.args[0] for call in reconcile.call_args_list] == [unserved, served]
 
 
 # endregion Background tasks

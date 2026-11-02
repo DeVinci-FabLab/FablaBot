@@ -51,7 +51,7 @@ The image runs as `10001:10001`; the volumes and the token file must belong to t
 | Setting | Role |
 | --- | --- |
 | `DISCORD_TOKEN_FILE` | Path of the file holding the bot token. Read at start, before connecting; must be readable by 10001. |
-| `ALLOWED_GUILD_IDS` | Server IDs the bot may serve, comma-separated, no quotes. Each ID can carry a name after a colon, `111111111111111111:Main server`: the bot ignores it, and it cannot hold a comma. A server outside the list gets nothing from the bot: its commands are refused, and its messages, reactions, joins, voice changes and reminders are ignored. Only the end of a temporary admin right the bot granted there still runs, on time. |
+| `ALLOWED_GUILD_IDS` | Server IDs the bot may serve, comma-separated, no quotes. Each ID can carry a name after a colon, `111111111111111111:Main server`: the bot ignores it, and it cannot hold a comma. A server outside the list gets nothing from the bot: its commands are refused, and its messages, reactions, joins, voice changes and reminders are ignored. A temporary admin right still ends on time there. |
 | `OPERATOR_LOG_CHANNEL_ID` | Optional. Channel receiving errors that belong to no server. Pick a channel only the bot's administrators can read: those errors come from every server's tasks. |
 | `DEV_GUILD_ID` | Optional, development bot only. Syncs the commands to this one server and leaves global commands alone. Never set on the production bot. |
 | `data/` volume | The database `data/fablabot.db` (see "Stored data"), its copies in `data/backups/`, and the fingerprint of the last command sync (`data/command_sync_state.json`; delete it to force a sync). |
@@ -233,9 +233,16 @@ Leaving guild: not_allowed (guild_id=333333333333333333)
 Two other cases are logged on purpose. When `ALLOWED_GUILD_IDS` is empty, the bot keeps the servers it is
 already in at start and logs a warning, but leaves any server that invites it later unless the
 application owner owns it (`Leaving guild: owner_not_proven`); when it is set but matches none of the current servers, the bot leaves none
-and logs an error ("check the IDs"). It then serves none: commands are refused, and reactions, joins, messages and
-reminders are ignored. Fixing the list and redeploying does not bring back what was ignored in between, as for a
-reaction made while the bot is down: ask the members concerned to take their reaction off and add it again.
+and logs an error ("check the IDs"). It then serves none, and that is downtime: commands are refused, and reactions,
+joins, messages and reminders are ignored. Fixing the list and redeploying does not catch up the reactions made in
+between, as for a reaction made while the bot is down:
+
+- A member whose add was dropped takes the reaction off and adds it again. Past the registration deadline, the add
+  stays out.
+- A member whose removal was dropped adds the reaction and takes it off again. Any reaction on the post runs the update.
+
+A temporary admin right still ends on time on those servers: the end of a right the bot granted does not wait for the list.
+
 A malformed value stops the bot at start.
 
 ## Remove a server

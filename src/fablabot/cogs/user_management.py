@@ -509,19 +509,18 @@ class UserManagement(commands.Cog):
 
         This round is the only retry of a temporary right: a removal Discord refused or raised on, a timer that
         died and a failed read leave a holder or a record that the next round sees, so no failure path has to reach
-        a retry, and nothing gives up. Unavailable guilds keep their records until they are back. A server the
-        policy refuses is settled only while it holds a record, since a right the bot granted ends on time wherever
-        the bot stays; one with no record is left alone, so a role named like the temporary one is not touched there.
+        a retry, and nothing gives up. Unavailable guilds keep their records until they are back. The allow-list is
+        not asked: a temporary admin right ends on time on any server the bot is in, served or not, because least
+        privilege comes before the list. Each server's lines stay under its own log context.
         """
         for guild in self.bot.guilds:
             if guild.unavailable:
                 continue
             # The timers armed in the turn inherit the server too, so their lines reach its log channel.
             with guild_log_context(guild.id):
-                # An exception other than a network one ends a tasks.loop for good, a failed read of the records included.
+                # An exception other than a network one ends a tasks.loop for good.
                 try:
-                    if self.bot.guild_access.is_served(guild.id) or op_expiries.member_ids(guild.id):
-                        await self._reconcile_guild(guild)
+                    await self._reconcile_guild(guild)
                 except Exception:
                     logger.exception(f"Op settling failed guild_id={guild.id}; the next round tries again")
 
