@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import importlib
+import sqlite3
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
 from discord import Guild, Member, Role, TextChannel, ui
 import pytest
 
+from fablabot import db
 from fablabot.helpers.guild_access import ALLOWED_GUILD_IDS_ENV
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Iterator
     from types import ModuleType
 
 LISTED_GUILD = "111111111111111111"
@@ -20,9 +22,12 @@ OTHER_LISTED_GUILD = "222222222222222222"
 
 
 @pytest.fixture(autouse=True)
-def _isolated_cwd(tmp_path, monkeypatch) -> None:
-    """Run every test from an empty temporary directory so nothing lands in ``data/`` or ``logs/``."""
+def _isolated_cwd(tmp_path, monkeypatch) -> Iterator[None]:
+    """Run every test from an empty temporary directory with its own database, outside ``data/`` so that folder stays empty."""
     monkeypatch.chdir(tmp_path)
+    db.open_database(tmp_path / "test-database" / "fablabot.db")
+    yield
+    db.close_database()
 
 
 @pytest.fixture
@@ -69,6 +74,71 @@ def simcord_bot(tmp_path, monkeypatch) -> Any:
     main = importlib.reload(fablabot.main)
     monkeypatch.setattr(main, "configure_logging", lambda _bot: (None, None))
     return main.Fablabot()
+
+
+@pytest.fixture(params=[sqlite3.OperationalError, sqlite3.DatabaseError], ids=["operational", "database"])
+def storage_error(request: pytest.FixtureRequest) -> sqlite3.Error:
+    """A storage failure a guard must contain: a locked database, then the rest of the family, such as a damaged file."""
+    return request.param("storage failed")
+
+
+def store_settings(content: dict[str, dict[str, Any]]) -> None:
+    """Write server settings as ``{guild_id: {column: value}}``, the legacy channel under ``__global__``.
+
+    Args:
+        content (dict[str, dict[str, Any]]): The settings to store.
+    """
+    with db.transaction() as conn:
+        for key, entry in content.items():
+            if key == "__global__":
+                conn.execute("INSERT INTO legacy_log_channel (singleton, channel_id) VALUES (1, ?)", (entry["log_channel_id"],))
+                continue
+            columns = ", ".join(entry)
+            marks = ", ".join("?" for _ in entry)
+            conn.execute(f"INSERT INTO guild_settings (guild_id, {columns}) VALUES (?, {marks})", (int(key), *entry.values()))
+
+
+def stored_settings() -> dict[str, dict[str, Any]]:
+    """Read server settings back in the shape ``store_settings`` takes.
+
+    Returns:
+        dict[str, dict[str, Any]]: The settings, unset columns left out.
+    """
+    conn = db.connection()
+    stored: dict[str, dict[str, Any]] = {}
+    for row in conn.execute("SELECT channel_id FROM legacy_log_channel"):
+        stored["__global__"] = {"log_channel_id": row["channel_id"]}
+    for row in conn.execute("SELECT * FROM guild_settings"):
+        stored[str(row["guild_id"])] = {key: row[key] for key in row.keys() if key != "guild_id" and row[key] is not None}  # noqa: SIM118
+    return stored
+
+
+def store_ops(content: dict[str, dict[str, dict[str, Any]]]) -> None:
+    """Write op expiries as ``{guild_id: {member_id: {"expires_at": ..., "channel_id": ...}}}``.
+
+    Args:
+        content (dict[str, dict[str, dict[str, Any]]]): The expiries to store.
+    """
+    with db.transaction() as conn:
+        for guild_id, entries in content.items():
+            for member_id, entry in entries.items():
+                conn.execute(
+                    "INSERT INTO op_expiry (guild_id, member_id, expires_at, channel_id) VALUES (?, ?, ?, ?)",
+                    (int(guild_id), int(member_id), entry["expires_at"], entry["channel_id"]),
+                )
+
+
+def stored_ops() -> dict[str, dict[str, dict[str, Any]]]:
+    """Read op expiries back in the shape ``store_ops`` takes.
+
+    Returns:
+        dict[str, dict[str, dict[str, Any]]]: The expiries; a guild without one is absent.
+    """
+    stored: dict[str, dict[str, dict[str, Any]]] = {}
+    for row in db.connection().execute("SELECT * FROM op_expiry"):
+        entry = {"expires_at": row["expires_at"], "channel_id": row["channel_id"]}
+        stored.setdefault(str(row["guild_id"]), {})[str(row["member_id"])] = entry
+    return stored
 
 
 def make_interaction(

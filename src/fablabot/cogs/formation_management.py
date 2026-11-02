@@ -8,11 +8,21 @@ import csv
 from datetime import datetime, timedelta
 import io
 import logging
-from pathlib import Path
+import sqlite3
 from typing import Any, override
 from warnings import deprecated
 
-from discord import Embed, File, Interaction, Member, RawReactionActionEvent, Role, TextChannel, app_commands
+from discord import (
+    Embed,
+    File,
+    Interaction,
+    Member,
+    NotFound,
+    RawReactionActionEvent,
+    Role,
+    TextChannel,
+    app_commands,
+)
 from discord.ext import commands, tasks
 
 from fablabot.helpers.access import AnyRole, access
@@ -31,10 +41,11 @@ from fablabot.helpers.formation import (
     send_waitlist_dm,
 )
 from fablabot.helpers.reaction_log import ReactionLogManager
-from fablabot.helpers.state_store import JsonStateStore
+from fablabot.helpers.safe_discord_operations import retract_unsaved_post
 from fablabot.helpers.utils import ensure_command_context, is_valid_emoji
 from fablabot.logging_handlers import guild_log_context
 from fablabot.models import FmCommand, FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
+from fablabot.services import formations
 from fablabot.ui import fmui
 
 logger = logging.getLogger(__name__)
@@ -42,9 +53,17 @@ logger = logging.getLogger(__name__)
 
 ALLOWED_ROLES = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN_TEMP, RoleNames.ADMIN, RoleNames.CODIR}
 _ACCESS = AnyRole(ALLOWED_ROLES)
-FM_STATE_FILE = Path("data/formations_state.json")
 TRAINER_NOTIFICATION_ADVANCE = timedelta(hours=1)
 REACTION_LOG_RETENTION = timedelta(days=30)
+REGISTRATION_WINDOW = timedelta(minutes=20)
+
+
+def _parse_ts(ts_iso: Any) -> datetime:
+    """Read a stored reaction time; a value that is not a date ranks first."""
+    try:
+        return datetime.fromisoformat(ts_iso).astimezone(PARIS_TZ)
+    except (TypeError, ValueError):
+        return datetime.min.replace(tzinfo=PARIS_TZ)
 
 
 class FormationManagement(commands.Cog):
@@ -75,39 +94,23 @@ class FormationManagement(commands.Cog):
             bot (commands.Bot): The bot instance.
         """
         self.bot = bot
-        self._state_store = JsonStateStore(logger, FM_STATE_FILE)
         self._reaction_logs = ReactionLogManager(
-            self._state_store,
+            "formation",
             retention=REACTION_LOG_RETENTION,
             logger=logger,
         )
-        """state structure (par guild):
-        ```
-        {
-          "<guild_id>": {
-              "draft": { "intro": str, "fms": [Formation as dict] },
-              "published": {
-                  "message_id": int,
-                  "channel_id": int,
-                  "message": { "intro": str, "end": str, "fms": [Formation as dict] }
-              },
-              "reactions_log": [
-                {
-                  "message_id": int,
-                  "user_id": int,
-                  "user_name": str,
-                  "emoji": str,
-                  "action": Literal["add", "remove"],
-                  "ts_iso": str
-                }
-              ]
-          }
-        }
-        ```
-        """
         self._reaction_lock = asyncio.Lock()
         self._published_locks: dict[int, asyncio.Lock] = {}
         self._pending_update_tasks: dict[int, asyncio.Task] = {}
+        # Servers asked for an update after the running one began: it runs once more when it ends.
+        self._update_wanted: set[int] = set()
+        # Servers where a storage failure left a reaction unlogged or an update unsaved. Each reminder tick runs their
+        # update, which takes the missed reactions back from Discord. Ceiling: in memory, so a restart during an outage
+        # forgets them and a member who reacted then reacts again; the upgrade path is a column.
+        self._stale_guilds: set[int] = set()
+        # Servers where an update failed for another reason, such as Discord refusing a read: the reactions it was to seat
+        # are logged and wait for the next reminder tick to run it again. Same ceiling: a restart forgets them.
+        self._retry_guilds: set[int] = set()
         self._reaction_logs.purge_all()
         self._check_upcoming_formations.start()
         logger.info("FormationManagement initialized")
@@ -456,6 +459,21 @@ class FormationManagement(commands.Cog):
             await interaction.followup.send("Erreur pendant la publication du message.", ephemeral=True)
             return
 
+        # Saved before the reactions: a reaction counts from the first one, and a refused save leaves nothing to undo.
+        try:
+            self._set_last_published_in_guild(
+                interaction.guild.id,
+                PublishedMessage(
+                    message_id=msg.id,
+                    channel_id=channel.id,
+                    message=draft,
+                ),
+            )
+        except sqlite3.Error:
+            logger.exception(f"Guild {interaction.guild.id} could not save the published message {msg.id}; retracting it.")
+            await interaction.followup.send(await retract_unsaved_post(logger, msg))
+            return
+
         success_reactions = 0
         for fm in draft.fms:
             try:
@@ -466,15 +484,6 @@ class FormationManagement(commands.Cog):
                     f"Guild {interaction.guild.id} failed to add reaction {fm.emoji!r} "
                     f"for formation {fm.name!r} in published message.",
                 )
-
-        self._set_last_published_in_guild(
-            interaction.guild.id,
-            PublishedMessage(
-                message_id=msg.id,
-                channel_id=channel.id,
-                message=draft,
-            ),
-        )
 
         logger.info(f"Guild {interaction.guild.id} published the formations draft in {channel}.")
         await interaction.followup.send(
@@ -601,37 +610,26 @@ class FormationManagement(commands.Cog):
             return
 
         async with self._reaction_lock:
-            pub = self._get_last_published_in_guild(payload.guild_id)
-            if not pub or payload.message_id != pub.message_id:
-                return
-            emoji_str = str(payload.emoji)
-            fm_emojis = {fm.emoji for fm in pub.message.fms}
-            if fm_emojis and emoji_str not in fm_emojis:
-                return
-
-            formation = next((fm for fm in pub.message.fms if fm.emoji == emoji_str), None)
-            if formation:
-                now = datetime.now(PARIS_TZ)
-                registration_deadline = formation.start_dt + timedelta(minutes=20)
-                if now > registration_deadline:
-                    logger.info(
-                        f"Ignoring reaction {emoji_str} for formation {formation.name!r} "
-                        f"from user {payload.user_id} - registration closed.",
-                    )
-                    return
-
-            member_name = member.name if member else None
+            received_at = datetime.now(PARIS_TZ)
             reaction_event = ReactionEvent(
                 message_id=payload.message_id,
                 user_id=payload.user_id,
-                user_name=member_name,
-                emoji=emoji_str,
+                user_name=member.name if member else None,
+                emoji=str(payload.emoji),
                 action=ReactionAction[payload.event_type.removeprefix("REACTION_")],
-                ts_iso=datetime.now(PARIS_TZ).isoformat(timespec="seconds"),
+                ts_iso=received_at.isoformat(timespec="seconds"),
             )
-
-            self._reaction_logs.append(payload.guild_id, reaction_event)
-
+            try:
+                if not self._reaction_counts(payload.guild_id, reaction_event):
+                    return
+                self._reaction_logs.append(payload.guild_id, reaction_event)
+            except sqlite3.Error:
+                logger.exception(
+                    f"Reaction not recorded guild_id={payload.guild_id} message_id={payload.message_id}; "
+                    "taken back from Discord once the storage answers"
+                )
+                self._stale_guilds.add(payload.guild_id)
+                return
             self._schedule_update(payload.guild_id)
 
     # endregion Event Listeners
@@ -643,66 +641,86 @@ class FormationManagement(commands.Cog):
         """Check for formations starting soon and notify trainers/responsibles (Paris timezone)."""
         logger.debug("Checking for upcoming formations to notify trainers and responsibles (Paris time).")
         now = datetime.now(PARIS_TZ)
+        for guild_id in self._stale_guilds | self._retry_guilds:
+            with guild_log_context(guild_id):  # the update's task inherits it, so its lines stay with their server
+                self._schedule_update(guild_id, delay=0)
+        # An exception other than a network one ends a tasks.loop for good: a storage failure waits for the next tick.
+        try:
+            # A snapshot: waiting on a guild's lock yields to code that may add a guild to the state.
+            guild_ids = formations.guilds_with_published()
+        except sqlite3.Error:
+            logger.exception("Reminder tick skipped: storage failure.")
+            return
+        for guild_id in guild_ids:
+            with guild_log_context(guild_id):
+                try:
+                    await self._send_due_reminders(guild_id, now)
+                except sqlite3.Error:
+                    logger.exception(f"Reminders of guild {guild_id} stopped by a storage failure; next tick tries again.")
+
+    async def _send_due_reminders(self, guild_id: int, now: datetime) -> None:
+        """Notify the people of one guild's formations that are due, and record that they were.
+
+        Args:
+            guild_id (int): The ID of the guild.
+            now (datetime): The time of this tick.
+        """
         window_tolerance = timedelta(minutes=5)
         notification_window_start = now + TRAINER_NOTIFICATION_ADVANCE - window_tolerance
         notification_window_end = now + TRAINER_NOTIFICATION_ADVANCE + window_tolerance
         start_window_start = now - window_tolerance
         start_window_end = now + window_tolerance
 
-        # A snapshot: waiting on a guild's lock yields to code that may add a guild to the state.
-        for guild_id_str in list(self._state_store.state):
-            guild_id = int(guild_id_str)
-            with guild_log_context(guild_id):
-                guild = self.bot.get_guild(guild_id)
-                if not guild:
+        guild = self.bot.get_guild(guild_id)
+        if not guild:
+            return
+
+        # One writer at a time: load, await and write back must not interleave with the registration update.
+        async with self._published_lock(guild_id):
+            pub = self._get_last_published_in_guild(guild_id)
+            if not pub:
+                return
+
+            fms = list(pub.message.fms)
+            if not fms:
+                return
+
+            send_contacts: str = format_respo_contacts(guild)
+
+            for fm in fms:
+                if fm.notified_at_start:
                     continue
 
-                # One writer at a time: load, await and write back must not interleave with the registration update.
-                async with self._published_lock(guild_id):
-                    pub = self._get_last_published_in_guild(guild_id)
-                    if not pub:
-                        continue
+                if not fm.notified_hour_before and notification_window_start <= fm.start_dt <= notification_window_end:
+                    await notify_trainer_before_formation(guild, fm, send_contacts, moment="hour_before")
+                    await notify_responsible_before_formation(guild, fm, moment="hour_before")
+                    await notify_participants_before_formation(guild, fm, send_contacts)
 
-                    fms = list(pub.message.fms)
-                    if not fms:
-                        continue
+                    fm.notified_hour_before = True
+                    continue
 
-                    send_contacts: str = format_respo_contacts(guild)
+                if start_window_start <= fm.start_dt <= start_window_end:
+                    await notify_trainer_before_formation(guild, fm, send_contacts, moment="start")
+                    await notify_responsible_before_formation(guild, fm, moment="start")
 
-                    for fm in fms:
-                        if fm.notified_at_start:
-                            continue
+                    fm.notified_at_start = True
 
-                        if not fm.notified_hour_before and notification_window_start <= fm.start_dt <= notification_window_end:
-                            await notify_trainer_before_formation(guild, fm, send_contacts, moment="hour_before")
-                            await notify_responsible_before_formation(guild, fm, moment="hour_before")
-                            await notify_participants_before_formation(guild, fm, send_contacts)
-
-                            fm.notified_hour_before = True
-                            continue
-
-                        if start_window_start <= fm.start_dt <= start_window_end:
-                            await notify_trainer_before_formation(guild, fm, send_contacts, moment="start")
-                            await notify_responsible_before_formation(guild, fm, moment="start")
-
-                            fm.notified_at_start = True
-
-                    updated_pub_msg = FmMessageDraft(
-                        header=pub.message.header,
-                        role_id=pub.message.role_id,
-                        intro=pub.message.intro,
-                        fms=fms,
-                        end=pub.message.end,
-                        request_forms_url=pub.message.request_forms_url,
-                    )
-                    self._set_last_published_in_guild(
-                        guild_id,
-                        PublishedMessage(
-                            message_id=pub.message_id,
-                            channel_id=pub.channel_id,
-                            message=updated_pub_msg,
-                        ),
-                    )
+            updated_pub_msg = FmMessageDraft(
+                header=pub.message.header,
+                role_id=pub.message.role_id,
+                intro=pub.message.intro,
+                fms=fms,
+                end=pub.message.end,
+                request_forms_url=pub.message.request_forms_url,
+            )
+            self._set_last_published_in_guild(
+                guild_id,
+                PublishedMessage(
+                    message_id=pub.message_id,
+                    channel_id=pub.channel_id,
+                    message=updated_pub_msg,
+                ),
+            )
 
     @_check_upcoming_formations.before_loop
     async def _before_check_upcoming_formations(self) -> None:
@@ -715,14 +733,6 @@ class FormationManagement(commands.Cog):
     # region ====== Helpers ======
     # -- State --
 
-    def _get_guild_state(self, guild_id: int) -> dict[str, Any]:
-        """Get state for a specific guild."""
-        return self._state_store.ensure_guild(guild_id)
-
-    def _set_guild_state(self, guild_id: int, payload: dict[str, Any]) -> None:
-        """Set the state for a specific guild."""
-        self._state_store.set_guild(guild_id, payload)
-
     def get_guild_draft(self, guild_id: int) -> FmMessageDraft:
         """Get the draft state for a specific guild.
 
@@ -732,13 +742,7 @@ class FormationManagement(commands.Cog):
         Returns:
             FmMessageDraft: The draft of the guild.
         """
-        guild_state = self._get_guild_state(guild_id)
-        if "draft" not in guild_state:
-            logger.debug(f"Initializing draft state for guild {guild_id}.")
-            self._set_guild_state(guild_id, guild_state)
-            guild_state["draft"] = {"header": "", "role_id": 0, "intro": "", "fms": [], "end": ""}
-        draft_dict = guild_state["draft"]
-        return FmMessageDraft.from_dict(draft_dict)
+        return formations.get_draft(guild_id) or FmMessageDraft(header="", role_id=0, intro="", fms=[], end="")
 
     def set_guild_draft(self, guild_id: int, draft: FmMessageDraft) -> None:
         """Set the draft for a specific guild.
@@ -747,33 +751,98 @@ class FormationManagement(commands.Cog):
             guild_id (int): The ID of the guild.
             draft (FmMessageDraft): The draft of the guild.
         """
-        guild_state = self._get_guild_state(guild_id)
-        guild_state["draft"] = draft.to_dict()
-        self._set_guild_state(guild_id, guild_state)
+        formations.save_draft(guild_id, draft)
 
     def _get_last_published_in_guild(self, guild_id: int) -> PublishedMessage | None:
         """Get the last published state for a specific guild."""
-        guild_state = self._get_guild_state(guild_id)
-        pub_dict = guild_state.get("published")
-        if not pub_dict:
+        published = formations.current_published(guild_id)
+        if published is None:
             logger.warning(f"No published formations data stored for guild {guild_id}.")
-            return None
-        return PublishedMessage.from_dict(pub_dict)
+        return published
 
     def _set_last_published_in_guild(self, guild_id: int, published: PublishedMessage) -> None:
         """Set the last published state for a specific guild."""
-        guild_state = self._get_guild_state(guild_id)
-        guild_state["published"] = published.to_dict()
-        self._set_guild_state(guild_id, guild_state)
+        formations.save_published(guild_id, published)
+
+    def _reaction_counts(self, guild_id: int, event: ReactionEvent) -> bool:
+        """Tell whether a reaction is on a server's published message, on one of its emojis, and not an add past the deadline.
+
+        The deadline is judged at the reaction's own time, so a check that runs late does not change the answer. It
+        closes sign-ups only: a removal is always logged, or the member who left would take their place back at the
+        next update.
+
+        Args:
+            guild_id (int): The ID of the guild.
+            event (ReactionEvent): The reaction.
+
+        Returns:
+            bool: True when the reaction belongs in the log.
+
+        Raises:
+            sqlite3.Error: The published message cannot be read.
+        """
+        pub = self._get_last_published_in_guild(guild_id)
+        if not pub or event.message_id != pub.message_id:
+            return False
+        fm_emojis = {fm.emoji for fm in pub.message.fms}
+        if fm_emojis and event.emoji not in fm_emojis:
+            return False
+
+        formation = next((fm for fm in pub.message.fms if fm.emoji == event.emoji), None)
+        if formation and event.action == ReactionAction.ADD:
+            registration_deadline = formation.start_dt + REGISTRATION_WINDOW
+            if datetime.fromisoformat(event.ts_iso) > registration_deadline:
+                logger.info(
+                    f"Ignoring reaction {event.emoji} for formation {formation.name!r} "
+                    f"from user {event.user_id} - registration closed.",
+                )
+                return False
+        return True
+
+    def _log_missed_reactions(
+        self,
+        guild_id: int,
+        message_id: int,
+        reactions: dict[str, dict[int, str]],
+        last_add: dict[tuple[str, int], datetime],
+    ) -> None:
+        """Log the reactions Discord shows and the log misses after a storage failure, as of now.
+
+        A failed write is the only reason here, so a member keeps their sign-up and takes their place in the queue at
+        this time, also when they had left before: a refused re-add does not give back the place they gave up. A
+        reaction past the registration deadline stays out, as the listener would have left it.
+
+        Args:
+            guild_id (int): The ID of the guild.
+            message_id (int): The published message.
+            reactions (dict[str, dict[int, str]]): The members who reacted, by emoji.
+            last_add (dict[tuple[str, int], datetime]): The logged time of each reaction still in place, completed here.
+        """
+        now = datetime.now(PARIS_TZ)
+        for emoji, users in reactions.items():
+            for user_id, user_name in users.items():
+                if (emoji, user_id) in last_add:
+                    continue
+                event = ReactionEvent(
+                    message_id=message_id,
+                    user_id=user_id,
+                    user_name=user_name,
+                    emoji=emoji,
+                    action=ReactionAction.ADD,
+                    ts_iso=now.isoformat(timespec="seconds"),
+                )
+                if self._reaction_counts(guild_id, event):
+                    self._reaction_logs.append(guild_id, event)
+                    last_add[emoji, user_id] = now
 
     # -- Reaction Updates --
 
     def _schedule_update(self, guild_id: int, delay: float = 2.0) -> None:
         """Schedule a debounced update for a guild's published message.
 
-        If an update is already scheduled and not finished, this is a no-op. The
-        scheduled coroutine waits `delay` seconds before invoking
-        `_update_published_message`, coalescing rapid events.
+        A request while an update is waiting out its delay is covered by it: it reads the history after the wait.
+        One that comes once the update has begun may have missed that reaction, so the update runs once more
+        when it ends.
 
         Args:
             guild_id (int): The ID of the guild.
@@ -781,17 +850,30 @@ class FormationManagement(commands.Cog):
         """
         existing = self._pending_update_tasks.get(guild_id)
         if existing and not existing.done():
+            self._update_wanted.add(guild_id)
             return
 
         async def _delayed() -> None:
             try:
-                await asyncio.sleep(delay)
-                await self._update_published_message(guild_id)
+                while True:
+                    await asyncio.sleep(delay)
+                    self._update_wanted.discard(guild_id)
+                    self._retry_guilds.discard(guild_id)
+                    await self._update_published_message(guild_id)
+                    if guild_id not in self._update_wanted:
+                        break
             except asyncio.CancelledError:
                 logger.debug(f"Scheduled update for guild {guild_id} was cancelled.")
+            except sqlite3.Error:
+                logger.exception(
+                    f"Update of guild {guild_id} stopped by a storage failure; the next reminder tick tries again."
+                )
+                self._stale_guilds.add(guild_id)
             except Exception:
-                logger.exception(f"Error during scheduled update for guild {guild_id}.")
+                logger.exception(f"Error during scheduled update for guild {guild_id}; the next reminder tick tries again.")
+                self._retry_guilds.add(guild_id)
             finally:
+                self._update_wanted.discard(guild_id)
                 self._pending_update_tasks.pop(guild_id, None)
 
         task = asyncio.create_task(_delayed())
@@ -825,12 +907,18 @@ class FormationManagement(commands.Cog):
             )
             return
         channel = guild.get_channel(channel_id)
-        assert isinstance(channel, TextChannel)
+        if not isinstance(channel, TextChannel):
+            logger.warning(
+                f"Channel {channel_id} of the published formations message is gone for guild {guild_id}; skipping update."
+            )
+            return
 
         try:
             msg = await channel.fetch_message(message_id)
-        except Exception:
+        except Exception as exc:
             logger.exception(f"Failed to fetch message {message_id} in channel {channel_id}.")
+            if not isinstance(exc, NotFound):  # a deleted post stays so at the next tick; a refused read can be repaired
+                self._retry_guilds.add(guild_id)
             return
         logger.debug(f"Fetched published message {message_id} in channel {channel_id} for guild {guild_id}.")
 
@@ -851,21 +939,30 @@ class FormationManagement(commands.Cog):
 
         history = self._reaction_logs.history(guild_id, message_id)
 
+        # The time of each reaction still in place: a logged removal takes the member out, so a reaction the log does
+        # not hold again never gets the old place back.
         last_add: dict[tuple[str, int], datetime] = {}
+        journaled: set[tuple[str, int]] = set()
         for event in history:
-            if event.action != ReactionAction.ADD:
-                continue
             emoji = str(event.emoji)
             user_id = event.user_id
             if not emoji or user_id is None or emoji not in tracked_emojis:
                 continue
-            try:
-                ts = datetime.fromisoformat(event.ts_iso).astimezone(PARIS_TZ)
-            except (TypeError, ValueError):
-                ts = datetime.min.replace(tzinfo=PARIS_TZ)
             key = (emoji, int(user_id))
-            if key not in last_add or ts > last_add[key]:
+            journaled.add(key)
+            if event.action != ReactionAction.ADD:
+                last_add.pop(key, None)
+                continue
+            ts = _parse_ts(event.ts_iso)
+            if key not in last_add or ts.timestamp() > last_add[key].timestamp():
                 last_add[key] = ts
+        # The journal keeps 30 days: a seat taken earlier has no entry left, and the stored time ranks it. The reaction
+        # still has to stand on Discord, which the rebuild below checks.
+        for fm in fms:
+            for stored in (*fm.registered_users, *fm.waitlisted_users):
+                stored_id = stored.get("user_id")
+                if isinstance(stored_id, int) and (fm.emoji, stored_id) not in journaled:
+                    last_add[fm.emoji, stored_id] = _parse_ts(stored.get("ts_iso"))
 
         reactions_snapshot: dict[str, dict[int, str]] = {}
         for reaction in msg.reactions:
@@ -876,6 +973,11 @@ class FormationManagement(commands.Cog):
                 if user.bot:
                     continue
                 reactions_snapshot.setdefault(emoji_str, {})[user.id] = f"{user.display_name} ({user.name})"
+
+        if guild_id in self._stale_guilds:
+            # Cleared first: a reaction refused from here on marks the server again, and a failure is marked by the caller.
+            self._stale_guilds.discard(guild_id)
+            self._log_missed_reactions(guild_id, message_id, reactions_snapshot, last_add)
 
         waitlist_notifications: list[tuple[int, str, int]] = []
         promotion_notifications: list[tuple[int, Formation]] = []
@@ -892,7 +994,7 @@ class FormationManagement(commands.Cog):
                     (uid, last_add.get((fm.emoji, uid), datetime.min.replace(tzinfo=PARIS_TZ)), username)
                     for uid, username in current_logged_user.items()
                 ),
-                key=lambda item: (item[1], item[0]),
+                key=lambda item: (item[1].timestamp(), item[0]),
             )
 
             registered: list[dict[str, Any]] = []
@@ -906,7 +1008,8 @@ class FormationManagement(commands.Cog):
                 if position < max(fm.seats, 0):
                     registered.append(entry)
                     if uid in prev_waitlisted_ids:
-                        promotion_notifications.append((uid, fm))
+                        if datetime.now(PARIS_TZ) <= fm.start_dt + REGISTRATION_WINDOW:
+                            promotion_notifications.append((uid, fm))
                     elif uid not in prev_registered_ids:
                         registration_notifications.append((uid, fm))
                 else:

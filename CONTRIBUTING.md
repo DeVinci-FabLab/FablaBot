@@ -88,6 +88,12 @@ When a fix removes a recorded error, the check rewrites the baseline. Commit tha
 
 Do not run `--writebaseline` to hide a new error. It is only for a basedpyright upgrade that reports errors in code nobody touched, and the pull request says so.
 
+## Change the stored data
+
+The schema lives in `src/fablabot/migrations/`, one numbered SQL file per step, applied in order at start. To change it, add
+the next number. Never edit a file that has shipped: databases in production already ran it. A file may rebuild a table (create the new one, copy, drop the old one, rename, recreate its indexes): foreign keys are off while it runs, and the start refuses the file if it leaves a row without its parent. A local `data/` holding JSON
+state from an older release stops the bot at start, as it does in production.
+
 ## Pull requests
 
 - Titles follow Conventional Commits, for example `fix(log): ...`, since the title becomes the squash commit.

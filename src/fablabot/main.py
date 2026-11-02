@@ -5,6 +5,7 @@ from __future__ import annotations
 from http import HTTPStatus
 import logging
 import os
+import sys
 from typing import TYPE_CHECKING, Any, override
 
 from discord import Intents
@@ -12,6 +13,7 @@ from discord.app_commands import AppCommandContext
 from discord.ext import commands
 from dotenv import load_dotenv
 
+from fablabot import db
 from fablabot.cogs import (
     ChannelManagement,
     FormationManagement,
@@ -157,7 +159,12 @@ class Fablabot(commands.Bot):
 
 
 def main() -> None:
-    """Run the bot using the token from the environment."""
+    """Open the database, then run the bot using the token from the environment."""
+    try:
+        db.open_database()
+    except db.StorageError as error:
+        sys.exit(f"Cannot start: {error}")
+
     discord_logger = logging.getLogger("discord.client")
     discord_logger.addFilter(DiscordGateway503Filter())
 
