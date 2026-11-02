@@ -860,17 +860,21 @@ class MessageManagement(commands.Cog):
                     f"Failed to execute reaction action {action.action_type} for emoji {emoji_str} "
                     f"on message {payload.message_id} by {member}",
                 )
-            self._reaction_logs.append(
-                guild.id,
-                ReactionEvent(
-                    message_id=payload.message_id,
-                    user_id=member.id,
-                    user_name=member.display_name,
-                    emoji=emoji_str,
-                    action=ReactionAction.ADD,
-                    ts_iso=datetime.now(PARIS_TZ).isoformat(),
-                ),
-            )
+            try:
+                self._reaction_logs.append(
+                    guild.id,
+                    ReactionEvent(
+                        message_id=payload.message_id,
+                        user_id=member.id,
+                        user_name=member.display_name,
+                        emoji=emoji_str,
+                        action=ReactionAction.ADD,
+                        ts_iso=datetime.now(PARIS_TZ).isoformat(),
+                    ),
+                )
+            except sqlite3.Error:
+                # Only the history line is lost: the member's other actions must still run.
+                logger.exception(f"Reaction history line not written guild_id={guild.id} message_id={payload.message_id}")
 
     # endregion Listeners
 

@@ -248,3 +248,23 @@ async def test_msg_follow_on_a_message_already_tracked_keeps_its_links(draft_lin
     await _follow(interaction, cog, channel)
 
     assert [r.emoji for r in messages.tracked_messages(1234)[MESSAGE].reactions] == expected
+
+
+async def test_a_refused_history_line_does_not_stop_the_other_actions_of_a_reaction(
+    storage_error: sqlite3.Error, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The history line is lost and logged; every action linked to the emoji still runs."""
+    member = MagicMock(bot=False, id=5, display_name="Alice")
+    guild = MagicMock(id=1234)
+    bot = MagicMock()
+    bot.get_guild.return_value = guild
+    cog = MessageManagement(bot)
+    cog._execute_reaction_action = AsyncMock()
+    messages.save_tracked(1234, _tracked(MESSAGE, _reaction("🔧", message_id=MESSAGE), _reaction("🔧", message_id=MESSAGE)))
+    payload = MagicMock(guild_id=1234, message_id=MESSAGE, emoji="🔧", member=member)
+
+    with patch.object(cog._reaction_logs, "append", side_effect=storage_error):
+        await cog.on_raw_reaction_add(payload)
+
+    assert cog._execute_reaction_action.await_count == 2
+    assert [r for r in caplog.records if r.levelname == "ERROR" and "history" in r.getMessage()]
