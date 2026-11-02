@@ -26,7 +26,7 @@ ALLOWED_GUILD_IDS_ENV: Final = "ALLOWED_GUILD_IDS"
 
 
 def parse_allowed_guild_ids(raw: str | None) -> frozenset[int]:
-    """Parse a comma-separated list of guild IDs.
+    """Parse a comma-separated list of guild IDs, each with an optional ``:name`` for the reader.
 
     Args:
         raw (str | None): The raw value of the environment variable.
@@ -42,11 +42,12 @@ def parse_allowed_guild_ids(raw: str | None) -> frozenset[int]:
     entries = [entry for entry in entries if entry]
     ids: set[int] = set()
     for position, entry in enumerate(entries, start=1):
+        guild_id = entry.partition(":")[0].strip()
         # str.isdigit alone accepts non-ASCII digits.
-        if not (entry.isascii() and entry.isdigit() and int(entry) > 0):
+        if not (guild_id.isascii() and guild_id.isdigit() and int(guild_id) > 0):
             msg = f"{ALLOWED_GUILD_IDS_ENV}: entry {position} is not a numeric guild ID"
             raise ValueError(msg)
-        ids.add(int(entry))
+        ids.add(int(guild_id))
     return frozenset(ids)
 
 
