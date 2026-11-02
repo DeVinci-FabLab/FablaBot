@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+from unittest.mock import MagicMock
 
 from conftest import cog_bot, make_interaction, make_member, make_role
+from discord import User
 import pytest
 
 from fablabot.cogs import formation_management, message_management
@@ -20,6 +22,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 GUILD_ID = 1234
+ALL_ROLES = sorted(value for name, value in vars(RoleNames).items() if not name.startswith("_"))
 
 
 def _formation() -> Formation:
@@ -104,21 +107,31 @@ async def test_a_member_who_still_holds_a_role_of_the_command_passes(surface: st
 
 @pytest.mark.parametrize(
     ("surface", "role"),
-    [
-        ("message.start_modal", RoleNames.ADMIN_TEMP),
-        ("message.unlink_view", RoleNames.ADMIN_TEMP),
-        ("message.bulk_dm_view", RoleNames.ADMIN),
-        ("message.bulk_dm_modal", RoleNames.PRESIDENT),
-        ("formation.select_view", RoleNames.BUREAU),
-        ("formation.edit_view", RoleNames.BUREAU),
-    ],
+    [(surface, role) for surface, (_build, roles) in SURFACES.items() for role in ALL_ROLES if role not in roles],
 )
 async def test_the_rule_is_the_one_of_the_command_not_a_neighbour_s(surface: str, role: str) -> None:
-    """A temporary admin may not use message views, only Bureau may send bulk DMs, and Bureau has no say on trainings."""
+    """Every role the command does not accept is refused on every view, so no view takes in a neighbour's role.
+
+    A temporary admin may not use message views, only Bureau may send bulk DMs, and Bureau has no say on trainings.
+    """
     build, _roles = SURFACES[surface]
     click = _clicker(role)
 
     assert await build().interaction_check(click) is False
+    click.response.send_message.assert_awaited_once_with(RIGHT_LOST_MESSAGE, ephemeral=True)
+
+
+@pytest.mark.parametrize("surface", SURFACES)
+async def test_a_user_who_is_not_a_member_is_refused_whatever_roles_it_carries(surface: str) -> None:
+    """A click from outside a server has no roles to read: it is refused, even if the payload shows an accepted one."""
+    build, roles = SURFACES[surface]
+    click = make_interaction(guild_id=GUILD_ID)
+    click.user = MagicMock(spec=User)
+    click.user.id = 7
+    click.user.roles = [make_role(sorted(roles)[0])]
+
+    assert await build().interaction_check(click) is False
+    click.response.send_message.assert_awaited_once_with(RIGHT_LOST_MESSAGE, ephemeral=True)
 
 
 def test_the_views_read_the_constants_of_the_commands() -> None:
