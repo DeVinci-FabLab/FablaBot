@@ -186,3 +186,41 @@ def test_operator_guide_gives_a_member_without_the_channel_a_way_out() -> None:
     section = _read("docs/OPERATIONS.md")
     assert "A member who cannot open it uses `/suggest` or a private `/help`" in section
     assert "Run `/help` without `show`" in section
+
+
+def test_operator_guide_moves_to_the_database_in_order() -> None:
+    """The steps come in the only safe order, and the guide says when not to run them."""
+    section = _section(_read("docs/OPERATIONS.md"), "## Moving to the database")
+    steps = (
+        "**Tell each server's admins",
+        "**Archive,**",
+        "**Rehearse on a copy.**",
+        "**Hold the update.**",
+        "**Merge the release pull request.**",
+        "**Stop the stack.**",
+        "**Check.**",
+        "**Import.**",
+        "**Check again,**",
+        "**Start.**",
+        "**Read the start.**",
+        "**Release the hold.**",
+    )
+    places = [section.index(step) for step in steps]
+    assert places == sorted(places)
+    for detail in ("Admin -temp-", "24 hours", "never counts", "about 5 minutes", "--network none", "Server check:"):
+        assert detail in section, detail
+
+
+def test_operator_guide_says_how_a_failed_import_rolls_back() -> None:
+    """A failed import ends on the held release, and a killed one is run again."""
+    section = _section(_read("docs/OPERATIONS.md"), "### If a step fails")
+    for detail in ("still holds the old release", "leaves no row", "Never delete the journal"):
+        assert detail in section, detail
+
+
+def test_operator_guide_warns_of_stale_json_and_exports_first() -> None:
+    """A rollback past the database exports first, and the way forward sets the database aside."""
+    section = _section(_read("docs/OPERATIONS.md"), "### Rolling back")
+    for detail in ("reads the JSON files", "with no error", "fablabot.export_state", "changed since it was imported"):
+        assert detail in section, detail
+    assert "docs/OPERATIONS.md#back-to-a-release-before-the-database" in _read("README.md")

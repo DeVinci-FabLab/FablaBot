@@ -86,6 +86,8 @@ is a decision for the association (GDPR), not for the bot.
 
 The production stack stays on `:latest`; a test server can follow `:edge`.
 
+The first release that keeps its state in the database does not follow these steps: see "Moving to the database".
+
 ### Rolling back
 
 Set the stack's image to the `:X.Y.Z` of the previous release, or to `:sha-<commit>`. Images from before
@@ -94,6 +96,43 @@ then redeploy. Go back to `:latest` once a fixed release is out.
 
 After a rollback, delete `data/command_sync_state.json` before upgrading again (see "This command is
 outdated"). The [README](../README.md#rolling-back) has the same steps under "Rolling back".
+
+#### Back to a release before the database
+
+A release from before the database ignores `data/fablabot.db` and reads the JSON files, which stopped at the import. It
+starts with no error, on old state: sign-ups since the import are gone for it, and reminders already sent go out again.
+So write fresh JSON files first. If the database release never started, skip to step 4: the JSON files are still right.
+
+1. Stop the stack, then archive, as in "Before every redeploy".
+2. Export, with the image that was running and the `fablabot_state` helper of "Moving to the database". The command
+   writes a new folder, and says how many replaced training messages have no place in those files: they stay in
+   `data/fablabot.db`.
+
+   ```bash
+   IMAGE=ghcr.io/devinci-fablab/fablabot:X.Y.Z   # the release that was running
+   fablabot_state "$VOLUMES_PATH/fablabot/data" fablabot.export_state data/exports/$STAMP
+   ```
+
+3. Move the old JSON files aside and copy the export in their place. Nothing is deleted.
+
+   ```bash
+   cd "$VOLUMES_PATH/fablabot/data"
+   sudo mkdir json-before-$STAMP
+   sudo mv guild_config.json formations_state.json messages_state.json json-before-$STAMP/
+   [ ! -e temp_admin_state.json ] || sudo mv temp_admin_state.json json-before-$STAMP/
+   sudo cp -p exports/$STAMP/*.json .
+   ```
+
+4. Set the stack's image to the older `:X.Y.Z` and deploy. Stay on that tag: `:latest` would bring the update back. If
+   the older image runs as another user, give it `data/` first, with `sudo chown -R`.
+
+To move forward again, the JSON files now hold what the database lacks, so the database release refuses to start with
+`changed since it was imported`. Stop the stack, archive, set the database aside, then follow "Moving to the database"
+from step 8. The file set aside keeps the replaced messages.
+
+```bash
+sudo mv "$VOLUMES_PATH/fablabot/data/fablabot.db" "$VOLUMES_PATH/fablabot/data/fablabot-before-$STAMP.db"
+```
 
 ## Find a server ID
 
@@ -341,7 +380,131 @@ file and in `data/backups/` until the association sets a retention period.
   It never removes these copies, and they count in the archive of "Before every redeploy".
 - A release never goes back: a database from a newer release stops an older one.
 - JSON state files left by an older release (`guild_config.json`, `formations_state.json`, `messages_state.json`,
-  `temp_admin_state.json`) stop the bot until they are imported. The bot never reads, changes or removes them.
+  `temp_admin_state.json`) stop the bot until they are imported (see "Moving to the database"). The bot never reads,
+  changes or removes them. They stay in place after the import, and the bot compares their fingerprints at each start.
+- The `__global__` section of `guild_config.json`, the instance-wide log channel of early releases, becomes one row that
+  no command writes. When the bot is ready, it gives that channel to the server that owns it, if that server has no log
+  channel, and keeps the row. A server that is no longer allowed keeps its settings; nothing reads them until it is
+  listed again.
+- `data/exports/<name>/` holds what `fablabot.export_state` wrote. These folders carry the same data, count in the
+  archive, and are never removed by the bot.
+
+## Moving to the database
+
+Do this once, for the first release that keeps its state in `data/fablabot.db`. That release refuses to start over
+the JSON files of older releases, and a release can deploy itself, so the update is held first. The bot is down from
+step 6 to step 11: about 5 minutes when nothing goes wrong. The JSON files are never changed, so a failed import costs
+that stop and nothing else.
+
+Pick the moment first. A reaction made while the bot is off never counts: it stays on the message, and the member gets
+no seat, no DM and no error. A reminder goes out only within 5 minutes of its time, so a stop across it loses that
+reminder.
+
+- Stay 24 hours away from the start of any training, on every server, before and after.
+- Avoid the day after a `/fm publish`, when members react.
+- Avoid Sunday around 03:00, when the host reboots.
+
+The commands run on the host, through this helper. They need no token, no `logs/` volume and no network.
+
+```bash
+fablabot_state() {
+  folder=$1; shift
+  docker run --rm --network none --read-only \
+    --tmpfs /tmp:size=1m,mode=1777,noexec,nosuid,nodev \
+    --cap-drop ALL --security-opt no-new-privileges:true \
+    -v "$folder:/app/data" "$IMAGE" python -m "$@"
+}
+```
+
+There is no `--user` on purpose: the image runs as the user the bot runs as, so what the import writes belongs to the
+bot. With an image that runs as root, a later move to `10001` must take `data/` whole with `chown -R`. With an image
+that runs as `10001`, `data/` must belong to `10001` before you start; otherwise the import stops with
+`cannot be used: unable to open database file`.
+
+1. **Tell each server's admins, the day before.** The first start removes every `Admin -temp-` given by hand, within a
+   minute, on every server. Only roles from `/user op` stay. A holder the bot cannot touch, because the role sits above
+   the bot's, writes two error lines a minute to that server's log channel until someone moves the role.
+
+2. **Archive,** with the bot running, from step 2 of "Before every redeploy". The bot replaces each JSON file whole, so
+   each one in the archive is complete. Keep `STAMP` for the next step.
+
+3. **Rehearse on a copy.** The `:edge` image holds the import as soon as it is on `main`.
+
+   ```bash
+   IMAGE=ghcr.io/devinci-fablab/fablabot:edge
+   COPY=~/fablabot-archive/rehearsal-$STAMP
+   sudo mkdir -m 700 "$COPY"
+   sudo tar -xzf ~/fablabot-archive/fablabot-$STAMP.tar.gz -C "$COPY" data
+   fablabot_state "$COPY/data" fablabot.import_state --check
+   fablabot_state "$COPY/data" fablabot.import_state
+   fablabot_state "$COPY/data" fablabot.import_state --check
+   ```
+
+   The last command must print `data/fablabot.db matches the files.` Any `Cannot import` line is a fix to make while
+   the bot still serves: stop here. Keep the copy with the archives.
+
+4. **Hold the update.** In Komodo, set the stack's `image:` to the release running now,
+   `ghcr.io/devinci-fablab/fablabot:X.Y.Z` in place of `:latest`, and deploy. The container restarts once on the same
+   image. A tag that does not move gives an automatic update nothing to pull. Read the stack's automatic update setting
+   while you are there, and note it.
+
+   ```bash
+   docker inspect fablabot --format '{{.Config.Image}}'
+   ```
+
+   It must print the tag you set.
+
+5. **Merge the release pull request.** Wait for the "Build and Push Docker Image" run to finish green, then pull the
+   new image. The bot keeps running on the held tag.
+
+   ```bash
+   IMAGE=ghcr.io/devinci-fablab/fablabot:X.Y.Z   # the new release
+   docker pull "$IMAGE"
+   docker inspect fablabot --format '{{.Config.Image}}'
+   ```
+
+   The last command must still print the held tag.
+
+6. **Stop the stack.** The bot is down from here.
+
+7. **Archive again,** steps 3 and 4 of "Before every redeploy". Nothing moves now.
+
+8. **Check.** One line per server, with counts and IDs only. Compare them with step 3.
+
+   ```bash
+   fablabot_state "$VOLUMES_PATH/fablabot/data" fablabot.import_state --check
+   ```
+
+9. **Import.** One transaction: it writes everything or nothing, and a second run has nothing to do.
+
+   ```bash
+   fablabot_state "$VOLUMES_PATH/fablabot/data" fablabot.import_state
+   ```
+
+10. **Check again,** with the command of step 8. It must print `data/fablabot.db matches the files.`
+
+11. **Start.** In Komodo, set `image:` to the new `:X.Y.Z` and deploy.
+
+12. **Read the start.**
+    - No `Cannot start` line.
+    - One `Server check:` line per server, with the `blocking=` you had before (see "Server check at start").
+    - `Removed temporary admin role (no recorded expiry)` for the roles of step 1.
+    - `/fm export` on each server with a published training: same members, same order.
+    - A member whose reaction is on the message but who is not on the list reacted during the stop: ask them to take
+      it off and add it again.
+
+13. **Release the hold.** Set `image:` back to `:latest`, set the automatic update back as you found it, and deploy.
+    The container restarts once.
+
+### If a step fails
+
+| Step | What you see | What to do |
+| --- | --- | --- |
+| 3 | `Cannot import: <file>/<place>: ...` | Production has not moved. The line gives the place in the file, never its value. Fix the cause in a release, then start again from step 2. |
+| 8, 9 or 10 | `Cannot import: ...`, or the import dies | Deploy the stack as it is: it still holds the old release, which reads the JSON files the import left alone. A failed import leaves no row. `data/fablabot.db` stays, the old release ignores it, and the next import fills it. |
+| 9 | `data/fablabot.db-journal` next to the database | The import was killed. Run step 9 again: it finishes the recovery and starts over. Never delete the journal. |
+| 11, or the update was not held | `Cannot start: data/... not imported`, in a restart loop | Nothing was changed and the bot never logged in. Stop the stack, then go on from step 7. |
+| 12 | The new release misbehaves | Go to "Back to a release before the database". |
 
 ## "This command is outdated"
 
@@ -380,8 +543,9 @@ The log tells which case applies: `Commands synced (9, global).` after a sync, a
 | A member sees a staff group | `@everyone` is allowed on that command in Integrations, or a role they hold was added at the top of the page | Remove that entry; leave the Roles & Members section at the top alone. |
 | A changed command does not show after a redeploy | The record matches while Discord holds other commands (another instance with the same token, or a rollback) | Delete `data/command_sync_state.json` and restart. |
 | Bot stops at start with `DEV_GUILD_ID: ...` | Malformed ID, or a server outside `ALLOWED_GUILD_IDS` | Digits only, and list the server; or unset it on the production bot. |
-| `Cannot start: data/... not imported into data/fablabot.db` | JSON state of an older release sits in `data/` and the database does not hold it | Nothing was changed. Keep the files and import them; never delete them to get past the message. |
-| `Cannot start: data/... changed since it was imported` | An older image ran after the import, so the file holds what the database lacks | Nothing was changed. Do not start this release before you know which side holds the latest data. |
+| `Cannot start: data/... not imported into data/fablabot.db` | JSON state of an older release sits in `data/` and the database does not hold it | Nothing was changed. Keep the files and follow "Moving to the database"; never delete them to get past the message. |
+| `Cannot start: data/... changed since it was imported` | An older image ran after the import, so the file holds what the database lacks | Nothing was changed. Do not start this release before you know which side holds the latest data: see "Back to a release before the database". |
+| `Cannot import: ...` | The JSON state holds something this release does not know, the database holds other data, or a file changed since the import | Nothing was written, and the line says where. See "If a step fails". |
 | `Cannot start: data/fablabot.db is at schema version ...` | The database comes from a newer release | Run that release or a later one. |
 | `Cannot start: data/fablabot.db cannot be used: ...` | The disk is full, `data/` is not writable, the file is damaged, or a migration left orphan rows | Check the disk and the folder's owner first. Restore the file from an archive or from `data/backups/` only if it is damaged. |
 | A release's image build failed | The tag exists but `:latest` did not move | Re-run the failed jobs of that run (re-running all jobs publishes `:edge` only). |
