@@ -262,10 +262,10 @@ A restart during the failure forgets which servers to catch up: a member who rea
 
 An update of the training message that stops for another reason (Discord does not return the post, or the run
 fails) is run again at the next 5-minute tick: the log shows `Error during scheduled update` or `Failed to fetch
-message`, and a member whose reaction is logged gets their place and their DM then. This includes a post the bot
+message`, and a member whose reaction is logged gets their place then, with their DM unless it already failed once after the save. This includes a post the bot
 may not read (403): an admin can repair the right, and the log gets one line per tick until then. A post that was
-deleted or a channel that is gone (`is gone for guild` in the log) is not asked for again at the tick: the next
-reaction runs the update. A restart forgets the retry, as above.
+deleted or a channel that is gone (`is gone for guild` in the log) is not asked for again at the tick, unless a
+failed write left the server marked: the next reaction runs the update. A restart forgets the retry, as above.
 
 ## Server check at start
 
@@ -331,6 +331,9 @@ nothing is removed. A failure is logged as a warning with the error type, and th
 Everything the bot keeps lives in one SQLite file, `data/fablabot.db`: per-server settings, training drafts,
 published messages and their registrations, tracked messages, the reaction history and the temporary-admin
 expiries. `data/command_sync_state.json` stays a separate file: it is a cache you may delete.
+
+The registrations of a replaced training message stay with no time limit, so member IDs and names stay in the
+file and in `data/backups/` until the association sets a retention period.
 
 - The file is one database at rest: no `-wal` or `-shm` file. A `data/fablabot.db-journal` file only exists while a write is
   in progress, or after a crash, and the next start finishes the recovery from it. Never delete it.

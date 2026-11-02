@@ -55,6 +55,7 @@ ALLOWED_ROLES = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN_TEMP, RoleNames.AD
 _ACCESS = AnyRole(ALLOWED_ROLES)
 TRAINER_NOTIFICATION_ADVANCE = timedelta(hours=1)
 REACTION_LOG_RETENTION = timedelta(days=30)
+REGISTRATION_WINDOW = timedelta(minutes=20)
 
 
 class FormationManagement(commands.Cog):
@@ -781,7 +782,7 @@ class FormationManagement(commands.Cog):
 
         formation = next((fm for fm in pub.message.fms if fm.emoji == event.emoji), None)
         if formation and event.action == ReactionAction.ADD:
-            registration_deadline = formation.start_dt + timedelta(minutes=20)
+            registration_deadline = formation.start_dt + REGISTRATION_WINDOW
             if datetime.fromisoformat(event.ts_iso) > registration_deadline:
                 logger.info(
                     f"Ignoring reaction {event.emoji} for formation {formation.name!r} "
@@ -993,7 +994,8 @@ class FormationManagement(commands.Cog):
                 if position < max(fm.seats, 0):
                     registered.append(entry)
                     if uid in prev_waitlisted_ids:
-                        promotion_notifications.append((uid, fm))
+                        if datetime.now(PARIS_TZ) <= fm.start_dt + REGISTRATION_WINDOW:
+                            promotion_notifications.append((uid, fm))
                     elif uid not in prev_registered_ids:
                         registration_notifications.append((uid, fm))
                 else:

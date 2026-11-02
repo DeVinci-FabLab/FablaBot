@@ -755,3 +755,70 @@ async def test_a_published_message_in_a_deleted_channel_is_not_tried_again(env: 
 
     assert env.cog._retry_guilds == set()
     assert GUILD_ID not in env.cog._pending_update_tasks
+
+
+async def test_one_servers_update_neither_holds_back_nor_drops_anothers(
+    started_bot: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each server has its own update: a request on one is not merged into the other's, nor forgotten when it ends."""
+    cog = started_bot.get_cog("FormationManagement")
+    gates = {GUILD_ID: asyncio.Event(), OTHER_GUILD_ID: asyncio.Event()}
+    started: list[int] = []
+
+    async def _update(guild_id: int) -> None:
+        started.append(guild_id)
+        await gates[guild_id].wait()
+
+    monkeypatch.setattr(cog, "_update_published_message", _update)
+    cog._schedule_update(GUILD_ID, delay=0)
+    await _let_others_run()
+    cog._schedule_update(OTHER_GUILD_ID, delay=0)
+    await _let_others_run()
+
+    assert started == [GUILD_ID, OTHER_GUILD_ID]
+    assert cog._update_wanted == set()
+    gates[GUILD_ID].set()
+    await _let_others_run()
+    assert set(cog._pending_update_tasks) == {OTHER_GUILD_ID}
+    gates[OTHER_GUILD_ID].set()
+    await _let_others_run()
+    assert cog._pending_update_tasks == {}
+
+
+async def test_a_stale_mark_is_used_and_cleared_by_its_own_server_only(env: _Env) -> None:
+    """A stale mark names one server: this server's update takes nothing back for it, and clears no other's."""
+    _forget_logged_reactions()
+    env.cog._stale_guilds.add(OTHER_GUILD_ID)
+
+    await env.cog._update_published_message(GUILD_ID)
+    assert env.cog._reaction_logs.history(GUILD_ID, MESSAGE_ID) == []
+
+    env.cog._stale_guilds.add(GUILD_ID)
+    await env.cog._update_published_message(GUILD_ID)
+    assert env.cog._stale_guilds == {OTHER_GUILD_ID}
+
+
+async def test_a_removal_long_after_the_training_promotes_nobody_by_dm(
+    started_bot: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A place freed once registration has closed moves the list and tells no one a seat is theirs."""
+    env = _Env(
+        started_bot.get_cog("FormationManagement"),
+        monkeypatch,
+        seats=1,
+        start_in=timedelta(days=-7),
+        reactors=(MEMBER_ID, OTHER_MEMBER_ID),
+    )
+    _log_events(env, (MEMBER_ID, ReactionAction.ADD, 10140), (OTHER_MEMBER_ID, ReactionAction.ADD, 10130))
+    await env.cog._update_published_message(GUILD_ID)
+    promotion = AsyncMock()
+    monkeypatch.setattr(fm_cog, "send_promotion_dm", promotion)
+    _discord_shows(env, OTHER_MEMBER_ID)
+    removal = _reaction_payload()
+    removal.event_type = "REACTION_REMOVE"
+
+    await env.cog.on_raw_reaction_event(removal)
+    await env.cog._pending_update_tasks[GUILD_ID]
+
+    assert _seats(env) == ([OTHER_MEMBER_ID], [])
+    promotion.assert_not_awaited()
