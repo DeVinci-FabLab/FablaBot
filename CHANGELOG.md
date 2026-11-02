@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.6.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.5.0...v0.6.0) (2026-11-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* **docker:** run the bot as an unprivileged user in a hardened container
+
+### Features
+
+* **docker:** run the bot as an unprivileged user in a hardened container ([b3b7a05](https://github.com/DeVinci-FabLab/FablaBot/commit/b3b7a05eee707fa1fd295b9a3772843911e101da))
+
 ## [0.5.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.4.0...v0.5.0) (2026-11-02)
 
 
