@@ -165,10 +165,10 @@ def test_no_workflow_uses_a_personal_token() -> None:
 
 
 def test_the_release_steps_are_documented() -> None:
-    """README explains how to release, roll back and set the repository; CONTRIBUTING says the title sets the version."""
+    """The deployment guide explains releases, rollbacks and settings; CONTRIBUTING says the title sets the version."""
     root = WORKFLOWS.parent.parent
-    readme = (root / "README.md").read_text(encoding="utf-8")
-    releases = re.search(r"^## Releases\n(?P<body>.*?)(?=^## )", readme, re.MULTILINE | re.DOTALL)
+    guide = (root / "docs" / "DEPLOYMENT.md").read_text(encoding="utf-8")
+    releases = re.search(r"^## Releases\n(?P<body>.*?)(?=^## )", guide, re.MULTILINE | re.DOTALL)
     assert releases
     for heading in ("Making a release", "Rolling back", "Repository settings"):
         assert re.search(rf"^### {heading}$", releases["body"], re.MULTILINE), heading

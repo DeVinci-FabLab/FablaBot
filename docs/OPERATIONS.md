@@ -1,13 +1,30 @@
 # Operator guide
 
-This guide is for whoever hosts and runs a FablaBot instance. It covers deploying the image,
+This guide is for whoever hosts and runs a FablaBot instance. It covers the settings, redeploying and rolling back,
 adding and removing servers, the Discord Developer Portal settings, the roles the bot expects, and
-the problems seen in production. Commands for members and staff are in the [user guide](USERGUIDE.md).
+the problems seen in production. How the image is built to run, how a release is made and how to move a host to the
+non-root image are in the [deployment guide](DEPLOYMENT.md). Commands for members and staff are in the
+[user guide](USERGUIDE.md).
+
+- [Deployment model](#deployment-model): [before every redeploy](#before-every-redeploy),
+  [releasing and redeploying](#releasing-and-redeploying), [rolling back](#rolling-back)
+- [Environment variables](#environment-variables): [allowed servers](#allowed-servers),
+  [log channels](#log-channels), [development bot](#development-bot)
+- [Find a server ID](#find-a-server-id), [Add a server](#add-a-server), [Remove a server](#remove-a-server)
+- [Discord Developer Portal](#discord-developer-portal)
+- [Roles](#roles) and [Staff commands in the slash menu](#staff-commands-in-the-slash-menu)
+- [Commands channel](#commands-channel)
+- [Health status](#health-status), [Server language](#server-language), [Temporary admin](#temporary-admin)
+- [When a database write fails](#when-a-database-write-fails)
+- [Server check at start](#server-check-at-start)
+- [Stored data](#stored-data) and [Moving to the database](#moving-to-the-database)
+- ["This command is outdated"](#this-command-is-outdated)
+- [Troubleshooting](#troubleshooting)
 
 ## Deployment model
 
 Every push to `main` publishes `:edge` and `:sha-<commit>`. `:latest`, `:X.Y.Z` and `:X.Y` move only
-when the release pull request is merged (see the [README](../README.md#releases), "Releases").
+when the release pull request is merged (see "Releases" in the [deployment guide](DEPLOYMENT.md#releases)).
 Production follows `:latest`; a test server can follow `:edge`. A merge to `main` is not a deploy, but a
 release is: the production stack has `poll_for_updates` and `auto_update` on, and a Komodo procedure runs every
 30 minutes, so `:latest` reaches production within 30 minutes. Treat merging the release pull request as
@@ -46,7 +63,7 @@ secrets:
     file: ./secrets/discord_token.secret
 ```
 
-The image runs as `10001:10001`; the volumes and the token file must belong to that user (see "Moving a host to the non-root image" below, and the [README](../README.md#moving-a-host-to-the-non-root-image)).
+The image runs as `10001:10001`; the volumes and the token file must belong to that user (see [Moving a host to the non-root image](DEPLOYMENT.md#moving-a-host-to-the-non-root-image)).
 
 | Setting | Role |
 | --- | --- |
@@ -121,11 +138,11 @@ the first release use `:<commit sha>`. Read the changelog entries in between for
 then redeploy. Go back to `:latest` once a fixed release is out.
 
 To go back past the release that brought the non-root image, take the hardening lines out of the stack too, as
-"Moving to the non-root image" says: the older image runs as root, and with every capability dropped root cannot read
+[Moving a host to the non-root image](DEPLOYMENT.md#moving-a-host-to-the-non-root-image) says: the older image runs as root, and with every capability dropped root cannot read
 or write what belongs to 10001.
 
 After a rollback, delete `data/command_sync_state.json` before upgrading again (see "This command is
-outdated"). The [README](../README.md#rolling-back) has the same steps under "Rolling back".
+outdated").
 
 #### Back to a release before the database
 
@@ -183,6 +200,56 @@ then follow "Moving to the database" from step 8. The file set aside keeps the r
 sudo mv "$VOLUMES_PATH/fablabot/data/fablabot.db" "$VOLUMES_PATH/fablabot/data/fablabot-before-$STAMP.db"
 ```
 
+## Environment variables
+
+The table under "Deployment model" lists each setting. The three below need more than a row.
+
+### Allowed servers
+
+`ALLOWED_GUILD_IDS` holds the IDs of the servers the bot may serve, separated by commas. Each ID can carry a name after a colon, so the list reads by itself; the bot ignores the name, which cannot hold a comma:
+
+```bash
+ALLOWED_GUILD_IDS=111111111111111111:Main server,222222222222222222:Test server
+```
+
+- When it is empty, the bot keeps serving the servers it is in at start and logs a warning. After that, it only stays in a server it joins if the application owner, or an admin or developer of its team, owns it.
+- A malformed value stops the bot at start.
+
+To keep other people from adding the bot to their servers, set the two Developer Portal settings of "Discord Developer Portal" below. To copy a server ID, see "Find a server ID". "Add a server" and "Remove a server" have the full steps.
+
+### Log channels
+
+Each server picks its log channel with `/log set` and receives its own errors only.
+
+`OPERATOR_LOG_CHANNEL_ID` holds one channel ID and receives the errors that belong to no server. Pick a channel only the bot's administrators can read: those errors come from every server's tasks.
+
+```bash
+OPERATOR_LOG_CHANNEL_ID=888888888888888888
+```
+
+- When it is empty, those errors stay in the log files.
+- A malformed value is ignored, with a warning at start.
+
+Log files live in `logs/`:
+
+- `logs/<date>.log` holds every line, stays on the host and is never sent.
+- `logs/guilds/<server ID>/<date>.log` holds one server's lines. `/log export` sends that file to that server only.
+- The bot deletes no log file. See "Before every redeploy" for archiving before a redeploy.
+
+### Development bot
+
+`DEV_GUILD_ID` holds one server ID, for a development bot only. When it is set, the bot syncs its commands to that server alone, where they show at once, and leaves the global commands as they are.
+
+```bash
+DEV_GUILD_ID=111111111111111111
+```
+
+- Use a separate Discord application for the development bot, one that never synced without `DEV_GUILD_ID`: otherwise each command shows twice on that server.
+- Never set it on the production bot: its commands would stop updating on every other server.
+- The server must be in `ALLOWED_GUILD_IDS` when that list is set. A malformed value, or a server outside the list, stops the bot at start.
+
+For the local setup of a development bot, see [CONTRIBUTING](../CONTRIBUTING.md#run-the-bot-locally).
+
 ## Find a server ID
 
 1. In Discord, open User Settings, Advanced, and enable Developer Mode.
@@ -212,8 +279,8 @@ Order matters: the allow-list comes before the invite, otherwise the bot joins a
    included. Discord refuses to add or remove a role that sits above the bot's own.
 4. In the commands channel (see below), run `/log set` and pick the channel that receives this
    server's errors.
-5. In Server Settings, Integrations, show each staff group to the roles that use it, as in the
-   [README](../README.md#staff-commands-in-the-slash-menu), "Staff commands in the slash menu". Until
+5. In Server Settings, Integrations, show each staff group to the roles that use it, as in
+   [Staff commands in the slash menu](#staff-commands-in-the-slash-menu). Until
    then, only members with the Administrator permission see the staff commands.
 6. Restart the stack and read the server's `Server check` lines (see "Server check at start"). The check
    runs once per start, so a server invited since the last start is read at the next one.
@@ -242,8 +309,6 @@ between, as for a reaction made while the bot is down:
 - A member whose removal was dropped adds the reaction and takes it off again. Any reaction on the post runs the update.
 
 A temporary admin right still ends on time on those servers: the end of a right the bot granted does not wait for the list.
-
-A malformed value stops the bot at start.
 
 ## Remove a server
 
@@ -284,8 +349,35 @@ Commands that need an admin accept `Administrateur`, `Président`, `Vice-Présid
 available yet.
 
 The slash menu shows each staff group only to server administrators and to the roles allowed in
-Integrations (README, "Staff commands in the slash menu"). The menu is a display setting; the bot
+Integrations (see "Staff commands in the slash menu" below). The menu is a display setting; the bot
 checks the roles above when a command runs.
+
+## Staff commands in the slash menu
+
+The staff command groups (`/text`, `/vocal`, `/fm`, `/log`, `/msg`, `/user`, `/welcome`) are hidden from the slash menu by default: only members with the Administrator permission see them. `/suggest` and `/help` stay visible to everyone. This changes what the menu shows, not who may run a command: each command still checks the caller's roles when it runs.
+
+On each server, a member with the Administrator permission shows each group to the roles that use it:
+
+1. Open Server Settings > Integrations, then Manage next to the bot.
+2. Under Commands, open a command, choose Add Roles or Members, add the roles listed below for it, and save.
+3. Leave the Roles & Members section at the top of that page alone: a role added there sees every staff group.
+4. Check with an account that has no staff role: after a reload, it sees `/suggest` and `/help` and no staff group. If a group still shows, open that command and make sure `@everyone` is not allowed there.
+
+| Command | Roles to add |
+| --- | --- |
+| `/text`, `/welcome` | Administrateur, Président, Vice-Président, Secrétaire Général |
+| `/vocal` | Administrateur, Président, Vice-Président, Secrétaire Général, Bureau |
+| `/log` | Administrateur, Président, Vice-Président, Secrétaire Général, Respo Numérique, Pôle Numérique |
+| `/fm` | Administrateur, CoDir, Respo Formation, Admin -temp- |
+| `/msg` | Administrateur, Président, Vice-Président, Secrétaire Général, Bureau |
+| `/user` | Administrateur, Président, Vice-Président, Secrétaire Général, Bureau, Respo Communication, Respo Event, Respo Formation, Respo Numérique, Respo Partenariat, Respo Projet |
+
+- These are the role names the bot checks today (`src/fablabot/helpers/constants.py`). Skip a role the server does not have, and a role that already has the Administrator permission.
+- `/vocal` allows Bureau for `/vocal create` of a temporary channel only: the bot still refuses `/vocal rename` and `/vocal delete` for Bureau at run time.
+- Discord applies this per command, not per subcommand: a role added to `/msg` sees all of `/msg`, and the bot still refuses the subcommands that role may not run. `/msg clear` needs Manage Messages in the channel and `/msg purge` the Administrator permission; a role that only uses `/msg clear` is added to `/msg` too.
+- For `/user`, also add any other `Respo <area>` role whose `Pôle <area>` role exists on the server.
+- The settings stay across restarts and redeploys as long as the commands keep their names.
+- Members may need to reload Discord before their menu changes: Ctrl+R (Windows, Linux), Cmd+R (macOS), or close and reopen the mobile app.
 
 ## Commands channel
 
@@ -305,48 +397,6 @@ need access to this one. Only `/help show:True`, which posts the list for everyo
 
 `/log set` picks the channel that receives the server's errors. `/log export` sends that server's log
 file to that server only.
-
-## Moving to the non-root image
-
-The image runs as `10001:10001`. The production host keeps its state in `data/fablabot.db`, beside the JSON files of the
-older releases, and all of it, `logs/` and the token file belong to another user than 10001. The host moves once, with
-the release that brings the non-root image. The commands are in the
-[README](../README.md#moving-a-host-to-the-non-root-image), "Moving a host to the non-root image". Set the volumes path
-first, to the value the stack uses:
-
-```bash
-VOLUMES_PATH=/path/to/volumes
-```
-
-The order is:
-
-1. Archive, with the bot running, into `~/fablabot-archive` (steps 2 to 4 of "Before every redeploy"). The `sudo`
-   steps ask for the operator's password.
-2. Hold the update: read the running version on the `fablabot` container, save its `Server check:` lines
-   (`docker logs fablabot 2>&1 | grep 'Server check:'`) to compare with after the move, then set the stack's `image:` to
-   that version and deploy. The stack updates itself every 30 minutes and merging a release deploys.
-3. Merge the pull request that brings the image, `feat(docker)!: run the bot as an unprivileged user in a hardened
-   container` (it gives a minor release), then the release pull request. Wait for the image build to finish green, and
-   pull the new image.
-4. Stop the stack and archive again.
-5. `sudo chown -R 10001:10001` on `data/` and `logs/`. Take `data/` whole: the database, its journal,
-   `data/backups/`, `data/exports/` and the JSON files all go to 10001.
-6. Make the token file readable by 10001: `sudo chown 10001:10001` and `sudo chmod 400` on it.
-7. Add the hardening lines to the stack (the example under "Deployment model"), with the new version as `image:`.
-8. Deploy.
-9. Read the start: no `Cannot start` line, the `Server check` lines (see "Server check at start"), the same counts as
-   the ones saved in step 2, and the health status, `docker inspect --format '{{.State.Health.Status}}' fablabot`,
-   which goes from `starting` to `healthy` within two minutes.
-10. Run `docker pull ghcr.io/devinci-fablab/fablabot:latest`, set `image:` back to `:latest` and deploy. Then read the
-    version label, which must be the release you merged, and the health.
-
-A host not yet moved stops at start with `Cannot start: data/ is not writable by uid 10001.` and
-Docker restarts it until the volume is fixed. No data is lost; the bot is down meanwhile.
-
-Rolling back needs two things together: the previous image (the `:X.Y.Z` read in step 2) and
-the stack without the hardening lines. The rollback stays on that tag, since `:latest` brings the non-root image back.
-The older image runs as root, and root without capabilities cannot write files owned by 10001. After a rollback, give
-the folders back to `10001` before redeploying the non-root image. Archive `data/` and `logs/` first; never delete them.
 
 ## Health status
 
@@ -536,7 +586,7 @@ There is no `--user` on purpose: the image runs as the user the bot runs as, so 
 bot. `data/` must belong to that user, root included: the helper drops every capability, so even root cannot write a
 folder that someone else owns, and the import stops with `cannot be used: unable to open database file`. With an image
 that runs as root, a later move to `10001` must take `data/` whole with `chown -R`, the database, its journal and
-`data/backups/` included: see "Moving to the non-root image". Step 8 checks the owner.
+`data/backups/` included: see [Moving a host to the non-root image](DEPLOYMENT.md#moving-a-host-to-the-non-root-image). Step 8 checks the owner.
 
 When you own `data/` and the image runs as root, as on the first move, you can skip the `chown`: add
 `--user "$(id -u):$(id -g)"` to the helper. The database then belongs to you, and the bot, running as root with its
@@ -651,14 +701,14 @@ usual capabilities, still writes it. It needs no `sudo` and changes no owner.
 
 ## "This command is outdated"
 
-Commands are synced to Discord only when they changed since the last sync
-(`data/command_sync_state.json`); a redeploy without command changes sends nothing. After a change,
+At start, the bot sends its slash commands to Discord only when they changed since the last sync. It keeps a
+fingerprint of the last sync in `data/command_sync_state.json`; a redeploy without command changes sends nothing. After a change,
 clients still holding the old list show this message: reload with Ctrl+R (Windows, Linux) or Cmd+R
 (macOS). The same reload makes the menu show or hide a staff group after its Integrations settings
 change.
 
 To force a sync: stop the stack, delete `data/command_sync_state.json`, start it. Do it after rolling
-back to an older image, before upgrading again. The file only records the last sync; it holds no
+back to an older image, before upgrading again: the older image syncs at every start without updating the file. The file only records the last sync; it holds no
 member data.
 
 The first start after the `/help` release syncs once, because the command list changed. Members reload
@@ -686,7 +736,7 @@ The log tells which case applies: `Commands synced (9, global).` after a sync, a
 | `Missing roles ... for guild ...` in the log | The server lacks a role name the bot expects | Create the role with the exact name (see Roles). |
 | "This command is outdated" | The client holds an old command list | Reload Discord (Ctrl/Cmd+R). |
 | No errors reach the operator channel | `OPERATOR_LOG_CHANNEL_ID` is empty or malformed (warning at start) | Set a valid channel ID; they stay in `logs/<date>.log` meanwhile. |
-| A staff member no longer sees their commands | Their role is not allowed on that command in Integrations, or their client holds the old list | Add the role as in the README table, then reload Discord. |
+| A staff member no longer sees their commands | Their role is not allowed on that command in Integrations, or their client holds the old list | Add the role as in the table of "Staff commands in the slash menu", then reload Discord. |
 | A member sees a staff group | `@everyone` is allowed on that command in Integrations, or a role they hold was added at the top of the page | Remove that entry; leave the Roles & Members section at the top alone. |
 | A changed command does not show after a redeploy | The record matches while Discord holds other commands (another instance with the same token, or a rollback) | Delete `data/command_sync_state.json` and restart. |
 | Bot stops at start with `DEV_GUILD_ID: ...` | Malformed ID, or a server outside `ALLOWED_GUILD_IDS` | Digits only, and list the server; or unset it on the production bot. |

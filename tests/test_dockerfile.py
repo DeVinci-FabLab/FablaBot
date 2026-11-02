@@ -113,6 +113,13 @@ def test_images_install_from_the_lock() -> None:
     assert "pip install" not in DOCKERFILE
 
 
+def test_the_build_context_holds_the_readme_the_project_names() -> None:
+    """The build reads the file `readme` names in pyproject.toml, so the allow-list keeps it."""
+    readme = re.search(r'^readme = "(?P<name>[^"]+)"', (ROOT / "pyproject.toml").read_text(), re.MULTILINE)
+    assert readme
+    assert f"!{readme['name']}" in DOCKERIGNORE.splitlines()
+
+
 def test_build_context_is_an_allow_list() -> None:
     """The build context admits only the listed files."""
     lines = [line for line in DOCKERIGNORE.splitlines() if line and not line.startswith("#")]
