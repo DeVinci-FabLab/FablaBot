@@ -9,6 +9,7 @@ from discord import ButtonStyle, Interaction, Member, Role, ui
 
 from fablabot.helpers.safe_discord_operations import safe_add_roles, safe_remove_roles
 from fablabot.helpers.utils import (
+    RIGHT_LOST_MESSAGE,
     RefusalKind,
     escape_md,
     format_member_mention,
@@ -21,8 +22,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
-
-RIGHT_LOST_MESSAGE = "Vous n'avez plus les droits pour cette action. Rien n'a été modifié."
 
 
 class BulkRoleAssignmentView(ui.View):

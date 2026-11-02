@@ -13,8 +13,10 @@ import pytest
 from fablabot import db, guild_config
 from fablabot.cogs import user_management
 from fablabot.helpers.constants import PARIS_TZ, RoleNames
+from fablabot.helpers.utils import RIGHT_LOST_MESSAGE
 from fablabot.import_state import main as run_import
-from fablabot.services import formations, op_expiries
+from fablabot.models import MsgReactionEvent, TrackedMessage
+from fablabot.services import formations, messages, op_expiries
 
 if TYPE_CHECKING:
     import sqlite3
@@ -570,3 +572,203 @@ async def test_a_training_imported_without_its_journal_keeps_the_seats_the_post_
     assert live is not None
     assert [u["user_id"] for u in live.message.fms[0].registered_users] == [first.id]
     assert [u["user_id"] for u in live.message.fms[0].waitlisted_users] == [server.plain.id]
+
+
+def lose(server: Server, member: Any, role: str) -> None:
+    """Take a role from a member while the views they opened stay open."""
+    server.env.backend.remove_member_role(GUILD_ID, member.id, server.role(role).id)
+
+
+def button_labels(message: Any) -> list[str]:
+    """List the labels of the buttons of a message."""
+    return [item["label"] for row in message.components for item in row["components"] if "label" in item]
+
+
+async def test_fm_start_modal_refuses_a_member_who_lost_the_role(server: Server) -> None:
+    """The role goes while the form is open: the submit is refused in private and no draft is stored."""
+    shown = await server.admin.slash(server.commands, "fm start", role=server.role("Membre ✓"))
+    lose(server, server.admin, "Administrateur")
+
+    refused = await server.admin.submit_modal(shown, fill(shown, {"Intro": "Bonjour", "Conclusion": "A bientot"}))
+
+    assert refused.ephemeral
+    assert refused.response.content == RIGHT_LOST_MESSAGE
+    assert formations.get_draft(GUILD_ID) is None
+
+
+async def test_fm_start_modal_still_stores_for_a_member_who_kept_the_role(server: Server) -> None:
+    """The same submit, with the role kept, stores the draft."""
+    shown = await server.admin.slash(server.commands, "fm start", role=server.role("Membre ✓"))
+
+    await server.admin.submit_modal(shown, fill(shown, {"Intro": "Bonjour", "Conclusion": "A bientot"}))
+
+    stored = formations.get_draft(GUILD_ID)
+    assert stored is not None
+    assert stored.intro == "Bonjour"
+
+
+async def test_fm_remove_view_refuses_a_member_who_lost_the_role(server: Server) -> None:
+    """The role goes while the selector is open: the click is refused and the training stays in the draft."""
+    await _draft(server, later())
+    shown = await server.admin.slash(server.commands, "fm remove")
+    lose(server, server.admin, "Administrateur")
+
+    refused = await server.admin.click(shown.response.message, label="🔧 Arduino")
+
+    assert refused.response.content == RIGHT_LOST_MESSAGE
+    draft = formations.get_draft(GUILD_ID)
+    assert draft is not None
+    assert [fm.name for fm in draft.fms] == ["Arduino"]
+
+
+async def test_fm_edit_validate_refuses_a_member_who_lost_the_role(server: Server) -> None:
+    """The role goes between the edit and the Validate click: the draft keeps the old duration."""
+    await _draft(server, later())
+    picker = await server.admin.slash(server.commands, "fm edit")
+    editor = await server.admin.click(picker.response.message, label="🔧 Arduino")
+    modal = await server.admin.click(editor.response.message, label="Durée & Places")
+    await server.admin.submit_modal(modal, fill(modal, {"Durée - Places": "5h - 9"}))
+    lose(server, server.admin, "Administrateur")
+
+    refused = await server.admin.click(editor.response.message, label="Valider les modifications")
+
+    assert refused.response.content == RIGHT_LOST_MESSAGE
+    draft = formations.get_draft(GUILD_ID)
+    assert draft is not None
+    assert [(fm.duration, fm.seats) for fm in draft.fms] == [("2h", 4)]
+
+
+async def test_fm_edit_modal_refuses_a_member_who_lost_the_role(server: Server) -> None:
+    """The role goes while an edit modal is open: the submit is refused and the editor is not refreshed."""
+    await _draft(server, later())
+    picker = await server.admin.slash(server.commands, "fm edit")
+    editor = await server.admin.click(picker.response.message, label="🔧 Arduino")
+    modal = await server.admin.click(editor.response.message, label="Durée & Places")
+    lose(server, server.admin, "Administrateur")
+
+    refused = await server.admin.submit_modal(modal, fill(modal, {"Durée - Places": "5h - 9"}))
+
+    assert refused.response.content == RIGHT_LOST_MESSAGE
+
+
+async def test_fm_edit_validate_still_stores_for_a_member_who_kept_the_role(server: Server) -> None:
+    """The same edit, with the role kept, reaches the draft."""
+    await _draft(server, later())
+    picker = await server.admin.slash(server.commands, "fm edit")
+    editor = await server.admin.click(picker.response.message, label="🔧 Arduino")
+    modal = await server.admin.click(editor.response.message, label="Durée & Places")
+    await server.admin.submit_modal(modal, fill(modal, {"Durée - Places": "5h - 9"}))
+
+    await server.admin.click(editor.response.message, label="Valider les modifications")
+
+    draft = formations.get_draft(GUILD_ID)
+    assert draft is not None
+    assert [(fm.duration, fm.seats) for fm in draft.fms] == [("5h", 9)]
+
+
+async def test_msg_start_modal_refuses_a_member_who_lost_the_role(server: Server) -> None:
+    """The role goes while the form is open: the submit is refused in private and no draft is stored."""
+    await server.show("msg", "Administrateur")
+    shown = await server.admin.slash(server.commands, "msg start")
+    lose(server, server.admin, "Administrateur")
+
+    refused = await server.admin.submit_modal(shown, fill(shown, {"Contenu du message": "Annonce"}))
+
+    assert refused.response.content == RIGHT_LOST_MESSAGE
+    assert messages.get_draft(GUILD_ID) is None
+
+
+async def test_msg_start_modal_still_stores_for_a_member_who_kept_the_role(server: Server) -> None:
+    """The same submit, with the role kept, stores the draft."""
+    await server.show("msg", "Administrateur")
+    shown = await server.admin.slash(server.commands, "msg start")
+
+    await server.admin.submit_modal(shown, fill(shown, {"Contenu du message": "Annonce"}))
+
+    draft = messages.get_draft(GUILD_ID)
+    assert draft is not None
+    assert draft.content == "Annonce"
+
+
+def _track_with_two_actions(target_id: int, channel_id: int) -> None:
+    """Follow a message that holds two actions on one emoji, so removing one leaves the bot's reaction in place."""
+    actions = [
+        MsgReactionEvent(
+            emoji="🅰", action_type=kind, message_content="Bonjour", target_id=0, target_name="", message_id=target_id
+        )
+        for kind in ("user_dm", "channel")
+    ]
+    messages.save_tracked(
+        GUILD_ID,
+        TrackedMessage(
+            message_id=target_id,
+            channel_id=channel_id,
+            content="Annonce",
+            reactions=actions,
+            created_by=1,
+            created_at_iso="2026-11-01T10:00:00+01:00",
+        ),
+    )
+
+
+async def _open_unlink_view(server: Server) -> Any:
+    """Open `/msg unlink_reaction` down to the list of actions of one followed message."""
+    await server.show("msg", "Administrateur")
+    target = await server.admin.send(server.general, "Annonce")
+    _track_with_two_actions(target.id, server.general.id)
+    picker = await server.admin.slash(server.commands, "msg unlink_reaction")
+    return await server.admin.click(picker.response.message, label=f"Message {target.id}")
+
+
+async def test_msg_unlink_refuses_a_member_who_lost_the_role(server: Server) -> None:
+    """The role goes while the action list is open: the click is refused and the action stays linked."""
+    actions = await _open_unlink_view(server)
+    lose(server, server.admin, "Administrateur")
+
+    refused = await server.admin.click(actions.response.message, label=button_labels(actions.response)[0])
+
+    assert refused.response.content == RIGHT_LOST_MESSAGE
+    assert [len(t.reactions) for t in messages.tracked_messages(GUILD_ID).values()] == [2]
+
+
+async def test_msg_unlink_still_removes_for_a_member_who_kept_the_role(server: Server) -> None:
+    """The same click, with the role kept, removes the action."""
+    actions = await _open_unlink_view(server)
+
+    await server.admin.click(actions.response.message, label=button_labels(actions.response)[0])
+
+    assert [len(t.reactions) for t in messages.tracked_messages(GUILD_ID).values()] == [1]
+
+
+async def test_msg_dm_confirm_refuses_a_member_who_lost_the_role(server: Server) -> None:
+    """Bureau loses the role between the form and Confirm: nobody gets the message."""
+    await server.show("msg", "Bureau")
+    recipient = server.env.create_user("recipient")
+    member = server.guild.add_member(recipient)
+    shown = await server.bureau.slash(server.commands, "msg dm")
+    sent = await server.bureau.submit_modal(shown, fill(shown, {"Message à envoyer": "Bonjour"}))
+    picker = sent.followups[-1]
+    await server.bureau.select(picker.message, [member])
+    lose(server, server.bureau, "Bureau")
+
+    refused = await server.bureau.click(picker.message, label="Confirmer")
+
+    assert refused.response.content == RIGHT_LOST_MESSAGE
+    assert recipient.dm_channel.history() == []
+
+
+async def test_msg_dm_confirm_still_sends_for_a_member_who_kept_the_role(server: Server) -> None:
+    """The same click, with the role kept, delivers the message."""
+    await server.show("msg", "Bureau")
+    recipient = server.env.create_user("recipient")
+    member = server.guild.add_member(recipient)
+    shown = await server.bureau.slash(server.commands, "msg dm")
+    sent = await server.bureau.submit_modal(shown, fill(shown, {"Message à envoyer": "Bonjour"}))
+    picker = sent.followups[-1]
+    await server.bureau.select(picker.message, [member])
+
+    await server.bureau.click(picker.message, label="Confirmer")
+
+    # SimCord cannot edit the follow-up the bot reports to once the DM went out: reading the errors accepts it.
+    assert len(server.env.errors) == 1
+    assert len(recipient.dm_channel.history()) == 1

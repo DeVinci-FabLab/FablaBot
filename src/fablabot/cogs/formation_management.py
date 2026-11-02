@@ -26,7 +26,8 @@ from discord import (
 from discord.ext import commands, tasks
 
 from fablabot.helpers.access import AnyRole, access
-from fablabot.helpers.constants import PARIS_TZ, ErrorMessages, RoleNames, staff_default_permissions
+from fablabot.helpers.constants import FORMATION_ROLES as ALLOWED_ROLES
+from fablabot.helpers.constants import PARIS_TZ, ErrorMessages, staff_default_permissions
 from fablabot.helpers.formation import (
     format_current_registrations,
     format_respo_contacts,
@@ -54,7 +55,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-ALLOWED_ROLES = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN_TEMP, RoleNames.ADMIN, RoleNames.CODIR}
 _ACCESS = AnyRole(ALLOWED_ROLES)
 TRAINER_NOTIFICATION_ADVANCE = timedelta(hours=1)
 REACTION_LOG_RETENTION = timedelta(days=3 * 365)
