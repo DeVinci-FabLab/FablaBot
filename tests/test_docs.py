@@ -221,7 +221,7 @@ def test_operator_guide_moves_to_the_database_in_order() -> None:
 def test_operator_guide_says_how_a_failed_import_rolls_back() -> None:
     """A failed import ends on the held release, and a killed one is run again."""
     section = _section(_read("docs/OPERATIONS.md"), "### If a step fails")
-    for detail in ("still holds the old release", "leaves no row", "Never delete the journal"):
+    for detail in ("still holds the old release", "leaves no row", "Never delete the journal", "`key #3`", "counted from 0"):
         assert detail in section, detail
 
 

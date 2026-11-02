@@ -518,7 +518,7 @@ that runs as `10001`, `data/` must belong to `10001` before you start; otherwise
 
 | Step | What you see | What to do |
 | --- | --- | --- |
-| 3 | `Cannot import: <file>/<place>: ...` | Production has not moved. The line gives the place in the file, never its value. Fix the cause in a release, then start again from step 2. |
+| 3 | `Cannot import: <file>/<place>: ...` | Production has not moved. The line gives the place in the file, never its value: a key that is no ID and no field name shows as `key #3`, its position counted from 0. Fix the cause in a release, then start again from step 2. |
 | 8, 9 or 10 | `Cannot import: ...`, or the import dies | Deploy the stack as it is: it still holds the old release, which reads the JSON files the import left alone. A failed import leaves no row. `data/fablabot.db` stays, the old release ignores it, and the next import fills it. |
 | 9 | `data/fablabot.db-journal` next to the database | The import was killed. Run step 9 again: it finishes the recovery and starts over. Never delete the journal. |
 | 11, or the update was not held | `Cannot start: data/... not imported`, in a restart loop | Nothing was changed and the bot never logged in. Stop the stack, then go on from step 7. |

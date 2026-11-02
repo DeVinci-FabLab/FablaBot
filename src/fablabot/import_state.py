@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 import hashlib
 import json
 from pathlib import Path
+import re
 import sqlite3
 import sys
 from types import MappingProxyType, NoneType
@@ -32,6 +33,9 @@ _TEXT: Final = (str,)
 _FLAG: Final = (bool,)
 _MAYBE_INT: Final = (int, NoneType)
 _MAYBE_TEXT: Final = (str, NoneType)
+# A key is echoed only if it reads as a field name, so a name with a capital, a space or a dot never shows. Ceiling: one
+# lowercase word does; the bot writes IDs and field names as keys, and a rehearsal needs the field name of a newer release.
+_FIELD_NAME: Final = re.compile(r"[a-z_]{1,40}")
 
 
 class Fields(NamedTuple):
@@ -123,7 +127,10 @@ _FIELDS: Final = (
 
 
 class StateFileError(Exception):
-    """The import stops; the message is one line for the operator, with no value from the files."""
+    """The import stops; the message is one line for the operator, with no value from the files.
+
+    A key that is no ID and no field name is given by its position, counted from 0.
+    """
 
 
 def _refuse(where: str, problem: str) -> NoReturn:
@@ -136,9 +143,9 @@ def _check_keyed(where: str, value: Any, shape: Keyed) -> None:
     """Check an object keyed by ID, entry by entry."""
     if not isinstance(value, dict):
         _refuse(where, "expected an object")
-    for key, entry in value.items():
+    for index, (key, entry) in enumerate(value.items()):
         if key not in shape.sections and not (key.isascii() and key.isdigit() and int(key) <= _MAX_ID):
-            _refuse(where, f"key {key!r} is not an ID")
+            _refuse(where, f"key #{index} is not an ID")
         _check(f"{where}/{key}", entry, shape.sections.get(key, shape.item))
 
 
@@ -149,9 +156,9 @@ def _check_fields(where: str, value: Any, shape: Fields) -> None:
     for key in shape.required:
         if key not in value:
             _refuse(where, f"key {key} is missing")
-    for key, entry in value.items():
+    for index, (key, entry) in enumerate(value.items()):
         if key not in shape.required and key not in shape.optional:
-            _refuse(where, f"unknown key {key!r}")
+            _refuse(where, f"unknown key {key!r}" if _FIELD_NAME.fullmatch(key) else f"unknown key #{index}")
         _check(f"{where}/{key}", entry, shape.required.get(key) or shape.optional[key])
 
 

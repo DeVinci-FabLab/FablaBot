@@ -6,6 +6,7 @@ import copy
 import hashlib
 import os
 from pathlib import Path
+import re
 import signal
 import sqlite3
 import subprocess
@@ -250,6 +251,83 @@ def test_an_unexpected_value_stops_with_its_place_and_not_its_content(path: tupl
 
     assert _folder() == before
     assert "name-" not in str(refused.value)
+
+
+def _everything() -> dict[str, Any]:
+    """Build the production shapes plus the two a server may hold besides: a running op and a message draft."""
+    files = state_files()
+    files["temp_admin_state.json"] = {FIRST: {"42": {"expires_at": "2026-11-02T12:00:00+00:00", "channel_id": 7}}}
+    files["messages_state.json"][FIRST]["draft"] = {"content": "Content", "reactions": []}
+    return files
+
+
+# The object that holds the key: its path from the files, every place a key can stand in a file.
+KEY_PLACES = [
+    ("guild_config.json",),
+    ("guild_config.json", FIRST),
+    ("guild_config.json", "__global__"),
+    ("formations_state.json",),
+    ("formations_state.json", FIRST),
+    ("formations_state.json", FIRST, "draft"),
+    PUBLISHED,
+    (*PUBLISHED, "message"),
+    FM,
+    (*FM, "registered_users", 0),
+    ("formations_state.json", FIRST, "reactions_log", 0),
+    ("messages_state.json",),
+    ("messages_state.json", FIRST),
+    ("messages_state.json", FIRST, "draft"),
+    ("messages_state.json", FIRST, "tracked"),
+    TRACKED,
+    (*TRACKED, "reactions", 0),
+    ("temp_admin_state.json",),
+    ("temp_admin_state.json", FIRST),
+    ("temp_admin_state.json", FIRST, "42"),
+]
+
+
+@pytest.mark.parametrize("parent", KEY_PLACES, ids=["/".join(str(step) for step in parent) for parent in KEY_PLACES])
+def test_a_key_that_may_name_a_person_is_given_by_its_position(parent: tuple[Any, ...]) -> None:
+    """A line pasted in an issue carries no name: where a key is no ID and no field name, only its place shows."""
+    files = _everything()
+    node: Any = files
+    for step in parent:
+        node = node[step]
+    position = len(node)
+    node["name-Alice Martin"] = {}
+    write_state(files)
+    before = _folder()
+
+    with pytest.raises(SystemExit) as refused:
+        import_state.main([])
+
+    assert re.search(rf"key #{position}\b", str(refused.value)), refused.value
+    assert "Alice" not in str(refused.value)
+    assert "name-" not in str(refused.value)
+    assert _folder() == before
+
+
+@pytest.mark.parametrize(
+    ("key", "shown"),
+    [
+        ("notified_later", True),
+        ("Alice Martin", False),
+        ("alice.martin@edu.devinci.fr", False),
+        ("name-1", False),
+        ("a" * 41, False),
+    ],
+    ids=["field name", "name with a capital and a space", "address", "dash", "too long"],
+)
+def test_a_field_name_this_release_does_not_know_is_still_named(key: str, *, shown: bool) -> None:
+    """The rehearsal needs the field a newer release added; what does not read as a field name is not echoed."""
+    write_state(_changed((*FM, key), 1))
+
+    with pytest.raises(SystemExit) as refused:
+        import_state.main([])
+
+    message = str(refused.value)
+    assert (f"unknown key {key!r}" in message) is shown
+    assert shown or (key not in message and "unknown key #" in message)
 
 
 def test_an_expiry_the_bot_could_not_read_stops() -> None:
