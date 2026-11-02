@@ -107,6 +107,28 @@ def test_a_server_without_a_draft_does_not_read_another_servers() -> None:
     assert messages.get_draft(GUILD_B) is None
 
 
+@pytest.mark.parametrize(
+    ("keep_text", "draft_after"),
+    [(True, MessageDraft(content="Pour A", reactions=[])), (False, None)],
+    ids=["draft-kept-without-links", "draft-deleted"],
+)
+def test_taking_the_links_of_a_draft_leaves_the_other_servers_draft_and_message_alone(
+    keep_text: bool, draft_after: MessageDraft | None
+) -> None:
+    """One server's draft gives its links to its message; the other server keeps its draft, its links and its message."""
+    draft_b = MessageDraft(content="Pour B", reactions=[_reaction("🅱")])
+    messages.save_draft(GUILD_A, MessageDraft(content="Pour A", reactions=[_reaction("🅰")]))
+    messages.save_draft(GUILD_B, draft_b)
+    messages.save_tracked(GUILD_B, _tracked(MESSAGE, _reaction("🅱", message_id=MESSAGE)))
+
+    messages.track_from_draft(GUILD_A, _tracked(MESSAGE, _reaction("🅰", message_id=MESSAGE)), keep_text=keep_text)
+
+    assert messages.get_draft(GUILD_A) == draft_after
+    assert [r.emoji for r in messages.tracked_messages(GUILD_A)[MESSAGE].reactions] == ["🅰"]
+    assert messages.get_draft(GUILD_B) == draft_b
+    assert [r.emoji for r in messages.tracked_messages(GUILD_B)[MESSAGE].reactions] == ["🅱"]
+
+
 def test_removing_a_message_removes_its_actions() -> None:
     """No orphan action stays behind."""
     messages.save_tracked(GUILD_A, _tracked(MESSAGE, _reaction()))
@@ -307,6 +329,62 @@ async def test_msg_publish_a_refused_write_after_a_new_text_retracts_the_post_an
     cog._sync_reactions_on_message.assert_not_awaited()
     assert messages.tracked_messages(1234) == {}
     assert messages.get_draft(1234) == MessageDraft(content="neuf", reactions=[])
+    interaction.response.send_message.assert_awaited_once_with(ErrorMessages.PUBLISH_NOT_SAVED, ephemeral=True)
+
+
+async def test_msg_publish_does_not_read_or_touch_another_servers_draft_changed_during_the_send() -> None:
+    """The draft read again after the send is the publishing server's: a change on another server counts for nothing."""
+    interaction = make_interaction(guild_id=GUILD_A)
+    cog = MessageManagement(MagicMock())
+    cog._sync_reactions_on_message = AsyncMock()
+    draft_b = MessageDraft(content="Pour B", reactions=[_reaction("🅱")])
+
+    async def _send(_content: str) -> MagicMock:
+        messages.save_draft(GUILD_B, draft_b)
+        return MagicMock(id=999)
+
+    channel = MagicMock(spec=TextChannel, id=7)
+    channel.send = AsyncMock(side_effect=_send)
+    messages.save_draft(GUILD_A, MessageDraft(content="x", reactions=[_reaction("🅰")]))
+
+    with patch.object(message_management, "ensure_command_context", AsyncMock(return_value=True)):
+        await MessageManagement.msg_publish.callback(cog, interaction, channel=channel)  # pyright: ignore[reportCallIssue]
+
+    assert [r.emoji for r in messages.tracked_messages(GUILD_A)[999].reactions] == ["🅰"]
+    assert messages.get_draft(GUILD_A) is None
+    assert messages.get_draft(GUILD_B) == draft_b
+    assert messages.tracked_messages(GUILD_B) == {}
+
+
+async def test_msg_publish_a_refused_read_after_the_send_retracts_the_post(storage_error: sqlite3.Error) -> None:
+    """The draft is read again once the post is out: a read the database refuses takes the post down like a refused write."""
+    interaction = make_interaction(guild_id=1234)
+    cog = MessageManagement(MagicMock())
+    cog._sync_reactions_on_message = AsyncMock()
+    posted = MagicMock(id=999)
+    posted.delete = AsyncMock()
+    channel = MagicMock(spec=TextChannel, id=7)
+    channel.send = AsyncMock(return_value=posted)
+    draft = MessageDraft(content="x", reactions=[_reaction()])
+    messages.save_draft(1234, draft)
+    reads = [draft, storage_error]
+
+    def _get_draft(_guild_id: int) -> MessageDraft:
+        read = reads.pop(0)
+        if isinstance(read, sqlite3.Error):
+            raise read
+        return read
+
+    with (
+        patch.object(message_management, "ensure_command_context", AsyncMock(return_value=True)),
+        patch.object(cog, "get_draft", side_effect=_get_draft),
+    ):
+        await MessageManagement.msg_publish.callback(cog, interaction, channel=channel)  # pyright: ignore[reportCallIssue]
+
+    posted.delete.assert_awaited_once()
+    cog._sync_reactions_on_message.assert_not_awaited()
+    assert messages.tracked_messages(1234) == {}
+    assert messages.get_draft(1234) == draft
     interaction.response.send_message.assert_awaited_once_with(ErrorMessages.PUBLISH_NOT_SAVED, ephemeral=True)
 
 

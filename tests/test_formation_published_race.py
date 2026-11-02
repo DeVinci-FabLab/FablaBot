@@ -589,6 +589,37 @@ async def test_a_removal_past_the_deadline_is_logged_so_that_the_member_does_not
     assert _seats(env) == ([OTHER_MEMBER_ID], [])
 
 
+async def test_an_update_leaves_the_marks_of_another_server_alone(started_bot: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The update of one server clears its own marks only, and a mark of another server does not keep it running."""
+    cog = started_bot.get_cog("FormationManagement")
+    update = AsyncMock()
+    monkeypatch.setattr(cog, "_update_published_message", update)
+    cog._update_wanted.add(OTHER_GUILD_ID)
+    cog._retry_guilds.add(OTHER_GUILD_ID)
+    cog._stale_guilds.add(NEW_GUILD_ID)
+
+    cog._schedule_update(GUILD_ID, delay=0)
+    await asyncio.wait_for(cog._pending_update_tasks[GUILD_ID], timeout=5)  # a mark of another server must not loop it
+
+    assert update.await_count == 1
+    assert cog._update_wanted == {OTHER_GUILD_ID}
+    assert cog._retry_guilds == {OTHER_GUILD_ID}
+    assert cog._stale_guilds == {NEW_GUILD_ID}
+
+
+async def test_the_tick_runs_the_update_of_every_marked_server(started_bot: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A server marked stale and another marked for a retry both get their update at the same tick."""
+    cog = started_bot.get_cog("FormationManagement")
+    schedule = MagicMock()
+    monkeypatch.setattr(cog, "_schedule_update", schedule)
+    cog._stale_guilds.add(NEW_GUILD_ID)
+    cog._retry_guilds.add(OTHER_GUILD_ID)
+
+    await cog._check_upcoming_formations()
+
+    assert {call.args[0] for call in schedule.call_args_list} == {NEW_GUILD_ID, OTHER_GUILD_ID}
+
+
 async def test_a_member_who_left_and_came_back_in_the_hour_the_clock_repeats_keeps_the_seat(
     started_bot: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
