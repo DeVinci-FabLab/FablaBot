@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.3.0...v0.4.0) (2026-11-02)
+
+
+### Features
+
+* **storage:** move the bot's state to SQLite, with its import and rollback ([c97d0b6](https://github.com/DeVinci-FabLab/FablaBot/commit/c97d0b689b94b83ad56fe0aeb7e7d7465a3d0d70))
+
+
+### Documentation
+
+* say a release can deploy itself and archive before merging it ([#130](https://github.com/DeVinci-FabLab/FablaBot/issues/130)) ([1807f7d](https://github.com/DeVinci-FabLab/FablaBot/commit/1807f7d323f5e200b915214f95ec0910e9cf1819))
+
 ## [0.3.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.2.0...v0.3.0) (2026-11-01)
 
 
