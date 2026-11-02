@@ -400,7 +400,7 @@ def test_a_failed_copy_does_not_pass_for_a_copy(tmp_path: Path, monkeypatch: pyt
 
     def _cut_short(conn: sqlite3.Connection, target: Path) -> None:
         real(conn, target)
-        raise sqlite3.OperationalError("disk full")
+        raise sqlite3.OperationalError
 
     monkeypatch.setattr(db, "_copy_to", _cut_short)
     with pytest.raises(db.StorageError):
