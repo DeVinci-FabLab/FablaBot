@@ -1,11 +1,14 @@
-"""Check the JSON state of older releases before it moves into the database, with the bot stopped.
+"""Move the JSON state of older releases into the database, with the bot stopped.
 
-``python -m fablabot.import_state --check`` reads the files and reports what they hold, writing nothing.
+``python -m fablabot.import_state --check`` reads the files and reports what they hold, writing nothing;
+``python -m fablabot.import_state`` imports them. The files stay untouched, and the import happens at most once.
 """
 
 from __future__ import annotations
 
 import argparse
+from datetime import UTC, datetime
+import hashlib
 import json
 from pathlib import Path
 import sqlite3
@@ -389,11 +392,105 @@ def _report(state: State) -> None:
         print(f"guild_id={server} " + " ".join(f"{field}={count}" for field, count in line.items()))
 
 
+def _hashes(files: Mapping[str, bytes]) -> dict[str, str]:
+    """Fingerprint each file, by the bytes that were judged."""
+    return {name: hashlib.sha256(raw).hexdigest() for name, raw in files.items()}
+
+
+def _already_done(conn: sqlite3.Connection, files: Mapping[str, bytes], path: Path) -> bool:
+    """Say whether these exact files are imported; any other state of the database refuses the import.
+
+    Args:
+        conn (sqlite3.Connection): The connection.
+        files (Mapping[str, bytes]): The bytes of each file found.
+        path (Path): The database file, for the message.
+
+    Returns:
+        bool: True if these files are imported already, False if the database is empty and ready.
+
+    Raises:
+        StateFileError: If it holds anything else: the bot's newer data must never be replaced or merged.
+    """
+    imported = {row[0]: row[1] for row in conn.execute("SELECT file_name, sha256 FROM state_import")}
+    hashes = _hashes(files)
+    if imported == hashes:
+        return True
+    if imported:
+        names = sorted(name for name in {*imported, *hashes} if imported.get(name) != hashes.get(name))
+        msg = f"{', '.join(names)} changed since the import into {path.as_posix()}; nothing was changed."
+        raise StateFileError(msg)
+    tables = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name <> 'state_import'"
+    ).fetchall()
+    filled = sorted(row[0] for row in tables if conn.execute(f"SELECT 1 FROM {row[0]} LIMIT 1").fetchone())
+    if filled:
+        msg = f"{path.as_posix()} already holds data no import wrote ({', '.join(filled)}); nothing was changed."
+        raise StateFileError(msg)
+    return False
+
+
+def run_import(path: Path = db.DATABASE_FILE) -> None:
+    """Import the state files beside the database, once; a second run changes nothing.
+
+    Args:
+        path (Path): The database file.
+    """
+    files = read_files(path.parent)
+    state = parse(files)
+    db.open_database(path, gate=False)
+    try:
+        conn = db.connection()
+        if _already_done(conn, files, path):
+            print("Already imported: nothing to do.")
+            return
+        now = datetime.now(UTC).isoformat()
+        with db.transaction():
+            _write_and_verify(conn, state)
+            # The last write of the transaction: the start gate opens only when everything above is there.
+            conn.executemany(
+                "INSERT INTO state_import (file_name, sha256, imported_at) VALUES (?, ?, ?)",
+                [(name, sha256, now) for name, sha256 in _hashes(files).items()],
+            )
+        _report(state)
+        print(f"Imported {', '.join(files)} into {path.as_posix()}.")
+    finally:
+        db.close_database()
+
+
+def _compare(path: Path, files: Mapping[str, bytes], state: State) -> None:
+    """Compare the database with the files, on a copy in memory: a read-only open leaves the file as it is.
+
+    Args:
+        path (Path): The database file.
+        files (Mapping[str, bytes]): The bytes of each file found.
+        state (State): What the files hold.
+
+    Raises:
+        StateFileError: If the database holds something else.
+    """
+    source = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    try:
+        source.backup(db.connection())
+    finally:
+        source.close()
+    conn = db.connection()
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'state_import'").fetchone() or not _already_done(
+        conn, files, path
+    ):
+        print(f"{path.as_posix()} holds no import yet.")
+        return
+    if (back := snapshot()) != state:
+        different = sorted(name for name in state if back[name] != state[name])
+        msg = f"{path.as_posix()} differs from {', '.join(different)}: normal only once the bot has run."
+        raise StateFileError(msg)
+    print(f"{path.as_posix()} matches the files.")
+
+
 def run_check(path: Path = db.DATABASE_FILE) -> None:
     """Run the whole import in memory and report what the files hold; nothing is written.
 
     Args:
-        path (Path): The database file; its folder holds the state files.
+        path (Path): The database file.
     """
     files = read_files(path.parent)
     state = parse(files)
@@ -401,9 +498,14 @@ def run_check(path: Path = db.DATABASE_FILE) -> None:
     try:
         with db.transaction() as conn:
             _write_and_verify(conn, state)
+        _report(state)
+        if path.with_name(f"{path.name}-journal").exists():
+            # A read-only open cannot finish the recovery, and this command writes nothing: the import does it.
+            print(f"{path.as_posix()} was left by an interrupted write: run the import.")
+        elif path.exists():
+            _compare(path, files, state)
     finally:
         db.close_database()
-    _report(state)
     print(f"Check passed for {', '.join(files)}: nothing was written.")
 
 
@@ -414,12 +516,10 @@ def main(argv: list[str] | None = None) -> None:
         argv (list[str] | None): The arguments, or None for the command line.
     """
     parser = argparse.ArgumentParser(prog="python -m fablabot.import_state", description=__doc__)
-    parser.add_argument(
-        "--check", action="store_true", required=True, help="read the files and report what they hold; write nothing"
-    )
-    parser.parse_args(argv)
+    parser.add_argument("--check", action="store_true", help="read the files and report what they hold; write nothing")
+    run = run_check if parser.parse_args(argv).check else run_import
     try:
-        run_check()
+        run()
     except (StateFileError, db.StorageError, sqlite3.Error, OSError) as error:
         sys.exit(f"Cannot import: {error}")
 
