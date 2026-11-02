@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 import logging
 from typing import TYPE_CHECKING, Any
@@ -47,7 +48,7 @@ async def _start(*guilds: MagicMock) -> UserManagement:
     bot.guilds = list(guilds)
     bot.get_guild = lambda gid: next((g for g in guilds if g.id == gid), None)
     cog = UserManagement(bot)
-    await cog.on_ready()
+    await cog._settle_ops()
     return cog
 
 
@@ -103,7 +104,7 @@ async def test_restart_and_reconnect_keep_one_timer_and_the_record() -> None:
     _stop(first)
     cog = await _start(guild)
     task = cog.deop_tasks[GUILD_ID, HOLDER_ID]
-    await cog.on_ready()
+    await cog._settle_ops()
 
     assert list(cog.deop_tasks) == [(GUILD_ID, HOLDER_ID)]
     assert cog.deop_tasks[GUILD_ID, HOLDER_ID] is task
@@ -189,7 +190,7 @@ async def test_op_landing_during_the_sweep_keeps_its_record_and_timer() -> None:
     cog = UserManagement(bot)
     cog_box.append(cog)
 
-    await cog.on_ready()
+    await cog._settle_ops()
 
     assert str(777) in stored_ops()[str(GUILD_ID)]
     assert (GUILD_ID, 777) in cog.deop_tasks
@@ -237,7 +238,7 @@ async def test_guild_back_from_an_outage_is_reconciled() -> None:
     assert not cog.deop_tasks
 
     guild.unavailable = False
-    await cog.on_guild_available(guild)
+    await cog._settle_ops()
 
     assert (GUILD_ID, HOLDER_ID) in cog.deop_tasks
     holder.remove_roles.assert_not_awaited()
@@ -263,12 +264,12 @@ def _two_holders_guild() -> tuple[MagicMock, MagicMock, MagicMock]:
 
 
 @pytest.mark.parametrize(
-    ("function", "first_keeps_the_role"),
-    [("get", True), ("clear", False)],
+    "function",
+    ["get", "clear"],
     ids=["failed-read", "failed-clear"],
 )
 async def test_a_storage_failure_on_one_holder_does_not_stop_the_other_holders(
-    caplog: pytest.LogCaptureFixture, storage_error: sqlite3.Error, function: str, first_keeps_the_role: bool
+    caplog: pytest.LogCaptureFixture, storage_error: sqlite3.Error, function: str
 ) -> None:
     """A storage failure on one holder at start is logged and the other holders of the server are still settled."""
     past = NOW - timedelta(minutes=1)
@@ -280,10 +281,10 @@ async def test_a_storage_failure_on_one_holder_does_not_stop_the_other_holders(
     with _storage_fails_for(function, HOLDER_ID, storage_error):
         _stop(await _start(guild))
 
-    assert first.remove_roles.await_count == (0 if first_keeps_the_role else 1)
+    first.remove_roles.assert_awaited_once()
     second.remove_roles.assert_awaited_once()
-    assert str(HOLDER_ID + 1) not in stored_ops()[str(GUILD_ID)]
-    assert str(HOLDER_ID) in stored_ops()[str(GUILD_ID)]
+    assert str(HOLDER_ID + 1) not in stored_ops().get(str(GUILD_ID), {})
+    assert (str(HOLDER_ID) in stored_ops().get(str(GUILD_ID), {})) is (function == "clear")
     errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
     assert any(f"guild_id={GUILD_ID}" in m and f"member_id={HOLDER_ID}" in m for m in errors)
 
@@ -329,41 +330,6 @@ async def test_a_failed_listing_of_the_records_does_not_stop_the_next_server(
     assert any(f"guild_id={GUILD_ID}" in m for m in errors)
 
 
-async def test_a_failed_clear_on_one_stale_record_does_not_stop_the_sweep(
-    caplog: pytest.LogCaptureFixture, storage_error: sqlite3.Error
-) -> None:
-    """A stale record that cannot be dropped at start is logged and the other stale records are still dropped."""
-    future = NOW + timedelta(minutes=12)
-    store_ops({str(GUILD_ID): {str(m): {"expires_at": future.isoformat(), "channel_id": 777} for m in (998, 999)}})
-    guild, _holder, _temp = _holder_guild()
-
-    with _storage_fails_for("clear", 998, storage_error):
-        _stop(await _start(guild))
-
-    assert "999" not in stored_ops()[str(GUILD_ID)]
-    assert "998" in stored_ops()[str(GUILD_ID)]
-    errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
-    assert any(f"guild_id={GUILD_ID}" in m and "member_id=998" in m for m in errors)
-
-
-async def test_a_failed_read_on_one_record_does_not_stop_the_sweep_from_arming_the_others(
-    caplog: pytest.LogCaptureFixture, storage_error: sqlite3.Error
-) -> None:
-    """With a partial member cache, a record that cannot be read at start is logged and the others still get their timer."""
-    future = NOW + timedelta(minutes=12)
-    store_ops({str(GUILD_ID): {str(m): {"expires_at": future.isoformat(), "channel_id": 777} for m in (998, 999)}})
-    guild, _holder, _temp = _holder_guild()
-    guild.chunked = False
-
-    with _storage_fails_for("get", 998, storage_error), patch.object(UserManagement, "_arm_deop") as arm:
-        await _start(guild)
-
-    arm.assert_called_once_with(GUILD_ID, 999, user_management.OpExpiry(future, 777))
-    assert "998" in stored_ops()[str(GUILD_ID)]
-    errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
-    assert any(f"guild_id={GUILD_ID}" in m and "member_id=998" in m for m in errors)
-
-
 async def test_op_landing_during_the_removal_at_start_keeps_its_record_and_timer() -> None:
     """An op granted to a holder while start removes their role keeps its new record and timer."""
     guild, holder, _temp = _holder_guild()
@@ -378,197 +344,94 @@ async def test_op_landing_during_the_removal_at_start_keeps_its_record_and_timer
 
     holder.remove_roles = AsyncMock(side_effect=op_lands_during_removal)
 
-    await cog.on_ready()
+    await cog._settle_ops()
 
     assert stored_ops()[str(GUILD_ID)][str(HOLDER_ID)]["expires_at"] == due.isoformat()
     assert not cog.deop_tasks[GUILD_ID, HOLDER_ID].done()
     _stop(cog)
 
 
-async def test_a_failed_read_at_start_is_retried_later_and_the_holder_is_settled(storage_error: sqlite3.Error) -> None:
-    """A holder whose record could not be read at start is settled by a delayed retry, without waiting for a reconnect."""
-    store_ops(_record(GUILD_ID, HOLDER_ID, NOW - timedelta(minutes=1)))
+async def test_a_holder_whose_expiry_cannot_be_read_loses_the_role_at_once(storage_error: sqlite3.Error) -> None:
+    """Least privilege: an end nobody can read counts as passed, and the record stays for the storage to answer."""
+    store_ops(_record(GUILD_ID, HOLDER_ID, NOW + timedelta(minutes=30)))
     guild, holder, _temp = _holder_guild()
-    real = op_expiries.get
-    failures = [storage_error]
 
-    def flaky(guild_id: int, member_id: int) -> object:
-        if failures:
-            raise failures.pop()
-        return real(guild_id, member_id)
-
-    with patch.object(user_management, "RECONCILE_RETRY_DELAYS", (0,)), patch.object(op_expiries, "get", side_effect=flaky):
-        cog = await _start(guild)
-        holder.remove_roles.assert_not_awaited()
-        await cog.reconcile_retries[GUILD_ID]
+    with patch.object(op_expiries, "get", side_effect=storage_error):
+        _stop(await _start(guild))
 
     holder.remove_roles.assert_awaited_once()
-    assert str(GUILD_ID) not in stored_ops()
-    _stop(cog)
-
-
-async def test_retries_of_a_failing_read_are_bounded_and_not_stacked(storage_error: sqlite3.Error) -> None:
-    """A read that keeps failing is retried the planned number of times only, one retry at a time per server."""
-    store_ops(_record(GUILD_ID, HOLDER_ID, NOW - timedelta(minutes=1)))
-    guild, _holder, _temp = _holder_guild()
-
-    with (
-        patch.object(user_management, "RECONCILE_RETRY_DELAYS", (0, 0)),
-        patch.object(op_expiries, "get", side_effect=storage_error) as get,
-    ):
-        cog = await _start(guild)
-        retry = cog.reconcile_retries[GUILD_ID]
-        await cog.on_ready()
-        assert cog.reconcile_retries[GUILD_ID] is retry
-        await retry
-
-    assert get.call_count == 4  # the start, the second ready, then two retries
-    assert GUILD_ID not in cog.reconcile_retries
-    _stop(cog)
-
-
-async def test_the_last_retry_takes_the_role_off_a_holder_whose_expiry_cannot_be_read(
-    caplog: pytest.LogCaptureFixture, storage_error: sqlite3.Error
-) -> None:
-    """When the retries run out on an unreadable expiry, the holder loses the role: a temporary right ends on time."""
-    store_ops(_record(GUILD_ID, HOLDER_ID, NOW + timedelta(minutes=12)))
-    guild, holder, temp = _holder_guild()
-
-    with (
-        patch.object(user_management, "RECONCILE_RETRY_DELAYS", (0, 0)),
-        patch.object(op_expiries, "get", side_effect=storage_error),
-    ):
-        cog = await _start(guild)
-        holder.remove_roles.assert_not_awaited()
-        await cog.reconcile_retries[GUILD_ID]
-
-    holder.remove_roles.assert_awaited_once()
-    assert holder.remove_roles.await_args.args == (temp,)
     assert "unreadable" in holder.remove_roles.await_args.kwargs["reason"]
-    assert not [r for r in caplog.records if "giving up" in r.getMessage()]
-    _stop(cog)
 
 
-async def test_a_holder_still_unsettled_after_the_last_retry_is_logged_as_given_up(
-    caplog: pytest.LogCaptureFixture, storage_error: sqlite3.Error
-) -> None:
-    """A holder that neither storage nor Discord lets the retries settle leaves an error line naming the server."""
-    store_ops(_record(GUILD_ID, HOLDER_ID, NOW - timedelta(minutes=1)))
+async def test_a_holder_with_a_running_timer_is_left_to_it_when_the_storage_fails(storage_error: sqlite3.Error) -> None:
+    """A reconnect during an outage does not cut an op whose timer is running."""
+    store_ops(_record(GUILD_ID, HOLDER_ID, NOW + timedelta(minutes=30)))
     guild, holder, _temp = _holder_guild()
-    holder.remove_roles = AsyncMock(side_effect=Forbidden(MagicMock(status=403), "missing permissions"))
+    cog = await _start(guild)
 
-    with (
-        patch.object(user_management, "RECONCILE_RETRY_DELAYS", (0, 0)),
-        patch.object(op_expiries, "get", side_effect=storage_error),
-    ):
-        cog = await _start(guild)
-        await cog.reconcile_retries[GUILD_ID]
+    with patch.object(op_expiries, "get", side_effect=storage_error):
+        await cog._settle_ops()
 
-    errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
-    assert any("giving up" in m and f"guild_id={GUILD_ID}" in m for m in errors)
+    holder.remove_roles.assert_not_awaited()
     _stop(cog)
 
 
-async def test_the_last_retry_arms_a_timer_for_a_record_it_cannot_read(storage_error: sqlite3.Error) -> None:
-    """With a partial member cache, the last retry arms an immediate timer for a record it cannot read."""
-    store_ops(_record(GUILD_ID, 999, NOW + timedelta(minutes=12)))
-    guild, _holder, _temp = _holder_guild()
-    guild.chunked = False
+@pytest.mark.parametrize("failing", ["get", "clear", "member_ids"], ids=["failed-read", "failed-clear", "failed-listing"])
+async def test_a_failed_sweep_is_settled_by_the_next_round(storage_error: sqlite3.Error, failing: str) -> None:
+    """With a partial cache a record the sweep could not settle is settled by the next round."""
+    store_ops(_record(GUILD_ID, HOLDER_ID, NOW - timedelta(minutes=1)))
+    temp = make_role(RoleNames.ADMIN_TEMP)
+    guild = make_guild(GUILD_ID, [temp], [])
+    guild.chunked = failing == "clear"
 
-    with (
-        patch.object(user_management, "RECONCILE_RETRY_DELAYS", (0, 0)),
-        _storage_fails_for("get", 999, storage_error),
-        patch.object(UserManagement, "_arm_deop") as arm,
-    ):
+    with patch.object(op_expiries, failing, side_effect=storage_error):
         cog = await _start(guild)
-        arm.assert_not_called()
-        await cog.reconcile_retries[GUILD_ID]
+    assert str(HOLDER_ID) in stored_ops().get(str(GUILD_ID), {})
 
-    arm.assert_called_once_with(GUILD_ID, 999, user_management.OpExpiry(NOW, 0))
-    assert str(999) in stored_ops()[str(GUILD_ID)]
-
-
-@pytest.mark.parametrize(
-    ("failing", "chunked"),
-    [("get", False), ("clear", True), ("member_ids", True)],
-    ids=["failed-read", "failed-clear", "failed-listing"],
-)
-async def test_a_failed_sweep_at_start_is_retried_later_and_the_record_is_settled(
-    storage_error: sqlite3.Error, failing: str, chunked: bool
-) -> None:
-    """A record the sweep could not read, drop or list at start is settled by the delayed retry."""
-    future = NOW + timedelta(minutes=12)
-    store_ops(_record(GUILD_ID, 999, future))
-    guild, _holder, _temp = _holder_guild()
-    guild.chunked = chunked
-    real = getattr(op_expiries, failing)
-    failures = [storage_error]
-    target = GUILD_ID if failing == "member_ids" else 999  # not the holder, whose own settling must not fail
-
-    def flaky(*args: int) -> object:
-        if failures and args[-1] == target:
-            raise failures.pop()
-        return real(*args)
-
-    with (
-        patch.object(user_management, "RECONCILE_RETRY_DELAYS", (0,)),
-        patch.object(op_expiries, failing, side_effect=flaky),
-        patch.object(UserManagement, "_arm_deop") as arm,
-    ):
-        cog = await _start(guild)
-        arm.assert_not_called()
-        await cog.reconcile_retries[GUILD_ID]
-
-    if chunked:
-        assert str(GUILD_ID) not in stored_ops()
-    else:
-        arm.assert_called_once_with(GUILD_ID, 999, user_management.OpExpiry(future, 777))
+    await cog._settle_ops()
+    await asyncio.gather(*cog.deop_tasks.values())
+    assert stored_ops() == {}
 
 
-async def test_a_failed_removal_at_start_is_retried_later_and_the_holder_is_settled() -> None:
-    """A removal Discord failed at start is retried by the delayed retry, so an expired op does not wait for a reconnect."""
+async def test_a_failed_removal_at_start_is_settled_by_the_next_round() -> None:
+    """A removal Discord failed is tried again a round later, and the record goes with the role."""
     store_ops(_record(GUILD_ID, HOLDER_ID, NOW - timedelta(minutes=1)))
     guild, holder, _temp = _holder_guild()
     holder.remove_roles = AsyncMock(side_effect=[HTTPException(MagicMock(status=503), "unavailable"), None])
 
-    with patch.object(user_management, "RECONCILE_RETRY_DELAYS", (0,)):
-        cog = await _start(guild)
-        assert holder.remove_roles.await_count == 1
-        assert str(HOLDER_ID) in stored_ops()[str(GUILD_ID)]
-        await cog.reconcile_retries[GUILD_ID]
+    cog = await _start(guild)
+    assert str(HOLDER_ID) in stored_ops()[str(GUILD_ID)]
+    await cog._settle_ops()
 
     assert holder.remove_roles.await_count == 2
-    assert str(GUILD_ID) not in stored_ops()
-    _stop(cog)
+    assert stored_ops() == {}
 
 
-async def test_a_removal_refused_for_the_first_of_two_holders_is_not_hidden_by_the_next_one() -> None:
-    """With two expired holders, a refusal on the first still starts the retry, which removes the role once Discord answers."""
+async def test_an_exception_on_one_server_leaves_the_round_alive_for_the_next_server() -> None:
+    """An exception that is not a storage one neither ends the loop nor stops the next server."""
     past = NOW - timedelta(minutes=1)
-    store_ops(
-        {str(GUILD_ID): {str(m): {"expires_at": past.isoformat(), "channel_id": 777} for m in (HOLDER_ID, HOLDER_ID + 1)}}
-    )
-    guild, first, second = _two_holders_guild()
-    temp = guild.roles[0]
-    refusals = [HTTPException(MagicMock(status=503), "unavailable")]
+    first_guild, _first, _temp = _holder_guild()
+    store_ops(_record(GUILD_ID, HOLDER_ID, past))
+    temp = make_role(RoleNames.ADMIN_TEMP)
+    second = make_member(HOLDER_ID + 1, temp)
+    store_ops(_record(OTHER_GUILD_ID, second.id, past))
+    outcomes = [RuntimeError("boom"), (True, None)]
 
-    def leave(member: MagicMock) -> Any:
-        async def remove(*_args: object, **_kwargs: object) -> None:
-            if member is first and refusals:
-                raise refusals.pop()
-            temp.members.remove(member)
+    with patch.object(user_management, "safe_remove_roles", AsyncMock(side_effect=outcomes)) as remove:
+        _stop(await _start(first_guild, make_guild(OTHER_GUILD_ID, [temp], [second])))
 
-        return remove
+    assert remove.await_count == 2
 
-    first.remove_roles = AsyncMock(side_effect=leave(first))
-    second.remove_roles = AsyncMock(side_effect=leave(second))
 
-    with patch.object(user_management, "RECONCILE_RETRY_DELAYS", (0,)):
-        cog = await _start(guild)
-        assert GUILD_ID in cog.reconcile_retries
-        await cog.reconcile_retries[GUILD_ID]
+async def test_the_rounds_run_from_the_cog_load_until_the_unload() -> None:
+    """The loop starts with the cog and stops with it."""
+    bot = MagicMock()
+    bot.guilds = []
+    bot.wait_until_ready = AsyncMock()
+    cog = UserManagement(bot)
 
-    assert first.remove_roles.await_count == 2
-    second.remove_roles.assert_awaited_once()
-    assert str(GUILD_ID) not in stored_ops()
-    _stop(cog)
+    await cog.cog_load()
+    assert cog._settle_ops.is_running()
+    await cog.cog_unload()
+    await asyncio.sleep(0)
+    assert not cog._settle_ops.is_running()

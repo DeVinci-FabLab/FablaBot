@@ -9,12 +9,12 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 import logging
 import sqlite3
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, override
 from warnings import deprecated
 
 from discord import Guild, HTTPException, Interaction, Member, NotFound, Role, User, app_commands
 from discord.abc import Messageable
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord.utils import get
 
 from fablabot.helpers.access import AnyRole, Check, access
@@ -38,8 +38,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 EXPIRY_RETRY_DELAY = timedelta(seconds=60)
-# Waits, in seconds, before each retry of a server whose records could not be settled at start; then it gives up.
-RECONCILE_RETRY_DELAYS = (30.0, 120.0, 600.0)
 
 _OP_NOT_RECORDED = "La durée n'a pas pu être enregistrée : aucun droit n'a été donné ni prolongé. Réessayez plus tard."
 _SELF_OP_REFUSED = "Vous ne pouvez pas vous op vous-même : un autre membre du staff doit le faire."
@@ -164,7 +162,6 @@ class UserManagement(commands.Cog):
         """
         self.bot = bot
         self.deop_tasks: dict[tuple[int, int], asyncio.Task[None]] = {}
-        self.reconcile_retries: dict[int, asyncio.Task[None]] = {}
         logger.info("UserManagement initialized")
 
     # region ====== User Slash Commands Group ======
@@ -493,176 +490,103 @@ class UserManagement(commands.Cog):
     # region ====== Helpers ======
     # -- Scheduling --
 
-    @commands.Cog.listener()
-    async def on_ready(self) -> None:
-        """Replay recorded op expiries on every guild the bot sees.
+    @override
+    async def cog_load(self) -> None:
+        """Start settling the temporary role."""
+        self._settle_ops.start()
 
-        Discord sends ``on_ready`` again after some reconnects, so this is idempotent: a running
-        timer is kept, a record is never duplicated. Unavailable guilds keep their records.
+    @override
+    async def cog_unload(self) -> None:
+        """Stop settling the temporary role."""
+        self._settle_ops.cancel()
+
+    @tasks.loop(seconds=EXPIRY_RETRY_DELAY.total_seconds())
+    async def _settle_ops(self) -> None:
+        """Settle every reachable server, once at start and again every minute.
+
+        This round is the only retry of a temporary right: a removal Discord refused or raised on, a timer that
+        died and a failed read leave a holder or a record that the next round sees, so no failure path has to reach
+        a retry, and nothing gives up. Unavailable guilds keep their records until they are back.
         """
         for guild in self.bot.guilds:
-            if not guild.unavailable:
+            if guild.unavailable:
+                continue
+            # An exception other than a network one ends a tasks.loop for good.
+            try:
                 await self._reconcile_guild(guild)
+            except Exception:
+                logger.exception(f"Op settling failed guild_id={guild.id}; the next round tries again")
 
-    @commands.Cog.listener()
-    async def on_guild_available(self, guild: Guild) -> None:
-        """Reconcile a guild that comes back from an outage, or reaches the bot after ``on_ready``."""
-        await self._reconcile_guild(guild)
+    @_settle_ops.before_loop
+    async def _before_settle_ops(self) -> None:
+        """Wait for the guilds before the first round."""
+        await self.bot.wait_until_ready()
 
     async def _reconcile_guild(self, guild: Guild) -> None:
-        """Remove the temporary role from holders with no future expiry, arm the others, drop stale records.
-
-        A storage failure is logged and ends only the holder or the sweep it hit: the other holders and
-        servers are still settled, and the server it hit is settled again by a bounded, delayed retry,
-        whose last round no longer waits for the storage to answer.
-        """
-        if not await self._settle_guild(guild):
-            self._retry_reconcile_later(guild.id)
-
-    async def _settle_guild(self, guild: Guild, *, fail_closed: bool = False) -> bool:
-        """Settle the holders and records of one server once.
-
-        Args:
-            guild (Guild): The server.
-            fail_closed (bool): Act without an expiry the storage cannot give: a holder loses the role, and a
-                record the cache cannot vouch for gets an immediate timer. Set on the last retry, so that a
-                temporary right does not outlive a storage that stays down.
-
-        Returns:
-            bool: False when a storage failure or a failed removal left a holder or a record unsettled.
-        """
+        """Remove the temporary role from holders with no future expiry, arm the others, drop stale records."""
         admin_role = get(guild.roles, name=RoleNames.ADMIN_TEMP)
         if admin_role is None:
-            return True
-        settled = True
-        holders = {member.id: member for member in admin_role.members}
-        for member in holders.values():
-            try:
-                settled = await self._reconcile_holder(guild, admin_role, member, fail_closed=fail_closed) and settled
-            except sqlite3.Error:
-                settled = False
-                logger.exception(f"Storage failure settling an op at start guild_id={guild.id} member_id={member.id}")
+            return
+        for member in admin_role.members:
+            await self._reconcile_holder(guild, admin_role, member)
+        self._sweep_stale_records(guild, admin_role)
 
-        try:
-            settled = self._sweep_stale_records(guild, admin_role, fail_closed=fail_closed) and settled
-        except sqlite3.Error:
-            settled = False
-            logger.exception(f"Storage failure listing op records at start guild_id={guild.id}")
-        return settled
-
-    def _retry_reconcile_later(self, guild_id: int) -> None:
-        """Start the one delayed retry of a server, unless one is already waiting."""
-        task = self.reconcile_retries.get(guild_id)
-        if task is None or task.done():
-            self.reconcile_retries[guild_id] = asyncio.create_task(self._reconcile_later(guild_id))
-
-    async def _reconcile_later(self, guild_id: int) -> None:
-        """Settle a server again after each delay of ``RECONCILE_RETRY_DELAYS``, until it is settled or they run out.
-
-        The last round fails closed (see ``_settle_guild``). A server that is gone or unavailable ends the
-        retry: ``on_guild_available`` settles it when it returns.
-        """
-        try:
-            for round_number, delay in enumerate(RECONCILE_RETRY_DELAYS, start=1):
-                await asyncio.sleep(delay)
-                guild = self.bot.get_guild(guild_id)
-                if guild is None or guild.unavailable:
-                    return
-                if await self._settle_guild(guild, fail_closed=round_number == len(RECONCILE_RETRY_DELAYS)):
-                    return
-            logger.error(f"Op records still unsettled, giving up until the next start or reconnect guild_id={guild_id}")
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception(f"Error in the op reconcile retry guild_id={guild_id}")
-        finally:
-            if self.reconcile_retries.get(guild_id) is asyncio.current_task():
-                self.reconcile_retries.pop(guild_id)
-
-    async def _reconcile_holder(self, guild: Guild, admin_role: Role, member: Member, *, fail_closed: bool = False) -> bool:
-        """Arm the timer of a holder whose expiry is ahead, and take the role off any other holder.
+    async def _reconcile_holder(self, guild: Guild, admin_role: Role, member: Member) -> None:
+        """Leave a holder to a running timer, arm one for an expiry ahead, and take the role off any other holder.
 
         Args:
             guild (Guild): The server.
             admin_role (Role): The temporary admin role.
             member (Member): The holder.
-            fail_closed (bool): Treat an expiry the storage cannot give as absent, so the role is removed.
-
-        Returns:
-            bool: False when Discord refused the removal and the holder still has the role.
         """
-        unreadable = False
+        timer_before = self.deop_tasks.get((guild.id, member.id))
+        if timer_before is not None and not timer_before.done():
+            return
         try:
             expiry = self._load_op(guild.id, member.id)
         except sqlite3.Error:
-            if not fail_closed:
-                raise
-            logger.exception(f"Storage failure reading the op expiry at start guild_id={guild.id} member_id={member.id}")
-            expiry, unreadable = None, True
-        if expiry is not None and expiry.expires_at > _utcnow():
-            task = self.deop_tasks.get((guild.id, member.id))
-            if task is None or task.done():
+            # Least privilege: an end nobody can read counts as passed. The cost is an op to run again.
+            logger.exception(f"Storage failure reading an op expiry guild_id={guild.id} member_id={member.id}; role removed")
+            cause = "expiry unreadable"
+        else:
+            if expiry is not None and expiry.expires_at > _utcnow():
                 self._arm_deop(guild.id, member.id, expiry)
-            return True
-        cause = "expiry unreadable" if unreadable else "no recorded expiry" if expiry is None else "expiry passed"
-        timer_before = self.deop_tasks.get((guild.id, member.id))
-        success, _error = await safe_remove_roles(
-            logger,
-            member,
-            admin_role,
-            reason=f"Temporary admin role removed at bot start: {cause}",
-        )
+                return
+            cause = "no recorded expiry" if expiry is None else "expiry passed"
+        success, _error = await safe_remove_roles(logger, member, admin_role, reason=f"Temporary admin role removed: {cause}")
         if not success:
-            logger.error(f"Failed to remove temporary admin role at start guild_id={guild.id} member_id={member.id}")
-            return False
-        logger.warning(f"Removed temporary admin role at start ({cause}) guild_id={guild.id} member_id={member.id}")
+            logger.error(
+                f"Failed to remove temporary admin role guild_id={guild.id} member_id={member.id}; next round tries again"
+            )
+            return
+        logger.warning(f"Removed temporary admin role ({cause}) guild_id={guild.id} member_id={member.id}")
         # An op run while the removal was in flight owns a new timer and record: leave both alone.
         timer_now = self.deop_tasks.get((guild.id, member.id))
         if timer_now is None or timer_now is timer_before:
-            self._clear_op(guild.id, member.id)
-        return True
+            self._clear_op_after_removal(guild.id, member.id)
 
-    def _sweep_stale_records(self, guild: Guild, admin_role: Role, *, fail_closed: bool = False) -> bool:
+    def _sweep_stale_records(self, guild: Guild, admin_role: Role) -> None:
         """Drop this guild's records of ops that are over, and arm the ones the cache cannot vouch for.
 
         A record is kept when its member holds the role or a live timer waits for them (an op that
         started while the removals were awaited). Otherwise it is dropped only when the guild's
         member cache is complete; with a partial cache the member may hold the role unseen, so the
         record gets its timer and ``_expire`` asks Discord when it fires (now, if the time has passed).
-        A record that cannot be read or dropped is logged and the others are still swept. With
-        ``fail_closed``, a record the cache cannot vouch for and the storage cannot give gets a timer
-        that fires now.
 
         Args:
             guild (Guild): The server.
             admin_role (Role): The temporary admin role.
-            fail_closed (bool): Arm such a record instead of leaving it.
-
-        Returns:
-            bool: False when a record could not be read or dropped.
         """
-        swept = True
         holder_ids = {member.id for member in admin_role.members}
         for member_id in op_expiries.member_ids(guild.id):
             task = self.deop_tasks.get((guild.id, member_id))
             if member_id in holder_ids or (task is not None and not task.done()):
                 continue
-            try:
-                expiry = None if guild.chunked else self._load_op(guild.id, member_id)
-                if expiry is None:
-                    self._clear_op(guild.id, member_id)
-                else:
-                    self._arm_deop(guild.id, member_id, expiry)
-            except sqlite3.Error:
-                if fail_closed and not guild.chunked:
-                    logger.exception(
-                        f"Storage failure reading an op record, timer set now guild_id={guild.id} member_id={member_id}"
-                    )
-                    self._arm_deop(guild.id, member_id, OpExpiry(expires_at=_utcnow(), channel_id=0))
-                    continue
-                swept = False
-                logger.exception(f"Storage failure sweeping an op record at start guild_id={guild.id} member_id={member_id}")
-        return swept
+            expiry = None if guild.chunked else self._load_op(guild.id, member_id)
+            if expiry is None:
+                self._clear_op(guild.id, member_id)
+            else:
+                self._arm_deop(guild.id, member_id, expiry)
 
     def _record_op(self, guild_id: int, member_id: int, expiry: OpExpiry) -> None:
         """Persist the expiry of a member's op on one guild, replacing any previous one."""
@@ -740,9 +664,9 @@ class UserManagement(commands.Cog):
         """End a member's op on one guild.
 
         Removes the role, then forgets the record (a crash in between leaves an orphan record,
-        cleared later), then posts the notice in the op channel. A failed removal keeps the record,
-        posts a failure notice instead and starts the bounded retry of the server. An unavailable guild
-        or a member Discord could not be asked about keeps the record and asks the caller to try again.
+        cleared later), then posts the notice in the op channel. A failed removal keeps the record and
+        posts a failure notice instead; the next settling round removes the role, with no notice. An unavailable
+        guild, or a member Discord could not be asked about, keeps the record and asks the caller to try again.
 
         Returns:
             bool: False when the caller should wait and call again, True when there is nothing left to retry.
@@ -778,8 +702,6 @@ class UserManagement(commands.Cog):
                 expiry,
                 f"Impossible de retirer le rôle {RoleNames.ADMIN_TEMP} à {format_member_mention(member)} : {error}",
             )
-            # The settle removes an expired holder again, bounded, and posts no notice: the failure is not repeated.
-            self._retry_reconcile_later(guild.id)
             return
 
         self._clear_op_after_removal(guild.id, member.id)

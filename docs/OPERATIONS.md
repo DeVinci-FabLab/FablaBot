@@ -226,20 +226,25 @@ A per-server language setting in the bot is planned and not available yet. The t
 `/user op` gives the `Admin -temp-` role for a limited time (5 minutes by default); `/user deop` removes it
 early. The expiry is recorded in the database.
 
-At every start, the bot checks each holder of `Admin -temp-` (`cogs/user_management.py`, `_reconcile_guild`):
+The expiry and the timer are set before the role is given. If the database refuses the expiry, the role is not
+given and the caller is told. The timer holds its own time, so the role ends on time even with the database down.
 
-- A holder with a future expiry gets a timer again.
+At start and then every minute, the bot checks each holder of `Admin -temp-` (`cogs/user_management.py`,
+`_settle_ops`). A role given by hand has no expiry, so it goes within a minute.
+
+- A holder with a running timer is left to it. A holder with a future expiry gets a timer.
 - A holder with no recorded expiry, or one that has passed, loses the role, and the log says
-  `Removed temporary admin role at start (no recorded expiry) guild_id=... member_id=...`.
-- If Discord refuses the removal with a 403 (Missing Permissions), the bot's role sits below
-  `Admin -temp-`. The log shows `Failed to remove temporary admin role at start`; move the bot's role above
-  it (step 3 of "Add a server") and restart.
-- A server whose database could not be read, or whose removal Discord refused, is settled again after 30 s,
-  2 min and 10 min. This holds for a removal refused at the scheduled expiry of an op too, which also posts one
-  failure notice in the op channel; the retries post none. The last round takes the role off every holder whose expiry still cannot be read.
-  If the holder is still in place after it, the log shows
-  `Op records still unsettled, giving up until the next start or reconnect guild_id=...`: look for the
-  `Storage failure` and `Failed to remove temporary admin role` lines above it, fix the cause, and restart.
+  `Removed temporary admin role (no recorded expiry) guild_id=... member_id=...`.
+- A holder whose expiry cannot be read loses the role at once (`expiry unreadable`): run `/user op` again once
+  the database answers.
+- A removal that fails is tried again every minute, with no end. At the scheduled expiry the first failure also
+  posts one notice in the op channel. The log shows `Failed to remove temporary admin role`. On a 403 (Missing
+  Permissions) the bot's role sits below `Admin -temp-`: move it above (step 3 of "Add a server").
+- A record the database could not read or drop stays, and the next round takes it up. The log shows
+  `Op settling failed`.
+
+A bot restarted on a full disk refuses to start (see `Cannot start`), so nothing removes a temporary role until
+the disk is fixed: fix the disk first, then check the holders of `Admin -temp-` in the server settings.
 
 ## Server check at start
 
