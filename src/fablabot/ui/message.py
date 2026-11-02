@@ -770,6 +770,9 @@ class _UnlinkReactionSelectView(ui.View):
     async def remove_link(self, interaction: Interaction, reaction_index: int) -> None:
         """Handle the removal of a reaction action.
 
+        The view stays open as long as its message, so it removes the action it showed from what is stored
+        now: its own copy may be older than a link a colleague added, a stop or a new draft.
+
         Args:
             interaction (Interaction): The Discord interaction context.
             reaction_index (int): The index of the reaction action to remove.
@@ -777,31 +780,39 @@ class _UnlinkReactionSelectView(ui.View):
         guild = interaction.guild
         assert guild is not None
 
-        if reaction_index >= len(self.target.reactions):
+        shown = self.reactions[reaction_index]
+        if isinstance(self.target, MessageDraft):
+            current = self.cog.get_draft(guild.id)
+        else:
+            current = self.cog.get_tracked_message(guild.id, self.target.message_id)
+        if current is None:
+            await interaction.response.send_message(ErrorMessages.EXPIRED_VIEW_MESSAGE, ephemeral=True)
+            return
+        if shown not in current.reactions:
             await interaction.response.edit_message(content="Action introuvable.", embed=None)
             return
 
-        removed = self.target.reactions.pop(reaction_index)
-        if isinstance(self.target, MessageDraft):
-            self.cog.set_draft(guild.id, self.target)
+        current.reactions.remove(shown)
+        if isinstance(current, MessageDraft):
+            self.cog.set_draft(guild.id, current)
             target_label = "le brouillon"
         else:
-            self.cog.set_tracked_message(guild.id, self.target)
-            target_label = f"le message {self.target.message_id}"
-            if removed.emoji not in [ev.emoji for ev in self.target.reactions]:
-                channel = await guild.fetch_channel(self.target.channel_id)
+            self.cog.set_tracked_message(guild.id, current)
+            target_label = f"le message {current.message_id}"
+            if shown.emoji not in [ev.emoji for ev in current.reactions]:
+                channel = await guild.fetch_channel(current.channel_id)
                 if not isinstance(channel, TextChannel):
                     return
                 try:
-                    msg = await channel.fetch_message(self.target.message_id)
+                    msg = await channel.fetch_message(current.message_id)
                 except Exception:
-                    logger.exception(f"Tracked message {self.target.message_id} no longer accessible.")
+                    logger.exception(f"Tracked message {current.message_id} no longer accessible.")
                     return
-                await msg.remove_reaction(removed.emoji, self.cog.bot.user)  # type: ignore[arg-type]
-        logger.info(f"Removed reaction action {removed.emoji} ({removed.action_type}) on {target_label} in guild {guild.id}")
+                await msg.remove_reaction(shown.emoji, self.cog.bot.user)  # type: ignore[arg-type]
+        logger.info(f"Removed reaction action {shown.emoji} ({shown.action_type}) on {target_label} in guild {guild.id}")
 
         await interaction.response.edit_message(
-            content=f"Action retirée de {target_label} : {removed.emoji} : {self.cog.format_reaction_action(removed)}",
+            content=f"Action retirée de {target_label} : {shown.emoji} : {self.cog.format_reaction_action(shown)}",
             view=None,
             embed=None,
         )

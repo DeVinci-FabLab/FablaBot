@@ -142,7 +142,7 @@ def test_the_cog_answers_none_for_an_id_too_large_for_the_database() -> None:
     """A member can paste up to 25 digits as a message link: nothing matches, nothing fails."""
     cog = MessageManagement(MagicMock())
 
-    assert cog._get_tracked_message(GUILD_A, 10**24) is None
+    assert cog.get_tracked_message(GUILD_A, 10**24) is None
 
 
 @pytest.mark.parametrize(

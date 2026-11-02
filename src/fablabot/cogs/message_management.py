@@ -425,7 +425,7 @@ class MessageManagement(commands.Cog):
             migrated_reactions.append(cloned)
 
         # Following a message again adds to its links; saving it with only the draft's would delete the others.
-        already = self._get_tracked_message(interaction.guild.id, fetched.id)
+        already = self.get_tracked_message(interaction.guild.id, fetched.id)
         tracked = TrackedMessage(
             message_id=fetched.id,
             channel_id=channel.id,
@@ -843,7 +843,7 @@ class MessageManagement(commands.Cog):
         if member is None or member.bot:
             return
 
-        tracked = self._get_tracked_message(payload.guild_id, payload.message_id)
+        tracked = self.get_tracked_message(payload.guild_id, payload.message_id)
         if tracked is None:
             return
 
@@ -935,7 +935,7 @@ class MessageManagement(commands.Cog):
         """Retrieve all tracked messages for a guild."""
         return messages.tracked_messages(guild_id)
 
-    def _get_tracked_message(self, guild_id: int, message_id: int) -> TrackedMessage | None:
+    def get_tracked_message(self, guild_id: int, message_id: int) -> TrackedMessage | None:
         """Retrieve a specific tracked message for a guild."""
         return self._get_tracked_messages(guild_id).get(message_id)
 
@@ -1014,7 +1014,7 @@ class MessageManagement(commands.Cog):
             logger.info(f"Added reaction {reaction.emoji} to draft in guild {guild_id}")
             return f"Réaction {reaction.emoji} ajoutée au brouillon."
 
-        tracked = self._get_tracked_message(guild_id, reaction.message_id)
+        tracked = self.get_tracked_message(guild_id, reaction.message_id)
         if tracked is None:
             return ErrorMessages.MSG_NO_TRACKED
 
