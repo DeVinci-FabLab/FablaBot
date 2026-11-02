@@ -55,6 +55,20 @@ def test_parse_reads_ids_commas_spaces_and_blanks() -> None:
     assert parse_allowed_guild_ids(" 111111111111111111 , 222222222222222222,,") == {LISTED, UNLISTED}
 
 
+def test_parse_reads_a_name_after_each_id() -> None:
+    """A name after a colon is for the reader: only the ID counts, and a bare ID still works."""
+    raw = " 111111111111111111:DeVinci Fablab , 222222222222222222"
+    assert parse_allowed_guild_ids(raw) == {LISTED, UNLISTED}
+
+
+def test_parse_still_refuses_a_name_alone_without_echoing_it() -> None:
+    """A name does not make an entry valid, and the refusal does not repeat it."""
+    with pytest.raises(ValueError, match="entry 1") as exc:
+        parse_allowed_guild_ids("abc-secret:DeVinci Fablab")
+    assert "abc-secret" not in str(exc.value)
+    assert "DeVinci" not in str(exc.value)
+
+
 @pytest.mark.parametrize("raw", [None, "", "  "])
 def test_parse_absent_or_blank_is_empty(raw: str | None) -> None:
     """An absent or blank value gives an empty set."""

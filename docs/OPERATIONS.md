@@ -42,7 +42,7 @@ secrets:
 | Setting | Role |
 | --- | --- |
 | `DISCORD_TOKEN_FILE` | Path of the file holding the bot token (`src/fablabot/main.py:32`). |
-| `ALLOWED_GUILD_IDS` | Server IDs the bot may serve, comma-separated, no quotes, no spaces. |
+| `ALLOWED_GUILD_IDS` | Server IDs the bot may serve, comma-separated, no quotes. Each ID can carry a name after a colon, `111111111111111111:Main server`: the bot ignores it, and it cannot hold a comma. |
 | `OPERATOR_LOG_CHANNEL_ID` | Optional. Channel receiving errors that belong to no server. Pick a channel only the bot's administrators can read: those errors come from every server's tasks. |
 | `DEV_GUILD_ID` | Optional, development bot only. Syncs the commands to this one server and leaves global commands alone. Never set on the production bot. |
 | `data/` volume | The database `data/fablabot.db` (see "Stored data"), its copies in `data/backups/`, and the fingerprint of the last command sync (`data/command_sync_state.json`; delete it to force a sync). |
@@ -594,7 +594,7 @@ The log tells which case applies: `Commands synced (9, global).` after a sync, a
 | --- | --- | --- |
 | The bot joins a new server and leaves at once | Its ID is not in `ALLOWED_GUILD_IDS`, or the host was not redeployed | Add the ID, redeploy, then invite again. |
 | The bot does not leave a removed server | The change was not deployed, or the list now matches none of the current servers | Redeploy; read the "Guild allow-list" line, and check the IDs. |
-| Bot stops at start with "entry N is not a numeric guild ID" | `ALLOWED_GUILD_IDS` has quotes, spaces or a non-numeric entry | Use `id1,id2`, digits only. |
+| Bot stops at start with "entry N is not a numeric guild ID" | `ALLOWED_GUILD_IDS` has quotes, or an entry whose ID is not numeric | Use `id1:name,id2:name`, with digits before each colon. |
 | A merged fix is not live | A merge does not deploy; only a release reaches `:latest` | Archive, then merge the release pull request. |
 | "Vous ne pouvez pas utiliser de commandes en dehors du salon ..." | The command ran outside the commands channel | Use the channel named in the message. A member who cannot open it uses `/suggest` or a private `/help`, which work in any channel where they can use application commands. |
 | "A public list only goes in ..." | `/help show:True` ran outside the commands channel | Run `/help` without `show`, or use the commands channel. |

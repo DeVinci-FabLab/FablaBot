@@ -39,10 +39,10 @@ echo -n 'my_discord_token' > secrets/discord_token.secret
 
 #### Allowed servers
 
-`ALLOWED_GUILD_IDS` holds the IDs of the servers the bot may serve, separated by commas:
+`ALLOWED_GUILD_IDS` holds the IDs of the servers the bot may serve, separated by commas. Each ID can carry a name after a colon, so the list reads by itself; the bot ignores the name, which cannot hold a comma:
 
 ```bash
-ALLOWED_GUILD_IDS=111111111111111111,222222222222222222
+ALLOWED_GUILD_IDS=111111111111111111:Main server,222222222222222222:Test server
 ```
 
 - When it is empty, the bot keeps serving the servers it is in at start and logs a warning. After that, it only stays in a server it joins if the application owner, or an admin or developer of its team, owns it.
