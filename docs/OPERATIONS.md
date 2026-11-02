@@ -120,6 +120,10 @@ Set the stack's image to the `:X.Y.Z` of the previous release, or to `:sha-<comm
 the first release use `:<commit sha>`. Read the changelog entries in between for changes to `data/`,
 then redeploy. Go back to `:latest` once a fixed release is out.
 
+To go back past the release that brought the non-root image, take the hardening lines out of the stack too, as
+"Moving to the non-root image" says: the older image runs as root, and with every capability dropped root cannot read
+or write what belongs to 10001.
+
 After a rollback, delete `data/command_sync_state.json` before upgrading again (see "This command is
 outdated"). The [README](../README.md#rolling-back) has the same steps under "Rolling back".
 
@@ -295,32 +299,44 @@ file to that server only.
 ## Moving to the non-root image
 
 The image runs as `10001:10001`. The production host keeps its state in `data/fablabot.db`, beside the JSON files of the
-older releases, and all of it, `logs/` and the token file belong to root. The host moves once, with the release that
-brings the non-root image. The commands are in the [README](../README.md#moving-a-host-to-the-non-root-image), "Moving a
-host to the non-root image"; the order is:
+older releases, and all of it, `logs/` and the token file belong to another user than 10001. The host moves once, with
+the release that brings the non-root image. The commands are in the
+[README](../README.md#moving-a-host-to-the-non-root-image), "Moving a host to the non-root image". Set the volumes path
+first, to the value the stack uses:
+
+```bash
+VOLUMES_PATH=/path/to/volumes
+```
+
+The order is:
 
 1. Archive, with the bot running, into `~/fablabot-archive` (steps 2 to 4 of "Before every redeploy"). The `sudo`
    steps ask for the operator's password.
-2. Hold the update: read the running version on the `fablabot` container, set the stack's `image:` to it and deploy.
-   The stack updates itself every 30 minutes and merging a release deploys.
-3. Merge the release pull request, wait for the image build to finish green, and pull the new image.
+2. Hold the update: read the running version on the `fablabot` container, save its `Server check:` lines
+   (`docker logs fablabot 2>&1 | grep 'Server check:'`) to compare with after the move, then set the stack's `image:` to
+   that version and deploy. The stack updates itself every 30 minutes and merging a release deploys.
+3. Merge the pull request that brings the image, `feat(docker)!: run the bot as an unprivileged user in a hardened
+   container` (it gives a minor release), then the release pull request. Wait for the image build to finish green, and
+   pull the new image.
 4. Stop the stack and archive again.
 5. `sudo chown -R 10001:10001` on `data/` and `logs/`. Take `data/` whole: the database, its journal,
    `data/backups/`, `data/exports/` and the JSON files all go to 10001.
 6. Make the token file readable by 10001: `sudo chown 10001:10001` and `sudo chmod 400` on it.
 7. Add the hardening lines to the stack (the example under "Deployment model"), with the new version as `image:`.
 8. Deploy.
-9. Read the start: no `Cannot start` line, the `Server check` lines (see "Server check at start"), and the health
-   status, `docker inspect --format '{{.State.Health.Status}}' fablabot`, which goes from `starting` to `healthy`
-   within two minutes.
-10. Set `image:` back to `:latest` and deploy.
+9. Read the start: no `Cannot start` line, the `Server check` lines (see "Server check at start"), the same counts as
+   the ones saved in step 2, and the health status, `docker inspect --format '{{.State.Health.Status}}' fablabot`,
+   which goes from `starting` to `healthy` within two minutes.
+10. Run `docker pull ghcr.io/devinci-fablab/fablabot:latest`, set `image:` back to `:latest` and deploy. Then read the
+    version label, which must be the release you merged, and the health.
 
 A host not yet moved stops at start with `Cannot start: data/ is not writable by uid 10001.` and
 Docker restarts it until the volume is fixed. No data is lost; the bot is down meanwhile.
 
-Rolling back needs two things together: the previous image (the `:X.Y.Z` read in step 2) and the stack without the hardening lines.
-The older image runs as root, and root without capabilities cannot write files owned by 10001. After a rollback, give the folders back to `10001` before redeploying the non-root
-image. Archive `data/` and `logs/` first; never delete them.
+Rolling back needs two things together: the previous image (the `:X.Y.Z` read in step 2) and
+the stack without the hardening lines. The rollback stays on that tag, since `:latest` brings the non-root image back.
+The older image runs as root, and root without capabilities cannot write files owned by 10001. After a rollback, give
+the folders back to `10001` before redeploying the non-root image. Archive `data/` and `logs/` first; never delete them.
 
 ## Health status
 
@@ -653,10 +669,10 @@ The log tells which case applies: `Commands synced (9, global).` after a sync, a
 | "A public list only goes in ..." | `/help show:True` ran outside the commands channel | Run `/help` without `show`, or use the commands channel. |
 | "Le salon de commandes du bot n'est pas configuré sur ce serveur." | No stored channel and no `commandes_bot` channel | Create a text channel named `commandes_bot`. |
 | A `/user op` role is not added or removed (403) | The bot's role is below `Admin -temp-` | Move the bot's role above it. |
-| Bot restarts in a loop with `Cannot start: data/ is not writable by uid 10001.` | The volume still belongs to root, or a file under it does | `sudo chown -R 10001:10001` the folder named, then wait for the restart. |
-| `Cannot start: the token file ... is not readable by uid 10001` | The token file belongs to root | `sudo chown 10001:10001 <file> && sudo chmod 400 <file>`. |
+| Bot restarts in a loop with `Cannot start: data/ is not writable by uid 10001.` | The volume, or a file under it, still belongs to another user | `sudo chown -R 10001:10001` the folder named, then wait for the restart. |
+| `Cannot start: the token file ... is not readable by uid 10001` | The token file belongs to another user | `sudo chown 10001:10001 <file> && sudo chmod 400 <file>`. |
 | Status `unhealthy`, the bot answers | The stack has `read_only` without the `/tmp` tmpfs (an ERROR names the heartbeat file) | Add the `tmpfs` line. |
-| After a rollback, registrations are lost | The older image runs as root without capabilities | Restore the stack without the hardening lines. |
+| After a rollback, the log shows `PermissionError: ... '/run/secrets/discord_token'`, or `Cannot start: data/fablabot.db cannot be used: attempt to write a readonly database.` | The older image runs as root without capabilities, and the token file and the database belong to 10001 | Restore the stack without the hardening lines. |
 | `Missing roles ... for guild ...` in the log | The server lacks a role name the bot expects | Create the role with the exact name (see Roles). |
 | "This command is outdated" | The client holds an old command list | Reload Discord (Ctrl/Cmd+R). |
 | No errors reach the operator channel | `OPERATOR_LOG_CHANNEL_ID` is empty or malformed (warning at start) | Set a valid channel ID; they stay in `logs/<date>.log` meanwhile. |
