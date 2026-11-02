@@ -82,12 +82,10 @@ class FormationManagement(commands.Cog):
         self._reaction_lock = asyncio.Lock()
         self._published_locks: dict[int, asyncio.Lock] = {}
         self._pending_update_tasks: dict[int, asyncio.Task] = {}
-        # Reactions the log refused, or whose checks could not run because the published message could not be read,
-        # kept so a storage failure loses no sign-up. Ceiling: they live in memory only, so a restart while the storage
-        # is still down drops them, and the queue has no size limit and is written in one go once the storage answers;
-        # the upgrade path is a cap, or a write in batches. Each update and each reminder tick tries them again.
-        self._unchecked_reactions: list[tuple[int, ReactionEvent]] = []
-        self._unlogged_reactions: list[tuple[int, ReactionEvent]] = []
+        # Servers where a storage failure left a reaction unlogged or an update unsaved. Each reminder tick runs their
+        # update, which takes the missed reactions back from Discord. Ceiling: in memory, so a restart during an outage
+        # forgets them and a member who reacted then reacts again; the upgrade path is a column.
+        self._stale_guilds: set[int] = set()
         # The published message when the database refused it, so reminder flags and registrations are neither lost
         # nor redone. Same ceiling; every write of the message tries to save it again.
         self._unsaved_published: dict[int, PublishedMessage] = {}
@@ -594,22 +592,17 @@ class FormationManagement(commands.Cog):
                 ts_iso=received_at.isoformat(timespec="seconds"),
             )
             try:
-                counts = self._reaction_counts(payload.guild_id, reaction_event)
+                if not self._reaction_counts(payload.guild_id, reaction_event):
+                    return
+                self._reaction_logs.append(payload.guild_id, reaction_event)
             except sqlite3.Error:
                 logger.exception(
-                    f"Reaction not checked guild_id={payload.guild_id} message_id={payload.message_id}; "
-                    "kept in memory, checked with the next update"
+                    f"Reaction not recorded guild_id={payload.guild_id} message_id={payload.message_id}; "
+                    "taken back from Discord once the storage answers"
                 )
-                self._unchecked_reactions.append((payload.guild_id, reaction_event))
-                self._schedule_update(payload.guild_id)
+                self._stale_guilds.add(payload.guild_id)
                 return
-            if not counts:
-                return
-
-            self._unlogged_reactions.append((payload.guild_id, reaction_event))
-            # The queue holds every server's reactions: each server whose reaction is written gets its update.
-            for guild_id in self._log_kept_reactions() | {payload.guild_id}:
-                self._schedule_update(guild_id)
+            self._schedule_update(payload.guild_id)
 
     # endregion Event Listeners
 
@@ -620,8 +613,9 @@ class FormationManagement(commands.Cog):
         """Check for formations starting soon and notify trainers/responsibles (Paris timezone)."""
         logger.debug("Checking for upcoming formations to notify trainers and responsibles (Paris time).")
         now = datetime.now(PARIS_TZ)
-        for guild_id in {guild_id for guild_id, _event in self._unchecked_reactions + self._unlogged_reactions}:
-            self._schedule_update(guild_id, delay=0)
+        for guild_id in self._stale_guilds:
+            with guild_log_context(guild_id):  # the update's task inherits it, so its lines stay with their server
+                self._schedule_update(guild_id, delay=0)
         # An exception other than a network one ends a tasks.loop for good: a storage failure waits for the next tick.
         try:
             # A snapshot: waiting on a guild's lock yields to code that may add a guild to the state. A guild whose only
@@ -811,51 +805,36 @@ class FormationManagement(commands.Cog):
                 return False
         return True
 
-    def _check_kept_reactions(self) -> None:
-        """Run the checks of the reactions that arrived while the published message could not be read.
+    def _log_missed_reactions(
+        self, guild_id: int, message_id: int, reactions: dict[str, dict[int, str]], last_add: dict[tuple[str, int], datetime]
+    ) -> None:
+        """Log the reactions Discord shows and the log misses after a storage failure, as of now.
 
-        Oldest first, until a read fails again; the reactions that pass join the queue to write.
+        A failed write is the only reason here, so a member keeps their sign-up and takes their place in the queue at
+        this time; a reaction past the registration deadline stays out, as the listener would have left it.
+
+        Args:
+            guild_id (int): The ID of the guild.
+            message_id (int): The published message.
+            reactions (dict[str, dict[int, str]]): The members who reacted, by emoji.
+            last_add (dict[tuple[str, int], datetime]): The last logged time of each reaction, completed here.
         """
-        while self._unchecked_reactions:
-            guild_id, event = self._unchecked_reactions[0]
-            with guild_log_context(guild_id):
-                try:
-                    counts = self._reaction_counts(guild_id, event)
-                except sqlite3.Error:
-                    logger.exception(
-                        f"Reaction not checked guild_id={guild_id} message_id={event.message_id}; "
-                        f"{len(self._unchecked_reactions)} kept in memory, checked with the next update"
-                    )
-                    return
-            self._unchecked_reactions.pop(0)
-            if counts:
-                self._unlogged_reactions.append((guild_id, event))
-
-    def _log_kept_reactions(self) -> set[int]:
-        """Check, then write, the reactions kept in memory, oldest first, until one fails.
-
-        Each write runs in its own server's log context, so its log line goes to that server's log and not to
-        the server whose event or update happens to write the queue.
-
-        Returns:
-            set[int]: The servers whose reactions were written; their registrations may have changed.
-        """
-        self._check_kept_reactions()
-        written: set[int] = set()
-        while self._unlogged_reactions:
-            guild_id, event = self._unlogged_reactions[0]
-            with guild_log_context(guild_id):
-                try:
+        now = datetime.now(PARIS_TZ)
+        for emoji, users in reactions.items():
+            for user_id in users:
+                if (emoji, user_id) in last_add:
+                    continue
+                event = ReactionEvent(
+                    message_id=message_id,
+                    user_id=user_id,
+                    user_name=None,
+                    emoji=emoji,
+                    action=ReactionAction.ADD,
+                    ts_iso=now.isoformat(timespec="seconds"),
+                )
+                if self._reaction_counts(guild_id, event):
                     self._reaction_logs.append(guild_id, event)
-                except sqlite3.Error:
-                    logger.exception(
-                        f"Reaction log write failed guild_id={guild_id} message_id={event.message_id}; "
-                        f"{len(self._unlogged_reactions)} kept in memory, written with the next update"
-                    )
-                    return written
-            self._unlogged_reactions.pop(0)
-            written.add(guild_id)
-        return written
+                    last_add[emoji, user_id] = now
 
     # -- Reaction Updates --
 
@@ -880,6 +859,11 @@ class FormationManagement(commands.Cog):
                 await self._update_published_message(guild_id)
             except asyncio.CancelledError:
                 logger.debug(f"Scheduled update for guild {guild_id} was cancelled.")
+            except sqlite3.Error:
+                logger.exception(
+                    f"Update of guild {guild_id} stopped by a storage failure; the next reminder tick tries again."
+                )
+                self._stale_guilds.add(guild_id)
             except Exception:
                 logger.exception(f"Error during scheduled update for guild {guild_id}.")
             finally:
@@ -903,9 +887,6 @@ class FormationManagement(commands.Cog):
 
     async def _update_published_message_locked(self, guild_id: int) -> None:  # noqa: PLR0912, PLR0915 - split once formations have tests
         """Reload the published message, rebuild registrations from reactions, save and notify."""
-        # This server's own reactions are read below; the other servers whose reactions were written get their update.
-        for other_guild_id in self._log_kept_reactions() - {guild_id}:
-            self._schedule_update(other_guild_id)
         pub = self._get_last_published_in_guild(guild_id)
         if not pub:
             logger.debug(f"No published formations message recorded for guild {guild_id}; skipping update.")
@@ -970,6 +951,11 @@ class FormationManagement(commands.Cog):
                 if user.bot:
                     continue
                 reactions_snapshot.setdefault(emoji_str, {})[user.id] = f"{user.display_name} ({user.name})"
+
+        if guild_id in self._stale_guilds:
+            # Cleared first: a reaction refused from here on marks the server again, and a failure is marked by the caller.
+            self._stale_guilds.discard(guild_id)
+            self._log_missed_reactions(guild_id, message_id, reactions_snapshot, last_add)
 
         waitlist_notifications: list[tuple[int, str, int]] = []
         promotion_notifications: list[tuple[int, Formation]] = []
