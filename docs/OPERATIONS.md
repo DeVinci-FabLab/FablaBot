@@ -407,8 +407,9 @@ Everything the bot keeps lives in one SQLite file, `data/fablabot.db`: per-serve
 published messages and their registrations, tracked messages, the reaction history and the temporary-admin
 expiries. `data/command_sync_state.json` stays a separate file: it is a cache you may delete.
 
-The registrations of a replaced training message stay with no time limit, so member IDs and names stay in the
-file and in `data/backups/` until the association sets a retention period.
+The reaction history is kept for 3 years, then deleted at the next write. The registrations of a replaced training
+message stay with no time limit, so member IDs and names stay in the file and in `data/backups/` until the planned
+step that keeps only anonymous statistics after 3 years.
 
 - The file is one database at rest: no `-wal` or `-shm` file. A `data/fablabot.db-journal` file only exists while a write is
   in progress, or after a crash, and the next start finishes the recovery from it. Never delete it.
