@@ -5,14 +5,17 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 import sqlite3
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
+from conftest import make_interaction
+from discord import TextChannel
 from discord.ext import commands
 import pytest
 
 from fablabot import db
+from fablabot.cogs import formation_management
 from fablabot.cogs.formation_management import FormationManagement
-from fablabot.helpers.constants import PARIS_TZ
+from fablabot.helpers.constants import PARIS_TZ, ErrorMessages
 from fablabot.models import FmMessageDraft, Formation, PublishedMessage
 from fablabot.services import formations
 
@@ -212,3 +215,33 @@ async def test_a_failed_guild_list_skips_the_tick(cog: Any, monkeypatch: pytest.
     monkeypatch.setattr(formations, "guilds_with_published", MagicMock(side_effect=sqlite3.OperationalError))
 
     await cog._check_upcoming_formations.coro(cog)
+
+
+@pytest.mark.parametrize(
+    ("delete_error", "reply"),
+    [(None, ErrorMessages.PUBLISH_NOT_SAVED), (OSError(), ErrorMessages.PUBLISH_NOT_SAVED_STILL_UP)],
+    ids=["post-deleted", "post-still-up"],
+)
+async def test_a_publish_the_database_refuses_adds_no_reaction_and_says_how_it_ended(
+    cog: Any, delete_error: Exception | None, reply: str
+) -> None:
+    """The save comes before the reactions, the post is taken down or the caller told to, and the draft stays."""
+    draft = message(full_formation())
+    cog.set_guild_draft(GUILD_A, draft)
+    interaction = make_interaction(guild_id=GUILD_A)
+    posted = MagicMock(id=FIRST)
+    posted.delete = AsyncMock(side_effect=delete_error)
+    posted.add_reaction = AsyncMock()
+    channel = MagicMock(spec=TextChannel)
+    channel.send = AsyncMock(return_value=posted)
+
+    with (
+        patch.object(formation_management, "ensure_command_context", AsyncMock(return_value=True)),
+        patch.object(formations, "save_published", side_effect=sqlite3.OperationalError("full")),
+    ):
+        await FormationManagement.fm_publish.callback(cog, interaction, channel=channel)  # pyright: ignore[reportCallIssue]
+
+    posted.add_reaction.assert_not_awaited()
+    posted.delete.assert_awaited_once()
+    interaction.followup.send.assert_awaited_once_with(reply)
+    assert formations.get_draft(GUILD_A) == draft

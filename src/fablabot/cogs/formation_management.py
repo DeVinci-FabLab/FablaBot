@@ -31,6 +31,7 @@ from fablabot.helpers.formation import (
     send_waitlist_dm,
 )
 from fablabot.helpers.reaction_log import ReactionLogManager
+from fablabot.helpers.safe_discord_operations import retract_unsaved_post
 from fablabot.helpers.utils import ensure_command_context, is_valid_emoji
 from fablabot.logging_handlers import guild_log_context
 from fablabot.models import FmCommand, FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
@@ -86,9 +87,6 @@ class FormationManagement(commands.Cog):
         # update, which takes the missed reactions back from Discord. Ceiling: in memory, so a restart during an outage
         # forgets them and a member who reacted then reacts again; the upgrade path is a column.
         self._stale_guilds: set[int] = set()
-        # The published message when the database refused it, so reminder flags and registrations are neither lost
-        # nor redone. Same ceiling; every write of the message tries to save it again.
-        self._unsaved_published: dict[int, PublishedMessage] = {}
         self._reaction_logs.purge_all()
         self._check_upcoming_formations.start()
         logger.info("FormationManagement initialized")
@@ -437,6 +435,21 @@ class FormationManagement(commands.Cog):
             await interaction.followup.send("Erreur pendant la publication du message.", ephemeral=True)
             return
 
+        # Saved before the reactions: a reaction counts from the first one, and a refused save leaves nothing to undo.
+        try:
+            self._set_last_published_in_guild(
+                interaction.guild.id,
+                PublishedMessage(
+                    message_id=msg.id,
+                    channel_id=channel.id,
+                    message=draft,
+                ),
+            )
+        except sqlite3.Error:
+            logger.exception(f"Guild {interaction.guild.id} could not save the published message {msg.id}; retracting it.")
+            await interaction.followup.send(await retract_unsaved_post(logger, msg))
+            return
+
         success_reactions = 0
         for fm in draft.fms:
             try:
@@ -447,15 +460,6 @@ class FormationManagement(commands.Cog):
                     f"Guild {interaction.guild.id} failed to add reaction {fm.emoji!r} "
                     f"for formation {fm.name!r} in published message.",
                 )
-
-        self._set_last_published_in_guild(
-            interaction.guild.id,
-            PublishedMessage(
-                message_id=msg.id,
-                channel_id=channel.id,
-                message=draft,
-            ),
-        )
 
         logger.info(f"Guild {interaction.guild.id} published the formations draft in {channel}.")
         await interaction.followup.send(
@@ -618,9 +622,8 @@ class FormationManagement(commands.Cog):
                 self._schedule_update(guild_id, delay=0)
         # An exception other than a network one ends a tasks.loop for good: a storage failure waits for the next tick.
         try:
-            # A snapshot: waiting on a guild's lock yields to code that may add a guild to the state. A guild whose only
-            # published message is in memory has no row yet; the tick serves it and saves the message.
-            guild_ids = sorted({*formations.guilds_with_published(), *self._unsaved_published})
+            # A snapshot: waiting on a guild's lock yields to code that may add a guild to the state.
+            guild_ids = formations.guilds_with_published()
         except sqlite3.Error:
             logger.exception("Reminder tick skipped: storage failure.")
             return
@@ -727,50 +730,15 @@ class FormationManagement(commands.Cog):
         formations.save_draft(guild_id, draft)
 
     def _get_last_published_in_guild(self, guild_id: int) -> PublishedMessage | None:
-        """Get the last published state for a specific guild.
-
-        The copy the database refused to take wins over the stored message unless that one is newer (message IDs
-        grow with time): a stale copy never hides a newer message. When the database cannot be read, the copy
-        is the best the cog knows.
-
-        Raises:
-            sqlite3.Error: The database cannot be read and no copy is kept.
-        """
-        kept = self._unsaved_published.get(guild_id)
-        try:
-            stored = formations.current_published(guild_id)
-        except sqlite3.Error:
-            if kept is None:
-                raise
-            logger.exception(f"Published formations message not read guild_id={guild_id}; using the copy kept in memory")
-            return kept
-        if kept is not None:
-            if stored is None or kept.message_id >= stored.message_id:
-                return kept
-            del self._unsaved_published[guild_id]
-        if stored is None:
+        """Get the last published state for a specific guild."""
+        published = formations.current_published(guild_id)
+        if published is None:
             logger.warning(f"No published formations data stored for guild {guild_id}.")
-        return stored
+        return published
 
     def _set_last_published_in_guild(self, guild_id: int, published: PublishedMessage) -> None:
-        """Set the last published state for a specific guild.
-
-        A storage failure is logged and the state is kept in memory, so the reminder flags and the registrations
-        it holds are not lost nor redone; the next write of the guild saves it. Message IDs grow with time, and a
-        message older than the kept one is never kept in its place, nor does it drop the kept one once saved.
-        """
-        kept = self._unsaved_published.get(guild_id)
-        try:
-            formations.save_published(guild_id, published)
-        except sqlite3.Error:
-            logger.exception(
-                f"Published formations message not saved guild_id={guild_id}; kept in memory, saved with the next write"
-            )
-            if kept is None or published.message_id >= kept.message_id:
-                self._unsaved_published[guild_id] = published
-            return
-        if kept is not None and published.message_id >= kept.message_id:
-            del self._unsaved_published[guild_id]
+        """Set the last published state for a specific guild."""
+        formations.save_published(guild_id, published)
 
     def _reaction_counts(self, guild_id: int, event: ReactionEvent) -> bool:
         """Tell whether a reaction is on a server's published message, on one of its emojis, and not past the deadline.

@@ -1,6 +1,6 @@
 """The reminder tick and the registration update both rewrite the published message: neither undoes the other.
 
-A storage failure on either write loses neither the reminder flags nor a registration.
+A storage failure loses no registration: the reaction stays on Discord, and the update takes it back from there.
 """
 
 from __future__ import annotations
@@ -297,6 +297,20 @@ async def test_a_reaction_taken_back_after_the_deadline_stays_out(started_bot: A
     assert env.cog._reaction_logs.history(GUILD_ID, MESSAGE_ID) == []
 
 
+async def test_a_failed_save_of_an_update_announces_nothing_and_the_tick_redoes_it(
+    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
+) -> None:
+    """The log holds the reaction, the save fails: no edit, no DM, and the next tick finishes the job."""
+    monkeypatch.setattr(formations, "save_published", _flaky(formations.save_published, storage_error))
+
+    env.cog._schedule_update(GUILD_ID, delay=0)
+    await env.cog._pending_update_tasks[GUILD_ID]
+
+    assert env.registration_dm.await_count == 0
+    await _tick_update(env)
+    assert env.registration_dm.await_count == 1
+
+
 async def test_a_refused_reaction_marks_only_its_own_server(
     env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
 ) -> None:
@@ -306,6 +320,21 @@ async def test_a_refused_reaction_marks_only_its_own_server(
     await env.cog.on_raw_reaction_event(_reaction_payload())
 
     assert env.cog._stale_guilds == {GUILD_ID}
+
+
+async def test_a_reminder_is_sent_again_when_saving_its_flag_fails(
+    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
+) -> None:
+    """A failed save of the notified flag keeps the state before: the next tick, still in the window, sends it again."""
+    monkeypatch.setattr(formations, "save_published", _flaky(formations.save_published, storage_error))
+
+    await env.cog._check_upcoming_formations()
+    await env.cog._check_upcoming_formations()
+
+    assert env.notify_participants.await_count == 2
+    stored = formations.current_published(GUILD_ID)
+    assert stored is not None
+    assert stored.message.fms[0].notified_hour_before is True
 
 
 async def test_a_reaction_taken_back_at_the_tick_is_logged_under_its_own_server(
@@ -324,139 +353,3 @@ async def test_a_reaction_taken_back_at_the_tick_is_logged_under_its_own_server(
     lines = [r for r in caplog.records if "Logged reaction" in r.getMessage()]
     assert lines
     assert {r.guild_id for r in lines} == {GUILD_ID}  # type: ignore[attr-defined]
-
-
-async def test_a_reminder_is_not_sent_again_when_saving_its_flag_fails(
-    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
-) -> None:
-    """A failed save of the notified flag keeps the flag in memory: the next tick sends nothing and saves it."""
-    monkeypatch.setattr(formations, "save_published", _flaky(formations.save_published, storage_error))
-
-    await env.cog._check_upcoming_formations()
-    await env.cog._check_upcoming_formations()
-
-    assert env.notify_participants.await_count == 1
-    stored = formations.current_published(GUILD_ID)
-    assert stored is not None
-    assert stored.message.fms[0].notified_hour_before is True
-
-
-async def test_an_unsaved_message_is_current_until_a_newer_one_is_saved(
-    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
-) -> None:
-    """A message kept in memory after a failed save stays current against a late write of an older one, not a newer one."""
-    fm = Formation(
-        emoji=EMOJI, name="Soudure", trainer_mention="<@1>", start_iso="2099-06-01T18:00:00+02:00", duration="2h", seats=5
-    )
-
-    def message(message_id: int) -> PublishedMessage:
-        return PublishedMessage(
-            message_id=message_id,
-            channel_id=77,
-            message=FmMessageDraft(header="h", role_id=9, intro="i", fms=[fm], end="e"),
-        )
-
-    def current_id() -> int | None:
-        current = env.cog._get_last_published_in_guild(GUILD_ID)
-        return current.message_id if current else None
-
-    monkeypatch.setattr(formations, "save_published", _flaky(formations.save_published, storage_error))
-    env.cog._set_last_published_in_guild(GUILD_ID, message(MESSAGE_ID + 1))
-    assert current_id() == MESSAGE_ID + 1
-
-    env.cog._set_last_published_in_guild(GUILD_ID, message(MESSAGE_ID))
-    assert current_id() == MESSAGE_ID + 1
-
-    env.cog._set_last_published_in_guild(GUILD_ID, message(MESSAGE_ID + 2))
-    assert current_id() == MESSAGE_ID + 2
-
-
-def _message(message_id: int, *, start_iso: str = "2099-06-01T18:00:00+02:00") -> PublishedMessage:
-    """A published message with one formation, under the given message ID."""
-    fm = Formation(emoji=EMOJI, name="Soudure", trainer_mention="<@1>", start_iso=start_iso, duration="2h", seats=5)
-    return PublishedMessage(
-        message_id=message_id,
-        channel_id=77,
-        message=FmMessageDraft(header="h", role_id=9, intro="i", fms=[fm], end="e"),
-    )
-
-
-def _current_id(cog: Any, guild_id: int = GUILD_ID) -> int | None:
-    """The ID of the message the cog treats as current on a server."""
-    current = cog._get_last_published_in_guild(guild_id)
-    return current.message_id if current else None
-
-
-async def test_a_failed_write_of_an_older_message_leaves_a_newer_unsaved_one_current(
-    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
-) -> None:
-    """A late write of the old message that fails too must not replace the newer message that exists only in memory."""
-    monkeypatch.setattr(formations, "save_published", _flaky(formations.save_published, storage_error, times=2))
-    env.cog._set_last_published_in_guild(GUILD_ID, _message(MESSAGE_ID + 1))
-
-    env.cog._set_last_published_in_guild(GUILD_ID, _message(MESSAGE_ID))
-
-    assert _current_id(env.cog) == MESSAGE_ID + 1
-
-
-async def test_a_failed_write_of_an_older_message_does_not_hide_a_newer_saved_one(
-    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
-) -> None:
-    """A late write of the old message that fails leaves the saved newer message current, and its reactions still count."""
-    env.cog._set_last_published_in_guild(GUILD_ID, _message(MESSAGE_ID + 1))
-    monkeypatch.setattr(formations, "save_published", _flaky(formations.save_published, storage_error))
-    env.cog._set_last_published_in_guild(GUILD_ID, _message(MESSAGE_ID))
-    _forget_logged_reactions()
-
-    assert _current_id(env.cog) == MESSAGE_ID + 1
-    payload = _reaction_payload()
-    payload.message_id = MESSAGE_ID + 1
-    await env.cog.on_raw_reaction_event(payload)
-
-    assert len(env.cog._reaction_logs.history(GUILD_ID, MESSAGE_ID + 1)) == 1
-
-
-async def test_an_unsaved_message_written_late_after_a_newer_one_does_not_become_current(
-    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
-) -> None:
-    """A message that was only in memory and reaches the database after a newer one is stored without taking its place."""
-    monkeypatch.setattr(formations, "save_published", _flaky(formations.save_published, storage_error))
-    env.cog._set_last_published_in_guild(GUILD_ID, _message(MESSAGE_ID + 1))
-    env.cog._set_last_published_in_guild(GUILD_ID, _message(MESSAGE_ID + 2))
-
-    env.cog._set_last_published_in_guild(GUILD_ID, _message(MESSAGE_ID + 1))
-
-    stored = formations.current_published(GUILD_ID)
-    assert stored is not None
-    assert stored.message_id == MESSAGE_ID + 2
-    assert _current_id(env.cog) == MESSAGE_ID + 2
-
-
-async def test_a_message_kept_in_memory_is_not_current_on_another_server(
-    env: _Env, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
-) -> None:
-    """The copy kept after a failed save belongs to its server: another server still sees its own message, or none."""
-    monkeypatch.setattr(formations, "save_published", _flaky(formations.save_published, storage_error))
-    env.cog._set_last_published_in_guild(OTHER_GUILD_ID, _message(MESSAGE_ID + 5))
-
-    assert _current_id(env.cog, OTHER_GUILD_ID) == MESSAGE_ID + 5
-    assert _current_id(env.cog, GUILD_ID) == MESSAGE_ID
-    assert _current_id(env.cog, NEW_GUILD_ID) is None
-
-
-async def test_the_reminder_tick_serves_a_first_publish_the_database_refused_and_saves_it(
-    started_bot: Any, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
-) -> None:
-    """A server whose only published message is in memory still gets its reminders, and the tick saves the message."""
-    cog = started_bot.get_cog("FormationManagement")
-    monkeypatch.setattr(formations, "save_published", _flaky(formations.save_published, storage_error))
-    env = _Env(cog, monkeypatch)
-    assert formations.current_published(GUILD_ID) is None
-
-    await cog._check_upcoming_formations()
-
-    assert env.notify_participants.await_count == 1
-    stored = formations.current_published(GUILD_ID)
-    assert stored is not None
-    assert stored.message.fms[0].notified_hour_before is True
-    assert cog._unsaved_published == {}

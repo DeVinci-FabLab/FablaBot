@@ -212,5 +212,17 @@ class ErrorMessages:
     GENERIC_ERROR = "Une erreur est survenue lors de {operation}."
     """Generic error message."""
 
+    PUBLISH_NOT_SAVED = (
+        "Publication annulée : l'enregistrement a échoué et le message a été retiré du salon. "
+        "Le brouillon est intact, réessaie plus tard."
+    )
+    """The database refused a post: it was deleted."""
+
+    PUBLISH_NOT_SAVED_STILL_UP = (
+        "L'enregistrement a échoué et le message n'a pas pu être retiré du salon : supprime-le à la main, "
+        "ses réactions ne comptent pas. Le brouillon est intact, réessaie plus tard."
+    )
+    """The database refused a post and Discord refused to delete it."""
+
     HTTP_ERROR = "Erreur HTTP lors de {operation}."
     """HTTP error during operation."""

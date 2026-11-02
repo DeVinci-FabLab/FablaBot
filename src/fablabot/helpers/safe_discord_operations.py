@@ -9,6 +9,7 @@ from discord import (
     Forbidden,
     HTTPException,
     Member,
+    Message,
     PermissionOverwrite,
     Role,
     TextChannel,
@@ -80,6 +81,24 @@ async def safe_remove_roles(
             operation=f"le retrait des rôles {', '.join(role.name for role in roles)} à {format_member_mention(member)}",
         )
     return True, None
+
+
+async def retract_unsaved_post(logger: Logger, message: Message) -> str:
+    """Delete a post the database refused to record, so members do not react to a message nothing follows.
+
+    Args:
+        logger (Logger): The logger to use for error messages.
+        message (Message): The post.
+
+    Returns:
+        str: The reply that tells the caller how it went.
+    """
+    try:
+        await message.delete()
+    except Exception:
+        logger.exception(f"Failed to retract the unsaved post message_id={message.id}")
+        return ErrorMessages.PUBLISH_NOT_SAVED_STILL_UP
+    return ErrorMessages.PUBLISH_NOT_SAVED
 
 
 async def safe_create_text_channel(

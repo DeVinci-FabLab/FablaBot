@@ -266,29 +266,28 @@ async def test_fm_publish_then_a_reaction_counts_as_a_sign_up(server: Server) ->
     assert str(server.plain.id).encode() in log
 
 
-async def test_fm_publish_whose_record_cannot_be_saved_still_completes_and_counts_sign_ups(
+async def test_fm_publish_the_database_refuses_takes_the_post_down_and_says_so(
     server: Server, monkeypatch: pytest.MonkeyPatch, storage_error: sqlite3.Error
 ) -> None:
-    """A storage failure after the post leaves a finished publish: the reply comes and reactions still count."""
-    real = formations.save_published
-    failures = [storage_error]
+    """A storage failure after the post leaves no post, no bot reaction, and a private reply; the draft publishes later."""
 
-    def flaky(*args: Any) -> None:
-        if failures:
-            raise failures.pop()
-        real(*args)
+    def refused(*_args: Any) -> None:
+        raise storage_error
 
-    monkeypatch.setattr(formations, "save_published", flaky)
     await _draft(server, later())
+    with monkeypatch.context() as patched:
+        patched.setattr(formations, "save_published", refused)
+        await server.admin.slash(server.commands, "fm publish", channel=server.general)
+    assert "Publication annulée" in everything(server.commands)
+    assert server.general.last_message is None
+
     await server.admin.slash(server.commands, "fm publish", channel=server.general)
     assert "Message publié dans" in everything(server.commands)
     published = server.general.last_message
     assert published is not None
-
     await server.plain.react(published, "🔧")
     await server.env.advance_time(120)
     export = await server.admin.slash(server.commands, "fm export")
-
     log = await next(a for a in export.response.attachments if a.filename.endswith(".csv")).read()
     assert str(server.plain.id).encode() in log
 
