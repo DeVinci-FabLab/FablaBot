@@ -11,7 +11,7 @@ import logging
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-from discord import TextChannel
+from discord import NotFound, TextChannel
 import pytest
 
 from fablabot import db
@@ -88,6 +88,7 @@ class _Env:
         reaction.users = _users
         message = MagicMock(id=MESSAGE_ID, reactions=[reaction])
         message.edit = AsyncMock()
+        self.message = message
 
         async def _fetch(_message_id: int) -> MagicMock:
             self.fetch_entered.set()
@@ -96,6 +97,7 @@ class _Env:
 
         channel = MagicMock(spec=TextChannel)
         channel.fetch_message = _fetch
+        self.channel = channel
         guild = MagicMock(id=GUILD_ID)
         guild.get_channel = MagicMock(return_value=channel)
         monkeypatch.setattr(cog.bot, "get_guild", lambda _guild_id: guild)
@@ -537,3 +539,70 @@ async def test_a_member_who_left_and_came_back_in_the_log_keeps_the_new_place_th
 
     assert _seats(env) == ([MEMBER_ID], [OTHER_MEMBER_ID])
     assert len(env.cog._reaction_logs.history(GUILD_ID, MESSAGE_ID)) == 4
+
+
+async def test_an_update_that_raises_is_run_again_at_the_next_tick(env: _Env) -> None:
+    """The member's reaction is logged, the update stops before saving: the next tick seats the member, once."""
+    reaction = env.message.reactions[0]
+    reaction.users = _flaky(reaction.users, RuntimeError("Discord refused"))
+
+    env.cog._schedule_update(GUILD_ID, delay=0)
+    await env.cog._pending_update_tasks[GUILD_ID]
+
+    assert _seats(env) == ([], [])
+    await _tick_update(env)
+    assert _seats(env) == ([MEMBER_ID], [])
+    assert env.registration_dm.await_count == 1
+    await _tick_update(env)
+    assert env.message.edit.await_count == 1
+
+
+async def test_a_reaction_during_an_update_that_then_raises_is_seated_at_the_next_tick(env_with_two: _Env) -> None:
+    """The request made during the running update dies with it: the tick still gives the second member a place."""
+    env = env_with_two
+    sending = asyncio.Event()
+    release = asyncio.Event()
+    failures = [RuntimeError("DM failed")]
+
+    async def _held_dm_that_fails(*_args: Any, **_kwargs: Any) -> None:
+        if failures:
+            sending.set()
+            await release.wait()
+            raise failures.pop()
+
+    env.registration_dm.side_effect = _held_dm_that_fails
+    env.cog._schedule_update(GUILD_ID, delay=0)
+    running = env.cog._pending_update_tasks[GUILD_ID]
+    await sending.wait()
+    env.cog._reaction_logs.append(GUILD_ID, _add_event(OTHER_MEMBER_ID))
+    env.cog._schedule_update(GUILD_ID, delay=0)
+    release.set()
+    await running
+
+    assert _seats(env) == ([MEMBER_ID], [])
+    await _tick_update(env)
+    assert _seats(env) == ([MEMBER_ID, OTHER_MEMBER_ID], [])
+
+
+async def test_a_published_message_that_cannot_be_fetched_is_tried_again_at_the_next_tick(env: _Env) -> None:
+    """A failed read of the post leaves the logged reaction without a place until the tick redoes the update."""
+    env.channel.fetch_message = _flaky(env.channel.fetch_message, OSError("connection reset"))
+
+    env.cog._schedule_update(GUILD_ID, delay=0)
+    await env.cog._pending_update_tasks[GUILD_ID]
+
+    assert _seats(env) == ([], [])
+    await _tick_update(env)
+    assert _seats(env) == ([MEMBER_ID], [])
+    assert env.registration_dm.await_count == 1
+
+
+async def test_a_published_message_that_no_longer_exists_is_not_fetched_again(env: _Env) -> None:
+    """Nothing is left to update on a deleted post: the tick does not keep asking for it."""
+    env.channel.fetch_message = AsyncMock(side_effect=NotFound(MagicMock(status=404, reason="Not Found"), "gone"))
+
+    env.cog._schedule_update(GUILD_ID, delay=0)
+    await env.cog._pending_update_tasks[GUILD_ID]
+    await _tick_update(env)
+
+    env.channel.fetch_message.assert_awaited_once()

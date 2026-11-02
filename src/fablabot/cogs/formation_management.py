@@ -12,7 +12,7 @@ import sqlite3
 from typing import Any, override
 from warnings import deprecated
 
-from discord import Embed, File, Interaction, Member, RawReactionActionEvent, Role, TextChannel, app_commands
+from discord import Embed, File, Interaction, Member, NotFound, RawReactionActionEvent, Role, TextChannel, app_commands
 from discord.ext import commands, tasks
 
 from fablabot.helpers.access import AnyRole, access
@@ -89,6 +89,9 @@ class FormationManagement(commands.Cog):
         # update, which takes the missed reactions back from Discord. Ceiling: in memory, so a restart during an outage
         # forgets them and a member who reacted then reacts again; the upgrade path is a column.
         self._stale_guilds: set[int] = set()
+        # Servers where an update failed for another reason, such as Discord refusing a read: the reactions it was to seat
+        # are logged and wait for the next reminder tick to run it again. Same ceiling: a restart forgets them.
+        self._retry_guilds: set[int] = set()
         self._reaction_logs.purge_all()
         self._check_upcoming_formations.start()
         logger.info("FormationManagement initialized")
@@ -619,7 +622,7 @@ class FormationManagement(commands.Cog):
         """Check for formations starting soon and notify trainers/responsibles (Paris timezone)."""
         logger.debug("Checking for upcoming formations to notify trainers and responsibles (Paris time).")
         now = datetime.now(PARIS_TZ)
-        for guild_id in self._stale_guilds:
+        for guild_id in self._stale_guilds | self._retry_guilds:
             with guild_log_context(guild_id):  # the update's task inherits it, so its lines stay with their server
                 self._schedule_update(guild_id, delay=0)
         # An exception other than a network one ends a tasks.loop for good: a storage failure waits for the next tick.
@@ -834,6 +837,7 @@ class FormationManagement(commands.Cog):
                 while True:
                     await asyncio.sleep(delay)
                     self._update_wanted.discard(guild_id)
+                    self._retry_guilds.discard(guild_id)
                     await self._update_published_message(guild_id)
                     if guild_id not in self._update_wanted:
                         break
@@ -845,7 +849,8 @@ class FormationManagement(commands.Cog):
                 )
                 self._stale_guilds.add(guild_id)
             except Exception:
-                logger.exception(f"Error during scheduled update for guild {guild_id}.")
+                logger.exception(f"Error during scheduled update for guild {guild_id}; the next reminder tick tries again.")
+                self._retry_guilds.add(guild_id)
             finally:
                 self._update_wanted.discard(guild_id)
                 self._pending_update_tasks.pop(guild_id, None)
@@ -885,8 +890,10 @@ class FormationManagement(commands.Cog):
 
         try:
             msg = await channel.fetch_message(message_id)
-        except Exception:
+        except Exception as exc:
             logger.exception(f"Failed to fetch message {message_id} in channel {channel_id}.")
+            if not isinstance(exc, NotFound):  # a deleted post has nothing left to update
+                self._retry_guilds.add(guild_id)
             return
         logger.debug(f"Fetched published message {message_id} in channel {channel_id} for guild {guild_id}.")
 

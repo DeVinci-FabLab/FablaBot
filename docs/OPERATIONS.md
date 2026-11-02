@@ -260,6 +260,11 @@ log channel. Free the space: the next write works, with no restart.
 
 A restart during the failure forgets which servers to catch up: a member who reacted then has to react again.
 
+An update of the training message that stops for another reason (Discord does not return the post, or the run
+fails) is run again at the next 5-minute tick: the log shows `Error during scheduled update` or `Failed to fetch
+message`, and a member whose reaction is logged gets their place and their DM then. A post that was deleted is not
+asked for again, and a restart forgets the retry, as above.
+
 ## Server check at start
 
 At the first start of the process, once the allow-list is applied, the bot reads each server it serves
