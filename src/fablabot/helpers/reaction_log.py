@@ -86,13 +86,15 @@ class ReactionLogManager:
             message_id (int): Message identifier.
 
         Returns:
-            list[ReactionEvent]: List of reaction events for the message, sorted by timestamp.
+            list[ReactionEvent]: List of reaction events for the message, in the order they happened.
         """
         if abs(message_id) > _MAX_ID:
             return []
+        # By the instant, not the text: the hour from 02:00 to 03:00 on the last Sunday of October happens twice, and its
+        # second pass has the smaller text (02:05+01:00 follows 02:50+02:00). A date SQLite cannot read comes first.
         rows = db.connection().execute(
             "SELECT message_id, user_id, user_name, emoji, action, ts_iso FROM reaction_event "
-            "WHERE scope = ? AND guild_id = ? AND message_id = ? ORDER BY ts_iso, id",
+            "WHERE scope = ? AND guild_id = ? AND message_id = ? ORDER BY unixepoch(ts_iso), id",
             (self._scope, guild_id, message_id),
         )
         history = [ReactionEvent.from_dict(dict(row)) for row in rows]

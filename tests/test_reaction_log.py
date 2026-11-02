@@ -26,11 +26,16 @@ def _log(scope: ReactionScope = "formation") -> ReactionLogManager:
     return ReactionLogManager(scope, retention=RETENTION, logger=logger)
 
 
-def _event(ts_iso: str, *, user_id: int = USER, user_name: str | None = "alice", message_id: int = MESSAGE) -> ReactionEvent:
-    """Build an added reaction."""
-    return ReactionEvent(
-        message_id=message_id, user_id=user_id, user_name=user_name, emoji="🔧", action=ReactionAction.ADD, ts_iso=ts_iso
-    )
+def _event(
+    ts_iso: str,
+    *,
+    user_id: int = USER,
+    user_name: str | None = "alice",
+    message_id: int = MESSAGE,
+    action: ReactionAction = ReactionAction.ADD,
+) -> ReactionEvent:
+    """Build a reaction, an added one unless told otherwise."""
+    return ReactionEvent(message_id=message_id, user_id=user_id, user_name=user_name, emoji="🔧", action=action, ts_iso=ts_iso)
 
 
 def _days_ago(days: float) -> str:
@@ -64,6 +69,20 @@ def test_history_follows_time_then_arrival() -> None:
     log.append(GUILD_A, _event(_days_ago(3), user_id=4))
 
     assert [event.user_id for event in log.history(GUILD_A, MESSAGE)] == [4, 3, 1, 2]
+
+
+def test_history_follows_the_instant_when_the_clock_goes_back() -> None:
+    """The hour from 02:00 to 03:00 on the last Sunday of October happens twice: 02:05+01:00 is 15 minutes after 02:50+02:00."""
+    log = ReactionLogManager("formation", retention=timedelta(days=36500), logger=logger)  # fixed dates must not expire
+    log.append(GUILD_A, _event("2026-10-25T02:50:00+02:00", action=ReactionAction.REMOVE))
+    log.append(GUILD_A, _event("2026-10-25T02:05:00+01:00"))
+    log.append(GUILD_A, _event("2026-10-24T20:00:00+02:00"))
+
+    assert [(event.ts_iso, event.action) for event in log.history(GUILD_A, MESSAGE)] == [
+        ("2026-10-24T20:00:00+02:00", ReactionAction.ADD),
+        ("2026-10-25T02:50:00+02:00", ReactionAction.REMOVE),
+        ("2026-10-25T02:05:00+01:00", ReactionAction.ADD),
+    ]
 
 
 def test_scopes_and_servers_stay_apart() -> None:

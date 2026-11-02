@@ -541,6 +541,28 @@ async def test_a_member_who_left_and_came_back_in_the_log_keeps_the_new_place_th
     assert len(env.cog._reaction_logs.history(GUILD_ID, MESSAGE_ID)) == 4
 
 
+async def test_a_member_who_left_and_came_back_in_the_hour_the_clock_repeats_keeps_the_seat(
+    started_bot: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The re-add at 02:05+01:00 comes 15 minutes after the removal at 02:50+02:00, though its text sorts before."""
+    env = _Env(started_bot.get_cog("FormationManagement"), monkeypatch)
+    monkeypatch.setattr(env.cog._reaction_logs, "_retention", timedelta(days=36500))  # fixed dates must not expire
+    _forget_logged_reactions()
+    for action, ts_iso in (
+        (ReactionAction.ADD, "2026-10-24T20:00:00+02:00"),
+        (ReactionAction.REMOVE, "2026-10-25T02:50:00+02:00"),
+        (ReactionAction.ADD, "2026-10-25T02:05:00+01:00"),
+    ):
+        event = ReactionEvent(
+            message_id=MESSAGE_ID, user_id=MEMBER_ID, user_name="alice", emoji=EMOJI, action=action, ts_iso=ts_iso
+        )
+        env.cog._reaction_logs.append(GUILD_ID, event)
+
+    await env.cog._update_published_message(GUILD_ID)
+
+    assert _seats(env) == ([MEMBER_ID], [])
+
+
 async def test_an_update_that_raises_is_run_again_at_the_next_tick(env: _Env) -> None:
     """The member's reaction is logged, the update stops before saving: the next tick seats the member, once."""
     reaction = env.message.reactions[0]
