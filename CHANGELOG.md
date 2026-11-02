@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.2](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.6.1...v0.6.2) (2026-11-02)
+
+
+### Bug Fixes
+
+* **message:** check the clicker's rights again on a staff view ([#146](https://github.com/DeVinci-FabLab/FablaBot/issues/146)) ([b108e78](https://github.com/DeVinci-FabLab/FablaBot/commit/b108e78333af887a62a939a2a82a3ecd564a7a38))
+
+
+### Documentation
+
+* shorten the README and move the rest to the guides ([#144](https://github.com/DeVinci-FabLab/FablaBot/issues/144)) ([6a309a8](https://github.com/DeVinci-FabLab/FablaBot/commit/6a309a8a09585cdbdb3d1e7cb36abec02bce3f00))
+
 ## [0.6.1](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.6.0...v0.6.1) (2026-11-02)
 
 
