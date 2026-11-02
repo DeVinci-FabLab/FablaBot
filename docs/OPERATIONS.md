@@ -56,11 +56,13 @@ Stop the stack, then archive `logs/` and `data/`: an archive of a running databa
    mkdir -p ~/fablabot-archive && chmod 700 ~/fablabot-archive
    ```
 
-3. Archive both folders and restrict the file:
+3. Archive both folders and restrict the file. `data/exports/` is private to the image's user (see "Stored data"), so
+   `tar` and `find` run with `sudo`: without it they skip that folder, and the two counts can still match with an
+   export missing. The redirection is done by your own shell, so the archive stays yours.
 
    ```bash
    STAMP=$(date +%Y%m%d-%H%M%S)
-   tar -czf ~/fablabot-archive/fablabot-$STAMP.tar.gz -C "$VOLUMES_PATH/fablabot" data logs
+   sudo tar -czf - -C "$VOLUMES_PATH/fablabot" data logs > ~/fablabot-archive/fablabot-$STAMP.tar.gz
    chmod 600 ~/fablabot-archive/fablabot-$STAMP.tar.gz
    ```
 
@@ -68,7 +70,7 @@ Stop the stack, then archive `logs/` and `data/`: an archive of a running databa
 
    ```bash
    tar -tzf ~/fablabot-archive/fablabot-$STAMP.tar.gz | grep -vc '/$'
-   find "$VOLUMES_PATH/fablabot/data" "$VOLUMES_PATH/fablabot/logs" -type f | wc -l
+   sudo find "$VOLUMES_PATH/fablabot/data" "$VOLUMES_PATH/fablabot/logs" -type f | wc -l
    ```
 
 5. Redeploy the stack.
@@ -113,15 +115,31 @@ So write fresh JSON files first. If the database release never started, skip to 
    fablabot_state "$VOLUMES_PATH/fablabot/data" fablabot.export_state data/exports/$STAMP
    ```
 
-3. Move the old JSON files aside and copy the export in their place. Nothing is deleted.
+3. Look at the export, then move the old JSON files aside and copy the export in their place. Nothing is deleted. The
+   export folder is private to the image's user, so every command that reads it runs with `sudo`, and the copy names
+   its files: your own shell cannot enter the folder, so it would leave a `*` as it is, and `cp` would copy nothing
+   after the old files were already aside.
 
    ```bash
    cd "$VOLUMES_PATH/fablabot/data"
+   sudo ls exports/$STAMP
+   ```
+
+   It must list `guild_config.json`, `formations_state.json`, `messages_state.json` and `temp_admin_state.json`. If it
+   does not, stop: nothing has moved. Then:
+
+   ```bash
    sudo mkdir json-before-$STAMP
    sudo mv guild_config.json formations_state.json messages_state.json json-before-$STAMP/
    [ ! -e temp_admin_state.json ] || sudo mv temp_admin_state.json json-before-$STAMP/
-   sudo cp -p exports/$STAMP/*.json .
+   sudo cp -p exports/$STAMP/guild_config.json exports/$STAMP/formations_state.json \
+     exports/$STAMP/messages_state.json exports/$STAMP/temp_admin_state.json .
+   ls -l guild_config.json formations_state.json messages_state.json temp_admin_state.json
    ```
+
+   The last command must list the four files. If one command above failed, do not deploy: the older release would start
+   on empty state, with no error. `json-before-$STAMP/` holds the files that were moved; copy them back with
+   `sudo cp -p`.
 
 4. Set the stack's image to the older `:X.Y.Z` and deploy. Stay on that tag: `:latest` would bring the update back. If
    the older image runs as another user, give it `data/` first, with `sudo chown -R`.
@@ -387,7 +405,7 @@ file and in `data/backups/` until the association sets a retention period.
   channel, and keeps the row. A server that is no longer allowed keeps its settings; nothing reads them until it is
   listed again.
 - `data/exports/<name>/` holds what `fablabot.export_state` wrote. These folders carry the same data, count in the
-  archive, and are never removed by the bot.
+  archive, and are never removed by the bot. Each is private to the image's user: read it with `sudo`.
 
 ## Moving to the database
 

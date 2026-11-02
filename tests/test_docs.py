@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import re
+import stat
+import subprocess
+import tarfile
+import textwrap
 from typing import Any
+
+import pytest
 
 from fablabot.cogs import user_management
 from fablabot.helpers.access import EVERYONE, AnyRole, rule_of
@@ -224,3 +231,113 @@ def test_operator_guide_warns_of_stale_json_and_exports_first() -> None:
     for detail in ("reads the JSON files", "with no error", "fablabot.export_state", "changed since it was imported"):
         assert detail in section, detail
     assert "docs/OPERATIONS.md#back-to-a-release-before-the-database" in _read("README.md")
+
+
+STAMP = "20261102-120000"
+EXPORTED = ("guild_config.json", "formations_state.json", "messages_state.json", "temp_admin_state.json")
+
+
+def _blocks(text: str) -> list[str]:
+    """Return the bash blocks of a piece of the guide, in order, as the operator pastes them."""
+    found = re.findall(r"^ *```bash\n(.*?)^ *```", text, re.MULTILINE | re.DOTALL)
+    return [textwrap.dedent(block) for block in found]
+
+
+class _Host:
+    """The operator's host: the volumes laid out as the guide expects, a `sudo` that can enter the private export folder."""
+
+    def __init__(self, root: Path) -> None:
+        self.home = root / "home"
+        self.volumes = root / "volumes"
+        self.data = self.volumes / "fablabot" / "data"
+        self.export = self.data / "exports" / STAMP
+        self.sudo = root / "bin" / "sudo"
+        for folder in (
+            self.home,
+            self.data,
+            self.volumes / "fablabot" / "logs" / "guilds" / "1",
+            self.export,
+            self.sudo.parent,
+        ):
+            folder.mkdir(parents=True)
+        (self.volumes / "fablabot" / "logs" / "guilds" / "1" / "day.log").write_text("log", encoding="utf-8")
+        for name in EXPORTED[:3]:
+            (self.data / name).write_text(f"old {name}", encoding="utf-8")
+        (self.data / "fablabot.db").write_text("database", encoding="utf-8")
+        for name in EXPORTED:
+            (self.export / name).write_text(f"new {name}", encoding="utf-8")
+        # The export belongs to the image's user and is mode 0700: the operator's own shell cannot enter it. This
+        # `sudo` opens it for the command it runs and shuts it after, so a glob the operator's shell expands finds nothing.
+        self.sudo.write_text(
+            f'#!/bin/sh\nchmod 700 "{self.export}"\n"$@"\nstatus=$?\nchmod 000 "{self.export}"\nexit $status\n'
+        )
+        self.sudo.chmod(0o755)
+        self.export.chmod(0)
+
+    def run(self, blocks: list[str], **env: str) -> subprocess.CompletedProcess[str]:
+        """Run blocks one after the other in one shell, as the operator pastes them, stopping at the first failure."""
+        variables = {
+            **os.environ,
+            "HOME": str(self.home),
+            "VOLUMES_PATH": str(self.volumes),
+            "PATH": f"{self.sudo.parent}{os.pathsep}{os.environ['PATH']}",
+            **env,
+        }
+        return subprocess.run(
+            ["bash", "-e", "-c", "\n".join(blocks)], cwd=self.home, env=variables, capture_output=True, text=True, check=False
+        )
+
+
+@pytest.fixture
+def host(tmp_path: Path) -> Any:
+    """A host with a private export folder, opened again after the test so the folder can be removed."""
+    layout = _Host(tmp_path)
+    yield layout
+    layout.export.chmod(stat.S_IRWXU)
+
+
+needs_a_user = pytest.mark.skipif(os.geteuid() == 0, reason="root enters any folder, so there is no private folder to test")
+
+
+@needs_a_user
+def test_the_archive_steps_take_the_private_export_folder(host: _Host) -> None:
+    """Once an export exists, the archive holds it and the count check counts it."""
+    section = _section(_read("docs/OPERATIONS.md"), "### Before every redeploy")
+
+    done = host.run(_blocks(section))
+
+    assert done.returncode == 0, done.stderr
+    archive_count, disk_count = done.stdout.split()
+    assert archive_count == disk_count
+    archive = next((host.home / "fablabot-archive").glob("*.tar.gz"))
+    with tarfile.open(archive) as opened:
+        assert f"data/exports/{STAMP}/guild_config.json" in opened.getnames()
+    assert stat.S_IMODE(archive.stat().st_mode) == 0o600
+
+
+@needs_a_user
+def test_the_rollback_copies_the_private_export_in_place_of_the_json_files(host: _Host) -> None:
+    """The copy is read with the right to enter the export folder, and the old files are kept aside."""
+    section = _section(_read("docs/OPERATIONS.md"), "#### Back to a release before the database")
+    step = section.split("\n3. ", 1)[1].split("\n4. ", 1)[0]
+
+    done = host.run(_blocks(step), STAMP=STAMP)
+
+    assert done.returncode == 0, done.stderr
+    for name in EXPORTED:
+        assert (host.data / name).read_text(encoding="utf-8") == f"new {name}"
+    for name in EXPORTED[:3]:
+        assert (host.data / f"json-before-{STAMP}" / name).read_text(encoding="utf-8") == f"old {name}"
+    assert set(done.stdout.split()) >= set(EXPORTED)
+
+
+@needs_a_user
+def test_the_rollback_moves_nothing_when_the_export_is_not_there(host: _Host) -> None:
+    """A wrong STAMP shows before the first file moves, so no older release starts on empty state."""
+    section = _section(_read("docs/OPERATIONS.md"), "#### Back to a release before the database")
+    step = section.split("\n3. ", 1)[1].split("\n4. ", 1)[0]
+
+    first = host.run(_blocks(step)[:1], STAMP="20250101-000000")
+
+    assert first.returncode != 0
+    assert sorted(path.name for path in host.data.glob("*.json")) == sorted(EXPORTED[:3])
