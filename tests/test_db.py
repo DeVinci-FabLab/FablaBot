@@ -406,6 +406,7 @@ def test_a_failed_copy_does_not_pass_for_a_copy(tmp_path: Path, monkeypatch: pyt
     with pytest.raises(db.StorageError):
         db.open_database(DB_FILE, migrations=migrations)
     assert list(DB_FILE.parent.glob("backups/test-v1-*.db")) == []
+    assert list(DB_FILE.parent.glob("backups/*.partial*")) == []
 
     monkeypatch.setattr(db, "_copy_to", real)
     db.open_database(DB_FILE, migrations=migrations)
