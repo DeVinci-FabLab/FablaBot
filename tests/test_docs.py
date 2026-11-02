@@ -216,6 +216,16 @@ def test_operator_guide_moves_to_the_database_in_order() -> None:
     assert places == sorted(places)
     for detail in ("Admin -temp-", "24 hours", "never counts", "about 5 minutes", "--network none", "Server check:"):
         assert detail in section, detail
+    rehearsal = section.split("**Rehearse on a copy.**", 1)[1].split("**Hold the update.**", 1)[0]
+    # A retry runs the image the fix built: the tag is pulled before the helper runs, not taken from the local copy.
+    assert rehearsal.index("fablabot:edge") < rehearsal.index('docker pull "$IMAGE"') < rehearsal.index("fablabot_state")
+    hold = section.split("**Hold the update.**", 1)[1].split("**Merge the release pull request.**", 1)[0]
+    assert "docker inspect fablabot --format '{{index .Config.Labels \"org.opencontainers.image.version\"}}'" in hold
+    assert "automatic update" in hold.split("cannot be edited", 1)[1]
+    # The data folder belongs to the image's user, root included, and each count may have grown since the rehearsal.
+    assert "root included" in section
+    assert "may have grown" in section.split("**Check.**", 1)[1].split("**Import.**", 1)[0]
+    assert "if any are left" in section.split("**Read the start.**", 1)[1]
 
 
 def test_operator_guide_says_how_a_failed_import_rolls_back() -> None:
@@ -230,6 +240,14 @@ def test_operator_guide_says_how_a_failed_import_rolls_back() -> None:
     assert "committed" in rows["10"]
     assert "set `data/fablabot.db` aside" in rows["10"]
     assert "mv" in rows["10"]
+    # Step 3 comes before the hold: a release cut now moves `:latest` and can deploy itself over unimported JSON.
+    assert "Fix the cause in a release" not in rows["3"]
+    assert "pull request on `main`" in rows["3"]
+    assert "leave the release pull request open" in rows["3"]
+    assert "`:edge`" in rows["3"]
+    assert "from step 2" in rows["3"]
+    # After a rollback by export the database holds the data: the next import fills it only if none ever committed.
+    assert "`mv`" in rows["8 or 9"]
 
 
 def test_operator_guide_warns_of_stale_json_and_exports_first() -> None:
@@ -237,6 +255,13 @@ def test_operator_guide_warns_of_stale_json_and_exports_first() -> None:
     section = _section(_read("docs/OPERATIONS.md"), "### Rolling back")
     for detail in ("reads the JSON files", "with no error", "fablabot.export_state", "changed since it was imported"):
         assert detail in section, detail
+    # The export brings a fourth file, so the way forward first stops on the file the import never saw.
+    assert "temp_admin_state.json not imported" in section
+    assert "`Cannot export`" in section
+    troubleshooting = _section(_read("docs/OPERATIONS.md"), "## Troubleshooting")
+    row = next(line for line in troubleshooting.splitlines() if "not imported into" in line)
+    assert "rollback by export" in row
+    assert "fablabot.db" in row
     assert "docs/OPERATIONS.md#back-to-a-release-before-the-database" in _read("README.md")
 
 
