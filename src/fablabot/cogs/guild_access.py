@@ -99,6 +99,18 @@ class GuildAccess(commands.Cog):
         return True
 
     @commands.Cog.listener()
+    async def on_connect(self) -> None:
+        """Serve the guilds of the first connection while the list is empty, before any event reaches another listener.
+
+        Ready comes seconds later, and a reaction or a join in that gap would find its guild refused and be lost,
+        as would the first reminder tick. The listeners start in the order their events were created, so this one
+        runs first. Ready still checks the owner of each guild and warns.
+        """
+        policy = self.bot.guild_access
+        if not policy.allowed and not self._first_ready_done:
+            policy.tolerated.update(guild.id for guild in self.bot.guilds)
+
+    @commands.Cog.listener()
     async def on_ready(self) -> None:
         """Reconcile the current guilds with the allow-list, on every full connection."""
         policy = self.bot.guild_access

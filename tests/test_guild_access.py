@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import discord
@@ -392,3 +392,46 @@ async def test_setup_hook_loads_guild_access(fablabot_main: ModuleType, monkeypa
     cog = bot.get_cog("GuildAccess")
     assert isinstance(cog, GuildAccess)
     assert {name for name, _ in cog.get_listeners()} >= {"on_guild_join", "on_ready"}
+
+
+async def test_connect_serves_every_current_guild_when_the_list_is_empty() -> None:
+    """With an empty list, the guilds of the first connection are served at once, with no owner lookup and no leave."""
+    guilds = [_guild(LISTED), _guild(UNLISTED)]
+    cog = _cog(set(), guilds)
+    await cog.on_connect()
+    assert cog.bot.guild_access.is_served(LISTED)
+    assert cog.bot.guild_access.is_served(UNLISTED)
+    cast("MagicMock", cog.bot).is_owner.assert_not_awaited()
+    for guild in guilds:
+        guild.leave.assert_not_awaited()
+
+
+async def test_connect_serves_nothing_new_when_the_list_is_not_empty() -> None:
+    """With a list, the connection changes nothing: only the listed guilds are served."""
+    cog = _cog({LISTED}, [_guild(LISTED), _guild(UNLISTED)])
+    await cog.on_connect()
+    assert cog.bot.guild_access.tolerated == set()
+    assert not cog.bot.guild_access.is_served(UNLISTED)
+
+
+async def test_connect_after_the_first_ready_does_not_serve_a_new_guild() -> None:
+    """A reconnect leaves a guild refused since the start unserved, as ready does."""
+    guilds = [_guild(LISTED)]
+    cog = _cog(set(), guilds)
+    await cog.on_connect()
+    await cog.on_ready()
+    guilds.append(_guild(UNLISTED))
+    await cog.on_connect()
+    assert cog.bot.guild_access.is_served(LISTED)
+    assert not cog.bot.guild_access.is_served(UNLISTED)
+
+
+async def test_a_failed_owner_lookup_at_ready_leaves_no_guild_unserved() -> None:
+    """With an empty list, an unexpected error in the owner lookup does not leave the guilds after it out of the served set."""
+    cog = _cog(set(), [_guild(LISTED), _guild(UNLISTED)])
+    cast("MagicMock", cog.bot).is_owner.side_effect = RuntimeError("lookup crashed")
+    await cog.on_connect()
+    with pytest.raises(RuntimeError):
+        await cog.on_ready()
+    assert cog.bot.guild_access.is_served(LISTED)
+    assert cog.bot.guild_access.is_served(UNLISTED)

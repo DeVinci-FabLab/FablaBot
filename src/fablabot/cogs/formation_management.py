@@ -602,6 +602,9 @@ class FormationManagement(commands.Cog):
     async def on_raw_reaction_event(self, payload: RawReactionActionEvent) -> None:
         """Log reaction updates on the last published formations message.
 
+        A server the allow-list refuses is dropped, and nothing catches that up. The servers of a start with an empty
+        list are served from the first connection, so no reaction is refused while the bot settles.
+
         Args:
             payload (RawReactionActionEvent): The raw reaction event payload.
         """
@@ -772,8 +775,8 @@ class FormationManagement(commands.Cog):
         """Tell whether a reaction is on a server's published message, on one of its emojis, and not an add past the deadline.
 
         The deadline is judged at the reaction's own time, so a check that runs late does not change the answer. It
-        closes sign-ups only: a removal is always logged, or the member who left would take their place back at the
-        next update.
+        closes sign-ups only: a removal is always logged on a served server, or the member who left would take their
+        place back at the next update.
 
         Args:
             guild_id (int): The ID of the guild.

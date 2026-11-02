@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from discord import Guild, Member, Message, TextChannel, VoiceChannel
@@ -19,6 +21,7 @@ from fablabot.services import formations
 
 LISTED = 111111111111111111
 UNLISTED = 222222222222222222
+THIRD = 333333333333333333
 CHANNEL_ID = 555
 MESSAGE_ID = 666
 USER_ID = 777
@@ -126,6 +129,20 @@ async def test_formation_reaction_is_recorded_only_on_a_served_server(guild_id: 
 # region ====== Member join ======
 
 
+def _new_member(guild_id: int) -> MagicMock:
+    """Build a member who just joined a guild with a validation category and a CoDir role."""
+    category, codir = MagicMock(), MagicMock()
+    category.name = "Validation"
+    codir.name = RoleNames.CODIR
+    member = MagicMock(spec=Member)
+    member.name = "alice"
+    member.guild = MagicMock(spec=Guild)
+    member.guild.id = guild_id
+    member.guild.categories = [category]
+    member.guild.roles = [codir]
+    return member
+
+
 @BY_SERVER
 async def test_welcome_channel_is_created_only_on_a_served_server(
     monkeypatch: pytest.MonkeyPatch, guild_id: int, *, acts: bool
@@ -136,15 +153,7 @@ async def test_welcome_channel_is_created_only_on_a_served_server(
     channel.send = AsyncMock()
     create = AsyncMock(return_value=(channel, None))
     monkeypatch.setattr(welcome_management, "safe_create_text_channel", create)
-    category, codir = MagicMock(), MagicMock()
-    category.name = "Validation"
-    codir.name = RoleNames.CODIR
-    member = MagicMock(spec=Member)
-    member.name = "alice"
-    member.guild = MagicMock(spec=Guild)
-    member.guild.id = guild_id
-    member.guild.categories = [category]
-    member.guild.roles = [codir]
+    member = _new_member(guild_id)
 
     await WelcomeManagement(_bot()).on_member_join(member)
 
@@ -284,3 +293,97 @@ async def test_op_settling_skips_a_server_the_policy_refuses() -> None:
 
 
 # endregion Background tasks
+
+# region ====== First connection ======
+
+
+@pytest.fixture
+def empty_list_bot(started_bot: Any) -> Any:
+    """The real bot with an empty allow-list and three guilds in its cache, as right after the gateway's READY."""
+    started_bot.guild_access = GuildAccessPolicy(frozenset())
+    for guild_id in (LISTED, UNLISTED, THIRD):
+        guild = started_bot._connection._add_guild_from_data({"id": str(guild_id), "unavailable": True})
+        guild.unavailable = False
+    return started_bot
+
+
+@pytest.mark.parametrize("event_type", ["REACTION_ADD", "REACTION_REMOVE"])
+async def test_a_reaction_right_after_the_first_connection_is_not_dropped(empty_list_bot: Any, event_type: str) -> None:
+    """With an empty list, a reaction that follows READY is recorded and scheduled: the guild is served before it arrives."""
+    cog = empty_list_bot.get_cog("FormationManagement")
+    cog._reaction_logs = MagicMock()
+    schedule = MagicMock()
+
+    with (
+        patch.object(cog, "_reaction_counts", return_value=True),
+        patch.object(cog, "_schedule_update", schedule),
+    ):
+        # The order the gateway dispatches them in: the listeners start in the order their events were created.
+        empty_list_bot.dispatch("connect")
+        empty_list_bot.dispatch(event_type.lower().replace("reaction", "raw_reaction"), _payload(LISTED, event_type))
+        await asyncio.sleep(0.05)
+
+    _expect(cog._reaction_logs.append, acts=True)
+    _expect(schedule, acts=True)
+
+
+async def test_a_member_joining_right_after_the_first_connection_gets_a_welcome_channel(
+    empty_list_bot: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With an empty list, a member who joins as the bot connects is welcomed: the guild is served before the join."""
+    monkeypatch.setattr(welcome_management, "is_welcome_verify_enabled", lambda _guild_id: True)
+    channel = MagicMock(spec=TextChannel)
+    channel.send = AsyncMock()
+    create = AsyncMock(return_value=(channel, None))
+    monkeypatch.setattr(welcome_management, "safe_create_text_channel", create)
+
+    empty_list_bot.dispatch("connect")
+    empty_list_bot.dispatch("member_join", _new_member(LISTED))
+    await asyncio.sleep(0.05)
+
+    _expect(create, acts=True)
+
+
+async def test_a_tracked_reaction_right_after_the_first_connection_acts_and_is_logged(empty_list_bot: Any) -> None:
+    """With an empty list, a reaction on a tracked message that follows READY runs its action and is written to the history."""
+    cog = empty_list_bot.get_cog("MessageManagement")
+    cog._reaction_logs = MagicMock()
+    tracked = MagicMock()
+    tracked.reactions = [MagicMock(emoji="🔧")]
+    run_action = AsyncMock()
+
+    with (
+        patch.object(cog, "get_tracked_message", return_value=tracked),
+        patch.object(cog, "_execute_reaction_action", run_action),
+    ):
+        empty_list_bot.dispatch("connect")
+        empty_list_bot.dispatch("raw_reaction_add", _payload(LISTED))
+        await asyncio.sleep(0.05)
+
+    _expect(run_action, acts=True)
+    _expect(cog._reaction_logs.append, acts=True)
+
+
+async def test_the_first_tick_after_the_first_connection_covers_every_guild(empty_list_bot: Any) -> None:
+    """With an empty list, the guilds are served before the bot is ready, so the first tick and round skip none."""
+    formation_cog = empty_list_bot.get_cog("FormationManagement")
+    user_cog = empty_list_bot.get_cog("UserManagement")
+    remind, reconcile = AsyncMock(), AsyncMock()
+
+    empty_list_bot.dispatch("connect")
+    await asyncio.sleep(0.05)
+    assert not empty_list_bot.is_ready()
+
+    with (
+        patch.object(formations, "guilds_with_published", return_value=[LISTED, UNLISTED, THIRD]),
+        patch.object(formation_cog, "_send_due_reminders", remind),
+        patch.object(user_cog, "_reconcile_guild", reconcile),
+    ):
+        await formation_cog._check_upcoming_formations.coro(formation_cog)
+        await user_cog._settle_ops.coro(user_cog)
+
+    assert [call.args[0] for call in remind.call_args_list] == [LISTED, UNLISTED, THIRD]
+    assert [call.args[0].id for call in reconcile.call_args_list] == [LISTED, UNLISTED, THIRD]
+
+
+# endregion First connection
