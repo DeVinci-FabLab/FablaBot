@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6.1](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.6.0...v0.6.1) (2026-11-02)
+
+
+### Bug Fixes
+
+* **access:** apply the allow-list to events as well as commands ([#142](https://github.com/DeVinci-FabLab/FablaBot/issues/142)) ([dd53bfd](https://github.com/DeVinci-FabLab/FablaBot/commit/dd53bfdd24c7ddd814c9931e4fb54cc9dddb1d6f))
+* **storage:** use one partial name per version and clear it on failure ([#141](https://github.com/DeVinci-FabLab/FablaBot/issues/141)) ([0cced49](https://github.com/DeVinci-FabLab/FablaBot/commit/0cced499f9966af5b9e59d8515c6a7909a04e0da))
+* **storage:** write one backup for the same data across failed upgrades ([bf5c35f](https://github.com/DeVinci-FabLab/FablaBot/commit/bf5c35f787e050151187c30bb4dcc84930dcc993))
+
+
+### Documentation
+
+* present the project in the README and the package metadata ([#143](https://github.com/DeVinci-FabLab/FablaBot/issues/143)) ([c0d2bab](https://github.com/DeVinci-FabLab/FablaBot/commit/c0d2bab6cb52653a54e420fdae2723a46981cb7e))
+
 ## [0.6.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.5.0...v0.6.0) (2026-11-02)
 
 
