@@ -150,19 +150,21 @@ def test_the_cog_answers_none_for_an_id_too_large_for_the_database() -> None:
     [(None, ErrorMessages.PUBLISH_NOT_SAVED), (OSError(), ErrorMessages.PUBLISH_NOT_SAVED_STILL_UP)],
     ids=["post-deleted", "post-still-up"],
 )
-@pytest.mark.parametrize("failing", ["save_tracked", "clear_draft"])
+@pytest.mark.parametrize(
+    ("failing", "links"), [("track_from_draft", 1), ("clear_draft", 0)], ids=["with-links", "without-links"]
+)
 async def test_msg_publish_the_database_refuses_retracts_the_post_and_says_so(
-    failing: str, delete_error: Exception | None, reply: str, storage_error: sqlite3.Error
+    failing: str, links: int, delete_error: Exception | None, reply: str, storage_error: sqlite3.Error
 ) -> None:
     """A post that cannot be recorded is taken down, or the caller is told to; no reaction is synced on it."""
     interaction = make_interaction(guild_id=1234)
     cog = MessageManagement(MagicMock())
     posted = MagicMock(id=999)
     posted.delete = AsyncMock(side_effect=delete_error)
-    channel = MagicMock(spec=TextChannel)
+    channel = MagicMock(spec=TextChannel, id=7)
     channel.send = AsyncMock(return_value=posted)
     cog._sync_reactions_on_message = AsyncMock()
-    messages.save_draft(1234, MessageDraft(content="x", reactions=[_reaction()]))
+    messages.save_draft(1234, MessageDraft(content="x", reactions=[_reaction() for _ in range(links)]))
 
     with (
         patch.object(message_management, "ensure_command_context", AsyncMock(return_value=True)),
@@ -173,6 +175,47 @@ async def test_msg_publish_the_database_refuses_retracts_the_post_and_says_so(
     posted.delete.assert_awaited_once()
     cog._sync_reactions_on_message.assert_not_awaited()
     interaction.response.send_message.assert_awaited_once_with(reply, ephemeral=True)
+
+
+async def test_msg_publish_a_refused_draft_deletion_leaves_the_message_untracked_and_the_draft_kept() -> None:
+    """The message and the draft change together: a post left up because it could not be taken down is not tracked."""
+    interaction = make_interaction(guild_id=1234)
+    cog = MessageManagement(MagicMock())
+    posted = MagicMock(id=999)
+    posted.delete = AsyncMock(side_effect=OSError())
+    channel = MagicMock(spec=TextChannel, id=7)
+    channel.send = AsyncMock(return_value=posted)
+    cog._sync_reactions_on_message = AsyncMock()
+    draft = MessageDraft(content="x", reactions=[_reaction()])
+    messages.save_draft(1234, draft)
+    db.connection().execute(
+        "CREATE TRIGGER refuse_draft_delete BEFORE DELETE ON tracked_message WHEN OLD.message_id IS NULL "
+        "BEGIN SELECT RAISE(ABORT, 'refused'); END"
+    )
+
+    with patch.object(message_management, "ensure_command_context", AsyncMock(return_value=True)):
+        await MessageManagement.msg_publish.callback(cog, interaction, channel=channel)  # pyright: ignore[reportCallIssue]
+
+    assert messages.tracked_messages(1234) == {}
+    assert messages.get_draft(1234) == draft
+    interaction.response.send_message.assert_awaited_once_with(ErrorMessages.PUBLISH_NOT_SAVED_STILL_UP, ephemeral=True)
+
+
+async def test_msg_publish_moves_the_links_to_the_post_and_deletes_the_draft() -> None:
+    """A published draft is gone and its links belong to the post."""
+    interaction = make_interaction(guild_id=1234)
+    cog = MessageManagement(MagicMock())
+    channel = MagicMock(spec=TextChannel, id=7)
+    channel.send = AsyncMock(return_value=MagicMock(id=999))
+    cog._sync_reactions_on_message = AsyncMock()
+    messages.save_draft(1234, MessageDraft(content="x", reactions=[_reaction("🔧")]))
+
+    with patch.object(message_management, "ensure_command_context", AsyncMock(return_value=True)):
+        await MessageManagement.msg_publish.callback(cog, interaction, channel=channel)  # pyright: ignore[reportCallIssue]
+
+    assert [(r.emoji, r.message_id) for r in messages.tracked_messages(1234)[999].reactions] == [("🔧", 999)]
+    assert messages.get_draft(1234) is None
+    cog._sync_reactions_on_message.assert_awaited_once()
 
 
 def _follow_setup(draft: MessageDraft | None) -> tuple[MagicMock, MessageManagement, MagicMock]:

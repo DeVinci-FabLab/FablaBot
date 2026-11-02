@@ -670,8 +670,9 @@ class MessageManagement(commands.Cog):
         )
         try:
             if updated_reactions:
-                self.set_tracked_message(interaction.guild.id, tracked)
-            self._clear_draft(interaction.guild.id)
+                messages.track_from_draft(interaction.guild.id, tracked, keep_text=False)
+            else:
+                self._clear_draft(interaction.guild.id)
         except sqlite3.Error:
             logger.exception(f"Message {msg.id} not saved in guild {interaction.guild.id}; retracting it.")
             await interaction.response.send_message(await retract_unsaved_post(logger, msg), ephemeral=True)
