@@ -112,6 +112,44 @@ def test_the_journal_keeps_the_order_of_the_file() -> None:
     assert [(row["user_id"], row["action"]) for row in events] == [(e["user_id"], e["action"]) for e in expected]
 
 
+def _journal(scope: str, guild_id: int) -> list[dict[str, Any]]:
+    """Read a history back from the database as lines with the keys a file line holds."""
+    rows = db.connection().execute(
+        "SELECT message_id, user_id, user_name, emoji, action, ts_iso FROM reaction_event "
+        "WHERE scope = ? AND guild_id = ? ORDER BY id",
+        (scope, guild_id),
+    )
+    return [dict(row) for row in rows]
+
+
+def test_each_history_comes_through_with_every_value_of_its_file() -> None:
+    """The rows hold what the lines hold, member names included, for both scopes: the read-back cannot see an earlier loss."""
+    files = state_files()
+    formation_lines = files["formations_state.json"][FIRST]["reactions_log"]
+    assert all(line["user_name"] for line in formation_lines)
+    named = {"message_id": MESSAGE_ID + 1, "emoji": "🧵", "action": "add", "ts_iso": "2026-10-21T09:00:00+02:00"}
+    message_lines = [
+        {**named, "user_id": 500000000000000011, "user_name": "name-500000000000000011"},
+        {**named, "user_id": 500000000000000012, "user_name": "name-500000000000000012", "action": "remove"},
+        {
+            "message_id": MESSAGE_ID + 2,
+            "user_id": 500000000000000011,
+            "emoji": "✅",
+            "action": "add",
+            "ts_iso": "2026-10-22T09:00:00+00:00",
+        },
+    ]
+    files["messages_state.json"][str(GUILDS[1])]["reactions_log"] = message_lines
+    write_state(files)
+
+    import_state.main([])
+
+    db.open_database()
+    assert _journal("formation", FIRST_GUILD) == formation_lines
+    # A line from before names were kept has none: it reads as it did, a name of None.
+    assert _journal("message", GUILDS[1]) == [*message_lines[:2], {**message_lines[2], "user_name": None}]
+
+
 def test_the_gate_opens_on_the_exact_contract_it_reads() -> None:
     """One row per file present, the fingerprint of its bytes, and none for an absent file."""
     before = write_state()
