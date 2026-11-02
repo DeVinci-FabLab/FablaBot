@@ -29,7 +29,8 @@ OTHER_MESSAGE_ID = 777
 EMOJI = "🔧"
 MEMBER_ID = 42
 OTHER_MEMBER_ID = 43
-NAMES = {MEMBER_ID: "alice", OTHER_MEMBER_ID: "bob"}
+THIRD_MEMBER_ID = 44
+NAMES = {MEMBER_ID: "alice", OTHER_MEMBER_ID: "bob", THIRD_MEMBER_ID: "carol"}
 
 
 class _Env:
@@ -405,6 +406,58 @@ async def test_a_reaction_on_discord_the_log_misses_is_left_out_without_a_storag
     assert pub is not None
     assert pub.message.fms[0].registered_users == []
     assert env.cog._reaction_logs.history(GUILD_ID, MESSAGE_ID) == []
+
+
+async def test_seats_taken_before_the_journal_retention_keep_their_order_and_a_logged_removal_still_removes(
+    started_bot: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The journal forgot the old sign-ups: the stored time ranks them, and the one who left in the journal stays out."""
+    env = _Env(
+        started_bot.get_cog("FormationManagement"),
+        monkeypatch,
+        seats=1,
+        reactors=(MEMBER_ID, OTHER_MEMBER_ID, THIRD_MEMBER_ID),
+    )
+    waitlist_dm = AsyncMock()
+    monkeypatch.setattr(fm_cog, "send_waitlist_dm", waitlist_dm)
+    _log_events(env, (THIRD_MEMBER_ID, ReactionAction.REMOVE, 5))
+    pub = env.cog._get_last_published_in_guild(GUILD_ID)
+    assert pub is not None
+    old = datetime.now(PARIS_TZ) - timedelta(days=45)
+
+    def _stored(user_id: int, days_later: int) -> dict[str, Any]:
+        return {"user_id": user_id, "username": NAMES[user_id], "ts_iso": (old + timedelta(days=days_later)).isoformat()}
+
+    # The higher ID signed up first: only the stored time, not the ID, puts it ahead.
+    pub.message.fms[0].registered_users = [_stored(OTHER_MEMBER_ID, 0)]
+    pub.message.fms[0].waitlisted_users = [_stored(MEMBER_ID, 1), _stored(THIRD_MEMBER_ID, 2)]
+    env.cog._set_last_published_in_guild(GUILD_ID, pub)
+
+    await env.cog._update_published_message(GUILD_ID)
+
+    assert _seats(env) == ([OTHER_MEMBER_ID], [MEMBER_ID])
+    assert env.registration_dm.await_count == 0
+    waitlist_dm.assert_not_awaited()
+
+
+async def test_a_stored_seat_without_a_reaction_on_discord_is_dropped_past_the_retention(
+    started_bot: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keeping an old seat needs the reaction to still stand: a member who took theirs off leaves."""
+    env = _Env(started_bot.get_cog("FormationManagement"), monkeypatch, seats=2, reactors=(OTHER_MEMBER_ID,))
+    _forget_logged_reactions()
+    pub = env.cog._get_last_published_in_guild(GUILD_ID)
+    assert pub is not None
+    old = (datetime.now(PARIS_TZ) - timedelta(days=45)).isoformat()
+    pub.message.fms[0].registered_users = [
+        {"user_id": MEMBER_ID, "username": "alice", "ts_iso": old},
+        {"user_id": OTHER_MEMBER_ID, "username": "bob", "ts_iso": old},
+    ]
+    env.cog._set_last_published_in_guild(GUILD_ID, pub)
+
+    await env.cog._update_published_message(GUILD_ID)
+
+    assert _seats(env) == ([OTHER_MEMBER_ID], [])
 
 
 async def test_a_reaction_taken_back_after_the_deadline_stays_out(started_bot: Any, monkeypatch: pytest.MonkeyPatch) -> None:

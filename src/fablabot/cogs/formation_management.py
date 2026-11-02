@@ -58,6 +58,14 @@ REACTION_LOG_RETENTION = timedelta(days=30)
 REGISTRATION_WINDOW = timedelta(minutes=20)
 
 
+def _parse_ts(ts_iso: Any) -> datetime:
+    """Read a stored reaction time; a value that is not a date ranks first."""
+    try:
+        return datetime.fromisoformat(ts_iso).astimezone(PARIS_TZ)
+    except (TypeError, ValueError):
+        return datetime.min.replace(tzinfo=PARIS_TZ)
+
+
 class FormationManagement(commands.Cog):
     """Hebdo formations management cog (Draft -> Publish -> Export).
 
@@ -934,21 +942,27 @@ class FormationManagement(commands.Cog):
         # The time of each reaction still in place: a logged removal takes the member out, so a reaction the log does
         # not hold again never gets the old place back.
         last_add: dict[tuple[str, int], datetime] = {}
+        journaled: set[tuple[str, int]] = set()
         for event in history:
             emoji = str(event.emoji)
             user_id = event.user_id
             if not emoji or user_id is None or emoji not in tracked_emojis:
                 continue
             key = (emoji, int(user_id))
+            journaled.add(key)
             if event.action != ReactionAction.ADD:
                 last_add.pop(key, None)
                 continue
-            try:
-                ts = datetime.fromisoformat(event.ts_iso).astimezone(PARIS_TZ)
-            except (TypeError, ValueError):
-                ts = datetime.min.replace(tzinfo=PARIS_TZ)
+            ts = _parse_ts(event.ts_iso)
             if key not in last_add or ts.timestamp() > last_add[key].timestamp():
                 last_add[key] = ts
+        # The journal keeps 30 days: a seat taken earlier has no entry left, and the stored time ranks it. The reaction
+        # still has to stand on Discord, which the rebuild below checks.
+        for fm in fms:
+            for stored in (*fm.registered_users, *fm.waitlisted_users):
+                stored_id = stored.get("user_id")
+                if isinstance(stored_id, int) and (fm.emoji, stored_id) not in journaled:
+                    last_add[fm.emoji, stored_id] = _parse_ts(stored.get("ts_iso"))
 
         reactions_snapshot: dict[str, dict[int, str]] = {}
         for reaction in msg.reactions:

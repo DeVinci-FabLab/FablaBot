@@ -474,11 +474,18 @@ async def _sign_up(server: Server, *members: Any) -> Any:
 
 
 def _state_of_the_old_release(published: Any, journal: list[dict[str, Any]], *seated: Any) -> None:
-    """Leave only JSON files behind, in the shape the old release wrote them for this post: one seat, a waitlist."""
+    """Leave only JSON files behind, in the shape the old release wrote them for this post: one seat, a waitlist.
+
+    The members signed up in the order given, all of them before the journal's retention.
+    """
     live = formations.current_published(GUILD_ID)
     assert live is not None
     training = live.message.fms[0].to_dict()
-    entries = [{"user_id": m.id, "username": m.name, "ts_iso": "2026-11-02T09:00:00+01:00"} for m in seated]
+    first_stamp = datetime.now(PARIS_TZ) - timedelta(days=40)
+    entries = [
+        {"user_id": m.id, "username": m.name, "ts_iso": (first_stamp + timedelta(minutes=i)).isoformat(timespec="seconds")}
+        for i, m in enumerate(seated)
+    ]
     training |= {"seats": 1, "registered_users": entries[:1], "waitlisted_users": entries[1:]}
     message = {**live.message.to_dict(), "fms": [training]}
     state = {"published": {"message_id": published.id, "channel_id": published.channel.id, "message": message}}
@@ -525,8 +532,30 @@ async def test_a_published_training_keeps_its_seats_after_the_import(server: Ser
     assert "Arduino" in everything(users[2].dm_channel)
 
 
-async def test_a_training_imported_without_its_journal_would_lose_its_seats(server: Server) -> None:
-    """Why the journal moves too: with none, the same list empties at the first update."""
+async def test_a_member_who_signed_up_before_the_journal_retention_keeps_the_seat_after_the_import(server: Server) -> None:
+    """The journal keeps 30 days: a seat taken earlier, with its reaction still on the post, is not given away."""
+    users = [server.env.create_user(name) for name in ("first", "second", "third")]
+    first, second, third = (server.guild.add_member(user) for user in users)
+    published = await _sign_up(server, first, second)
+    await server.env.advance_time(120)
+    _state_of_the_old_release(published, [_add(published, second, 1)], first, second)
+
+    run_import([])
+    db.open_database()
+    received = [everything(user.dm_channel) for user in users[:2]]
+    await third.react(published, "🔧")
+    await server.env.advance_time(120)
+
+    live = formations.current_published(GUILD_ID)
+    assert live is not None
+    training = live.message.fms[0]
+    assert [u["user_id"] for u in training.registered_users] == [first.id]
+    assert [u["user_id"] for u in training.waitlisted_users] == [second.id, third.id]
+    assert [everything(user.dm_channel) for user in users[:2]] == received
+
+
+async def test_a_training_imported_without_its_journal_keeps_the_seats_the_post_still_shows(server: Server) -> None:
+    """With no journal at all, a stored seat holds while its reaction stands; a reaction nobody stored does not count."""
     first = server.member("first")
     published = await _sign_up(server, first)
     await server.env.advance_time(120)
@@ -539,4 +568,5 @@ async def test_a_training_imported_without_its_journal_would_lose_its_seats(serv
 
     live = formations.current_published(GUILD_ID)
     assert live is not None
-    assert first.id not in [u["user_id"] for u in live.message.fms[0].registered_users]
+    assert [u["user_id"] for u in live.message.fms[0].registered_users] == [first.id]
+    assert [u["user_id"] for u in live.message.fms[0].waitlisted_users] == [server.plain.id]
