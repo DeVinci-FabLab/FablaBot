@@ -74,8 +74,8 @@ async def safe_remove_roles(
     except Forbidden:
         logger.exception(f"Forbidden to remove roles {roles} from member_id={member.id}")
         return False, ErrorMessages.ROLE_REMOVE_FAILED
-    except HTTPException:
-        logger.exception(f"HTTP error while removing roles {roles} from member_id={member.id}")
+    except Exception:  # a network failure raises past discord.py, and the caller must still hear of it
+        logger.exception(f"Error while removing roles {roles} from member_id={member.id}")
         return False, ErrorMessages.HTTP_ERROR.format(
             operation=f"le retrait des rôles {', '.join(role.name for role in roles)} à {format_member_mention(member)}",
         )

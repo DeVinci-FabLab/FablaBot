@@ -164,8 +164,8 @@ async def test_the_role_ends_on_time_with_the_database_down(cog: UserManagement,
 
 @pytest.mark.parametrize(
     "error",
-    [HTTPException(MagicMock(status=503), "unavailable"), Forbidden(MagicMock(status=403), "no")],
-    ids=["5xx", "403"],
+    [HTTPException(MagicMock(status=503), "unavailable"), Forbidden(MagicMock(status=403), "no"), TimeoutError(), OSError()],
+    ids=["5xx", "403", "timeout", "network"],
 )
 async def test_any_failed_removal_at_expiry_is_taken_up_by_the_next_round(cog: UserManagement, error: Exception) -> None:
     """Whatever the removal raises, the record stays and the next round removes the role, with no second notice."""
@@ -186,6 +186,20 @@ async def test_any_failed_removal_at_expiry_is_taken_up_by_the_next_round(cog: U
     assert target.remove_roles.await_count == 2
     assert stored_ops() == {}
     guild.get_channel.return_value.send.assert_awaited_once()
+
+
+async def test_a_network_failure_on_deop_gets_a_reply_and_the_timer_stays(cog: UserManagement) -> None:
+    """A removal that raises past discord.py still answers the caller, and the running timer still ends the op."""
+    guild, target, caller = _server(GUILD_A)
+    await _op(cog, guild, caller, target, 5)
+    target.remove_roles = AsyncMock(side_effect=TimeoutError())
+    interaction = _interaction(guild, caller)
+
+    await UserManagement.user_deop.callback(cog, interaction, member=target)  # pyright: ignore[reportCallIssue]
+
+    assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+    assert (GUILD_A, TARGET_ID) in cog.deop_tasks
+    assert str(TARGET_ID) in stored_ops()[str(GUILD_A)]
 
 
 async def test_reop_replaces_expiry_and_keeps_one_timer(cog: UserManagement) -> None:
