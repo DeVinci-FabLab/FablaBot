@@ -13,6 +13,7 @@ import pytest
 from fablabot import db, guild_config
 from fablabot.cogs import user_management
 from fablabot.helpers.constants import PARIS_TZ, RoleNames
+from fablabot.import_state import main as run_import
 from fablabot.services import formations, op_expiries
 
 if TYPE_CHECKING:
@@ -459,3 +460,113 @@ async def test_a_full_journey_writes_no_json_state(server: Server) -> None:
     await server.env.advance_time(120)
 
     assert [path.name for path in Path("data").glob("*.json")] == ["command_sync_state.json"]
+
+
+async def _sign_up(server: Server, *members: Any) -> Any:
+    """Publish a training with one seat and let members react, as they did before the release that moves the state."""
+    await _draft(server, later())
+    await server.admin.slash(server.commands, "fm publish", channel=server.general)
+    published = server.general.last_message
+    assert published is not None
+    for member in members:
+        await member.react(published, "🔧")
+    return published
+
+
+def _state_of_the_old_release(published: Any, journal: list[dict[str, Any]], *seated: Any) -> None:
+    """Leave only JSON files behind, in the shape the old release wrote them for this post: one seat, a waitlist.
+
+    The members signed up in the order given, all of them before the journal's retention.
+    """
+    live = formations.current_published(GUILD_ID)
+    assert live is not None
+    training = live.message.fms[0].to_dict()
+    first_stamp = datetime.now(PARIS_TZ) - timedelta(days=40)
+    entries = [
+        {"user_id": m.id, "username": m.name, "ts_iso": (first_stamp + timedelta(minutes=i)).isoformat(timespec="seconds")}
+        for i, m in enumerate(seated)
+    ]
+    training |= {"seats": 1, "registered_users": entries[:1], "waitlisted_users": entries[1:]}
+    message = {**live.message.to_dict(), "fms": [training]}
+    state = {"published": {"message_id": published.id, "channel_id": published.channel.id, "message": message}}
+    db.close_database()
+    Path("data").mkdir(exist_ok=True)
+    Path("data/formations_state.json").write_text(
+        json.dumps({str(GUILD_ID): {**state, "reactions_log": journal}}, ensure_ascii=False), encoding="utf-8"
+    )
+
+
+def _add(published: Any, member: Any, hours_ago: int) -> dict[str, Any]:
+    """Build one journal line of the old release."""
+    moment = datetime.now(PARIS_TZ) - timedelta(hours=hours_ago)
+    return {
+        "message_id": published.id,
+        "user_id": member.id,
+        "user_name": member.name,
+        "emoji": "🔧",
+        "action": "add",
+        "ts_iso": moment.isoformat(timespec="seconds"),
+    }
+
+
+async def test_a_published_training_keeps_its_seats_after_the_import(server: Server) -> None:
+    """Moved by the import, the bot rebuilds the same list: same seat, same waitlist, a new member behind, no DM repeated."""
+    users = [server.env.create_user(name) for name in ("first", "second", "third")]
+    first, second, third = (server.guild.add_member(user) for user in users)
+    published = await _sign_up(server, first, second)
+    await server.env.advance_time(120)
+    _state_of_the_old_release(published, [_add(published, first, 2), _add(published, second, 1)], first, second)
+
+    run_import([])
+    db.open_database()
+    received = [everything(user.dm_channel) for user in users[:2]]
+    await third.react(published, "🔧")
+    await server.env.advance_time(120)
+
+    live = formations.current_published(GUILD_ID)
+    assert live is not None
+    training = live.message.fms[0]
+    assert [u["user_id"] for u in training.registered_users] == [first.id]
+    assert [u["user_id"] for u in training.waitlisted_users] == [second.id, third.id]
+    assert [everything(user.dm_channel) for user in users[:2]] == received
+    assert "Arduino" in everything(users[2].dm_channel)
+
+
+async def test_a_member_who_signed_up_before_the_journal_retention_keeps_the_seat_after_the_import(server: Server) -> None:
+    """The journal keeps 30 days: a seat taken earlier, with its reaction still on the post, is not given away."""
+    users = [server.env.create_user(name) for name in ("first", "second", "third")]
+    first, second, third = (server.guild.add_member(user) for user in users)
+    published = await _sign_up(server, first, second)
+    await server.env.advance_time(120)
+    _state_of_the_old_release(published, [_add(published, second, 1)], first, second)
+
+    run_import([])
+    db.open_database()
+    received = [everything(user.dm_channel) for user in users[:2]]
+    await third.react(published, "🔧")
+    await server.env.advance_time(120)
+
+    live = formations.current_published(GUILD_ID)
+    assert live is not None
+    training = live.message.fms[0]
+    assert [u["user_id"] for u in training.registered_users] == [first.id]
+    assert [u["user_id"] for u in training.waitlisted_users] == [second.id, third.id]
+    assert [everything(user.dm_channel) for user in users[:2]] == received
+
+
+async def test_a_training_imported_without_its_journal_keeps_the_seats_the_post_still_shows(server: Server) -> None:
+    """With no journal at all, a stored seat holds while its reaction stands; a reaction nobody stored does not count."""
+    first = server.member("first")
+    published = await _sign_up(server, first)
+    await server.env.advance_time(120)
+    _state_of_the_old_release(published, [], first)
+
+    run_import([])
+    db.open_database()
+    await server.plain.react(published, "🔧")
+    await server.env.advance_time(120)
+
+    live = formations.current_published(GUILD_ID)
+    assert live is not None
+    assert [u["user_id"] for u in live.message.fms[0].registered_users] == [first.id]
+    assert [u["user_id"] for u in live.message.fms[0].waitlisted_users] == [server.plain.id]

@@ -237,7 +237,7 @@ def _state_files(path: Path) -> list[Path]:
     return files
 
 
-def open_database(path: Path = DATABASE_FILE, *, migrations: Path = MIGRATIONS_DIR) -> None:
+def open_database(path: Path = DATABASE_FILE, *, migrations: Path = MIGRATIONS_DIR, gate: bool = True) -> None:
     """Open the database, creating it when missing, and bring its schema up to date.
 
     JSON state left by an older release must have been imported first: the bot never starts over
@@ -246,6 +246,7 @@ def open_database(path: Path = DATABASE_FILE, *, migrations: Path = MIGRATIONS_D
     Args:
         path (Path): The database file.
         migrations (Path): The folder of migration files.
+        gate (bool): False for the import alone, which exists to pass this gate.
 
     Raises:
         StorageError: If the database cannot be used.
@@ -254,7 +255,7 @@ def open_database(path: Path = DATABASE_FILE, *, migrations: Path = MIGRATIONS_D
     close_database()
     conn: sqlite3.Connection | None = None
     try:
-        state_files = _state_files(path)
+        state_files = _state_files(path) if gate else []
         path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(path, autocommit=True)
         _configure(conn)

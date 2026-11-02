@@ -171,6 +171,8 @@ If the build stops with "The release is not this commit", the release was cut fo
 
 Set the stack's image to the previous release, `ghcr.io/devinci-fablab/fablabot:X.Y.Z`, or to one commit with `:sha-<commit>`, and redeploy. Read the changelog entries in between first: a release that changed the files in `data/` says so there. Go back to `:latest` once a fixed release is out.
 
+Going back past the first release that keeps its state in the database takes one more step, or the older release reads stale files with no error: see [the operator guide](docs/OPERATIONS.md#back-to-a-release-before-the-database).
+
 ### Repository settings
 
 Releases need two settings, once, by a repository admin:

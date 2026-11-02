@@ -49,10 +49,18 @@ def _message(conn: sqlite3.Connection, row: sqlite3.Row) -> FmMessageDraft:
     )
 
 
-def _save(
+def write_message(
     conn: sqlite3.Connection, guild_id: int, message_id: int | None, channel_id: int | None, message: FmMessageDraft
 ) -> None:
-    """Write one ``fm_message`` row and replace its formations, inside the caller's transaction."""
+    """Write one ``fm_message`` row and replace its formations, inside the caller's transaction.
+
+    Args:
+        conn (sqlite3.Connection): The connection, inside a transaction.
+        guild_id (int): The ID of the guild.
+        message_id (int | None): The published message, or None for the draft.
+        channel_id (int | None): Its channel, or None for the draft.
+        message (FmMessageDraft): The message payload.
+    """
     columns = (message.header, message.role_id, message.intro, message.end, message.request_forms_url)
     row = conn.execute("SELECT id FROM fm_message WHERE guild_id = ? AND message_id IS ?", (guild_id, message_id)).fetchone()
     if row:
@@ -121,7 +129,7 @@ def save_draft(guild_id: int, draft: FmMessageDraft) -> None:
         draft (FmMessageDraft): The draft.
     """
     with db.transaction() as conn:
-        _save(conn, guild_id, None, None, draft)
+        write_message(conn, guild_id, None, None, draft)
 
 
 def current_published(guild_id: int) -> PublishedMessage | None:
@@ -154,7 +162,7 @@ def save_published(guild_id: int, published: PublishedMessage) -> None:
         published (PublishedMessage): The published message.
     """
     with db.transaction() as conn:
-        _save(conn, guild_id, published.message_id, published.channel_id, published.message)
+        write_message(conn, guild_id, published.message_id, published.channel_id, published.message)
 
 
 def guilds_with_published() -> list[int]:
