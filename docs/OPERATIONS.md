@@ -294,18 +294,32 @@ file to that server only.
 
 ## Moving to the non-root image
 
-The image runs as `10001:10001`. Volumes and the token file written by an older image belong to root, so
-a host moves once, before the first redeploy on the non-root image: archive `data/` and `logs/`, give
-both folders and the token file to `10001`, add the hardening lines to the stack (the example under
-"Deployment model"), redeploy and check the start. The steps, in order, are in the
-[README](../README.md#moving-a-host-to-the-non-root-image), "Moving a host to the non-root image".
+The image runs as `10001:10001`. The production host keeps its state in `data/fablabot.db`, beside the JSON files of the
+older releases, and all of it, `logs/` and the token file belong to root. The host moves once, with the release that
+brings the non-root image. The commands are in the [README](../README.md#moving-a-host-to-the-non-root-image), "Moving a
+host to the non-root image"; the order is:
+
+1. Archive, with the bot running, into `~/fablabot-archive` (steps 2 to 4 of "Before every redeploy"). The `sudo`
+   steps ask for the operator's password.
+2. Hold the update: read the running version on the `fablabot` container, set the stack's `image:` to it and deploy.
+   The stack updates itself every 30 minutes and merging a release deploys.
+3. Merge the release pull request, wait for the image build to finish green, and pull the new image.
+4. Stop the stack and archive again.
+5. `sudo chown -R 10001:10001` on `data/` and `logs/`. Take `data/` whole: the database, its journal,
+   `data/backups/`, `data/exports/` and the JSON files all go to 10001.
+6. Make the token file readable by 10001: `sudo chown 10001:10001` and `sudo chmod 400` on it.
+7. Add the hardening lines to the stack (the example under "Deployment model"), with the new version as `image:`.
+8. Deploy.
+9. Read the start: no `Cannot start` line, the `Server check` lines (see "Server check at start"), and the health
+   status, `docker inspect --format '{{.State.Health.Status}}' fablabot`, which goes from `starting` to `healthy`
+   within two minutes.
+10. Set `image:` back to `:latest` and deploy.
 
 A host not yet moved stops at start with `Cannot start: data/ is not writable by uid 10001.` and
 Docker restarts it until the volume is fixed. No data is lost; the bot is down meanwhile.
 
-Rolling back needs two things together: the previous image tag (`:<commit sha>`) and the stack without
-the hardening lines. The older image runs as root, and root without capabilities cannot write files
-owned by 10001. After a rollback, give the folders back to `10001` before redeploying the non-root
+Rolling back needs two things together: the previous image (the `:X.Y.Z` read in step 2) and the stack without the hardening lines.
+The older image runs as root, and root without capabilities cannot write files owned by 10001. After a rollback, give the folders back to `10001` before redeploying the non-root
 image. Archive `data/` and `logs/` first; never delete them.
 
 ## Health status
@@ -317,6 +331,8 @@ restarts the bot on its own. To read the last checks:
 ```bash
 docker inspect --format '{{json .State.Health}}' fablabot
 ```
+
+The status alone is `docker inspect --format '{{.State.Health.Status}}' fablabot`.
 
 ## Server language
 
@@ -493,7 +509,8 @@ fablabot_state() {
 There is no `--user` on purpose: the image runs as the user the bot runs as, so what the import writes belongs to the
 bot. `data/` must belong to that user, root included: the helper drops every capability, so even root cannot write a
 folder that someone else owns, and the import stops with `cannot be used: unable to open database file`. With an image
-that runs as root, a later move to `10001` must take `data/` whole with `chown -R`. Step 8 checks the owner.
+that runs as root, a later move to `10001` must take `data/` whole with `chown -R`, the database, its journal and
+`data/backups/` included: see "Moving to the non-root image". Step 8 checks the owner.
 
 When you own `data/` and the image runs as root, as on the first move, you can skip the `chown`: add
 `--user "$(id -u):$(id -g)"` to the helper. The database then belongs to you, and the bot, running as root with its

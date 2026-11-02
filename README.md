@@ -151,56 +151,69 @@ To check an image locally (needs Docker): `sh docker/check-image.sh`. It builds 
 
 ### Moving a host to the non-root image
 
-Volumes and the token file written by an older image belong to root. Do this once, on the host, before the first redeploy on the non-root image:
+The production host already runs a release that keeps its state in `data/fablabot.db`, beside the JSON files of the older releases. The release that brings the non-root image needs `data/`, `logs/` and the token file to belong to `10001`, which today they do not. Do this once, on the host. The `sudo` steps ask for the operator's password. Keep the previous image's version at hand: it is the way back.
 
-1. Stop the stack.
-2. Archive `data/` and `logs/` into a private folder and compare the file counts. Never delete either folder.
+Merging a release deploys it: the stack updates itself every 30 minutes. So the update is held first, and the stack is stopped only once the new image is in.
+
+1. **Archive.** Follow steps 2 to 4 of ["Before every redeploy"](docs/OPERATIONS.md#before-every-redeploy) in the operator guide, skipping its step 1: the bot keeps running, and this copy is a safety net taken before the merge. The archive goes to `~/fablabot-archive`, outside the volumes, and the two counts must be the same. Never delete `data/` or `logs/`.
+
+2. **Hold the update.** Read the release running now, the version label of the container (it is called `fablabot`), then set the stack's `image:` to that version in place of `:latest` and deploy. The container restarts once on the same image. The stack updates itself every 30 minutes, and a tag that does not move gives it nothing to pull.
 
    ```bash
-   VOLUMES_PATH=/path/to/volumes  # the value the stack uses
-   STAMP=$(date +%Y%m%d-%H%M)
-   sudo mkdir -p "$VOLUMES_PATH/fablabot/archive" && sudo chmod 700 "$VOLUMES_PATH/fablabot/archive"
-   for dir in data logs; do
-     sudo tar -czf "$VOLUMES_PATH/fablabot/archive/$dir-$STAMP.tar.gz" -C "$VOLUMES_PATH/fablabot" "$dir"
-     sudo chmod 600 "$VOLUMES_PATH/fablabot/archive/$dir-$STAMP.tar.gz"
-     echo "$dir: $(sudo tar -tzf "$VOLUMES_PATH/fablabot/archive/$dir-$STAMP.tar.gz" | grep -vc '/$') archived, $(sudo find "$VOLUMES_PATH/fablabot/$dir" -type f | wc -l) on disk"
-   done
+   docker inspect fablabot --format '{{index .Config.Labels "org.opencontainers.image.version"}}'
+   docker inspect fablabot --format '{{.Config.Image}}'
    ```
 
-3. Check that nothing on the host already uses id 10001. The command must print nothing. If it prints a line, stop: giving the files to that id would give the token and the state to that host account.
+   The second command must print the tag you set. If `image:` cannot be edited, turn the stack's automatic update off instead and note how you found it.
+
+3. **Merge the release pull request.** Wait for the "Build and Push Docker Image" run to finish green, then pull the new image. The bot keeps running on the held tag.
+
+   ```bash
+   docker pull ghcr.io/devinci-fablab/fablabot:X.Y.Z   # the new release
+   ```
+
+4. **Stop the stack.** The bot is down from here. Archive again, with all four steps of "Before every redeploy": an archive of a running database can be inconsistent, and the volumes are about to change owner.
+
+5. **Give the folders to the bot's user.** First check that nothing on the host already uses id 10001. The command must print nothing. If it prints a line, stop: giving the files to that id would give the token and the state to that host account.
 
    ```bash
    getent passwd 10001; getent group 10001
    ```
 
-   Then give both folders to the bot's user. Leave `archive/` as it is.
+   Then give both folders to the bot's user, whole: the database, its journal, `data/backups/`, the exports and the JSON files all belong to it.
 
    ```bash
+   VOLUMES_PATH=/path/to/volumes  # the value the stack uses
    sudo chown -R 10001:10001 "$VOLUMES_PATH/fablabot/data" "$VOLUMES_PATH/fablabot/logs"
    ```
 
-4. Let the bot's user read the token file, the one named under `secrets: discord_token: file:` in the stack.
+6. **Give the token file to the bot's user.** It is the file named under `secrets: discord_token: file:` in the stack.
 
    ```bash
    sudo chown 10001:10001 /path/to/discord_token.secret && sudo chmod 400 /path/to/discord_token.secret
    ```
 
-5. Add the seven lines above to the bot's service in the stack.
-6. Redeploy the stack.
-7. Check the start. The first command prints `0`. The second prints `starting`, then `healthy` within two minutes.
+7. **Add the hardening lines.** Add the seven lines above to the bot's service in the stack, and set `image:` to the new version, `ghcr.io/devinci-fablab/fablabot:X.Y.Z`.
+
+8. **Deploy.**
+
+9. **Read the start.** The first command prints `0`. The second prints `starting`, then `healthy` within two minutes. The third prints the `Server check:` lines, one per server, each with the `blocking=` count it had before.
 
    ```bash
-   docker logs fablabot-prod 2>&1 | grep -c 'Cannot start'
-   docker inspect --format '{{.State.Health.Status}}' fablabot-prod
+   docker logs fablabot 2>&1 | grep -c 'Cannot start'
+   docker inspect --format '{{.State.Health.Status}}' fablabot
+   docker logs fablabot 2>&1 | grep 'Server check:'
    ```
 
-   Use your stack's container name if it is not `fablabot-prod`. A `Cannot start:` line names the folder, file or setting to fix; once fixed, the bot starts at its next restart.
+   A `Cannot start:` line names the folder, file or setting to fix; once fixed, the bot starts at its next restart. Use your stack's container name if it is not `fablabot`.
 
-To roll back, set the image back to the previous `:<commit sha>` tag and restore the stack as it was before step 5. The older image runs as root and reads the volumes without a `chown` back, but root without capabilities cannot write files owned by 10001: the seven lines must go with it.
+10. **Release the hold.** Set `image:` back to `:latest` (and the automatic update back as you found it, if you turned it off) and deploy. The container restarts once, with the hardening lines kept.
 
-After a rollback, the root image writes root-owned files. Run step 3 again (and step 4 if the token file was replaced) before you redeploy the non-root image.
+To roll back, set the image back to the previous image, the `:X.Y.Z` read in step 2, and restore the stack as it was before step 7. The older image runs as root and reads the volumes without a `chown` back, but root without capabilities cannot write files owned by 10001: the seven lines must go with it.
 
-After restoring an archive, run step 3 again: `tar` run as root restores the files as root.
+After a rollback, the root image writes root-owned files. Run step 5 again (and step 6 if the token file was replaced) before you redeploy the non-root image.
+
+After restoring an archive, run step 5 again: `tar` run as root restores the files as root.
 
 ## Documentation
 

@@ -384,3 +384,88 @@ def test_the_rollback_moves_nothing_when_the_export_is_not_there(host: _Host) ->
 
     assert first.returncode != 0
     assert sorted(path.name for path in host.data.glob("*.json")) == sorted(EXPORTED[:3])
+
+
+MOVE_STEPS = (
+    "**Archive.**",
+    "**Hold the update.**",
+    "**Merge the release pull request.**",
+    "**Stop the stack.**",
+    "**Give the folders to the bot's user.**",
+    "**Give the token file to the bot's user.**",
+    "**Add the hardening lines.**",
+    "**Deploy.**",
+    "**Read the start.**",
+    "**Release the hold.**",
+)
+
+
+def test_readme_moves_a_host_to_the_non_root_image_in_order() -> None:
+    """The host on the database holds, merges, stops, gives the files away, hardens, deploys and only then follows `:latest`."""
+    section = _section(_read("README.md"), "### Moving a host to the non-root image")
+    places = [section.index(step) for step in MOVE_STEPS]
+    assert places == sorted(places)
+    hold = section.split("**Hold the update.**", 1)[1].split("**Merge the release pull request.**", 1)[0]
+    assert "org.opencontainers.image.version" in hold
+    assert "every 30 minutes" in hold
+    assert "sudo chown -R 10001:10001" in section.split("**Give the folders", 1)[1].split("**Give the token", 1)[0]
+    token = section.split("**Give the token file", 1)[1].split("**Add the hardening lines.**", 1)[0]
+    assert "chown 10001:10001" in token
+    assert "chmod 400" in token
+    hardening = section.split("**Add the hardening lines.**", 1)[1].split("**Deploy.**", 1)[0]
+    assert "new version" in hardening
+    start = section.split("**Read the start.**", 1)[1].split("**Release the hold.**", 1)[0]
+    assert "Server check" in start
+    assert "State.Health.Status" in start
+    assert ":latest" in section.split("**Release the hold.**", 1)[1].split("\n\n", 1)[0]
+
+
+def test_readme_rolls_the_non_root_move_back_with_the_old_image_and_no_hardening() -> None:
+    """The rollback needs both: the previous image, and the stack without the hardening lines."""
+    section = _section(_read("README.md"), "### Moving a host to the non-root image")
+    rollback = section.split("To roll back", 1)[1]
+    assert "previous image" in rollback
+    assert "without the hardening lines" in rollback or "the seven lines must go" in rollback
+
+
+def test_the_non_root_move_uses_the_guides_archive_and_the_real_container() -> None:
+    """The archive is `~/fablabot-archive`, never a folder inside the volumes, and the container is `fablabot`."""
+    readme = _section(_read("README.md"), "### Moving a host to the non-root image")
+    guide = _section(_read("docs/OPERATIONS.md"), "## Moving to the non-root image")
+    for text in (readme, guide):
+        assert "fablabot/archive" not in text
+        assert "~/fablabot-archive" in text
+        assert "password" in text
+        assert "fablabot-prod" not in text
+        assert "docker inspect --format '{{.State.Health.Status}}' fablabot" in text
+    assert "fablabot/archive" not in _read("README.md")
+    assert "fablabot/archive" not in _read("docs/OPERATIONS.md")
+
+
+def test_operator_guide_lists_the_non_root_move_in_the_same_order() -> None:
+    """The guide's list follows the README's: the same steps, in the same order."""
+    section = _section(_read("docs/OPERATIONS.md"), "## Moving to the non-root image")
+    keywords = (
+        "Archive",
+        "Hold the update",
+        "Merge the release",
+        "Stop the stack",
+        "chown -R 10001:10001",
+        "chmod 400",
+        "hardening lines",
+        "Deploy",
+        "Server check",
+        ":latest",
+    )
+    places = [section.index(keyword) for keyword in keywords]
+    assert places == sorted(places)
+    assert "the stack without the hardening lines" in section
+    assert "`data/` whole" in section
+
+
+def test_moving_to_the_database_keeps_the_whole_folder_rule_for_the_later_move() -> None:
+    """A move to 10001 after the database takes `data/` whole, the database and its backups with it."""
+    section = _section(_read("docs/OPERATIONS.md"), "## Moving to the database")
+    assert "`chown -R`" in section
+    assert "`data/` whole" in section
+    assert "Moving to the non-root image" in section
