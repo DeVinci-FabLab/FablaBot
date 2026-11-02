@@ -282,6 +282,19 @@ async def test_ready_guard_leaves_none_when_list_matches_nothing(caplog: pytest.
     assert not cog.bot.guild_access.is_served(LISTED)
 
 
+async def test_ready_guard_error_tells_what_the_bot_ignores(caplog: pytest.LogCaptureFixture) -> None:
+    """The error says that events and reminders are dropped too, and that a redeploy does not bring them back."""
+    cog = _cog({WRONG_LIST}, [_guild(LISTED), _guild(UNLISTED)])
+    with caplog.at_level(logging.INFO):
+        await cog.on_ready()
+    [error] = [r.getMessage().lower() for r in caplog.records if r.levelno == logging.ERROR]
+    assert "2 current guilds" in error
+    for ignored in ("commands", "reactions", "joins", "reminders"):
+        assert ignored in error
+    assert "not caught up" in error
+    assert "redeploy" in error
+
+
 async def test_ready_empty_list_stays_serves_and_warns(caplog: pytest.LogCaptureFixture) -> None:
     """With an empty list, the bot stays, serves every guild and warns about unproven owners."""
     owned, other = _guild(LISTED, owner_id=OWNER_ID), _guild(UNLISTED)

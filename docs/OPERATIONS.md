@@ -220,7 +220,10 @@ Leaving guild: not_allowed (guild_id=333333333333333333)
 Two other cases are logged on purpose. When `ALLOWED_GUILD_IDS` is empty, the bot keeps the servers it is
 already in at start and logs a warning, but leaves any server that invites it later unless the
 application owner owns it (`Leaving guild: owner_not_proven`); when it is set but matches none of the current servers, the bot leaves none
-and logs an error ("check the IDs"). A malformed value stops the bot at start.
+and logs an error ("check the IDs"). It then serves none: commands are refused, and reactions, joins, messages and
+reminders are ignored. Fixing the list and redeploying does not bring back what was ignored in between, as for a
+reaction made while the bot is down: ask the members concerned to take their reaction off and add it again.
+A malformed value stops the bot at start.
 
 ## Remove a server
 

@@ -136,10 +136,12 @@ class GuildAccess(commands.Cog):
                     leaving += 1
         elif guilds and not any(guild.id in policy.allowed for guild in guilds):
             # A list matching nothing is more likely a typo than a wish to leave everywhere, and a
-            # departure is costly to undo: commands stay refused by the tree.
+            # departure is costly to undo: the bot stays but serves none, and nothing is caught up at
+            # the next start, as for a reaction made while it is down.
             logger.error(
-                f"{ALLOWED_GUILD_IDS_ENV} matches none of the {len(guilds)} current guilds: "
-                "leaving none and refusing their commands; check the IDs.",
+                f"{ALLOWED_GUILD_IDS_ENV} matches none of the {len(guilds)} current guilds: leaving none, "
+                "serving none. Commands are refused; reactions, joins, messages and reminders are ignored "
+                "and not caught up once fixed; check the IDs and redeploy.",
             )
         else:
             unlisted = [guild for guild in guilds if guild.id not in policy.allowed]
