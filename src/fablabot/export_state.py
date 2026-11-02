@@ -117,6 +117,24 @@ def replaced_messages() -> int:
     return row[0]
 
 
+def _open_filled() -> None:
+    """Open the database, refusing a file that is missing or empty, which is what a wrong volume looks like.
+
+    Raises:
+        StorageError: If there is no file, or no import and no row in it.
+    """
+    path = db.DATABASE_FILE
+    if not path.exists():
+        msg = f"{path.as_posix()} does not exist; nothing was written. Is this the bot's data volume?"
+        raise db.StorageError(msg)
+    db.open_database()
+    conn = db.connection()
+    tables = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").fetchall()
+    if not any(conn.execute(f"SELECT 1 FROM {row[0]} LIMIT 1").fetchone() for row in tables):
+        msg = f"{path.as_posix()} holds no data and no import; nothing was written. Is this the bot's data volume?"
+        raise db.StorageError(msg)
+
+
 def export_to(folder: Path) -> None:
     """Write every state file into a new folder, which appears whole or not at all.
 
@@ -149,7 +167,7 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit("Usage: python -m fablabot.export_state <new folder>")
     folder = Path(args[0])
     try:
-        db.open_database()
+        _open_filled()
         export_to(folder)
         replaced = replaced_messages()
     except (db.StorageError, OSError, sqlite3.Error) as error:

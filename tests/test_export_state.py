@@ -142,3 +142,38 @@ def test_the_export_needs_a_folder() -> None:
     """No folder, no guess."""
     with pytest.raises(SystemExit, match="Usage"):
         export_state.main([])
+
+
+def test_the_export_refuses_a_volume_with_no_database(capsys: pytest.CaptureFixture[str]) -> None:
+    """A wrong or empty volume has no database: the command creates nothing and says so, as the import does."""
+    with pytest.raises(SystemExit, match=r"Cannot export: .*fablabot\.db") as stopped:
+        export_state.main([str(EXPORT)])
+
+    assert stopped.value.code != 0
+    assert not db.DATABASE_FILE.exists()
+    assert not EXPORT.exists()
+    assert capsys.readouterr().out == ""
+
+
+def test_the_export_refuses_a_database_holding_nothing() -> None:
+    """A database no import and no row filled is what an empty volume leaves behind: no empty files are written."""
+    db.open_database()
+    db.close_database()
+
+    with pytest.raises(SystemExit, match=r"Cannot export: .*holds no data") as stopped:
+        export_state.main([str(EXPORT)])
+
+    assert stopped.value.code != 0
+    assert not EXPORT.exists()
+    assert not EXPORT.with_name(f"{EXPORT.name}.partial").exists()
+
+
+def test_the_export_serves_a_database_the_bot_filled_without_an_import() -> None:
+    """A new instance never imported anything: its rows are enough."""
+    db.open_database()
+    op_expiries.record(FIRST_GUILD, 42, {"expires_at": "2026-11-02T12:00:00+00:00", "channel_id": 7})
+    db.close_database()
+
+    export_state.main([str(EXPORT)])
+
+    assert _load(EXPORT)["temp_admin_state.json"][str(FIRST_GUILD)]["42"]["channel_id"] == 7
