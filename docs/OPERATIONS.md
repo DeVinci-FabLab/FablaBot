@@ -246,6 +246,20 @@ At start and then every minute, the bot checks each holder of `Admin -temp-` (`c
 A bot restarted on a full disk refuses to start (see `Cannot start`), so nothing removes a temporary role until
 the disk is fixed: fix the disk first, then check the holders of `Admin -temp-` in the server settings.
 
+## When a database write fails
+
+A full disk or a lost volume makes writes fail while the bot runs. Each failure reaches the log and the server's
+log channel. Free the space: the next write works, with no restart.
+
+| What failed | What people see | What comes back on its own |
+| --- | --- | --- |
+| A reaction on a training message | The reaction stays; no DM, not in the list; `Reaction not recorded` in the log | At the next 5-minute tick after the disk is back: the member is registered at that time, in the order of that moment, if the deadline has not passed |
+| `/fm publish` or `/msg publish` | The post disappears and the staff member is told; the draft stays | Nothing: publish again |
+| `/user op` | The role is not given, and the caller is told in private | Nothing: run it again |
+| A reminder flag | The reminder goes out again at the next tick while its window lasts | The flag, once a tick can write it |
+
+A restart during the failure forgets which servers to catch up: a member who reacted then has to react again.
+
 ## Server check at start
 
 At the first start of the process, once the allow-list is applied, the bot reads each server it serves
