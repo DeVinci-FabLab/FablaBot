@@ -41,10 +41,7 @@ EXPIRY_RETRY_DELAY = timedelta(seconds=60)
 # Waits, in seconds, before each retry of a server whose records could not be settled at start; then it gives up.
 RECONCILE_RETRY_DELAYS = (30.0, 120.0, 600.0)
 
-_OP_NOT_RECORDED = (
-    "La durée n'a pas pu être enregistrée : le rôle est retiré, ou le sera dès que possible. "
-    "Vérifiez qu'il a bien disparu, puis réessayez."
-)
+_OP_NOT_RECORDED = "La durée n'a pas pu être enregistrée : aucun droit n'a été donné ni prolongé. Réessayez plus tard."
 _SELF_OP_REFUSED = "Vous ne pouvez pas vous op vous-même : un autre membre du staff doit le faire."
 _TEMP_ROLE_REFUSED = f"Le rôle {RoleNames.ADMIN_TEMP} se donne uniquement avec `/user op`, qui fixe sa durée."
 _TEMP_ROLE_TAKE_REFUSED = f"Le rôle {RoleNames.ADMIN_TEMP} se retire uniquement avec `/user deop`."
@@ -228,6 +225,17 @@ class UserManagement(commands.Cog):
             await self._refuse(interaction, "user.op", RefusalKind.SELF_TARGET, _SELF_OP_REFUSED)
             return
 
+        # Record and timer first: the role is never given without its end, and a role that lands although Discord
+        # reported a failure still ends on time. A crash in between leaves a record with no role, dropped by the sweep.
+        expiry = OpExpiry(expires_at=_utcnow() + timedelta(minutes=time), channel_id=interaction.channel_id or 0)
+        try:
+            self._record_op(interaction.guild.id, member.id, expiry)
+        except sqlite3.Error:
+            logger.exception(f"Op expiry not recorded guild_id={interaction.guild.id} member_id={member.id}; role not given")
+            await interaction.response.send_message(_OP_NOT_RECORDED, ephemeral=True)
+            return
+        self._arm_deop(interaction.guild.id, member.id, expiry)
+
         success, error = await safe_add_roles(
             logger,
             member,
@@ -238,32 +246,11 @@ class UserManagement(commands.Cog):
             await interaction.response.send_message(error, ephemeral=True)
             return
 
-        # Role first, then record: a crash in between leaves a holder with no record, removed at start.
-        expiry = OpExpiry(expires_at=_utcnow() + timedelta(minutes=time), channel_id=interaction.channel_id or 0)
-        try:
-            self._record_op(interaction.guild.id, member.id, expiry)
-        except sqlite3.Error:
-            # Nothing would end an op without its record: take the role back at once.
-            logger.exception(
-                f"Op expiry not recorded guild_id={interaction.guild.id} member_id={member.id}; taking the role back"
-            )
-            await self._take_back_unrecorded_op(interaction.guild, member, admin_role)
-            await interaction.response.send_message(_OP_NOT_RECORDED, ephemeral=True)
-            return
-        self._arm_deop(interaction.guild.id, member.id, expiry.expires_at)
         logger.info(f"Granted {member} temporary admin for {time} minutes for reason: {reason}")
         await interaction.response.send_message(
             f"{codir_role.mention} Droits admin donnés à {format_member_mention(member)} pour {time} minutes. "
             f"Raison: {escape_md(reason)}",
         )
-
-    async def _take_back_unrecorded_op(self, guild: Guild, member: Member, admin_role: Role) -> None:
-        """Remove the role of an op that could not be recorded; if Discord refuses, a retry removes it later."""
-        removed, _error = await safe_remove_roles(logger, member, admin_role, reason="Op expiry could not be recorded")
-        if not removed:
-            # A holder with no record is removed by the settle, which the retry runs until it succeeds or gives up.
-            logger.error(f"Op role not taken back guild_id={guild.id} member_id={member.id}; retrying later")
-            self._retry_reconcile_later(guild.id)
 
     @user_group.command(
         name="deop",
@@ -615,7 +602,7 @@ class UserManagement(commands.Cog):
         if expiry is not None and expiry.expires_at > _utcnow():
             task = self.deop_tasks.get((guild.id, member.id))
             if task is None or task.done():
-                self._arm_deop(guild.id, member.id, expiry.expires_at)
+                self._arm_deop(guild.id, member.id, expiry)
             return True
         cause = "expiry unreadable" if unreadable else "no recorded expiry" if expiry is None else "expiry passed"
         timer_before = self.deop_tasks.get((guild.id, member.id))
@@ -644,8 +631,7 @@ class UserManagement(commands.Cog):
         record gets its timer and ``_expire`` asks Discord when it fires (now, if the time has passed).
         A record that cannot be read or dropped is logged and the others are still swept. With
         ``fail_closed``, a record the cache cannot vouch for and the storage cannot give gets a timer
-        that fires now and asks again every ``EXPIRY_RETRY_DELAY`` until it can be read, then waits for the
-        time it holds.
+        that fires now.
 
         Args:
             guild (Guild): The server.
@@ -666,13 +652,13 @@ class UserManagement(commands.Cog):
                 if expiry is None:
                     self._clear_op(guild.id, member_id)
                 else:
-                    self._arm_deop(guild.id, member_id, max(expiry.expires_at, _utcnow()))
+                    self._arm_deop(guild.id, member_id, expiry)
             except sqlite3.Error:
                 if fail_closed and not guild.chunked:
                     logger.exception(
                         f"Storage failure reading an op record, timer set now guild_id={guild.id} member_id={member_id}"
                     )
-                    self._arm_deop(guild.id, member_id, _utcnow())
+                    self._arm_deop(guild.id, member_id, OpExpiry(expires_at=_utcnow(), channel_id=0))
                     continue
                 swept = False
                 logger.exception(f"Storage failure sweeping an op record at start guild_id={guild.id} member_id={member_id}")
@@ -712,10 +698,10 @@ class UserManagement(commands.Cog):
             logger.exception(f"Unreadable op expiry guild_id={guild_id} member_id={member_id}; treated as absent")
             return None
 
-    def _arm_deop(self, guild_id: int, member_id: int, expires_at: datetime) -> None:
+    def _arm_deop(self, guild_id: int, member_id: int, expiry: OpExpiry) -> None:
         """Start the one timer of a member's op on one guild, replacing any running one."""
         self._cancel_deop(guild_id, member_id)
-        self.deop_tasks[guild_id, member_id] = asyncio.create_task(self._deop_later(guild_id, member_id, expires_at))
+        self.deop_tasks[guild_id, member_id] = asyncio.create_task(self._deop_later(guild_id, member_id, expiry))
 
     def _cancel_deop(self, guild_id: int, member_id: int) -> None:
         """Cancel the timer of a member's op on one guild, if any."""
@@ -723,20 +709,22 @@ class UserManagement(commands.Cog):
         if task:
             task.cancel()
 
-    async def _deop_later(self, guild_id: int, member_id: int, expires_at: datetime) -> None:
-        """Wait until the recorded time, then end the op.
+    async def _deop_later(self, guild_id: int, member_id: int, expiry: OpExpiry) -> None:
+        """Wait until the time the timer was given, then end the op.
 
         The wait is measured on the loop's monotonic clock while the recorded time is a wall-clock
         time, so a wake-up before the wall clock reaches it sleeps again instead of giving up.
         While the guild cannot be acted on (an outage, a member Discord has not answered for), the
         timer keeps the record and tries again every ``EXPIRY_RETRY_DELAY``, so the role does not
-        outlive the outage until the next start.
+        outlive the outage until the next start. The timer holds its own expiry: whatever changes the record
+        (a new op, a deop) replaces or cancels it, and a storage failure cannot delay the removal.
         """
+        expires_at = expiry.expires_at
         try:
             while True:
                 while (delay := _delay_until(expires_at)) > 0:
                     await asyncio.sleep(delay)
-                if await self._expire(guild_id, member_id):
+                if await self._expire(guild_id, member_id, expiry):
                     return
                 expires_at = _utcnow() + EXPIRY_RETRY_DELAY
         except asyncio.CancelledError:
@@ -748,29 +736,17 @@ class UserManagement(commands.Cog):
             if self.deop_tasks.get((guild_id, member_id)) is asyncio.current_task():
                 self.deop_tasks.pop((guild_id, member_id))
 
-    async def _expire(self, guild_id: int, member_id: int) -> bool:
-        """End a member's op on one guild at its recorded time, waiting for it if it has not come.
+    async def _expire(self, guild_id: int, member_id: int, expiry: OpExpiry) -> bool:
+        """End a member's op on one guild.
 
         Removes the role, then forgets the record (a crash in between leaves an orphan record,
         cleared later), then posts the notice in the op channel. A failed removal keeps the record,
-        posts a failure notice instead and starts the bounded retry of the server. An unavailable guild, a member
-        Discord could not be asked about, or a record the database could not be asked for keeps the record
-        and asks the caller to try again.
+        posts a failure notice instead and starts the bounded retry of the server. An unavailable guild
+        or a member Discord could not be asked about keeps the record and asks the caller to try again.
 
         Returns:
             bool: False when the caller should wait and call again, True when there is nothing left to retry.
         """
-        try:
-            expiry = self._load_op(guild_id, member_id)
-        except sqlite3.Error:
-            logger.exception(f"Storage failure reading the op expiry guild_id={guild_id} member_id={member_id}; record kept")
-            return False
-        if expiry is None:
-            return True
-        # A timer armed while the record was unreadable (fail closed at start) fires early: wait for the recorded time.
-        # Whatever changes the record meanwhile (a new op, a deop) cancels this timer.
-        while (delay := _delay_until(expiry.expires_at)) > 0:
-            await asyncio.sleep(delay)
         guild = self.bot.get_guild(guild_id)
         if guild is None or guild.unavailable:
             logger.warning(f"Guild unreachable at op expiry guild_id={guild_id} member_id={member_id}; record kept")

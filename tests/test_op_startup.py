@@ -91,7 +91,7 @@ async def test_start_keeps_future_holder_until_stored_time() -> None:
         await _start(guild)
 
     holder.remove_roles.assert_not_awaited()
-    arm.assert_called_once_with(GUILD_ID, HOLDER_ID, due)
+    arm.assert_called_once_with(GUILD_ID, HOLDER_ID, user_management.OpExpiry(due, 777))
 
 
 async def test_restart_and_reconnect_keep_one_timer_and_the_record() -> None:
@@ -181,7 +181,7 @@ async def test_op_landing_during_the_sweep_keeps_its_record_and_timer() -> None:
         # A /user op served while the removal is awaited: the record and the timer exist, the cache does not show the role yet.
         cog = cog_box[0]
         cog._record_op(GUILD_ID, 777, user_management.OpExpiry(due, 123))
-        cog._arm_deop(GUILD_ID, 777, due)
+        cog._arm_deop(GUILD_ID, 777, user_management.OpExpiry(due, 123))
 
     holder.remove_roles = AsyncMock(side_effect=op_lands_during_removal)
     bot = MagicMock()
@@ -206,7 +206,7 @@ async def test_start_with_partial_member_cache_keeps_future_record_and_arms_it()
     with patch.object(UserManagement, "_arm_deop") as arm:
         await _start(guild)
 
-    arm.assert_called_once_with(GUILD_ID, 999, due)
+    arm.assert_called_once_with(GUILD_ID, 999, user_management.OpExpiry(due, 777))
     assert str(999) in stored_ops()[str(GUILD_ID)]
 
 
@@ -358,7 +358,7 @@ async def test_a_failed_read_on_one_record_does_not_stop_the_sweep_from_arming_t
     with _storage_fails_for("get", 998, storage_error), patch.object(UserManagement, "_arm_deop") as arm:
         await _start(guild)
 
-    arm.assert_called_once_with(GUILD_ID, 999, future)
+    arm.assert_called_once_with(GUILD_ID, 999, user_management.OpExpiry(future, 777))
     assert "998" in stored_ops()[str(GUILD_ID)]
     errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
     assert any(f"guild_id={GUILD_ID}" in m and "member_id=998" in m for m in errors)
@@ -374,7 +374,7 @@ async def test_op_landing_during_the_removal_at_start_keeps_its_record_and_timer
 
     async def op_lands_during_removal(*_args: object, **_kwargs: object) -> None:
         cog._record_op(GUILD_ID, HOLDER_ID, user_management.OpExpiry(due, 123))
-        cog._arm_deop(GUILD_ID, HOLDER_ID, due)
+        cog._arm_deop(GUILD_ID, HOLDER_ID, user_management.OpExpiry(due, 123))
 
     holder.remove_roles = AsyncMock(side_effect=op_lands_during_removal)
 
@@ -484,7 +484,7 @@ async def test_the_last_retry_arms_a_timer_for_a_record_it_cannot_read(storage_e
         arm.assert_not_called()
         await cog.reconcile_retries[GUILD_ID]
 
-    arm.assert_called_once_with(GUILD_ID, 999, NOW)
+    arm.assert_called_once_with(GUILD_ID, 999, user_management.OpExpiry(NOW, 0))
     assert str(999) in stored_ops()[str(GUILD_ID)]
 
 
@@ -522,7 +522,7 @@ async def test_a_failed_sweep_at_start_is_retried_later_and_the_record_is_settle
     if chunked:
         assert str(GUILD_ID) not in stored_ops()
     else:
-        arm.assert_called_once_with(GUILD_ID, 999, future)
+        arm.assert_called_once_with(GUILD_ID, 999, user_management.OpExpiry(future, 777))
 
 
 async def test_a_failed_removal_at_start_is_retried_later_and_the_holder_is_settled() -> None:

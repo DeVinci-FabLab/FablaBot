@@ -24,6 +24,7 @@ NOW = datetime(2026, 10, 28, 15, 0, tzinfo=UTC)
 GUILD_A, GUILD_B = 1001, 1002
 TARGET_ID = 501
 OP_CHANNEL_ID = 777
+EXPIRY = OpExpiry(expires_at=NOW, channel_id=OP_CHANNEL_ID)
 
 
 @pytest.fixture(autouse=True)
@@ -85,77 +86,80 @@ async def test_op_records_expiry_before_replying(cog: UserManagement) -> None:
     assert set(cog.deop_tasks) == {(GUILD_A, TARGET_ID)}
 
 
-async def test_op_that_cannot_be_recorded_takes_the_role_back(cog: UserManagement, storage_error: sqlite3.Error) -> None:
-    """Without a record nothing would end the op: the role leaves at once and the caller is told privately."""
+async def test_op_that_cannot_be_recorded_gives_no_role(cog: UserManagement, storage_error: sqlite3.Error) -> None:
+    """Without a record nothing would end the op: no role is given, no timer runs, and the caller is told in private."""
     guild, target, caller = _server(GUILD_A)
 
     with patch.object(op_expiries, "record", side_effect=storage_error):
-        interaction = await _op(cog, guild, caller, target, 10)
+        interaction = await _op(cog, guild, caller, target, 5)
 
-    target.add_roles.assert_awaited_once()
-    target.remove_roles.assert_awaited_once()
+    target.add_roles.assert_not_awaited()
     assert cog.deop_tasks == {}
-    assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+    assert stored_ops() == {}
+    interaction.response.send_message.assert_awaited_once_with(user_management._OP_NOT_RECORDED, ephemeral=True)
 
 
-async def test_op_whose_record_and_role_removal_both_fail_is_settled_by_a_retry(
-    cog: UserManagement, storage_error: sqlite3.Error, caplog: pytest.LogCaptureFixture
-) -> None:
-    """When the role cannot be taken back either, the log says so and a retry removes it: no role without record or timer."""
+async def test_a_reop_that_cannot_be_recorded_leaves_the_running_op(cog: UserManagement, storage_error: sqlite3.Error) -> None:
+    """A failed extension keeps the time and the timer of the op already running."""
     guild, target, caller = _server(GUILD_A)
-    temp = guild.roles[0]
-    target.add_roles = AsyncMock(side_effect=lambda *_a, **_k: temp.members.append(target))
-    target.remove_roles = AsyncMock(side_effect=[Forbidden(MagicMock(status=403), "missing permissions"), None])
+    await _op(cog, guild, caller, target, 5)
+    timer = cog.deop_tasks[GUILD_A, TARGET_ID]
+    stored = stored_ops()
+
+    with patch.object(op_expiries, "record", side_effect=storage_error):
+        await _op(cog, guild, caller, target, 90)
+
+    assert cog.deop_tasks[GUILD_A, TARGET_ID] is timer
+    assert stored_ops() == stored
+
+
+async def test_a_role_discord_reported_as_failed_but_gave_still_ends_on_time(cog: UserManagement) -> None:
+    """An add that raises after Discord applied it leaves a role with its record and timer, so it ends at its time."""
+    guild, target, caller = _server(GUILD_A)
+    target.add_roles = AsyncMock(side_effect=HTTPException(MagicMock(status=503), "unavailable"))
+    cog.bot.get_guild = MagicMock(return_value=guild)
+
+    interaction = await _op(cog, guild, caller, target, 5)
+
+    assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+    target.roles.append(guild.roles[0])
+    with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=5)):
+        await cog.deop_tasks[GUILD_A, TARGET_ID]
+    target.remove_roles.assert_awaited_once()
+    assert stored_ops() == {}
+
+
+async def test_an_add_discord_refused_leaves_no_trace_at_its_time(cog: UserManagement) -> None:
+    """A refused add gives nothing; at its time the timer finds no role, drops the record and posts nothing."""
+    guild, target, caller = _server(GUILD_A)
+    target.add_roles = AsyncMock(side_effect=Forbidden(MagicMock(status=403), "missing permissions"))
+    cog.bot.get_guild = MagicMock(return_value=guild)
+
+    await _op(cog, guild, caller, target, 5)
+    with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=5)):
+        await cog.deop_tasks[GUILD_A, TARGET_ID]
+
+    target.remove_roles.assert_not_awaited()
+    assert stored_ops() == {}
+    guild.get_channel.return_value.send.assert_not_awaited()
+
+
+async def test_the_role_ends_on_time_with_the_database_down(cog: UserManagement, storage_error: sqlite3.Error) -> None:
+    """The timer holds its own expiry: neither a failed read nor a failed clear delays the removal or the notice."""
+    guild, target, caller = _server(GUILD_A)
+    await _op(cog, guild, caller, target, 5)
+    target.roles.append(guild.roles[0])
     cog.bot.get_guild = MagicMock(return_value=guild)
 
     with (
-        patch.object(user_management, "RECONCILE_RETRY_DELAYS", (0,)),
-        patch.object(op_expiries, "record", side_effect=storage_error),
+        patch.object(op_expiries, "get", side_effect=storage_error),
+        patch.object(op_expiries, "clear", side_effect=storage_error),
+        patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=5)),
     ):
-        interaction = await _op(cog, guild, caller, target, 10)
-        assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
-        errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
-        assert any("not taken back" in m and f"guild_id={GUILD_A}" in m and f"member_id={TARGET_ID}" in m for m in errors)
-        await cog.reconcile_retries[GUILD_A]
+        await cog.deop_tasks[GUILD_A, TARGET_ID]
 
-    assert target.remove_roles.await_count == 2
-    assert cog.deop_tasks == {}
-
-
-@pytest.mark.parametrize("removal_works", [True, False], ids=["role-taken-back", "removal-refused"])
-async def test_the_reply_to_an_op_that_cannot_be_recorded_is_true_whether_or_not_the_removal_worked(
-    cog: UserManagement, storage_error: sqlite3.Error, removal_works: bool
-) -> None:
-    """One text serves both outcomes: it never says the role is gone when Discord refused and a retry still has to remove it."""
-    guild, target, caller = _server(GUILD_A)
-    if not removal_works:
-        target.remove_roles = AsyncMock(side_effect=Forbidden(MagicMock(status=403), "missing permissions"))
-        cog.bot.get_guild = MagicMock(return_value=guild)
-
-    with (
-        patch.object(user_management, "RECONCILE_RETRY_DELAYS", (3600,)),
-        patch.object(op_expiries, "record", side_effect=storage_error),
-    ):
-        interaction = await _op(cog, guild, caller, target, 10)
-        for retry in cog.reconcile_retries.values():
-            retry.cancel()
-
-    reply = interaction.response.send_message.await_args
-    assert reply.args[0] == user_management._OP_NOT_RECORDED
-    assert "ou le sera" in reply.args[0]
-    assert reply.kwargs["ephemeral"] is True
-
-
-async def test_op_that_cannot_be_recorded_does_not_start_a_retry_when_the_role_is_taken_back(
-    cog: UserManagement, storage_error: sqlite3.Error
-) -> None:
-    """A role taken back at once needs no retry."""
-    guild, target, caller = _server(GUILD_A)
-
-    with patch.object(op_expiries, "record", side_effect=storage_error):
-        await _op(cog, guild, caller, target, 10)
-
-    assert cog.reconcile_retries == {}
+    target.remove_roles.assert_awaited_once()
+    guild.get_channel.return_value.send.assert_awaited_once()
 
 
 async def test_reop_replaces_expiry_and_keeps_one_timer(cog: UserManagement) -> None:
@@ -181,7 +185,7 @@ async def test_expiry_removes_role_clears_record_and_posts_in_op_channel(cog: Us
     cog.bot.get_guild = MagicMock(return_value=guild)
 
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=90)):
-        await cog._expire(GUILD_A, TARGET_ID)
+        await cog._expire(GUILD_A, TARGET_ID, EXPIRY)
 
     target.remove_roles.assert_awaited_once()
     assert str(TARGET_ID) not in stored_ops().get(str(GUILD_A), {})
@@ -198,9 +202,11 @@ async def test_expiry_twice_posts_one_notice(cog: UserManagement) -> None:
     target.roles.append(guild.roles[0])
     cog.bot.get_guild = MagicMock(return_value=guild)
 
+    target.remove_roles.side_effect = lambda *_args, **_kwargs: target.roles.clear()
+
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=5)):
-        await cog._expire(GUILD_A, TARGET_ID)
-        await cog._expire(GUILD_A, TARGET_ID)
+        await cog._expire(GUILD_A, TARGET_ID, EXPIRY)
+        await cog._expire(GUILD_A, TARGET_ID, EXPIRY)
 
     guild.get_channel.return_value.send.assert_awaited_once()
 
@@ -213,7 +219,7 @@ async def test_expiry_for_member_who_left_clears_record_quietly(cog: UserManagem
     cog.bot.get_guild = MagicMock(return_value=guild)
 
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=5)):
-        await cog._expire(GUILD_A, TARGET_ID)
+        await cog._expire(GUILD_A, TARGET_ID, EXPIRY)
 
     assert str(TARGET_ID) not in stored_ops().get(str(GUILD_A), {})
     assert not [r for r in caplog.records if r.levelname == "ERROR"]
@@ -226,7 +232,7 @@ async def test_expiry_leaves_a_member_without_the_role_alone_and_clears_the_reco
     cog.bot.get_guild = MagicMock(return_value=guild)
 
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=5)):
-        settled = await cog._expire(GUILD_A, TARGET_ID)
+        settled = await cog._expire(GUILD_A, TARGET_ID, EXPIRY)
 
     assert settled is True
     assert str(TARGET_ID) not in stored_ops().get(str(GUILD_A), {})
@@ -243,7 +249,7 @@ async def test_failed_expiry_keeps_record_and_warns_op_channel(cog: UserManageme
     cog.bot.get_guild = MagicMock(return_value=guild)
 
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=5)):
-        await cog._expire(GUILD_A, TARGET_ID)
+        await cog._expire(GUILD_A, TARGET_ID, EXPIRY)
 
     assert str(TARGET_ID) in stored_ops()[str(GUILD_A)]
     guild.get_channel.return_value.send.assert_awaited_once()
@@ -343,41 +349,12 @@ async def test_timer_that_wakes_before_the_clock_is_due_waits_again(cog: UserMan
         patch.object(user_management, "_utcnow", side_effect=lambda: clock["now"]),
         patch.object(user_management.asyncio, "sleep", early_wake),
     ):
-        cog._arm_deop(GUILD_A, TARGET_ID, expires_at)
+        cog._arm_deop(GUILD_A, TARGET_ID, OpExpiry(expires_at, OP_CHANNEL_ID))
         await cog.deop_tasks[GUILD_A, TARGET_ID]
 
     assert len(sleeps) == 2
     target.remove_roles.assert_awaited_once()
     assert str(TARGET_ID) not in stored_ops().get(str(GUILD_A), {})
-
-
-async def test_a_timer_armed_before_its_record_could_be_read_waits_for_the_recorded_time(cog: UserManagement) -> None:
-    """A timer that fires at once because the record was unreadable waits for the time the record holds, then ends the op."""
-    guild, target, _caller = _server(GUILD_A)
-    target.roles.append(guild.roles[0])
-    cog.bot.get_guild = MagicMock(return_value=guild)
-    expires_at = NOW + timedelta(minutes=30)
-    cog._record_op(GUILD_A, TARGET_ID, OpExpiry(expires_at=expires_at, channel_id=OP_CHANNEL_ID))
-    clock = {"now": NOW}
-    real_sleep = asyncio.sleep
-    sleeps: list[float] = []
-
-    async def advance(delay: float) -> None:
-        sleeps.append(delay)
-        clock["now"] += timedelta(seconds=delay)
-        await real_sleep(0)
-
-    with (
-        patch.object(user_management, "_utcnow", side_effect=lambda: clock["now"]),
-        patch.object(user_management.asyncio, "sleep", advance),
-    ):
-        cog._arm_deop(GUILD_A, TARGET_ID, NOW)
-        await cog.deop_tasks[GUILD_A, TARGET_ID]
-
-    assert sleeps == [1800.0]
-    target.remove_roles.assert_awaited_once()
-    assert str(TARGET_ID) not in stored_ops().get(str(GUILD_A), {})
-    assert cog.deop_tasks == {}
 
 
 async def test_expiry_keeps_record_and_asks_for_a_retry_while_the_guild_is_unavailable(
@@ -391,7 +368,7 @@ async def test_expiry_keeps_record_and_asks_for_a_retry_while_the_guild_is_unava
     cog.bot.get_guild = MagicMock(return_value=guild)
 
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=31)):
-        settled = await cog._expire(GUILD_A, TARGET_ID)
+        settled = await cog._expire(GUILD_A, TARGET_ID, EXPIRY)
 
     assert settled is False
     assert str(TARGET_ID) in stored_ops()[str(GUILD_A)]
@@ -421,7 +398,7 @@ async def test_timer_waits_and_tries_again_until_the_guild_is_back(cog: UserMana
         patch.object(user_management, "_utcnow", side_effect=lambda: clock["now"]),
         patch.object(user_management.asyncio, "sleep", guild_comes_back),
     ):
-        cog._arm_deop(GUILD_A, TARGET_ID, NOW)
+        cog._arm_deop(GUILD_A, TARGET_ID, EXPIRY)
         await cog.deop_tasks[GUILD_A, TARGET_ID]
 
     assert sleeps == [60.0]
@@ -441,7 +418,7 @@ async def test_expiry_removes_the_role_of_a_cached_member_in_a_guild_whose_cache
     cog.bot.get_guild = MagicMock(return_value=guild)
 
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=31)):
-        settled = await cog._expire(GUILD_A, TARGET_ID)
+        settled = await cog._expire(GUILD_A, TARGET_ID, EXPIRY)
 
     assert settled is True
     target.remove_roles.assert_awaited_once()
@@ -460,74 +437,12 @@ async def test_expiry_asks_discord_for_a_member_missing_from_an_incomplete_cache
     cog.bot.get_guild = MagicMock(return_value=guild)
 
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=31)):
-        settled = await cog._expire(GUILD_A, TARGET_ID)
+        settled = await cog._expire(GUILD_A, TARGET_ID, EXPIRY)
 
     assert settled is True
     guild.fetch_member.assert_awaited_once_with(TARGET_ID)
     target.remove_roles.assert_awaited_once()
     assert str(TARGET_ID) not in stored_ops().get(str(GUILD_A), {})
-
-
-async def test_expiry_asks_for_a_retry_when_the_record_cannot_be_read(
-    cog: UserManagement, caplog: pytest.LogCaptureFixture, storage_error: sqlite3.Error
-) -> None:
-    """When the record cannot be read at expiry, the role and the record stay and the caller is asked to try again."""
-    guild, target, caller = _server(GUILD_A)
-    await _op(cog, guild, caller, target, 31)
-    target.roles.append(guild.roles[0])
-    cog.bot.get_guild = MagicMock(return_value=guild)
-
-    with (
-        patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=31)),
-        patch.object(op_expiries, "get", side_effect=storage_error),
-    ):
-        settled = await cog._expire(GUILD_A, TARGET_ID)
-
-    assert settled is False
-    assert str(TARGET_ID) in stored_ops()[str(GUILD_A)]
-    target.remove_roles.assert_not_awaited()
-    errors = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
-    assert any(f"guild_id={GUILD_A}" in m and f"member_id={TARGET_ID}" in m for m in errors)
-
-
-async def test_timer_tries_again_after_a_failed_read_and_removes_the_role(
-    cog: UserManagement, storage_error: sqlite3.Error
-) -> None:
-    """A timer whose first read fails waits and tries again, and the role still leaves."""
-    guild, target, _caller = _server(GUILD_A)
-    target.roles.append(guild.roles[0])
-    cog.bot.get_guild = MagicMock(return_value=guild)
-    cog._record_op(GUILD_A, TARGET_ID, OpExpiry(expires_at=NOW, channel_id=OP_CHANNEL_ID))
-    clock = {"now": NOW}
-    real_sleep = asyncio.sleep
-    sleeps: list[float] = []
-
-    async def advance(delay: float) -> None:
-        sleeps.append(delay)
-        clock["now"] += timedelta(seconds=delay)
-        await real_sleep(0)
-
-    real_get = op_expiries.get
-    reads = {"count": 0}
-
-    def fail_once(guild_id: int, member_id: int) -> dict | None:
-        reads["count"] += 1
-        if reads["count"] == 1:
-            raise storage_error
-        return real_get(guild_id, member_id)
-
-    with (
-        patch.object(user_management, "_utcnow", side_effect=lambda: clock["now"]),
-        patch.object(user_management.asyncio, "sleep", advance),
-        patch.object(op_expiries, "get", side_effect=fail_once),
-    ):
-        cog._arm_deop(GUILD_A, TARGET_ID, NOW)
-        await cog.deop_tasks[GUILD_A, TARGET_ID]
-
-    assert sleeps == [60.0]
-    target.remove_roles.assert_awaited_once()
-    assert str(TARGET_ID) not in stored_ops().get(str(GUILD_A), {})
-    assert cog.deop_tasks == {}
 
 
 async def test_expiry_clears_quietly_a_member_discord_does_not_know(
@@ -542,7 +457,7 @@ async def test_expiry_clears_quietly_a_member_discord_does_not_know(
     cog.bot.get_guild = MagicMock(return_value=guild)
 
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=31)):
-        settled = await cog._expire(GUILD_A, TARGET_ID)
+        settled = await cog._expire(GUILD_A, TARGET_ID, EXPIRY)
 
     assert settled is True
     assert str(TARGET_ID) not in stored_ops().get(str(GUILD_A), {})
@@ -562,7 +477,7 @@ async def test_expiry_keeps_record_and_asks_for_a_retry_when_discord_cannot_say_
     cog.bot.get_guild = MagicMock(return_value=guild)
 
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=31)):
-        settled = await cog._expire(GUILD_A, TARGET_ID)
+        settled = await cog._expire(GUILD_A, TARGET_ID, EXPIRY)
 
     assert settled is False
     assert str(TARGET_ID) in stored_ops()[str(GUILD_A)]
@@ -606,7 +521,7 @@ async def test_expiry_with_the_op_channel_gone_logs_the_member(cog: UserManageme
     guild.get_channel.return_value = None
 
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=5)):
-        await cog._expire(GUILD_A, TARGET_ID)
+        await cog._expire(GUILD_A, TARGET_ID, EXPIRY)
 
     lines = [r.getMessage() for r in caplog.records if "gone" in r.getMessage()]
     assert len(lines) == 1
@@ -653,7 +568,7 @@ async def test_a_failed_clear_after_the_expiry_removal_still_posts_the_notice(
         patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=90)),
         patch.object(op_expiries, "clear", side_effect=storage_error),
     ):
-        done = await cog._expire(GUILD_A, TARGET_ID)
+        done = await cog._expire(GUILD_A, TARGET_ID, EXPIRY)
 
     assert done is True
     target.remove_roles.assert_awaited_once()
