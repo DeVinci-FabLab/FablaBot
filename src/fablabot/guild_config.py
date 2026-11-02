@@ -3,78 +3,52 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from fablabot.helpers.state_store import JsonStateStore
+from fablabot import db
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    import sqlite3
 
 logger = logging.getLogger(__name__)
 
-CONFIG_FILE = Path("data/guild_config.json")
-_GUILD_KEY_COMMANDS = "commands_channel_id"
-_GUILD_KEY_WELCOME = "welcome_verify_enabled"
-_KEY_LOG = "log_channel_id"
-_GUILD_KEY: set[str] = {_GUILD_KEY_COMMANDS, _GUILD_KEY_WELCOME, _KEY_LOG}
-# Instance-wide log channel of older releases: read to migrate it, never written.
-_LEGACY_SECTION = "__global__"
-
-_config_store = JsonStateStore(logger, CONFIG_FILE)
+_COMMANDS = "commands_channel_id"
+_WELCOME = "welcome_verify_enabled"
+_LOG = "log_channel_id"
 
 
-def _load_all() -> dict[str, dict[str, Any]]:
-    """Load all guild configuration data from the JSON file.
-
-    Returns:
-        dict[str, dict[str, Any]]: Mapping of guild IDs to their configuration entries.
-    """
-    state = _config_store.state
-    if not isinstance(state, dict):
-        logger.warning("Guild configuration store is not a mapping; resetting.")
-        return {}
-    return {k: v for k, v in state.items() if isinstance(v, dict)}
-
-
-def _save_all(data: dict[str, dict[str, Any]]) -> None:
-    """Persist all guild configuration data through the shared state store.
+def _read(guild_id: int) -> sqlite3.Row | None:
+    """Read the settings of a specific guild.
 
     Args:
-        data (dict[str, dict[str, Any]]): Mapping of guild IDs to their configuration entries.
+        guild_id (int): The ID of the guild.
+
+    Returns:
+        sqlite3.Row | None: The guild's row, or None when it has no setting.
     """
-    _config_store.state.clear()
-    _config_store.state.update({k: v for k, v in data.items() if isinstance(v, dict)})
-    _config_store.save()
+    return db.connection().execute("SELECT * FROM guild_settings WHERE guild_id = ?", (guild_id,)).fetchone()
 
 
-def _update_entry(guild_id: int, **updates: int | bool | None) -> None:
-    """Update the configuration entry for a specific guild.
+def _set(guild_id: int, column: str, value: int | None) -> None:
+    """Change one setting of a specific guild; a guild left with no setting keeps no row.
 
     Args:
         guild_id (int): The ID of the guild to update.
-        **updates (int | bool | None): Key-value pairs to update in the guild's configuration.
+        column (str): One of the column constants above, never user input.
+        value (int | None): The value to store, or None to unset it.
     """
-    key = str(guild_id)
-    data = _load_all()
-    entry = dict(data.get(key, {}))
-    entry = {k: v for k, v in entry.items() if k in _GUILD_KEY}
-    changed = False
-    for field, value in updates.items():
-        if value is None:
-            if field in entry:
-                entry.pop(field)
-                changed = True
-        elif entry.get(field) != value:
-            entry[field] = value
-            changed = True
-    if not changed:
-        return
-    if entry:
-        data[key] = entry
-    elif key in data:
-        data.pop(key)
-    _save_all(data)
+    with db.transaction() as conn:
+        conn.execute(
+            f"INSERT INTO guild_settings (guild_id, {column}) VALUES (?, ?) "
+            f"ON CONFLICT (guild_id) DO UPDATE SET {column} = excluded.{column}",
+            (guild_id, value),
+        )
+        conn.execute(
+            "DELETE FROM guild_settings WHERE guild_id = ? "
+            "AND commands_channel_id IS NULL AND log_channel_id IS NULL AND welcome_verify_enabled IS NULL",
+            (guild_id,),
+        )
 
 
 def get_commands_channel_id(guild_id: int) -> int | None:
@@ -86,9 +60,8 @@ def get_commands_channel_id(guild_id: int) -> int | None:
     Returns:
         int | None: The commands channel ID if it exists, otherwise None.
     """
-    entry = _load_all().get(str(guild_id), {})
-    value = entry.get(_GUILD_KEY_COMMANDS)
-    return int(value) if isinstance(value, int) else None
+    row = _read(guild_id)
+    return row[_COMMANDS] if row else None
 
 
 def set_commands_channel_id(guild_id: int, channel_id: int | None) -> None:
@@ -98,7 +71,7 @@ def set_commands_channel_id(guild_id: int, channel_id: int | None) -> None:
         guild_id (int): The ID of the guild to set the commands channel ID for.
         channel_id (int | None): The channel ID to set, or None to unset it.
     """
-    _update_entry(guild_id, **{_GUILD_KEY_COMMANDS: channel_id})
+    _set(guild_id, _COMMANDS, channel_id)
 
 
 def get_log_channel_id(guild_id: int) -> int | None:
@@ -110,9 +83,8 @@ def get_log_channel_id(guild_id: int) -> int | None:
     Returns:
         int | None: The log channel ID if the guild has one, otherwise None.
     """
-    entry = _load_all().get(str(guild_id), {})
-    value = entry.get(_KEY_LOG)
-    return int(value) if isinstance(value, int) and not isinstance(value, bool) else None
+    row = _read(guild_id)
+    return row[_LOG] if row else None
 
 
 def set_log_channel_id(guild_id: int, channel_id: int) -> None:
@@ -122,23 +94,23 @@ def set_log_channel_id(guild_id: int, channel_id: int) -> None:
         guild_id (int): The ID of the guild to set the log channel for.
         channel_id (int): The channel ID to set.
     """
-    _update_entry(guild_id, **{_KEY_LOG: channel_id})
+    _set(guild_id, _LOG, channel_id)
 
 
 def get_legacy_log_channel_id() -> int | None:
     """Retrieve the instance-wide log channel that older releases stored.
 
     Returns:
-        int | None: The legacy log channel ID if the file still holds one, otherwise None.
+        int | None: The legacy log channel ID if one is still stored, otherwise None.
     """
-    value = _load_all().get(_LEGACY_SECTION, {}).get(_KEY_LOG)
-    return int(value) if isinstance(value, int) and not isinstance(value, bool) else None
+    row = db.connection().execute("SELECT channel_id FROM legacy_log_channel").fetchone()
+    return row["channel_id"] if row else None
 
 
 def migrate_legacy_log_channel(guild_of_channel: Callable[[int], int | None]) -> int | None:
     """Give the legacy log channel to the guild that owns it, unless that guild already has one.
 
-    The legacy entry stays in the file so an older release still finds it.
+    The legacy entry stays, so the operator can still see where the channel came from.
 
     Args:
         guild_of_channel (Callable[[int], int | None]): Resolves a channel ID to its guild ID, or None.
@@ -170,9 +142,8 @@ def is_welcome_verify_enabled(guild_id: int) -> bool:
     Returns:
         bool: True if welcome verification is enabled, False otherwise.
     """
-    entry = _load_all().get(str(guild_id), {})
-    value = entry.get(_GUILD_KEY_WELCOME)
-    return bool(value) if isinstance(value, bool) else False
+    row = _read(guild_id)
+    return bool(row[_WELCOME]) if row else False
 
 
 def set_welcome_verify_enabled(guild_id: int, *, enabled: bool) -> None:
@@ -182,4 +153,4 @@ def set_welcome_verify_enabled(guild_id: int, *, enabled: bool) -> None:
         guild_id (int): The ID of the guild to set the status for.
         enabled (bool): Whether to enable or disable the feature.
     """
-    _update_entry(guild_id, **{_GUILD_KEY_WELCOME: bool(enabled)})
+    _set(guild_id, _WELCOME, int(enabled))

@@ -140,7 +140,7 @@ async def test_msg_purge_logs_the_purged_member_as_target_and_the_caller_as_user
 
     monkeypatch.setattr(ui.View, "wait", confirm)
     interaction = make_interaction()
-    interaction.user.guild_permissions.administrator = True
+    interaction.permissions.administrator = True
     channel = MagicMock(spec=TextChannel)
     channel.name = "salon"
     channel.history = no_history
@@ -159,3 +159,30 @@ async def test_msg_purge_logs_the_purged_member_as_target_and_the_caller_as_user
     assert all("target_id=4242" in line for line in purged)
     assert [line.count("user_id=418003123456789012") for line in purged] == [0, 1]
     assert not any("user_id=4242" in line for line in purged)
+
+
+async def test_msg_purge_refuses_anyone_but_a_server_administrator(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A caller without the administrator permission is refused before anything is counted."""
+
+    async def confirm(self, _timeout=None) -> bool:
+        """Answer the confirmation view as if the caller pressed confirm, so a wrongly open gate would purge."""
+        self.confirmed = True
+        return False
+
+    monkeypatch.setattr(ui.View, "wait", confirm)
+    interaction = make_interaction()
+    interaction.permissions.administrator = False
+    channel = MagicMock(spec=TextChannel)
+    channel.purge = AsyncMock()
+
+    await MessageManagement.msg_purge.callback(
+        MessageManagement(MagicMock()),
+        interaction,  # pyright: ignore[reportCallIssue]  # cog bound away
+        user=_member(),
+        count=5,
+        channel=channel,
+    )
+
+    interaction.response.send_message.assert_awaited_once()
+    assert "administrateurs" in interaction.response.send_message.await_args.args[0]
+    channel.purge.assert_not_awaited()

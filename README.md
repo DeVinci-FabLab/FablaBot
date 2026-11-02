@@ -39,10 +39,10 @@ echo -n 'my_discord_token' > secrets/discord_token.secret
 
 #### Allowed servers
 
-`ALLOWED_GUILD_IDS` holds the IDs of the servers the bot may serve, separated by commas:
+`ALLOWED_GUILD_IDS` holds the IDs of the servers the bot may serve, separated by commas. Each ID can carry a name after a colon, so the list reads by itself; the bot ignores the name, which cannot hold a comma:
 
 ```bash
-ALLOWED_GUILD_IDS=111111111111111111,222222222222222222
+ALLOWED_GUILD_IDS=111111111111111111:Main server,222222222222222222:Test server
 ```
 
 - When it is empty, the bot keeps serving the servers it is in at start and logs a warning. After that, it only stays in a server it joins if the application owner, or an admin or developer of its team, owns it.
@@ -101,24 +101,26 @@ DISCORD_TOKEN_FILE=secrets/discord_token.secret ALLOWED_GUILD_IDS=<your server I
 
 ### Staff commands in the slash menu
 
-The staff command groups (`/text`, `/vocal`, `/fm`, `/log`, `/msg`, `/user`, `/welcome`) are hidden from the slash menu by default: only members with the Administrator permission see them. `/suggest` stays visible to everyone. This changes what the menu shows, not who may run a command: each command still checks the caller's roles when it runs.
+The staff command groups (`/text`, `/vocal`, `/fm`, `/log`, `/msg`, `/user`, `/welcome`) are hidden from the slash menu by default: only members with the Administrator permission see them. `/suggest` and `/help` stay visible to everyone. This changes what the menu shows, not who may run a command: each command still checks the caller's roles when it runs.
 
 On each server, a member with the Administrator permission shows each group to the roles that use it:
 
 1. Open Server Settings > Integrations, then Manage next to the bot.
 2. Under Commands, open a command, choose Add Roles or Members, add the roles listed below for it, and save.
 3. Leave the Roles & Members section at the top of that page alone: a role added there sees every staff group.
-4. Check with an account that has no staff role: after a reload, it sees `/suggest` and no staff group. If a group still shows, open that command and make sure `@everyone` is not allowed there.
+4. Check with an account that has no staff role: after a reload, it sees `/suggest` and `/help` and no staff group. If a group still shows, open that command and make sure `@everyone` is not allowed there.
 
 | Command | Roles to add |
 | --- | --- |
-| `/text`, `/vocal`, `/welcome` | Administrateur, Président, Vice-Président, Secrétaire Général |
+| `/text`, `/welcome` | Administrateur, Président, Vice-Président, Secrétaire Général |
+| `/vocal` | Administrateur, Président, Vice-Président, Secrétaire Général, Bureau |
 | `/log` | Administrateur, Président, Vice-Président, Secrétaire Général, Respo Numérique, Pôle Numérique |
 | `/fm` | Administrateur, CoDir, Respo Formation, Admin -temp- |
 | `/msg` | Administrateur, Président, Vice-Président, Secrétaire Général, Bureau |
 | `/user` | Administrateur, Président, Vice-Président, Secrétaire Général, Bureau, Respo Communication, Respo Event, Respo Formation, Respo Numérique, Respo Partenariat, Respo Projet |
 
 - These are the role names the bot checks today (`src/fablabot/helpers/constants.py`). Skip a role the server does not have, and a role that already has the Administrator permission.
+- `/vocal` allows Bureau for `/vocal create` of a temporary channel only: the bot still refuses `/vocal rename` and `/vocal delete` for Bureau at run time.
 - Discord applies this per command, not per subcommand: a role added to `/msg` sees all of `/msg`, and the bot still refuses the subcommands that role may not run. `/msg clear` needs Manage Messages in the channel and `/msg purge` the Administrator permission; a role that only uses `/msg clear` is added to `/msg` too.
 - For `/user`, also add any other `Respo <area>` role whose `Pôle <area>` role exists on the server.
 - The settings stay across restarts and redeploys as long as the commands keep their names.
@@ -235,7 +237,7 @@ Images published before the first release keep their `:<commit sha>` tags.
 1. Every push to `main` updates one pull request titled `chore(main): release X.Y.Z`. It holds the next version and its changelog, worked out from the commit titles on `main`: `fix:` bumps Z, `feat:` bumps Y, and below 1.0.0 a breaking change (`feat!:`) bumps Y as well.
 2. The check runs on that pull request too. Review it and merge it like any other.
 3. The merge tags `vX.Y.Z`, publishes the GitHub release, and builds the image under `:latest`, `:X.Y.Z`, `:X.Y`, `:edge` and `:sha-<commit>`.
-4. Publishing does not restart a running bot. Redeploy the stack (pull the image, recreate the container) to run the release.
+4. Publishing restarts production: the stack updates itself every 30 minutes. Archive before merging, as the [operator guide](docs/OPERATIONS.md#releasing-and-redeploying) says, and redeploy the stack if the running revision stays old.
 
 If the image build of a release fails, the tag exists but `:latest` has not moved. Open that run in the Actions tab and choose "Re-run failed jobs": re-running all jobs would publish `:edge` only.
 
@@ -244,6 +246,8 @@ If the build stops with "The release is not this commit", the release was cut fo
 ### Rolling back
 
 Set the stack's image to the previous release, `ghcr.io/devinci-fablab/fablabot:X.Y.Z`, or to one commit with `:sha-<commit>`, and redeploy. Read the changelog entries in between first: a release that changed the files in `data/` says so there. Go back to `:latest` once a fixed release is out.
+
+Going back past the first release that keeps its state in the database takes one more step, or the older release reads stale files with no error: see [the operator guide](docs/OPERATIONS.md#back-to-a-release-before-the-database).
 
 ### Repository settings
 

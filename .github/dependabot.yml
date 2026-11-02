@@ -7,8 +7,12 @@ updates:
     cooldown:
       default-days: 7
     groups:
+      # It runs on developer machines at every pytest: each bump gets its own pull request.
+      simcord:
+        patterns: ["simcord"]
       python:
         patterns: ["*"]
+        exclude-patterns: ["simcord"]
     commit-message:
       prefix: build
       include: scope

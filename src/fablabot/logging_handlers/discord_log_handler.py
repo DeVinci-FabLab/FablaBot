@@ -84,7 +84,11 @@ class DiscordLogHandler(logging.Handler):
             guild_id (int | None): The server the message is tied to, or None.
             message (str): The message to send.
         """
-        channel = self.destination(guild_id)
+        try:
+            channel = self.destination(guild_id)
+        except Exception as exc:  # the lookup reads the database: a failure is logged below ERROR, never raised
+            logger.warning(f"Could not find the log channel (guild_id={guild_id}): {type(exc).__name__}")
+            return
         if channel is None:
             return
         # A run of three or more backticks would close the code block: break every backtick with a zero-width space.

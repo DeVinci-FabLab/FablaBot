@@ -8,18 +8,18 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 import logging
-from pathlib import Path
-from typing import Literal
+import sqlite3
+from typing import TYPE_CHECKING, Literal, override
 from warnings import deprecated
 
 from discord import Guild, HTTPException, Interaction, Member, NotFound, Role, User, app_commands
-from discord.ext import commands
+from discord.abc import Messageable
+from discord.ext import commands, tasks
 from discord.utils import get
 
+from fablabot.helpers.access import AnyRole, Check, access
 from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames, staff_default_permissions
-from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.safe_discord_operations import safe_add_roles, safe_remove_roles
-from fablabot.helpers.state_store import JsonStateStore
 from fablabot.helpers.utils import (
     RefusalKind,
     ensure_command_context,
@@ -28,25 +28,98 @@ from fablabot.helpers.utils import (
     format_role_mention,
     log_refusal,
 )
+from fablabot.logging_handlers import guild_log_context
 from fablabot.models.user import OpExpiry
+from fablabot.services import op_expiries
 from fablabot.ui import uui
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
 
 logger = logging.getLogger(__name__)
 
-OP_STATE_FILE = Path("data/temp_admin_state.json")
 EXPIRY_RETRY_DELAY = timedelta(seconds=60)
 
+_OP_NOT_RECORDED = "La durée n'a pas pu être enregistrée : aucun droit n'a été donné ni prolongé. Réessaie plus tard."
 _SELF_OP_REFUSED = "Vous ne pouvez pas vous op vous-même : un autre membre du staff doit le faire."
 _TEMP_ROLE_REFUSED = f"Le rôle {RoleNames.ADMIN_TEMP} se donne uniquement avec `/user op`, qui fixe sa durée."
+_TEMP_ROLE_TAKE_REFUSED = f"Le rôle {RoleNames.ADMIN_TEMP} se retire uniquement avec `/user deop`."
 _SELF_ADD_REFUSED = "Vous ne pouvez pas vous donner un rôle vous-même : un autre membre du staff doit le faire."
+_ROLE_NOT_BELOW_REFUSED = (
+    "Ce rôle est au même rang que votre rôle le plus haut, ou au-dessus : "
+    "demandez à un membre dont le rôle le plus haut est au-dessus de celui-ci."
+)
 _ADD_REFUSALS = {
     RefusalKind.MISSING_RIGHT: ErrorMessages.NO_PERMISSION_ADD_ROLE,
+    RefusalKind.ROLE_NOT_BELOW: _ROLE_NOT_BELOW_REFUSED,
     RefusalKind.TEMP_ROLE_OUTSIDE_OP: _TEMP_ROLE_REFUSED,
     RefusalKind.SELF_TARGET: _SELF_ADD_REFUSED,
 }
-_REMOVE_REFUSALS = {RefusalKind.MISSING_RIGHT: ErrorMessages.NO_PERMISSION_REMOVE_ROLE}
+_REMOVE_REFUSALS = {
+    RefusalKind.MISSING_RIGHT: ErrorMessages.NO_PERMISSION_REMOVE_ROLE,
+    RefusalKind.ROLE_NOT_BELOW: _ROLE_NOT_BELOW_REFUSED,
+    RefusalKind.TEMP_ROLE_OUTSIDE_DEOP: _TEMP_ROLE_TAKE_REFUSED,
+}
 # Same audience as the other staff tools (/msg): the member lists it shows are personal data.
 _WITH_ROLES_ALLOWED = ADMIN_ROLES | {RoleNames.BUREAU}
+
+
+def _role_names(member: Member) -> frozenset[str]:
+    """Return the names of the roles a member holds."""
+    return frozenset(role.name for role in member.roles)
+
+
+def can_assign(role_names: Collection[str], role: str) -> bool:
+    """Tell whether a holder of ``role_names`` may give or take the role named ``role``.
+
+    Args:
+        role_names (Collection[str]): The role names the member holds.
+        role (str): The name of the role to give or take.
+
+    Returns:
+        bool: True for an administrative role (never for the admin role itself), for the bureau's own roles,
+            for the pole whose manager the member is, and for the ``F - `` roles of a training manager.
+    """
+    if role == RoleNames.ADMIN:
+        return False
+    held = set(role_names)
+    if held & ADMIN_ROLES:
+        return True
+    if role in {RoleNames.SBIRE_BUREAU, RoleNames.AGENTS_MYFAB} and RoleNames.BUREAU in held:
+        return True
+    if role.startswith("Pôle ") and f"Respo {role.split('Pôle ', 1)[1]}" in held:
+        return True
+    return RoleNames.TRAININGS_MANAGER in held and role.startswith("F - ")
+
+
+def role_refusal(role_names: Collection[str], role: str, *, action: Literal["add", "remove"]) -> RefusalKind | None:
+    """Tell why a holder of ``role_names`` may not give or take ``role``, or None when allowed.
+
+    Args:
+        role_names (Collection[str]): The role names the member holds.
+        role (str): The name of the role to give or take.
+        action (Literal["add", "remove"]): Whether the role is given or taken.
+
+    Returns:
+        RefusalKind | None: The reason to refuse, or None. The self-target refusal depends on the target and is not here.
+    """
+    if not can_assign(role_names, role):
+        return RefusalKind.MISSING_RIGHT
+    if action == "add" and role == RoleNames.ADMIN_TEMP:
+        return RefusalKind.TEMP_ROLE_OUTSIDE_OP
+    return None
+
+
+def can_op(role_names: Collection[str]) -> bool:
+    """Tell whether a holder of ``role_names`` may op or deop: a right over the temporary role, or the digital manager."""
+    return can_assign(role_names, RoleNames.ADMIN_TEMP) or RoleNames.DIGITAL_MANAGER in role_names
+
+
+_OP_ACCESS = Check(lambda c: RoleNames.ADMIN_TEMP in c.server_roles and RoleNames.CODIR in c.server_roles and can_op(c.roles))
+_DEOP_ACCESS = Check(lambda c: RoleNames.ADMIN_TEMP in c.server_roles and can_op(c.roles))
+_GIVE_ACCESS = Check(lambda c: any(role_refusal(c.roles, r, action="add") is None for r in c.server_roles))
+_TAKE_ACCESS = Check(lambda c: any(role_refusal(c.roles, r, action="remove") is None for r in c.server_roles))
+_WITH_ROLES_ACCESS = AnyRole(_WITH_ROLES_ALLOWED)
 
 
 def _utcnow() -> datetime:
@@ -70,7 +143,6 @@ class UserManagement(commands.Cog):
     """Cog to register user management commands.
 
     Commands:
-        - /user help: Display help for user management commands.
         - /user op: Grant temporary admin privileges to a user.
         - /user deop: Revoke temporary admin privileges from a user.
         - /user add_role: Add a role to a single user.
@@ -91,56 +163,18 @@ class UserManagement(commands.Cog):
         """
         self.bot = bot
         self.deop_tasks: dict[tuple[int, int], asyncio.Task[None]] = {}
-        self._op_store = JsonStateStore(logger, OP_STATE_FILE)
-        if not isinstance(self._op_store.state, dict):
-            # Fail closed: with no readable expiry, every holder is removed at start.
-            logger.error(f"Op expiry state in {OP_STATE_FILE} is not a mapping; ignored")
-            self._op_store.state = {}
-        """state structure: ``{"<guild_id>": {"<member_id>": {"expires_at": iso8601 with offset, "channel_id": int}}}``"""
         logger.info("UserManagement initialized")
 
     # region ====== User Slash Commands Group ======
-    # -- Help & Admin Access --
+    # -- Admin Access --
 
     user_group = app_commands.Group(
         name="user", description="Gestion des utilisateurs", default_permissions=staff_default_permissions()
     )
 
     @user_group.command(
-        name="help",
-        description="Affiche l'aide pour les commandes de gestion des utilisateurs.",
+        name="op", description="Donne des droits admin temporaires à un utilisateur.", extras=access(_OP_ACCESS)
     )
-    @app_commands.describe(show="Afficher l'aide publiquement ou non")
-    async def user_help(self, interaction: Interaction, *, show: bool = False) -> None:
-        """Display help for user management commands.
-
-        Args:
-            interaction (Interaction): The Discord interaction context.
-            show (bool): Whether to show the help publicly or not.
-        """
-        help_message = build_help_message(
-            "Commandes de gestion des utilisateurs",
-            "user",
-            [
-                (
-                    "op <user> <reason> [time]",
-                    f"Donner le rôle {RoleNames.ADMIN_TEMP} pour une durée limitée (5 minutes par défaut, 90 au plus). "
-                    "Il n'ouvre que les commandes qui le nomment, aujourd'hui /fm. On ne peut pas s'op soi-même",
-                ),
-                ("deop <user>", f"Retirer le rôle {RoleNames.ADMIN_TEMP} avant la fin de sa durée"),
-                (
-                    "add_role <user> <role>",
-                    f"Ajouter un rôle à un utilisateur, jamais à soi-même ({RoleNames.ADMIN_TEMP} se donne avec op)",
-                ),
-                ("remove_role <user> <role>", "Retirer un rôle à un utilisateur"),
-                ("add_roles <role>", "Ajouter un rôle à plusieurs utilisateurs via un sélecteur"),
-                ("remove_roles <role>", "Retirer un rôle à plusieurs utilisateurs via un sélecteur"),
-                ("with_roles", "Lister les membres possédant les rôles sélectionnés"),
-            ],
-        )
-        await interaction.response.send_message(help_message, ephemeral=not show)
-
-    @user_group.command(name="op", description="Donne des droits admin temporaires à un utilisateur.")
     @app_commands.describe(
         member="L'utilisateur cible",
         reason="Raison de l'attribution",
@@ -182,12 +216,23 @@ class UserManagement(commands.Cog):
             )
             return
         assert isinstance(interaction.user, Member)
-        if not self._can_op(interaction.user, admin_role):
+        if not can_op(_role_names(interaction.user)):
             await self._refuse(interaction, "user.op", RefusalKind.MISSING_RIGHT, ErrorMessages.INSUFFICIENT_PERMISSIONS)
             return
         if member.id == interaction.user.id:
             await self._refuse(interaction, "user.op", RefusalKind.SELF_TARGET, _SELF_OP_REFUSED)
             return
+
+        # Record and timer first: the role is never given without its end, and a role that lands although Discord
+        # reported a failure still ends on time. A crash in between leaves a record with no role, dropped by the sweep.
+        expiry = OpExpiry(expires_at=_utcnow() + timedelta(minutes=time), channel_id=interaction.channel_id or 0)
+        try:
+            self._record_op(interaction.guild.id, member.id, expiry)
+        except sqlite3.Error:
+            logger.exception(f"Op expiry not recorded guild_id={interaction.guild.id} member_id={member.id}; role not given")
+            await interaction.response.send_message(_OP_NOT_RECORDED, ephemeral=True)
+            return
+        self._arm_deop(interaction.guild.id, member.id, expiry)
 
         success, error = await safe_add_roles(
             logger,
@@ -199,10 +244,6 @@ class UserManagement(commands.Cog):
             await interaction.response.send_message(error, ephemeral=True)
             return
 
-        # Role first, then record: a crash in between leaves a holder with no record, removed at start.
-        expiry = OpExpiry(expires_at=_utcnow() + timedelta(minutes=time), channel_id=interaction.channel_id or 0)
-        self._record_op(interaction.guild.id, member.id, expiry)
-        self._arm_deop(interaction.guild.id, member.id, expiry.expires_at)
         logger.info(f"Granted {member} temporary admin for {time} minutes for reason: {reason}")
         await interaction.response.send_message(
             f"{codir_role.mention} Droits admin donnés à {format_member_mention(member)} pour {time} minutes. "
@@ -212,6 +253,7 @@ class UserManagement(commands.Cog):
     @user_group.command(
         name="deop",
         description="Retire les droits admin temporaires d'un utilisateur.",
+        extras=access(_DEOP_ACCESS),
     )
     @app_commands.describe(member="L'utilisateur cible")
     async def user_deop(self, interaction: Interaction, *, member: Member) -> None:
@@ -235,7 +277,7 @@ class UserManagement(commands.Cog):
             )
             return
         assert isinstance(interaction.user, Member)
-        if not self._can_op(interaction.user, admin_role):
+        if not can_op(_role_names(interaction.user)):
             await self._refuse(interaction, "user.deop", RefusalKind.MISSING_RIGHT, ErrorMessages.INSUFFICIENT_PERMISSIONS)
             return
 
@@ -255,7 +297,7 @@ class UserManagement(commands.Cog):
         timer_now = self.deop_tasks.get(key)
         if timer_now is None or timer_now is timer_before:
             self._cancel_deop(*key)
-            self._clear_op(*key)
+            self._clear_op_after_removal(*key)
 
         logger.info(f"Revoked temporary admin from {member}")
         await interaction.response.defer(thinking=True)
@@ -266,6 +308,7 @@ class UserManagement(commands.Cog):
     @user_group.command(
         name="add_role",
         description="Donne un rôle à un utilisateur.",
+        extras=access(_GIVE_ACCESS),
     )
     @app_commands.describe(
         member="L'utilisateur cible",
@@ -302,6 +345,7 @@ class UserManagement(commands.Cog):
     @user_group.command(
         name="remove_role",
         description="Retire un rôle à un utilisateur.",
+        extras=access(_TAKE_ACCESS),
     )
     @app_commands.describe(
         member="L'utilisateur cible",
@@ -348,6 +392,7 @@ class UserManagement(commands.Cog):
     @user_group.command(
         name="add_roles",
         description="Donne un rôle à plusieurs utilisateurs via un sélecteur.",
+        extras=access(_GIVE_ACCESS),
     )
     @app_commands.describe(role="Le rôle à attribuer")
     async def user_add_roles(self, interaction: Interaction, *, role: Role) -> None:
@@ -374,7 +419,7 @@ class UserManagement(commands.Cog):
             interaction.user,
             followup_mes.id,
             action="add",
-            check=lambda actor, target: self.assignment_refusal(actor, target, role, action="add"),
+            check=lambda actor, target: self.assignment_refusal(actor, target, self._live_role(actor, role), action="add"),
         )
         await interaction.followup.send(
             f"Sélectionnez les membres à qui ajouter {escape_md(role.name)} puis cliquez sur **Confirmer**.",
@@ -385,6 +430,7 @@ class UserManagement(commands.Cog):
     @user_group.command(
         name="remove_roles",
         description="Retire un rôle à plusieurs utilisateurs via un sélecteur.",
+        extras=access(_TAKE_ACCESS),
     )
     @app_commands.describe(role="Le rôle à retirer")
     async def user_remove_roles(self, interaction: Interaction, *, role: Role) -> None:
@@ -411,7 +457,7 @@ class UserManagement(commands.Cog):
             interaction.user,
             followup_mes.id,
             action="remove",
-            check=lambda actor, target: self.assignment_refusal(actor, target, role, action="remove"),
+            check=lambda actor, target: self.assignment_refusal(actor, target, self._live_role(actor, role), action="remove"),
         )
         await interaction.followup.send(
             f"Sélectionnez les membres à qui retirer {escape_md(role.name)} puis cliquez sur **Confirmer**.",
@@ -422,6 +468,7 @@ class UserManagement(commands.Cog):
     @user_group.command(
         name="with_roles",
         description="Obtenir les membres avec des rôles spécifiques.",
+        extras=access(_WITH_ROLES_ACCESS),
     )
     async def user_with_roles(self, interaction: Interaction) -> None:
         """Get members with specific roles.
@@ -444,49 +491,82 @@ class UserManagement(commands.Cog):
     # region ====== Helpers ======
     # -- Scheduling --
 
-    @commands.Cog.listener()
-    async def on_ready(self) -> None:
-        """Replay recorded op expiries on every guild the bot sees.
+    @override
+    async def cog_load(self) -> None:
+        """Start settling the temporary role."""
+        self._settle_ops.start()
 
-        Discord sends ``on_ready`` again after some reconnects, so this is idempotent: a running
-        timer is kept, a record is never duplicated. Unavailable guilds keep their records.
+    @override
+    async def cog_unload(self) -> None:
+        """Stop settling the temporary role."""
+        self._settle_ops.cancel()
+
+    @tasks.loop(seconds=EXPIRY_RETRY_DELAY.total_seconds())
+    async def _settle_ops(self) -> None:
+        """Settle every reachable server, once at start and again every minute.
+
+        This round is the only retry of a temporary right: a removal Discord refused or raised on, a timer that
+        died and a failed read leave a holder or a record that the next round sees, so no failure path has to reach
+        a retry, and nothing gives up. Unavailable guilds keep their records until they are back.
         """
         for guild in self.bot.guilds:
-            if not guild.unavailable:
-                await self._reconcile_guild(guild)
+            if guild.unavailable:
+                continue
+            # The timers armed in the turn inherit the server too, so their lines reach its log channel.
+            with guild_log_context(guild.id):
+                # An exception other than a network one ends a tasks.loop for good.
+                try:
+                    await self._reconcile_guild(guild)
+                except Exception:
+                    logger.exception(f"Op settling failed guild_id={guild.id}; the next round tries again")
 
-    @commands.Cog.listener()
-    async def on_guild_available(self, guild: Guild) -> None:
-        """Reconcile a guild that comes back from an outage, or reaches the bot after ``on_ready``."""
-        await self._reconcile_guild(guild)
+    @_settle_ops.before_loop
+    async def _before_settle_ops(self) -> None:
+        """Wait for the guilds before the first round."""
+        await self.bot.wait_until_ready()
 
     async def _reconcile_guild(self, guild: Guild) -> None:
         """Remove the temporary role from holders with no future expiry, arm the others, drop stale records."""
         admin_role = get(guild.roles, name=RoleNames.ADMIN_TEMP)
         if admin_role is None:
             return
-        holders = {member.id: member for member in admin_role.members}
-        for member in holders.values():
-            expiry = self._load_op(guild.id, member.id)
-            if expiry is not None and expiry.expires_at > _utcnow():
-                task = self.deop_tasks.get((guild.id, member.id))
-                if task is None or task.done():
-                    self._arm_deop(guild.id, member.id, expiry.expires_at)
-                continue
-            cause = "no recorded expiry" if expiry is None else "expiry passed"
-            success, _error = await safe_remove_roles(
-                logger,
-                member,
-                admin_role,
-                reason=f"Temporary admin role removed at bot start: {cause}",
-            )
-            if not success:
-                logger.error(f"Failed to remove temporary admin role at start guild_id={guild.id} member_id={member.id}")
-                continue
-            logger.warning(f"Removed temporary admin role at start ({cause}) guild_id={guild.id} member_id={member.id}")
-            self._clear_op(guild.id, member.id)
-
+        for member in admin_role.members:
+            await self._reconcile_holder(guild, admin_role, member)
         self._sweep_stale_records(guild, admin_role)
+
+    async def _reconcile_holder(self, guild: Guild, admin_role: Role, member: Member) -> None:
+        """Leave a holder to a running timer, arm one for an expiry ahead, and take the role off any other holder.
+
+        Args:
+            guild (Guild): The server.
+            admin_role (Role): The temporary admin role.
+            member (Member): The holder.
+        """
+        timer_before = self.deop_tasks.get((guild.id, member.id))
+        if timer_before is not None and not timer_before.done():
+            return
+        try:
+            expiry = self._load_op(guild.id, member.id)
+        except sqlite3.Error:
+            # Least privilege: an end nobody can read counts as passed. The cost is an op to run again.
+            logger.exception(f"Storage failure reading an op expiry guild_id={guild.id} member_id={member.id}; role removed")
+            cause = "expiry unreadable"
+        else:
+            if expiry is not None and expiry.expires_at > _utcnow():
+                self._arm_deop(guild.id, member.id, expiry)
+                return
+            cause = "no recorded expiry" if expiry is None else "expiry passed"
+        success, _error = await safe_remove_roles(logger, member, admin_role, reason=f"Temporary admin role removed: {cause}")
+        if not success:
+            logger.error(
+                f"Failed to remove temporary admin role guild_id={guild.id} member_id={member.id}; next round tries again"
+            )
+            return
+        logger.warning(f"Removed temporary admin role ({cause}) guild_id={guild.id} member_id={member.id}")
+        # An op run while the removal was in flight owns a new timer and record: leave both alone.
+        timer_now = self.deop_tasks.get((guild.id, member.id))
+        if timer_now is None or timer_now is timer_before:
+            self._clear_op_after_removal(guild.id, member.id)
 
     def _sweep_stale_records(self, guild: Guild, admin_role: Role) -> None:
         """Drop this guild's records of ops that are over, and arm the ones the cache cannot vouch for.
@@ -495,54 +575,40 @@ class UserManagement(commands.Cog):
         started while the removals were awaited). Otherwise it is dropped only when the guild's
         member cache is complete; with a partial cache the member may hold the role unseen, so the
         record gets its timer and ``_expire`` asks Discord when it fires (now, if the time has passed).
+
+        Args:
+            guild (Guild): The server.
+            admin_role (Role): The temporary admin role.
         """
-        state = self._op_store.state
-        entries = state.get(str(guild.id))
-        if str(guild.id) in state and not isinstance(entries, dict):
-            logger.error(f"Op state entry is not a mapping; reset guild_id={guild.id}")
-            state.pop(str(guild.id))
-            self._op_store.save()
-            return
-        if entries is None:
-            return
         holder_ids = {member.id for member in admin_role.members}
-        for key in list(entries):
-            if not key.isdigit():
-                entries.pop(key)
-                continue
-            member_id = int(key)
+        for member_id in op_expiries.member_ids(guild.id):
             task = self.deop_tasks.get((guild.id, member_id))
             if member_id in holder_ids or (task is not None and not task.done()):
                 continue
-            if guild.chunked:
-                entries.pop(key)
-                continue
-            expiry = self._load_op(guild.id, member_id)
+            expiry = None if guild.chunked else self._load_op(guild.id, member_id)
             if expiry is None:
-                entries.pop(key)
+                self._clear_op(guild.id, member_id)
             else:
-                self._arm_deop(guild.id, member_id, max(expiry.expires_at, _utcnow()))
-        if not entries:
-            self._op_store.state.pop(str(guild.id))
-        self._op_store.save()
+                self._arm_deop(guild.id, member_id, expiry)
 
     def _record_op(self, guild_id: int, member_id: int, expiry: OpExpiry) -> None:
         """Persist the expiry of a member's op on one guild, replacing any previous one."""
-        entries = self._op_store.ensure_guild(guild_id)
-        if not isinstance(entries, dict):
-            entries = self._op_store.state[str(guild_id)] = {}
-        entries[str(member_id)] = expiry.to_dict()
-        self._op_store.save()
+        op_expiries.record(guild_id, member_id, expiry.to_dict())
 
     def _clear_op(self, guild_id: int, member_id: int) -> None:
         """Forget the expiry of a member's op on one guild, if any."""
-        entries = self._op_store.state.get(str(guild_id))
-        if not isinstance(entries, dict) or str(member_id) not in entries:
-            return
-        entries.pop(str(member_id))
-        if not entries:
-            self._op_store.state.pop(str(guild_id))
-        self._op_store.save()
+        op_expiries.clear(guild_id, member_id)
+
+    def _clear_op_after_removal(self, guild_id: int, member_id: int) -> None:
+        """Forget an expiry whose role has just been taken off; a storage failure is logged and leaves the record.
+
+        The role is already gone, so the caller goes on and tells the member. A record left behind is
+        dropped by the next settling turn.
+        """
+        try:
+            self._clear_op(guild_id, member_id)
+        except sqlite3.Error:
+            logger.exception(f"Op expiry not cleared after the role was removed guild_id={guild_id} member_id={member_id}")
 
     def _load_op(self, guild_id: int, member_id: int) -> OpExpiry | None:
         """Read the recorded expiry of a member's op on one guild.
@@ -550,11 +616,7 @@ class UserManagement(commands.Cog):
         Returns:
             OpExpiry | None: The expiry, or None when absent or unreadable (logged as an error).
         """
-        entries = self._op_store.state.get(str(guild_id))
-        if entries is not None and not isinstance(entries, dict):
-            logger.error(f"Unreadable op expiries for guild_id={guild_id}; treated as absent")
-            return None
-        raw = entries.get(str(member_id)) if entries else None
+        raw = op_expiries.get(guild_id, member_id)
         if raw is None:
             return None
         try:
@@ -563,10 +625,10 @@ class UserManagement(commands.Cog):
             logger.exception(f"Unreadable op expiry guild_id={guild_id} member_id={member_id}; treated as absent")
             return None
 
-    def _arm_deop(self, guild_id: int, member_id: int, expires_at: datetime) -> None:
+    def _arm_deop(self, guild_id: int, member_id: int, expiry: OpExpiry) -> None:
         """Start the one timer of a member's op on one guild, replacing any running one."""
         self._cancel_deop(guild_id, member_id)
-        self.deop_tasks[guild_id, member_id] = asyncio.create_task(self._deop_later(guild_id, member_id, expires_at))
+        self.deop_tasks[guild_id, member_id] = asyncio.create_task(self._deop_later(guild_id, member_id, expiry))
 
     def _cancel_deop(self, guild_id: int, member_id: int) -> None:
         """Cancel the timer of a member's op on one guild, if any."""
@@ -574,20 +636,22 @@ class UserManagement(commands.Cog):
         if task:
             task.cancel()
 
-    async def _deop_later(self, guild_id: int, member_id: int, expires_at: datetime) -> None:
-        """Wait until the recorded time, then end the op.
+    async def _deop_later(self, guild_id: int, member_id: int, expiry: OpExpiry) -> None:
+        """Wait until the time the timer was given, then end the op.
 
         The wait is measured on the loop's monotonic clock while the recorded time is a wall-clock
         time, so a wake-up before the wall clock reaches it sleeps again instead of giving up.
         While the guild cannot be acted on (an outage, a member Discord has not answered for), the
         timer keeps the record and tries again every ``EXPIRY_RETRY_DELAY``, so the role does not
-        outlive the outage until the next start.
+        outlive the outage until the next start. The timer holds its own expiry: whatever changes the record
+        (a new op, a deop) replaces or cancels it, and a storage failure cannot delay the removal.
         """
+        expires_at = expiry.expires_at
         try:
             while True:
                 while (delay := _delay_until(expires_at)) > 0:
                     await asyncio.sleep(delay)
-                if await self._expire(guild_id, member_id):
+                if await self._expire(guild_id, member_id, expiry):
                     return
                 expires_at = _utcnow() + EXPIRY_RETRY_DELAY
         except asyncio.CancelledError:
@@ -599,20 +663,17 @@ class UserManagement(commands.Cog):
             if self.deop_tasks.get((guild_id, member_id)) is asyncio.current_task():
                 self.deop_tasks.pop((guild_id, member_id))
 
-    async def _expire(self, guild_id: int, member_id: int) -> bool:
-        """End a member's op on one guild if its recorded time has come.
+    async def _expire(self, guild_id: int, member_id: int, expiry: OpExpiry) -> bool:
+        """End a member's op on one guild.
 
         Removes the role, then forgets the record (a crash in between leaves an orphan record,
-        cleared later), then posts the notice in the op channel. A failed removal keeps the record
-        for the next start and posts a failure notice instead. An unavailable guild, or a member
-        Discord could not be asked about, keeps the record and asks the caller to try again.
+        cleared later), then posts the notice in the op channel. A failed removal keeps the record and
+        posts a failure notice instead; the next settling round removes the role, with no notice. An unavailable
+        guild, or a member Discord could not be asked about, keeps the record and asks the caller to try again.
 
         Returns:
             bool: False when the caller should wait and call again, True when there is nothing left to retry.
         """
-        expiry = self._load_op(guild_id, member_id)
-        if expiry is None or expiry.expires_at > _utcnow():
-            return True
         guild = self.bot.get_guild(guild_id)
         if guild is None or guild.unavailable:
             logger.warning(f"Guild unreachable at op expiry guild_id={guild_id} member_id={member_id}; record kept")
@@ -629,9 +690,8 @@ class UserManagement(commands.Cog):
             return False
         if member is None or admin_role not in member.roles:
             self._clear_op(guild_id, member_id)
-            return True
-
-        await self._revoke_at_expiry(guild, member, admin_role, expiry)
+        else:
+            await self._revoke_at_expiry(guild, member, admin_role, expiry)
         return True
 
     async def _revoke_at_expiry(self, guild: Guild, member: Member, admin_role: Role, expiry: OpExpiry) -> None:
@@ -647,7 +707,7 @@ class UserManagement(commands.Cog):
             )
             return
 
-        self._clear_op(guild.id, member.id)
+        self._clear_op_after_removal(guild.id, member.id)
         logger.info(f"Revoked temporary admin at expiry guild_id={guild.id} member_id={member.id}")
         notice = f"Droits admin temporaires retirés de {format_member_mention(member)} : durée écoulée."
         await self._post_op_notice(guild, member.id, expiry, notice)
@@ -682,7 +742,7 @@ class UserManagement(commands.Cog):
     async def _post_op_notice(guild: Guild, member_id: int, expiry: OpExpiry, text: str) -> None:
         """Post an op notice in the channel where the op was run; log only when it is gone."""
         channel = guild.get_channel(expiry.channel_id)
-        if channel is None or not hasattr(channel, "send"):
+        if channel is None or not isinstance(channel, Messageable):
             logger.warning(
                 f"Op channel {expiry.channel_id} gone in guild_id={guild.id} member_id={member_id}; notice not posted",
             )
@@ -698,9 +758,18 @@ class UserManagement(commands.Cog):
         await interaction.response.send_message(text, ephemeral=True)
 
     @staticmethod
-    def _can_op(user: Member, admin_role: Role) -> bool:
-        """Checks if the member may op or deop: a permanent admin role or the digital manager role."""
-        return UserManagement._can_assign_role(user, admin_role) or RoleNames.DIGITAL_MANAGER in (r.name for r in user.roles)
+    def _live_role(actor: Member, role: Role) -> Role:
+        """Return the guild's current copy of ``role``, since the command's copy keeps the rank it had then.
+
+        Args:
+            actor (Member): A member of the guild the role belongs to.
+            role (Role): The role as the command received it.
+
+        Returns:
+            Role: The cached role with the same ID, or ``role`` itself when the role no longer exists (Discord then
+            refuses the change and the member is listed as failed).
+        """
+        return actor.guild.get_role(role.id) or role
 
     @staticmethod
     def assignment_refusal(
@@ -719,85 +788,30 @@ class UserManagement(commands.Cog):
             action (Literal["add", "remove"]): Whether the role is given or taken.
 
         Returns:
-            RefusalKind | None: The first reason to refuse, or None.
+            RefusalKind | None: The first reason to refuse, or None. Beyond the name rules, a role must sit strictly below the
+            actor's highest role, unless the actor owns the server. The temporary role does not count toward that rank.
         """
-        if not UserManagement._can_assign_role(actor, role):
-            return RefusalKind.MISSING_RIGHT
-        if action == "add" and role.name == RoleNames.ADMIN_TEMP:
-            return RefusalKind.TEMP_ROLE_OUTSIDE_OP
-        if action == "add" and target is not None and target.id == actor.id:
+        kind = role_refusal(_role_names(actor), role.name, action=action)
+        rank = max((r.position for r in actor.roles if r.name != RoleNames.ADMIN_TEMP), default=0)
+        if kind is None and actor.id != actor.guild.owner_id and role.position >= rank:
+            return RefusalKind.TEMP_ROLE_OUTSIDE_DEOP if role.name == RoleNames.ADMIN_TEMP else RefusalKind.ROLE_NOT_BELOW
+        if kind is None and action == "add" and target is not None and target.id == actor.id:
             return RefusalKind.SELF_TARGET
-        return None
+        return kind
 
     @staticmethod
-    def _can_assign_role(user: User | Member, target_role: Role) -> bool:
+    def _can_assign_role(user: Member | User, target_role: Role) -> bool:
         """Checks if the member can assign a specific role.
 
         Args:
-            user (User | Member): The user attempting to assign the role.
+            user (Member | User): The user attempting to assign the role.
             target_role (Role): The role to be assigned.
 
         Returns:
             bool: True if the user can assign the role, False otherwise.
         """
-        if target_role.name == RoleNames.ADMIN:
-            return False
         assert isinstance(user, Member)
-
-        return (
-            UserManagement._is_user_server_admin(user)
-            or UserManagement._is_user_responsible_for_pole(user, target_role)
-            or UserManagement._is_user_responsible_for_trainers(user, target_role)
-        )
-
-    @staticmethod
-    def _is_user_server_admin(member: Member) -> bool:
-        """Checks if the member has an administrative role.
-
-        Args:
-            member (Member): The member to check.
-
-        Returns:
-            bool: `True` if the member is a server admin, `False` otherwise.
-        """
-        member_role_names = {role.name for role in member.roles}
-        return bool(member_role_names & ADMIN_ROLES)
-
-    @staticmethod
-    def _is_user_responsible_for_pole(member: Member, target_role: Role) -> bool:
-        """Checks if member is responsible for the 'pole' of the target role.
-
-        Args:
-            member (Member): The member to check.
-            target_role (Role): The role to check against.
-
-        Returns:
-            bool: `True` if the member is responsible for the pole, `False` otherwise.
-        """
-        role_names = {role.name for role in member.roles}
-        if target_role.name == RoleNames.SBIRE_BUREAU and RoleNames.BUREAU in role_names:
-            return True
-        if target_role.name == RoleNames.AGENTS_MYFAB and RoleNames.BUREAU in role_names:
-            return True
-        if target_role.name.startswith("Pôle "):
-            suffix = target_role.name.split("Pôle ", 1)[1]
-            if f"Respo {suffix}" in role_names:
-                return True
-        return False
-
-    @staticmethod
-    def _is_user_responsible_for_trainers(member: Member, target_role: Role) -> bool:
-        """Checks if member manages formations for the target role.
-
-        Args:
-            member (Member): The member to check.
-            target_role (Role): The role to check against.
-
-        Returns:
-            bool: `True` if the member is responsible for the formation, `False` otherwise.
-        """
-        role_names = {role.name for role in member.roles}
-        return RoleNames.TRAININGS_MANAGER in role_names and target_role.name.startswith("F - ")
+        return can_assign(_role_names(user), target_role.name)
 
     # endregion Helpers
 

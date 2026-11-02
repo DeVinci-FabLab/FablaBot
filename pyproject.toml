@@ -2,14 +2,14 @@
 dependencies = [
   "discord-py>=2.7.1",
   "emoji>=2.15.0",
-  "python-dotenv==1.0.0",
+  "python-dotenv==1.2.4",
   "tzdata>=2025.2",
 ]
 description = "General purpose Discord bot for the DeVinci Fablab discord server."
 name = "fablabot"
 readme = "README.md"
 requires-python = ">=3.13"
-version = "0.1.0"
+version = "0.5.0"
 
 [build-system]
 requires = ["setuptools"]
@@ -17,6 +17,9 @@ requires = ["setuptools"]
 [tool.setuptools.packages.find]
 include = ["fablabot*"]
 where = ["src"]
+
+[tool.setuptools.package-data]
+fablabot = ["locales/*.toml", "migrations/*.sql"]
 
 [project.scripts]
 doc_builder = "fablabot._build_docs:build_docs"
@@ -29,7 +32,11 @@ dev = [
   "pytest>=9.2.0",
   "pytest-asyncio>=1.4.1",
   "ruff>=0.12.9",
+  "simcord[pytest]==3.2.1",
   "typing-extensions>=4.15.0",
+]
+mockups = [
+  "playwright>=1.64.1",
 ]
 
 [tool.pytest.ini_options]

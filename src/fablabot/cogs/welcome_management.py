@@ -11,12 +11,14 @@ from discord.ext import commands
 from discord.utils import get
 
 from fablabot.guild_config import is_welcome_verify_enabled, set_welcome_verify_enabled
+from fablabot.helpers.access import AnyRole, access
 from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames, staff_default_permissions
-from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.safe_discord_operations import safe_add_roles, safe_create_text_channel, safe_delete_channel
 from fablabot.helpers.utils import ensure_command_context, escape_md
 
 logger = logging.getLogger(__name__)
+
+_ACCESS = AnyRole(ADMIN_ROLES)
 
 
 class WelcomeManagement(commands.Cog):
@@ -51,35 +53,8 @@ class WelcomeManagement(commands.Cog):
     )
 
     @welcome_group.command(
-        name="help",
-        description="Affiche l'aide pour les commandes de bienvenue.",
-    )
-    @app_commands.describe(show="Afficher l'aide publiquement ou non")
-    async def welcome_help(self, interaction: Interaction, *, show: bool = False) -> None:
-        """Display help for welcome commands.
-
-        Args:
-            interaction (Interaction): The Discord interaction object.
-            show (bool): Whether to show the help publicly or not.
-        """
-        help_message = build_help_message(
-            "Commandes de gestion des channels de bienvenue",
-            "welcome",
-            [
-                (
-                    "verify <enable>",
-                    "Activer ou désactiver la création automatique de salons de bienvenue",
-                ),
-                (
-                    "approve <city>",
-                    "Valider un nouveau membre et lui attribuer les rôles adaptés à sa ville",
-                ),
-            ],
-        )
-        await interaction.response.send_message(help_message, ephemeral=not show)
-
-    @welcome_group.command(
         name="verify",
+        extras=access(_ACCESS),
         description="Active ou désactive la création automatique de salons de bienvenue.",
     )
     @app_commands.describe(enable="Activer ou désactiver la fonctionnalité")
@@ -115,6 +90,7 @@ class WelcomeManagement(commands.Cog):
 
     @welcome_group.command(
         name="approve",
+        extras=access(_ACCESS),
         description="Valide un nouveau membre en lui attribuant les rôles appropriés.",
     )
     @app_commands.describe(city="La ville de l'utilisateur (Paris, Nantes, Montpellier)")

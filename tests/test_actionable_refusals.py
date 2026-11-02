@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock, MagicMock
 from conftest import make_interaction, make_role
 from discord import TextChannel
 
-from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.utils import ensure_command_context
 
 if TYPE_CHECKING:
@@ -92,8 +91,3 @@ async def test_member_with_role_in_commands_channel_passes() -> None:
     """Who may run what is unchanged."""
     interaction = _setup(member_has_role=True, in_commands_channel=True)
     assert await _run(interaction) is True
-
-
-def test_help_footer_mentions_suggest() -> None:
-    """Every help message points members to /suggest."""
-    assert "/suggest" in build_help_message("Aide", "/x", [("a", "b")])

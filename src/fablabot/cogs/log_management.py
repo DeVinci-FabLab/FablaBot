@@ -10,12 +10,15 @@ from discord import Interaction, TextChannel, abc, app_commands
 from discord.ext import commands
 
 from fablabot.guild_config import get_log_channel_id, migrate_legacy_log_channel, set_log_channel_id
+from fablabot.helpers.access import AnyRole, access
 from fablabot.helpers.constants import ADMIN_ROLES, PARIS_TZ, RoleNames, staff_default_permissions
-from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.utils import ensure_command_context, format_channel_mention
 from fablabot.logging_handlers import DailyFileHandler
 
 logger = logging.getLogger(__name__)
+_SET_ACCESS = AnyRole(ADMIN_ROLES)
+_EXPORT_ROLES = ADMIN_ROLES | {RoleNames.DIGITAL_MANAGER, RoleNames.DIGITAL_POLE}
+_EXPORT_ACCESS = AnyRole(_EXPORT_ROLES)
 
 
 def _parse_export_date(raw: str) -> datetime | None:
@@ -37,7 +40,6 @@ class LogManagement(commands.Cog):
     """Cog to register log management commands.
 
     Commands:
-        - /log help: Display help for log management commands.
         - /log set: Configure the channel receiving bot logs.
         - /log export: Export the logs.
 
@@ -77,29 +79,8 @@ class LogManagement(commands.Cog):
     )
 
     @log_group.command(
-        name="help",
-        description="Affiche l'aide pour les commandes de gestion des logs.",
-    )
-    @app_commands.describe(show="Afficher l'aide publiquement ou non")
-    async def log_help(self, interaction: Interaction, *, show: bool = False) -> None:
-        """Display help for log management commands.
-
-        Args:
-            interaction (Interaction): The Discord interaction context.
-            show (bool): Whether to show the help publicly or not.
-        """
-        help_message = build_help_message(
-            "Commandes de gestion des logs",
-            "log",
-            [
-                ("set <channel>", "Configurer le salon recevant les erreurs du bot sur ce serveur"),
-                ("export [date]", "Exporter les logs de ce serveur, du jour ou d'une date donnée (format JJ/MM/AAAA)"),
-            ],
-        )
-        await interaction.response.send_message(help_message, ephemeral=not show)
-
-    @log_group.command(
         name="set",
+        extras=access(_SET_ACCESS),
         description="Configure le salon recevant les erreurs du bot sur ce serveur.",
     )
     @app_commands.describe(channel="Salon textuel qui recevra les logs du bot.")
@@ -143,6 +124,7 @@ class LogManagement(commands.Cog):
 
     @log_group.command(
         name="export",
+        extras=access(_EXPORT_ACCESS),
         description="Exporte les logs récents de ce serveur.",
     )
     @app_commands.describe(
@@ -160,7 +142,7 @@ class LogManagement(commands.Cog):
             "log.export",
             interaction,
             log_details=None,
-            required_roles=ADMIN_ROLES | {RoleNames.DIGITAL_MANAGER, RoleNames.DIGITAL_POLE},
+            required_roles=_EXPORT_ROLES,
         ):
             return
 

@@ -13,10 +13,12 @@ from discord.app_commands import AppCommandContext
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
+from fablabot import db
 from fablabot.cogs import (
     ChannelManagement,
     FormationManagement,
     GuildAccess,
+    HelpManagement,
     LogManagement,
     MessageManagement,
     UserManagement,
@@ -30,6 +32,7 @@ from fablabot.helpers.command_sync import (
     sync_commands_if_changed,
 )
 from fablabot.helpers.guild_access import GuildAccessPolicy, GuildAccessTree
+from fablabot.helpers.i18n import CatalogTranslator, catalog
 from fablabot.helpers.logging_setup import configure_logging
 from fablabot.helpers.startup_checks import TOKEN_FILE_ENV, StartupError, check_runtime_access
 from fablabot.helpers.state_store import JsonStateStore
@@ -133,10 +136,12 @@ class Fablabot(commands.Bot):
             MessageManagement(self),
             UserManagement(self),
             WelcomeManagement(self),
+            HelpManagement(self),
         ):
             await self.add_cog(cog)
             logger.info(f"Loaded cog {cog.__class__.__name__}.")
 
+        await self.tree.set_translator(CatalogTranslator(catalog()))
         await sync_commands_if_changed(
             self.tree,
             JsonStateStore(logger, COMMAND_SYNC_STATE_FILE),
@@ -197,11 +202,14 @@ class Fablabot(commands.Bot):
 
 
 def main() -> None:
-    """Check that the bot can start, then run it with the token from the environment."""
+    """Check that the bot can start, open the database, then run it with the token from the environment."""
     try:
         token = check_runtime_access(os.environ.get(TOKEN_FILE_ENV))
+        db.open_database()
     except StartupError as error:
         sys.exit("\n".join(f"Cannot start: {problem}" for problem in error.problems))
+    except db.StorageError as error:
+        sys.exit(f"Cannot start: {error}")
 
     discord_logger = logging.getLogger("discord.client")
     discord_logger.addFilter(DiscordGateway503Filter())

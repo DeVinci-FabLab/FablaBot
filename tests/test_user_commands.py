@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-import json
 import logging
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from conftest import make_guild, make_interaction, make_member, make_role
+from conftest import make_guild, make_interaction, make_member, make_role, stored_ops
 import pytest
 
 from fablabot.cogs import user_management
@@ -19,7 +17,6 @@ NOW = datetime(2026, 10, 28, 15, 0, tzinfo=UTC)
 GUILD_ID = 1001
 CALLER_ID, TARGET_ID = 418003123456789012, 501
 CALLER_NAME = "member_418003123456789012"
-STATE_FILE = Path("data/temp_admin_state.json")
 
 
 @pytest.fixture(autouse=True)
@@ -46,7 +43,7 @@ class Server:
     def __init__(self, *caller_roles: str) -> None:
         """Build a server whose caller holds the given roles."""
         self.roles = {
-            name: make_role(name, role_id=i)
+            name: make_role(name, role_id=i, position=0 if name.startswith("F - ") else 10 if name in caller_roles else 0)
             for i, name in enumerate(
                 (
                     RoleNames.ADMIN_TEMP,
@@ -117,7 +114,7 @@ async def test_temp_admin_only_cannot_grant_op_or_deop(
     _refusal(interaction)
     target.add_roles.assert_not_awaited()
     target.remove_roles.assert_not_awaited()
-    assert not STATE_FILE.exists()
+    assert not stored_ops()
     assert cog.deop_tasks == {}
     assert any("kind=missing_right" in line for line in _refusal_lines(caplog))
 
@@ -126,7 +123,7 @@ async def test_temp_admin_only_deop_leaves_expiry_untouched(cog: UserManagement)
     """A refused deop from a temporary admin leaves the expiry untouched."""
     server = Server(RoleNames.PRESIDENT)
     await _op(cog, server, server.target)
-    before = STATE_FILE.read_text(encoding="utf-8")
+    before = stored_ops()
     other = Server(RoleNames.ADMIN_TEMP)
     other.guild = server.guild
     interaction = other.interaction()
@@ -134,7 +131,7 @@ async def test_temp_admin_only_deop_leaves_expiry_untouched(cog: UserManagement)
     await UserManagement.user_deop.callback(cog, interaction, member=server.target)
 
     _refusal(interaction)
-    assert STATE_FILE.read_text(encoding="utf-8") == before
+    assert stored_ops() == before
     assert (GUILD_ID, TARGET_ID) in cog.deop_tasks
 
 
@@ -177,7 +174,7 @@ async def test_op_self_is_refused_even_for_digital_manager(cog: UserManagement) 
 
     assert "vous-même" in _refusal(interaction)
     server.caller.add_roles.assert_not_awaited()
-    assert not STATE_FILE.exists()
+    assert not stored_ops()
 
 
 async def test_remove_role_from_self_is_allowed(cog: UserManagement) -> None:
@@ -226,42 +223,3 @@ async def test_refusal_lines_carry_ids_but_no_name(cog: UserManagement, caplog: 
     lines = _refusal_lines(caplog)
     assert lines == [f"[user.add_role] refused kind=missing_right guild_id={GUILD_ID} user_id={CALLER_ID}"]
     assert all(CALLER_NAME not in r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING)
-
-
-# -- Help --
-
-
-async def test_help_explains_op_scope_and_self_rule(cog: UserManagement) -> None:
-    """The help text explains the op scope and the self rule."""
-    interaction = make_interaction()
-
-    await UserManagement.user_help.callback(cog, interaction)
-
-    text = interaction.response.send_message.await_args.args[0]
-    assert "durée limitée" in text
-    assert "/fm" in text
-    assert "soi-même" in text
-
-
-# -- A malformed guild entry in the op state does not block op --
-
-
-@pytest.mark.parametrize("entry", [[], None, "x"], ids=["list", "null", "string"])
-async def test_op_works_after_start_on_a_malformed_guild_entry(entry: object) -> None:
-    """Op works after a start on a malformed guild entry."""
-    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps({str(GUILD_ID): entry}), encoding="utf-8")
-    server = Server(RoleNames.PRESIDENT)
-    bot = MagicMock()
-    bot.guilds = [server.guild]
-    cog = UserManagement(bot)
-    await cog.on_ready()
-
-    interaction = await _op(cog, server, server.target)
-
-    server.target.add_roles.assert_awaited_once()
-    assert str(TARGET_ID) in json.loads(STATE_FILE.read_text(encoding="utf-8"))[str(GUILD_ID)]
-    assert (GUILD_ID, TARGET_ID) in cog.deop_tasks
-    interaction.response.send_message.assert_awaited_once()
-    for task in cog.deop_tasks.values():
-        task.cancel()

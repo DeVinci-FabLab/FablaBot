@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 import logging
 import re
 from typing import TYPE_CHECKING, Literal
 
 from fablabot.helpers.constants import RoleNames
-from fablabot.helpers.formation.rendering import format_formation_export, humanize_dt
+from fablabot.helpers.formation.rendering import discord_timestamp, format_formation_export
 from fablabot.helpers.utils import get_members_by_role, get_or_fetch_member, send_dm_to_member
 
 if TYPE_CHECKING:
@@ -39,7 +38,7 @@ async def send_registration_dm(
         return
     logger.debug(f"Resolved member {member.id} ({member.display_name}) for registration DM in guild {guild.id}.")
 
-    datetime_text = humanize_dt(datetime.fromisoformat(formation.start_iso)).lower()[2:-2]
+    datetime_text = discord_timestamp(formation.start_dt)
 
     message = (
         f"Salut {member.display_name} !\n"
@@ -104,7 +103,7 @@ async def send_promotion_dm(
         return
     logger.debug(f"Resolved member {member.id} ({member.display_name}) for waitlist promotion DM in guild {guild.id}.")
 
-    datetime_text = humanize_dt(datetime.fromisoformat(formation.start_iso)).lower()[2:-2]
+    datetime_text = discord_timestamp(formation.start_dt)
 
     message = (
         f"Salut {member.display_name} !\n"
@@ -143,7 +142,7 @@ async def notify_trainer_before_formation(
         logger.error(f"Failed to fetch trainer {trainer_id} for formation {formation.name!r}.")
         return
 
-    datetime_text = humanize_dt(formation.start_dt).lower()[2:-2]
+    datetime_text = discord_timestamp(formation.start_dt)
     formation_export = format_formation_export(formation)
 
     if moment == "hour_before":
@@ -179,7 +178,7 @@ async def notify_responsible_before_formation(
         formation (Formation): The formation starting soon.
         moment (Literal["hour_before", "start"]): When the notification is sent.
     """
-    datetime_text = humanize_dt(formation.start_dt).lower()[2:-2]
+    datetime_text = discord_timestamp(formation.start_dt)
     formation_export = format_formation_export(formation)
 
     if moment == "hour_before":
@@ -212,7 +211,7 @@ async def notify_participants_before_formation(
         formation (Formation): The formation starting soon.
         contacts (str): The contact string for formation managers.
     """
-    datetime_text = humanize_dt(formation.start_dt).lower()[2:-2]
+    datetime_text = discord_timestamp(formation.start_dt)
 
     message_content = (
         f"La formation **{formation.name}** commence bientôt (le {datetime_text}).\n\n"

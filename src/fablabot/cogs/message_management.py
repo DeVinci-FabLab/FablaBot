@@ -8,10 +8,9 @@ import csv
 from datetime import datetime, timedelta
 import io
 import logging
-from pathlib import Path
 import random
 import re
-from typing import Any
+import sqlite3
 from warnings import deprecated
 
 from discord import (
@@ -38,10 +37,10 @@ from discord import (
 )
 from discord.ext import commands
 
+from fablabot.helpers.access import EVERYONE, AnyRole, ServerPermission, access
 from fablabot.helpers.constants import ADMIN_ROLES, PARIS_TZ, ErrorMessages, RoleNames, staff_default_permissions
-from fablabot.helpers.help_messages import build_help_message
 from fablabot.helpers.reaction_log import ReactionLogManager
-from fablabot.helpers.state_store import JsonStateStore
+from fablabot.helpers.safe_discord_operations import retract_unsaved_post
 from fablabot.helpers.utils import (
     ensure_command_context,
     get_members_by_role,
@@ -51,20 +50,22 @@ from fablabot.helpers.utils import (
 )
 from fablabot.models.common import ReactionAction, ReactionEvent
 from fablabot.models.message import EASTER_EGGS, EASTER_EGGS_ENABLED, MessageDraft, MsgCommand, MsgReactionEvent, TrackedMessage
+from fablabot.services import messages
 from fablabot.ui import mui
 
 logger = logging.getLogger(__name__)
 
-MESSAGES_STATE_FILE = Path("data/messages_state.json")
-REACTION_LOG_RETENTION = timedelta(days=30)
+REACTION_LOG_RETENTION = timedelta(days=3 * 365)
 ALLOWED_ROLES = ADMIN_ROLES | {RoleNames.BUREAU}
+_ACCESS = AnyRole(ALLOWED_ROLES)
+_DM_ROLES = {RoleNames.BUREAU}
+_DM_ACCESS = AnyRole(_DM_ROLES)
 
 
 class MessageManagement(commands.Cog):
     """Cog handling message tracking, reaction automation, and quick messaging workflows.
 
     Commands:
-        - /msg help: Display help for message management commands.
         - /msg clear: Clear the current channel of its last messages.
         - /msg dm: Send a direct message to multiple users.
         - /msg start: Create or overwrite a message draft via a modal.
@@ -93,9 +94,8 @@ class MessageManagement(commands.Cog):
             bot (commands.Bot): The bot instance.
         """
         self.bot = bot
-        self._state_store = JsonStateStore(logger, MESSAGES_STATE_FILE)
         self._reaction_logs = ReactionLogManager(
-            self._state_store,
+            "message",
             retention=REACTION_LOG_RETENTION,
             logger=logger,
         )
@@ -109,44 +109,10 @@ class MessageManagement(commands.Cog):
     )
 
     @msg_group.command(
-        name="help",
-        description="Afficher l'aide sur les commandes message.",
+        name="clear",
+        description="Nettoie le salon actuel de ses derniers messages.",
+        extras=access(ServerPermission("manage_messages")),
     )
-    @app_commands.describe(show="Afficher l'aide publiquement ou non")
-    async def msg_help(self, interaction: Interaction, *, show: bool = False) -> None:
-        """Display help for message management commands.
-
-        Args:
-            interaction (Interaction): The Discord interaction context.
-            show (bool): Whether to show the help publicly or not.
-        """
-        help_message = build_help_message(
-            "Commandes de gestion des messages",
-            "msg",
-            [
-                ("clear [messages]", "Nettoyer les derniers messages du salon (par défaut 5)"),
-                ("dm <message>", "Envoyer un message privé à plusieurs utilisateurs sélectionnés"),
-                ("start", "Créer ou remplacer le brouillon via un modal"),
-                ("follow <channel> <message>", "Ajouter le suivi sur un message existant (ID ou lien)"),
-                (
-                    "link_reaction <message> <emoji>",
-                    "Associer une réaction à une action automatisée (DM utilisateur/rôle ou message salon)",
-                ),
-                ("unlink_reaction", "Retirer une action liée à une réaction (sélection via une vue)"),
-                ("list", "Lister les messages suivis et leurs réactions"),
-                ("preview", "Prévisualiser le brouillon en cours"),
-                ("publish <channel>", "Publier le brouillon et activer le suivi"),
-                ("export [message]", "Exporter l'historique des réactions d'un message suivi"),
-                ("stop", "Arrêter le suivi d'un message (sélection via une vue)"),
-            ],
-            footer=(
-                "Actions supportées : `user_dm` (DM la personne qui réagit), "
-                "`role_dm` (DM les membres d'un rôle), `channel` (message dans un salon cible)"
-            ),
-        )
-        await interaction.response.send_message(help_message, ephemeral=not show)
-
-    @msg_group.command(name="clear", description="Nettoie le salon actuel de ses derniers messages.")
     @app_commands.describe(messages="Le nombre de messages à supprimer (par défaut 5)")
     async def msg_clear(self, interaction: Interaction, *, messages: app_commands.Range[int, 1, 50] = 5) -> None:
         """Clears the current channel of its last messages.
@@ -196,6 +162,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="dm",
+        extras=access(_DM_ACCESS),
         description="Envoie un message privé à plusieurs utilisateurs via un sélecteur.",
     )
     async def msg_dm(self, interaction: Interaction) -> None:
@@ -205,7 +172,7 @@ class MessageManagement(commands.Cog):
             interaction (Interaction): The Discord interaction context.
             message (str): The message content to send.
         """
-        if not await ensure_command_context(logger, "message.dm", interaction, required_roles={RoleNames.BUREAU}):
+        if not await ensure_command_context(logger, "message.dm", interaction, required_roles=_DM_ROLES):
             return
 
         await interaction.response.send_modal(mui.BulkDMModal(self))
@@ -213,6 +180,7 @@ class MessageManagement(commands.Cog):
     @msg_group.command(
         name="purge",
         description="Supprime les messages d'un utilisateur (ADMIN ONLY)",
+        extras=access(ServerPermission("administrator")),
     )
     @app_commands.describe(
         user="Utilisateur à purger (OBLIGATOIRE)",
@@ -252,7 +220,7 @@ class MessageManagement(commands.Cog):
             reason=reason,
         )
 
-        if not interaction.user.guild_permissions.administrator:
+        if not interaction.permissions.administrator:
             logger.warning(f"Non-admin user_id={interaction.user.id} tried to purge messages")
             await interaction.response.send_message(
                 "Seuls les administrateurs peuvent utiliser cette commande",
@@ -399,6 +367,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="start",
+        extras=access(_ACCESS),
         description="Démarrer/écraser un brouillon de message (modal).",
     )
     async def msg_start(self, interaction: Interaction) -> None:
@@ -412,7 +381,7 @@ class MessageManagement(commands.Cog):
 
         await interaction.response.send_modal(mui.StartMessageModal(self))
 
-    @msg_group.command(name="follow", description="Démarrer le suivi sur un message déjà envoyé.")
+    @msg_group.command(name="follow", description="Démarrer le suivi sur un message déjà envoyé.", extras=access(_ACCESS))
     @app_commands.describe(
         channel="Salon dans lequel se trouve le message",
         message="ID du message ou lien complet",
@@ -450,23 +419,22 @@ class MessageManagement(commands.Cog):
         assert interaction.guild is not None
         draft = self.get_draft(interaction.guild.id)
         migrated_reactions: list[MsgReactionEvent] = []
-        if draft and draft.reactions:
-            for reaction in draft.reactions:
-                cloned = copy(reaction)
-                cloned.message_id = fetched.id
-                migrated_reactions.append(cloned)
-            draft.reactions.clear()
-            self.set_draft(interaction.guild.id, draft)
+        for reaction in draft.reactions if draft else []:
+            cloned = copy(reaction)
+            cloned.message_id = fetched.id
+            migrated_reactions.append(cloned)
 
+        # Following a message again adds to its links; saving it with only the draft's would delete the others.
+        already = self.get_tracked_message(interaction.guild.id, fetched.id)
         tracked = TrackedMessage(
             message_id=fetched.id,
             channel_id=channel.id,
             content=fetched.content or "(contenu vide ou embed)",
-            reactions=migrated_reactions,
+            reactions=[*(already.reactions if already else []), *migrated_reactions],
             created_by=interaction.user.id,
             created_at_iso=datetime.now(PARIS_TZ).isoformat(),
         )
-        self.set_tracked_message(interaction.guild.id, tracked)
+        messages.track_from_draft(interaction.guild.id, tracked, keep_text=True)
         if migrated_reactions:
             await self._sync_reactions_on_message(interaction.guild.id, tracked)
 
@@ -479,7 +447,9 @@ class MessageManagement(commands.Cog):
             f"{len(migrated_reactions)} réaction(s) importée(s) depuis le brouillon.",
         )
 
-    @msg_group.command(name="link_reaction", description="Associer une réaction à une action automatisée.")
+    @msg_group.command(
+        name="link_reaction", description="Associer une réaction à une action automatisée.", extras=access(_ACCESS)
+    )
     @app_commands.describe(emoji="Emoji déclencheur")
     async def msg_link_reaction(
         self,
@@ -528,6 +498,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="unlink_reaction",
+        extras=access(_ACCESS),
         description="Retirer une action associée à une réaction sur un message suivi.",
     )
     async def msg_unlink_reaction(self, interaction: Interaction) -> None:
@@ -566,6 +537,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="list",
+        extras=access(_ACCESS),
         description="Lister les messages actuellement suivis.",
     )
     async def msg_list(self, interaction: Interaction) -> None:
@@ -614,6 +586,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="preview",
+        extras=access(_ACCESS),
         description="Prévisualiser le brouillon courant.",
     )
     async def msg_preview(self, interaction: Interaction) -> None:
@@ -646,6 +619,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="publish",
+        extras=access(_ACCESS),
         description="Publier le brouillon dans un salon et activer le suivi.",
     )
     @app_commands.describe(channel="Salon cible pour la publication")
@@ -681,12 +655,17 @@ class MessageManagement(commands.Cog):
             )
             return
 
-        updated_reactions: list[MsgReactionEvent] = []
-        for reaction in draft.reactions:
-            cloned = copy(reaction)
-            cloned.message_id = msg.id
-            updated_reactions.append(cloned)
-        if updated_reactions:
+        try:
+            # The draft may have changed while the post went out; the read and the write have no await between them.
+            # The links on it now go with the post. A text written meanwhile is a new draft (`/msg start` empties the
+            # links): it stays as it is, and the post keeps the links it was sent with.
+            current = self.get_draft(interaction.guild.id) or draft
+            text_changed = current.content != draft.content
+            updated_reactions: list[MsgReactionEvent] = []
+            for reaction in (draft if text_changed else current).reactions:
+                cloned = copy(reaction)
+                cloned.message_id = msg.id
+                updated_reactions.append(cloned)
             tracked = TrackedMessage(
                 message_id=msg.id,
                 channel_id=channel.id,
@@ -695,10 +674,18 @@ class MessageManagement(commands.Cog):
                 created_by=interaction.user.id,
                 created_at_iso=datetime.now(PARIS_TZ).isoformat(),
             )
-            self.set_tracked_message(interaction.guild.id, tracked)
-
+            if updated_reactions and text_changed:
+                messages.save_tracked(interaction.guild.id, tracked)
+            elif updated_reactions:
+                messages.track_from_draft(interaction.guild.id, tracked, keep_text=False)
+            elif not text_changed:
+                self._clear_draft(interaction.guild.id)
+        except sqlite3.Error:
+            logger.exception(f"Message {msg.id} not saved in guild {interaction.guild.id}; retracting it.")
+            await interaction.response.send_message(await retract_unsaved_post(logger, msg), ephemeral=True)
+            return
+        if updated_reactions:
             await self._sync_reactions_on_message(interaction.guild.id, tracked)
-        self._clear_draft(interaction.guild.id)
 
         logger.info(
             f"Published message {msg.id} in guild {interaction.guild.id} with {len(updated_reactions)} reaction actions",
@@ -709,6 +696,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="export",
+        extras=access(_ACCESS),
         description="Exporter l'historique des réactions d'un message suivi.",
     )
     async def msg_export(self, interaction: Interaction) -> None:
@@ -745,6 +733,7 @@ class MessageManagement(commands.Cog):
 
     @msg_group.command(
         name="stop",
+        extras=access(_ACCESS),
         description="Arrêter le suivi d'un message.",
     )
     async def msg_stop(self, interaction: Interaction) -> None:
@@ -782,7 +771,11 @@ class MessageManagement(commands.Cog):
 
     # region ====== Suggestion Slash Command ======
 
-    @app_commands.command(name="suggest", description="Envoyer une suggestion (choisir destinataire, texte, anonymat)")
+    @app_commands.command(
+        name="suggest",
+        extras=access(EVERYONE),
+        description="Envoyer une suggestion (choisir destinataire, texte, anonymat)",
+    )
     async def suggest(self, interaction: Interaction) -> None:
         """Single command entrypoint for sending suggestions via a small interactive flow.
 
@@ -858,7 +851,7 @@ class MessageManagement(commands.Cog):
         if member is None or member.bot:
             return
 
-        tracked = self._get_tracked_message(payload.guild_id, payload.message_id)
+        tracked = self.get_tracked_message(payload.guild_id, payload.message_id)
         if tracked is None:
             return
 
@@ -875,17 +868,21 @@ class MessageManagement(commands.Cog):
                     f"Failed to execute reaction action {action.action_type} for emoji {emoji_str} "
                     f"on message {payload.message_id} by {member}",
                 )
-            self._reaction_logs.append(
-                guild.id,
-                ReactionEvent(
-                    message_id=payload.message_id,
-                    user_id=member.id,
-                    user_name=member.display_name,
-                    emoji=emoji_str,
-                    action=ReactionAction.ADD,
-                    ts_iso=datetime.now(PARIS_TZ).isoformat(),
-                ),
-            )
+            try:
+                self._reaction_logs.append(
+                    guild.id,
+                    ReactionEvent(
+                        message_id=payload.message_id,
+                        user_id=member.id,
+                        user_name=member.display_name,
+                        emoji=emoji_str,
+                        action=ReactionAction.ADD,
+                        ts_iso=datetime.now(PARIS_TZ).isoformat(),
+                    ),
+                )
+            except sqlite3.Error:
+                # Only the history line is lost: the member's other actions must still run.
+                logger.exception(f"Reaction history line not written guild_id={guild.id} message_id={payload.message_id}")
 
     # endregion Listeners
 
@@ -948,17 +945,9 @@ class MessageManagement(commands.Cog):
 
     def _get_tracked_messages(self, guild_id: int) -> dict[int, TrackedMessage]:
         """Retrieve all tracked messages for a guild."""
-        guild_state = self._state_store.ensure_guild(guild_id)
-        tracked_raw = guild_state.get("tracked", {}) or {}
-        tracked: dict[int, TrackedMessage] = {}
-        for msg_id_str, payload in tracked_raw.items():
-            try:
-                tracked[int(msg_id_str)] = TrackedMessage.from_dict(payload)
-            except Exception:
-                logger.warning(f"Ignoring invalid tracked message payload for guild {guild_id}: {payload}")
-        return tracked
+        return messages.tracked_messages(guild_id)
 
-    def _get_tracked_message(self, guild_id: int, message_id: int) -> TrackedMessage | None:
+    def get_tracked_message(self, guild_id: int, message_id: int) -> TrackedMessage | None:
         """Retrieve a specific tracked message for a guild."""
         return self._get_tracked_messages(guild_id).get(message_id)
 
@@ -981,10 +970,7 @@ class MessageManagement(commands.Cog):
             guild_id (int): The ID of the guild.
             tracked (TrackedMessage): The tracked message to set or update.
         """
-        guild_state = self._state_store.ensure_guild(guild_id)
-        tracked_map = guild_state.setdefault("tracked", {})
-        tracked_map[str(tracked.message_id)] = tracked.to_dict()
-        self._state_store.set_guild(guild_id, guild_state)
+        messages.save_tracked(guild_id, tracked)
 
     def remove_tracked_message(self, guild_id: int, message_id: int) -> bool:
         """Remove a tracked message for a guild.
@@ -996,14 +982,7 @@ class MessageManagement(commands.Cog):
         Returns:
             bool: True if the message was removed, False if it was not found.
         """
-        guild_state = self._state_store.ensure_guild(guild_id)
-        tracked_map: dict[str, Any] = guild_state.get("tracked") or {}
-        if str(message_id) not in tracked_map:
-            return False
-        tracked_map.pop(str(message_id), None)
-        guild_state["tracked"] = tracked_map
-        self._state_store.set_guild(guild_id, guild_state)
-        return True
+        return messages.remove_tracked(guild_id, message_id)
 
     def get_draft(self, guild_id: int) -> MessageDraft | None:
         """Retrieve the message draft for a guild.
@@ -1014,9 +993,7 @@ class MessageManagement(commands.Cog):
         Returns:
             MessageDraft | None: The message draft for the guild, or None if not found.
         """
-        guild_state = self._state_store.ensure_guild(guild_id)
-        draft_raw = guild_state.get("draft")
-        return MessageDraft.from_dict(draft_raw) if draft_raw else None
+        return messages.get_draft(guild_id)
 
     def set_draft(self, guild_id: int, draft: MessageDraft) -> None:
         """Set the message draft for a guild.
@@ -1025,18 +1002,13 @@ class MessageManagement(commands.Cog):
             guild_id (int): The ID of the guild.
             draft (MessageDraft): The message draft to set.
         """
-        guild_state = self._state_store.ensure_guild(guild_id)
-        guild_state["draft"] = draft.to_dict()
-        self._state_store.set_guild(guild_id, guild_state)
+        messages.save_draft(guild_id, draft)
         logger.debug(f"Draft updated for guild {guild_id} with {len(draft.reactions)} reactions")
 
     def _clear_draft(self, guild_id: int) -> None:
         """Clear the message draft for a guild."""
-        guild_state = self._state_store.ensure_guild(guild_id)
-        if "draft" in guild_state:
-            guild_state.pop("draft", None)
-            self._state_store.set_guild(guild_id, guild_state)
-            logger.debug(f"Draft cleared for guild {guild_id}")
+        messages.clear_draft(guild_id)
+        logger.debug(f"Draft cleared for guild {guild_id}")
 
     async def register_reaction_action(self, guild_id: int, reaction: MsgReactionEvent) -> str:
         """Register a reaction action for a tracked message or draft.
@@ -1054,7 +1026,7 @@ class MessageManagement(commands.Cog):
             logger.info(f"Added reaction {reaction.emoji} to draft in guild {guild_id}")
             return f"Réaction {reaction.emoji} ajoutée au brouillon."
 
-        tracked = self._get_tracked_message(guild_id, reaction.message_id)
+        tracked = self.get_tracked_message(guild_id, reaction.message_id)
         if tracked is None:
             return ErrorMessages.MSG_NO_TRACKED
 
