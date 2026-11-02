@@ -355,6 +355,63 @@ def test_an_upgrade_copies_the_database_first(tmp_path: Path) -> None:
     assert _version(DB_FILE) == 2
 
 
+def _failed_upgrade(tmp_path: Path) -> Path:
+    """Return migrations whose second step fails, with a database at the first step."""
+    db.open_database(DB_FILE, migrations=_migrations(tmp_path / "m", "CREATE TABLE one (a);"))
+    db.close_database()
+    return _migrations(tmp_path / "m", "CREATE TABLE one (a);", "CREATE TABLE one (a);")
+
+
+def test_repeated_failed_upgrades_leave_one_copy(tmp_path: Path) -> None:
+    """A start that keeps failing under a restart policy does not fill the disk with copies."""
+    migrations = _failed_upgrade(tmp_path)
+
+    for _ in range(3):
+        with pytest.raises(db.StorageError):
+            db.open_database(DB_FILE, migrations=migrations)
+
+    copies = list(DB_FILE.parent.glob("backups/test-v1-*.db"))
+    assert len(copies) == 1
+    assert _version(copies[0]) == 1
+    assert _version(DB_FILE) == 1
+
+
+def test_a_database_changed_since_its_copy_is_copied_again(tmp_path: Path) -> None:
+    """An older release may have written in between: the newer data gets its own copy, and the first one stays."""
+    migrations = _failed_upgrade(tmp_path)
+    with pytest.raises(db.StorageError):
+        db.open_database(DB_FILE, migrations=migrations)
+    [first] = DB_FILE.parent.glob("backups/test-v1-*.db")
+    os.utime(first, (first.stat().st_atime - 10, first.stat().st_mtime - 10))
+
+    with pytest.raises(db.StorageError):
+        db.open_database(DB_FILE, migrations=migrations)
+
+    assert first.exists()
+    assert len(list(DB_FILE.parent.glob("backups/test-v1-*.db"))) == 2
+
+
+def test_a_failed_copy_does_not_pass_for_a_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A copy that stops partway leaves no file under a copy's name, so the next start copies again."""
+    db.open_database(DB_FILE, migrations=_migrations(tmp_path / "m", "CREATE TABLE one (a);"))
+    db.close_database()
+    migrations = _migrations(tmp_path / "m", "CREATE TABLE one (a);", "CREATE TABLE two (a);")
+    real = db._copy_to
+
+    def _cut_short(conn: sqlite3.Connection, target: Path) -> None:
+        real(conn, target)
+        raise sqlite3.OperationalError("disk full")
+
+    monkeypatch.setattr(db, "_copy_to", _cut_short)
+    with pytest.raises(db.StorageError):
+        db.open_database(DB_FILE, migrations=migrations)
+    assert list(DB_FILE.parent.glob("backups/test-v1-*.db")) == []
+
+    monkeypatch.setattr(db, "_copy_to", real)
+    db.open_database(DB_FILE, migrations=migrations)
+    assert len(list(DB_FILE.parent.glob("backups/test-v1-*.db"))) == 1
+
+
 def test_an_up_to_date_database_is_not_copied() -> None:
     """A restart at the same version writes no backup."""
     db.open_database(DB_FILE)
