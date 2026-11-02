@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.5.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.4.0...v0.5.0) (2026-11-02)
+
+
+### Features
+
+* **access:** let each allowed server carry a name after its ID ([#136](https://github.com/DeVinci-FabLab/FablaBot/issues/136)) ([0eb4b89](https://github.com/DeVinci-FabLab/FablaBot/commit/0eb4b896364ba5e39e3da9fc289f6c78ce24193a))
+
+
+### Bug Fixes
+
+* **storage:** keep the reaction history for three years ([#137](https://github.com/DeVinci-FabLab/FablaBot/issues/137)) ([6ce97cf](https://github.com/DeVinci-FabLab/FablaBot/commit/6ce97cf74f3ad1fda19e917ea5d5eeb02afe1b49))
+
+
+### Documentation
+
+* state the automatic update and the move without sudo ([#134](https://github.com/DeVinci-FabLab/FablaBot/issues/134)) ([bd92d1b](https://github.com/DeVinci-FabLab/FablaBot/commit/bd92d1bebc9ab4d23b7b6996fa214c4551f7d175))
+
 ## [0.4.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.3.0...v0.4.0) (2026-11-02)
 
 
