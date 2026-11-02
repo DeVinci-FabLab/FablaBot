@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -216,29 +217,30 @@ def test_a_corrupt_file_stops_before_anything_is_written(name: str, raw: bytes, 
 @pytest.mark.parametrize(
     ("path", "value", "message"),
     [
-        (("guild_config.json", FIRST, "unknown"), 1, "unknown key"),
+        (("guild_config.json", FIRST, "unknown"), "name-Alice", "unknown key"),
         (("guild_config.json", "not-an-id"), {}, "not an ID"),
-        (("guild_config.json", FIRST, "log_channel_id"), "2", "log_channel_id: unexpected value"),
-        (("guild_config.json", FIRST, "welcome_verify_enabled"), 1, "unexpected value"),
-        (("guild_config.json", "__global__", "other"), 1, "unknown key"),
+        (("guild_config.json", FIRST, "log_channel_id"), "name-Alice", "log_channel_id: unexpected value"),
+        (("guild_config.json", FIRST, "welcome_verify_enabled"), "name-Alice", "unexpected value"),
+        (("guild_config.json", "__global__", "other"), "name-Alice", "unknown key"),
         (("formations_state.json", "__global__"), {}, "not an ID"),
-        (("formations_state.json", FIRST, "unknown"), 1, "unknown key"),
-        ((*PUBLISHED, "unknown"), 1, "unknown key"),
-        ((*PUBLISHED, "message_id"), None, "unexpected value"),
-        ((*PUBLISHED, "message", "unknown"), 1, "unknown key"),
-        ((*FM, "unknown"), 1, "unknown key"),
-        ((*FM, "duration"), 90, "unexpected value"),
+        (("formations_state.json", FIRST, "unknown"), "name-Alice", "unknown key"),
+        ((*PUBLISHED, "unknown"), "name-Alice", "unknown key"),
+        ((*PUBLISHED, "message_id"), "name-Alice", "unexpected value"),
+        ((*PUBLISHED, "message", "unknown"), "name-Alice", "unknown key"),
+        ((*FM, "unknown"), "name-Alice", "unknown key"),
+        ((*FM, "duration"), ["name-Alice"], "unexpected value"),
+        ((*FM, "seats"), "name-Alice", "unexpected value"),
         ((*FM, "seats"), True, "unexpected value"),
-        ((*FM, "registered_users", 0, "unknown"), 1, "unknown key"),
-        ((*FM, "registered_users", 0, "ts_iso"), None, "unexpected value"),
-        (("formations_state.json", FIRST, "reactions_log", 0, "action"), "ADD", "expected one of"),
-        (("formations_state.json", FIRST, "reactions_log", 0, "unknown"), 1, "unknown key"),
+        ((*FM, "registered_users", 0, "unknown"), "name-Alice", "unknown key"),
+        ((*FM, "registered_users", 0, "ts_iso"), ["name-Alice"], "unexpected value"),
+        (("formations_state.json", FIRST, "reactions_log", 0, "action"), "name-ADD", "expected one of"),
+        (("formations_state.json", FIRST, "reactions_log", 0, "unknown"), "name-Alice", "unknown key"),
         (("formations_state.json", FIRST, "reactions_log", 0, "user_id"), 2**63, "unexpected value"),
-        (("messages_state.json", FIRST, "unknown"), 1, "unknown key"),
+        (("messages_state.json", FIRST, "unknown"), "name-Alice", "unknown key"),
         ((*TRACKED, "message_id"), 5, "differ"),
-        ((*TRACKED, "unknown"), 1, "unknown key"),
-        ((*TRACKED, "reactions", 0, "action_type"), "webhook", "expected one of"),
-        ((*TRACKED, "reactions", 0, "unknown"), 1, "unknown key"),
+        ((*TRACKED, "unknown"), "name-Alice", "unknown key"),
+        ((*TRACKED, "reactions", 0, "action_type"), "name-webhook", "expected one of"),
+        ((*TRACKED, "reactions", 0, "unknown"), "name-Alice", "unknown key"),
     ],
 )
 def test_an_unexpected_value_stops_with_its_place_and_not_its_content(path: tuple[Any, ...], value: Any, message: str) -> None:
@@ -251,6 +253,7 @@ def test_an_unexpected_value_stops_with_its_place_and_not_its_content(path: tupl
 
     assert _folder() == before
     assert "name-" not in str(refused.value)
+    assert "Alice" not in str(refused.value)
 
 
 def _everything() -> dict[str, Any]:
@@ -328,6 +331,130 @@ def test_a_field_name_this_release_does_not_know_is_still_named(key: str, *, sho
     message = str(refused.value)
     assert (f"unknown key {key!r}" in message) is shown
     assert shown or (key not in message and "unknown key #" in message)
+
+
+def _written(name: str, raw: bytes) -> None:
+    """Write the production files, then one of them as these exact bytes."""
+    write_state()
+    (DATA / name).write_bytes(raw)
+
+
+def _refused(*, check: bool) -> str:
+    """Run a command that must stop on a ``Cannot import`` line, and give the line."""
+    with pytest.raises(SystemExit) as refused:
+        import_state.main(["--check"] if check else [])
+    assert str(refused.value).startswith("Cannot import: ")
+    return str(refused.value)
+
+
+@pytest.mark.parametrize("check", [True, False], ids=["check", "import"])
+def test_a_key_too_long_to_be_an_id_stops_with_a_line(*, check: bool) -> None:
+    """Python refuses to turn 4300 digits into a number: the file is refused like any other, not a traceback."""
+    _written("guild_config.json", b'{"' + b"9" * 4301 + b'": {}}')
+    before = _folder()
+
+    assert "key #0 is not an ID" in _refused(check=check)
+
+    assert _folder() == before
+
+
+@pytest.mark.parametrize("check", [True, False], ids=["check", "import"])
+@pytest.mark.parametrize(
+    ("path", "where"),
+    [
+        (("formations_state.json", FIRST, "draft", "header"), "header: unexpected value"),
+        (("formations_state.json", FIRST, "reactions_log", 0, "user_name"), "user_name: unexpected value"),
+    ],
+    ids=["header", "name"],
+)
+def test_a_lone_surrogate_stops_with_its_place(path: tuple[Any, ...], where: str, *, check: bool) -> None:
+    """SQLite cannot store it: the file stops at the value, not at the write, and the text is not shown."""
+    raw = json.dumps(_changed(path, "name-Alice\ud800")[path[0]]).encode()
+    assert b"\\ud800" in raw
+    _written(path[0], raw)
+    before = _folder()
+
+    message = _refused(check=check)
+
+    assert where in message
+    assert "Alice" not in message
+    assert _folder() == before
+
+
+@pytest.mark.parametrize("check", [True, False], ids=["check", "import"])
+def test_a_lone_surrogate_as_a_key_is_given_by_its_position(*, check: bool) -> None:
+    """A key is no ID and no field name: only its place shows."""
+    _written("guild_config.json", b'{"\\ud800": {}}')
+
+    assert "key #0 is not an ID" in _refused(check=check)
+
+
+@pytest.mark.parametrize("check", [True, False], ids=["check", "import"])
+def test_a_file_nested_too_deeply_stops_with_a_line(*, check: bool) -> None:
+    """The reader gives up on very deep nesting: it is a refusal of the file, not a traceback."""
+    _written("guild_config.json", b"[" * 200_000)
+    before = _folder()
+
+    assert "guild_config.json" in _refused(check=check)
+
+    assert _folder() == before
+
+
+@pytest.mark.parametrize("check", [True, False], ids=["check", "import"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        ("guild_config.json", FIRST, "log_channel_id"),
+        ("guild_config.json", "__global__", "log_channel_id"),
+        (*PUBLISHED, "channel_id"),
+        (*FM, "registered_users", 0, "user_id"),
+        ("formations_state.json", FIRST, "reactions_log", 0, "message_id"),
+        (*TRACKED, "created_by"),
+        (*TRACKED, "reactions", 0, "target_id"),
+    ],
+    ids=lambda path: "/".join(str(step) for step in path),
+)
+def test_a_negative_id_stops(path: tuple[Any, ...], *, check: bool) -> None:
+    """No Discord ID is below 0: the value stops the import, and its place is all that shows."""
+    files = _changed(path, -4_200_000_000)
+    write_state(files)
+    before = _folder()
+
+    message = _refused(check=check)
+
+    assert path[-1] + ": unexpected value" in message
+    assert "-4200000000" not in message
+    assert _folder() == before
+
+
+def test_a_negative_number_of_seats_is_no_id_and_still_reads() -> None:
+    """Only IDs are bounded below: the seats keep the type they had."""
+    state = import_state.parse(write_state(_changed((*FM, "seats"), -1)))
+
+    assert state["formations_state.json"][FIRST]["published"]["message"]["fms"][0]["seats"] == -1
+
+
+@pytest.mark.parametrize("check", [True, False], ids=["check", "import"])
+@pytest.mark.parametrize(
+    ("name", "raw"),
+    [
+        ("guild_config.json", b'{"name-Alice": 1, "name-Alice": 2}'),
+        ("formations_state.json", b'{"1": {}, "1": {}}'),
+        ("messages_state.json", b'{"1": {"tracked": {}, "tracked": {}}}'),
+        ("temp_admin_state.json", b'{"1": {"2": {"channel_id": 1, "channel_id": 2}}}'),
+    ],
+    ids=["top-level", "server", "section", "deep"],
+)
+def test_a_key_given_twice_stops(name: str, raw: bytes, *, check: bool) -> None:
+    """The bot read the last of two equal keys without a word: the first would be lost, so the file stops."""
+    _written(name, raw)
+    before = _folder()
+
+    message = _refused(check=check)
+
+    assert f"{name}: a key appears twice" in message
+    assert "Alice" not in message
+    assert _folder() == before
 
 
 def test_an_expiry_the_bot_could_not_read_stops() -> None:
@@ -520,9 +647,10 @@ def test_check_works_on_a_read_only_copy() -> None:
         DATA.chmod(0o700)
 
 
-def test_the_bot_keeps_its_gate() -> None:
-    """Only the import opens past it: the bot's own path takes no argument."""
-    source = Path(db.__file__).with_name("main.py").read_text(encoding="utf-8")
+@pytest.mark.parametrize("module", ["main.py", "export_state.py"])
+def test_the_bot_keeps_its_gate(module: str) -> None:
+    """Only the import opens past it: the bot's own path and the export take no argument."""
+    source = Path(db.__file__).with_name(module).read_text(encoding="utf-8")
 
     assert "db.open_database()" in source
     assert "gate=" not in source

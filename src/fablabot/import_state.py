@@ -31,7 +31,6 @@ _MAX_ID: Final = 2**63 - 1  # SQLite's largest integer
 _INT: Final = (int,)
 _TEXT: Final = (str,)
 _FLAG: Final = (bool,)
-_MAYBE_INT: Final = (int, NoneType)
 _MAYBE_TEXT: Final = (str, NoneType)
 # A key is echoed only if it reads as a field name, so a name with a capital, a space or a dot never shows. Ceiling: one
 # lowercase word does; the bot writes IDs and field names as keys, and a rehearsal needs the field name of a newer release.
@@ -64,7 +63,15 @@ class OneOf(NamedTuple):
     allowed: tuple[str, ...]
 
 
-_USER: Final = Fields({"user_id": _INT, "username": _TEXT, "ts_iso": _TEXT}, {})
+class Id(NamedTuple):
+    """A Discord ID: a whole number from 0 up to SQLite's largest, or None where the old code allowed it."""
+
+    nullable: bool = False
+
+
+_ID: Final = Id()
+_MAYBE_ID: Final = Id(nullable=True)
+_USER: Final = Fields({"user_id": _ID, "username": _TEXT, "ts_iso": _TEXT}, {})
 _FORMATION: Final = Fields(
     {"emoji": _TEXT, "name": _TEXT, "trainer_mention": _TEXT, "start_iso": _TEXT, "duration": _TEXT, "seats": _INT},
     {
@@ -78,25 +85,25 @@ _FORMATION: Final = Fields(
 )
 _MESSAGE: Final = Fields(
     {},
-    {"header": _TEXT, "role_id": _INT, "intro": _TEXT, "fms": Items(_FORMATION), "end": _TEXT, "request_forms_url": _TEXT},
+    {"header": _TEXT, "role_id": _ID, "intro": _TEXT, "fms": Items(_FORMATION), "end": _TEXT, "request_forms_url": _TEXT},
 )
-_PUBLISHED: Final = Fields({"message_id": _INT, "channel_id": _INT, "message": _MESSAGE}, {})
+_PUBLISHED: Final = Fields({"message_id": _ID, "channel_id": _ID, "message": _MESSAGE}, {})
 _EVENT: Final = Fields(
-    {"message_id": _INT, "user_id": _INT, "emoji": _TEXT, "action": OneOf(("add", "remove")), "ts_iso": _TEXT},
+    {"message_id": _ID, "user_id": _ID, "emoji": _TEXT, "action": OneOf(("add", "remove")), "ts_iso": _TEXT},
     {"user_name": _MAYBE_TEXT},
 )
 _LINK: Final = Fields(
     {"emoji": _TEXT, "action_type": OneOf(("channel", "user_dm", "role_dm")), "message_content": _TEXT},
-    {"target_id": _MAYBE_INT, "target_name": _MAYBE_TEXT, "message_id": _MAYBE_INT},
+    {"target_id": _MAYBE_ID, "target_name": _MAYBE_TEXT, "message_id": _MAYBE_ID},
 )
 _TRACKED: Final = Fields(
-    {"message_id": _INT, "channel_id": _INT, "content": _TEXT},
-    {"reactions": Items(_LINK), "created_by": _MAYBE_INT, "created_at_iso": _MAYBE_TEXT},
+    {"message_id": _ID, "channel_id": _ID, "content": _TEXT},
+    {"reactions": Items(_LINK), "created_by": _MAYBE_ID, "created_at_iso": _MAYBE_TEXT},
 )
 _SHAPES: Final = {
     GUILD_CONFIG_FILE: Keyed(
-        Fields({}, {"commands_channel_id": _INT, "log_channel_id": _INT, "welcome_verify_enabled": _FLAG}),
-        {LEGACY_SECTION: Fields({"log_channel_id": _INT}, {})},
+        Fields({}, {"commands_channel_id": _ID, "log_channel_id": _ID, "welcome_verify_enabled": _FLAG}),
+        {LEGACY_SECTION: Fields({"log_channel_id": _ID}, {})},
     ),
     FORMATIONS_FILE: Keyed(Fields({}, {"draft": _MESSAGE, "published": _PUBLISHED, "reactions_log": Items(_EVENT)})),
     MESSAGES_FILE: Keyed(
@@ -109,7 +116,7 @@ _SHAPES: Final = {
             },
         )
     ),
-    TEMP_ADMIN_FILE: Keyed(Keyed(Fields({"expires_at": _TEXT, "channel_id": _INT}, {}))),
+    TEMP_ADMIN_FILE: Keyed(Keyed(Fields({"expires_at": _TEXT, "channel_id": _ID}, {}))),
 }
 _FIELDS: Final = (
     "settings",
@@ -133,10 +140,37 @@ class StateFileError(Exception):
     """
 
 
+class _RepeatedKeyError(ValueError):
+    """An object names a key twice; the key is not kept."""
+
+
+def _object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Build a JSON object, refusing a repeated key: the bot read the last one and dropped the first without a word."""
+    result = dict(pairs)
+    if len(result) != len(pairs):
+        raise _RepeatedKeyError
+    return result
+
+
 def _refuse(where: str, problem: str) -> NoReturn:
     """Stop on a place in a file, never on a value."""
     msg = f"{where}: {problem}."
     raise StateFileError(msg)
+
+
+def _is_id_key(key: str) -> bool:
+    """Say whether a key is a Discord ID; digits beyond the largest ID are not turned into a number, Python refuses 4300."""
+    return key.isascii() and key.isdigit() and len(key) <= len(str(_MAX_ID)) and int(key) <= _MAX_ID
+
+
+def _storable(value: Any) -> bool:
+    """Say whether a text can be written as UTF-8, which a lone surrogate, as a JSON escape can spell one, cannot."""
+    if isinstance(value, str):
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
+            return False
+    return True
 
 
 def _check_keyed(where: str, value: Any, shape: Keyed) -> None:
@@ -144,7 +178,7 @@ def _check_keyed(where: str, value: Any, shape: Keyed) -> None:
     if not isinstance(value, dict):
         _refuse(where, "expected an object")
     for index, (key, entry) in enumerate(value.items()):
-        if key not in shape.sections and not (key.isascii() and key.isdigit() and int(key) <= _MAX_ID):
+        if key not in shape.sections and not _is_id_key(key):
             _refuse(where, f"key #{index} is not an ID")
         _check(f"{where}/{key}", entry, shape.sections.get(key, shape.item))
 
@@ -177,8 +211,12 @@ def _check(where: str, value: Any, shape: Any) -> None:
         case OneOf(allowed):
             if value not in allowed:
                 _refuse(where, f"expected one of {', '.join(allowed)}")
+        case Id(nullable):
+            is_id = type(value) is int and 0 <= value <= _MAX_ID
+            if not (is_id or (nullable and value is None)):
+                _refuse(where, "unexpected value")
         case _:
-            if type(value) not in shape or (type(value) is int and abs(value) > _MAX_ID):
+            if type(value) not in shape or (type(value) is int and abs(value) > _MAX_ID) or not _storable(value):
                 _refuse(where, "unexpected value")
 
 
@@ -268,7 +306,13 @@ def parse(files: Mapping[str, bytes]) -> State:
     state: State = {}
     for name, shape in _SHAPES.items():
         try:
-            data: Any = json.loads(files[name].decode("utf-8")) if name in files else {}
+            data: Any = json.loads(files[name].decode("utf-8"), object_pairs_hook=_object) if name in files else {}
+        except _RepeatedKeyError as error:
+            msg = f"{name}: a key appears twice."
+            raise StateFileError(msg) from error
+        except RecursionError as error:
+            msg = f"{name} is nested too deeply."
+            raise StateFileError(msg) from error
         except ValueError as error:
             msg = f"{name} is not valid JSON."
             raise StateFileError(msg) from error
