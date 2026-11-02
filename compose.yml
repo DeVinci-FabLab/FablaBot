@@ -3,6 +3,13 @@ services:
     image: ghcr.io/devinci-fablab/fablabot:latest
     container_name: fablabot-prod
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=1m,mode=1777,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     environment:
       - DISCORD_TOKEN_FILE=/run/secrets/discord_token
       - ALLOWED_GUILD_IDS=${ALLOWED_GUILD_IDS:-}

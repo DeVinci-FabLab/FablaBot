@@ -9,7 +9,7 @@ description = "General purpose Discord bot for the DeVinci Fablab discord server
 name = "fablabot"
 readme = "README.md"
 requires-python = ">=3.13"
-version = "0.5.0"
+version = "0.6.0"
 
 [build-system]
 requires = ["setuptools"]
