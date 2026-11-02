@@ -9,13 +9,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from conftest import make_interaction
 from discord import TextChannel
-from discord.ext import commands
 import pytest
 
 from fablabot import db
 from fablabot.cogs import formation_management
 from fablabot.cogs.formation_management import FormationManagement
 from fablabot.helpers.constants import PARIS_TZ, ErrorMessages
+from fablabot.helpers.guild_access import GuildAccessPolicy
 from fablabot.models import FmMessageDraft, Formation, PublishedMessage
 from fablabot.services import formations
 
@@ -182,7 +182,9 @@ def test_a_failed_save_keeps_the_previous_message() -> None:
 @pytest.fixture
 async def cog() -> Any:
     """The formation cog over a stub bot, with its loop stopped."""
-    instance = FormationManagement(MagicMock(spec=commands.Bot))
+    bot = MagicMock()
+    bot.guild_access = GuildAccessPolicy(frozenset({GUILD_A, GUILD_B}))
+    instance = FormationManagement(bot)
     instance._check_upcoming_formations.cancel()
     return instance
 

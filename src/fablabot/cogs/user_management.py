@@ -36,6 +36,8 @@ from fablabot.ui import uui
 if TYPE_CHECKING:
     from collections.abc import Collection
 
+    from fablabot.main import Fablabot
+
 logger = logging.getLogger(__name__)
 
 EXPIRY_RETRY_DELAY = timedelta(seconds=60)
@@ -155,11 +157,11 @@ class UserManagement(commands.Cog):
         user_group (app_commands.Group): Command group for user management commands.
     """
 
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: Fablabot) -> None:
         """Initialize the cog and register its command groups.
 
         Args:
-            bot (commands.Bot): The bot instance.
+            bot (Fablabot): The bot instance.
         """
         self.bot = bot
         self.deop_tasks: dict[tuple[int, int], asyncio.Task[None]] = {}
@@ -510,7 +512,7 @@ class UserManagement(commands.Cog):
         a retry, and nothing gives up. Unavailable guilds keep their records until they are back.
         """
         for guild in self.bot.guilds:
-            if guild.unavailable:
+            if guild.unavailable or not self.bot.guild_access.is_served(guild.id):
                 continue
             # The timers armed in the turn inherit the server too, so their lines reach its log channel.
             with guild_log_context(guild.id):
@@ -817,10 +819,10 @@ class UserManagement(commands.Cog):
 
 
 @deprecated("Load the cog using `bot.add_cog()` instead.")
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: Fablabot) -> None:
     """Setup function to load the UserManagement cog.
 
     Args:
-        bot (commands.Bot): The bot instance.
+        bot (Fablabot): The bot instance.
     """
     await bot.add_cog(UserManagement(bot))

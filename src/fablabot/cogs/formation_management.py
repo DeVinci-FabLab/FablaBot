@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 import io
 import logging
 import sqlite3
-from typing import Any, override
+from typing import TYPE_CHECKING, Any, override
 from warnings import deprecated
 
 from discord import (
@@ -47,6 +47,9 @@ from fablabot.logging_handlers import guild_log_context
 from fablabot.models import FmCommand, FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
 from fablabot.services import formations
 from fablabot.ui import fmui
+
+if TYPE_CHECKING:
+    from fablabot.main import Fablabot
 
 logger = logging.getLogger(__name__)
 
@@ -87,11 +90,11 @@ class FormationManagement(commands.Cog):
         fm_group (app_commands.Group): Command group for formation management commands.
     """
 
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: Fablabot) -> None:
         """Initialize the FormationManagement cog.
 
         Args:
-            bot (commands.Bot): The bot instance.
+            bot (Fablabot): The bot instance.
         """
         self.bot = bot
         self._reaction_logs = ReactionLogManager(
@@ -602,7 +605,7 @@ class FormationManagement(commands.Cog):
         Args:
             payload (RawReactionActionEvent): The raw reaction event payload.
         """
-        if payload.guild_id is None:
+        if payload.guild_id is None or not self.bot.guild_access.is_served(payload.guild_id):
             return
 
         member = payload.member
@@ -641,7 +644,8 @@ class FormationManagement(commands.Cog):
         """Check for formations starting soon and notify trainers/responsibles (Paris timezone)."""
         logger.debug("Checking for upcoming formations to notify trainers and responsibles (Paris time).")
         now = datetime.now(PARIS_TZ)
-        for guild_id in self._stale_guilds | self._retry_guilds:
+        served = self.bot.guild_access.is_served
+        for guild_id in filter(served, self._stale_guilds | self._retry_guilds):
             with guild_log_context(guild_id):  # the update's task inherits it, so its lines stay with their server
                 self._schedule_update(guild_id, delay=0)
         # An exception other than a network one ends a tasks.loop for good: a storage failure waits for the next tick.
@@ -651,7 +655,7 @@ class FormationManagement(commands.Cog):
         except sqlite3.Error:
             logger.exception("Reminder tick skipped: storage failure.")
             return
-        for guild_id in guild_ids:
+        for guild_id in filter(served, guild_ids):
             with guild_log_context(guild_id):
                 try:
                     await self._send_due_reminders(guild_id, now)
@@ -1072,10 +1076,10 @@ class FormationManagement(commands.Cog):
 
 
 @deprecated("Load the cog using `bot.add_cog()` instead.")
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: Fablabot) -> None:
     """Setup function to load the Formations cog.
 
     Args:
-        bot (commands.Bot): The bot instance.
+        bot (Fablabot): The bot instance.
     """
     await bot.add_cog(FormationManagement(bot))

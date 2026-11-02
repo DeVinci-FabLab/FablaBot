@@ -11,6 +11,7 @@ import logging
 import random
 import re
 import sqlite3
+from typing import TYPE_CHECKING
 from warnings import deprecated
 
 from discord import (
@@ -53,6 +54,9 @@ from fablabot.models.message import EASTER_EGGS, EASTER_EGGS_ENABLED, MessageDra
 from fablabot.services import messages
 from fablabot.ui import mui
 
+if TYPE_CHECKING:
+    from fablabot.main import Fablabot
+
 logger = logging.getLogger(__name__)
 
 REACTION_LOG_RETENTION = timedelta(days=3 * 365)
@@ -87,11 +91,11 @@ class MessageManagement(commands.Cog):
         msg_group (app_commands.Group): Command group for message management.
     """
 
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: Fablabot) -> None:
         """Initialize the cog and register its command groups.
 
         Args:
-            bot (commands.Bot): The bot instance.
+            bot (Fablabot): The bot instance.
         """
         self.bot = bot
         self._reaction_logs = ReactionLogManager(
@@ -814,7 +818,7 @@ class MessageManagement(commands.Cog):
             return
         if msg.author.bot:
             return
-        if not msg.guild:
+        if not msg.guild or not self.bot.guild_access.is_served(msg.guild.id):
             return
         if not isinstance(msg.channel, TextChannel | VoiceChannel | StageChannel | Thread):
             return
@@ -839,7 +843,7 @@ class MessageManagement(commands.Cog):
         Args:
             payload (RawReactionActionEvent): The raw reaction add event payload.
         """
-        if payload.guild_id is None:
+        if payload.guild_id is None or not self.bot.guild_access.is_served(payload.guild_id):
             return
         guild = self.bot.get_guild(payload.guild_id)
         if guild is None:
@@ -1138,10 +1142,10 @@ class MessageManagement(commands.Cog):
 
 
 @deprecated("Load the cog using `bot.add_cog()` instead.")
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: Fablabot) -> None:
     """Setup function to load the MessageManagement cog.
 
     Args:
-        bot (commands.Bot): The bot instance.
+        bot (Fablabot): The bot instance.
     """
     await bot.add_cog(MessageManagement(bot))

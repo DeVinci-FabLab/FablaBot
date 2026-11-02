@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from warnings import deprecated
 
 from discord import HTTPException, Interaction, Member, PermissionOverwrite, TextChannel, app_commands
@@ -15,6 +15,9 @@ from fablabot.helpers.access import AnyRole, access
 from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames, staff_default_permissions
 from fablabot.helpers.safe_discord_operations import safe_add_roles, safe_create_text_channel, safe_delete_channel
 from fablabot.helpers.utils import ensure_command_context, escape_md
+
+if TYPE_CHECKING:
+    from fablabot.main import Fablabot
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +38,11 @@ class WelcomeManagement(commands.Cog):
         welcome_group (app_commands.Group): Command group for welcome-related commands.
     """
 
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: Fablabot) -> None:
         """Initialize the Welcome cog.
 
         Args:
-            bot (commands.Bot): The bot instance.
+            bot (Fablabot): The bot instance.
         """
         self.bot = bot
         logger.info("Welcome cog initialized")
@@ -181,6 +184,8 @@ class WelcomeManagement(commands.Cog):
         Args:
             member (Member): The member that joined.
         """
+        if not self.bot.guild_access.is_served(member.guild.id):
+            return
         logger.debug(f"Member joined: {member} ({member.id})")
         is_enabled = is_welcome_verify_enabled(member.guild.id)
         if not is_enabled:
@@ -232,10 +237,10 @@ class WelcomeManagement(commands.Cog):
 
 
 @deprecated("Load the cog using `bot.add_cog()` instead.")
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: Fablabot) -> None:
     """Sets up the Welcome cog.
 
     Args:
-        bot (commands.Bot): The bot instance.
+        bot (Fablabot): The bot instance.
     """
     await bot.add_cog(WelcomeManagement(bot))
