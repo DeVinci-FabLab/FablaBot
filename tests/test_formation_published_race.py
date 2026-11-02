@@ -29,12 +29,21 @@ OTHER_MESSAGE_ID = 777
 EMOJI = "🔧"
 MEMBER_ID = 42
 OTHER_MEMBER_ID = 43
+NAMES = {MEMBER_ID: "alice", OTHER_MEMBER_ID: "bob"}
 
 
 class _Env:
     """A published message (one hour away unless told otherwise), a stub guild, and spies on every notification."""
 
-    def __init__(self, cog: Any, monkeypatch: pytest.MonkeyPatch, *, start_in: timedelta = timedelta(hours=1)) -> None:
+    def __init__(
+        self,
+        cog: Any,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        start_in: timedelta = timedelta(hours=1),
+        seats: int = 5,
+        reactors: tuple[int, ...] = (MEMBER_ID,),
+    ) -> None:
         self.cog = cog
         self.gate = asyncio.Event()
         self.entered = asyncio.Event()
@@ -42,7 +51,9 @@ class _Env:
         self.fetch_entered = asyncio.Event()
 
         start = datetime.now(PARIS_TZ) + start_in
-        fm = Formation(emoji=EMOJI, name="Soudure", trainer_mention="<@1>", start_iso=start.isoformat(), duration="2h", seats=5)
+        fm = Formation(
+            emoji=EMOJI, name="Soudure", trainer_mention="<@1>", start_iso=start.isoformat(), duration="2h", seats=seats
+        )
         cog._set_last_published_in_guild(
             GUILD_ID,
             PublishedMessage(
@@ -63,11 +74,15 @@ class _Env:
             ),
         )
 
-        user = MagicMock(display_name="Alice", name="alice", bot=False, id=MEMBER_ID)
-        user.name = "alice"
+        users = []
+        for reactor in reactors:
+            user = MagicMock(display_name=NAMES[reactor].title(), bot=False, id=reactor)
+            user.name = NAMES[reactor]
+            users.append(user)
 
         async def _users() -> Any:
-            yield user
+            for user in users:
+                yield user
 
         reaction = MagicMock(emoji=EMOJI)
         reaction.users = _users
@@ -240,6 +255,38 @@ async def test_a_reaction_the_log_refused_registers_the_member_at_the_tick_after
     assert len(env.cog._reaction_logs.history(GUILD_ID, MESSAGE_ID)) == 1
     await _tick_update(env)
     assert env.registration_dm.await_count == 1
+
+
+async def test_a_member_who_left_and_came_back_during_an_outage_queues_behind_the_one_who_took_the_seat(
+    started_bot: Any, monkeypatch: pytest.MonkeyPatch, storage_error: Exception
+) -> None:
+    """A refused re-add is logged at the tick, as of then: the member does not take back the place left."""
+    env = _Env(started_bot.get_cog("FormationManagement"), monkeypatch, seats=1, reactors=(MEMBER_ID, OTHER_MEMBER_ID))
+    _forget_logged_reactions()
+    now = datetime.now(PARIS_TZ)
+    for user_id, action, minutes_ago in (
+        (MEMBER_ID, ReactionAction.ADD, 30),
+        (MEMBER_ID, ReactionAction.REMOVE, 20),
+        (OTHER_MEMBER_ID, ReactionAction.ADD, 10),
+    ):
+        event = ReactionEvent(
+            message_id=MESSAGE_ID,
+            user_id=user_id,
+            user_name=NAMES[user_id],
+            emoji=EMOJI,
+            action=action,
+            ts_iso=(now - timedelta(minutes=minutes_ago)).isoformat(timespec="seconds"),
+        )
+        env.cog._reaction_logs.append(GUILD_ID, event)
+    monkeypatch.setattr(env.cog._reaction_logs, "append", _flaky(env.cog._reaction_logs.append, storage_error))
+
+    await env.cog.on_raw_reaction_event(_reaction_payload())
+    await _tick_update(env)
+
+    pub = env.cog._get_last_published_in_guild(GUILD_ID)
+    assert pub is not None
+    assert [entry["user_id"] for entry in pub.message.fms[0].registered_users] == [OTHER_MEMBER_ID]
+    assert [entry["user_id"] for entry in pub.message.fms[0].waitlisted_users] == [MEMBER_ID]
 
 
 async def test_a_reaction_whose_check_could_not_read_is_taken_back_the_same_way(

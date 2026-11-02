@@ -774,23 +774,30 @@ class FormationManagement(commands.Cog):
         return True
 
     def _log_missed_reactions(
-        self, guild_id: int, message_id: int, reactions: dict[str, dict[int, str]], last_add: dict[tuple[str, int], datetime]
+        self,
+        guild_id: int,
+        message_id: int,
+        reactions: dict[str, dict[int, str]],
+        last_add: dict[tuple[str, int], datetime],
+        left: set[tuple[str, int]],
     ) -> None:
         """Log the reactions Discord shows and the log misses after a storage failure, as of now.
 
         A failed write is the only reason here, so a member keeps their sign-up and takes their place in the queue at
-        this time; a reaction past the registration deadline stays out, as the listener would have left it.
+        this time, also when they had left before: a refused re-add does not give back the place they gave up. A
+        reaction past the registration deadline stays out, as the listener would have left it.
 
         Args:
             guild_id (int): The ID of the guild.
             message_id (int): The published message.
             reactions (dict[str, dict[int, str]]): The members who reacted, by emoji.
             last_add (dict[tuple[str, int], datetime]): The last logged time of each reaction, completed here.
+            left (set[tuple[str, int]]): The reactions whose latest logged event is a removal.
         """
         now = datetime.now(PARIS_TZ)
         for emoji, users in reactions.items():
             for user_id in users:
-                if (emoji, user_id) in last_add:
+                if (emoji, user_id) in last_add and (emoji, user_id) not in left:
                     continue
                 event = ReactionEvent(
                     message_id=message_id,
@@ -895,18 +902,21 @@ class FormationManagement(commands.Cog):
         history = self._reaction_logs.history(guild_id, message_id)
 
         last_add: dict[tuple[str, int], datetime] = {}
+        left: set[tuple[str, int]] = set()  # members whose latest logged event is a removal
         for event in history:
-            if event.action != ReactionAction.ADD:
-                continue
             emoji = str(event.emoji)
             user_id = event.user_id
             if not emoji or user_id is None or emoji not in tracked_emojis:
                 continue
+            key = (emoji, int(user_id))
+            if event.action != ReactionAction.ADD:
+                left.add(key)
+                continue
+            left.discard(key)
             try:
                 ts = datetime.fromisoformat(event.ts_iso).astimezone(PARIS_TZ)
             except (TypeError, ValueError):
                 ts = datetime.min.replace(tzinfo=PARIS_TZ)
-            key = (emoji, int(user_id))
             if key not in last_add or ts > last_add[key]:
                 last_add[key] = ts
 
@@ -923,7 +933,7 @@ class FormationManagement(commands.Cog):
         if guild_id in self._stale_guilds:
             # Cleared first: a reaction refused from here on marks the server again, and a failure is marked by the caller.
             self._stale_guilds.discard(guild_id)
-            self._log_missed_reactions(guild_id, message_id, reactions_snapshot, last_add)
+            self._log_missed_reactions(guild_id, message_id, reactions_snapshot, last_add, left)
 
         waitlist_notifications: list[tuple[int, str, int]] = []
         promotion_notifications: list[tuple[int, Formation]] = []
