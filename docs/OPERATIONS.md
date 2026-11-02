@@ -9,9 +9,9 @@ the problems seen in production. Commands for members and staff are in the [user
 Every push to `main` publishes `:edge` and `:sha-<commit>`. `:latest`, `:X.Y.Z` and `:X.Y` move only
 when the release pull request is merged (see the [README](../README.md#releases), "Releases").
 Production follows `:latest`; a test server can follow `:edge`. A merge to `main` is not a deploy, but a
-release can be: production restarted on its own within the hour after two image builds (2026-10-29 15:01 and
-2026-11-01 19:00 UTC), which points to an automatic update in Komodo. Treat merging the release pull request
-as deploying. The stack can also be redeployed by hand (pull the image, recreate the container). In Komodo,
+release is: the production stack has `poll_for_updates` and `auto_update` on, and a Komodo procedure runs every
+30 minutes, so `:latest` reaches production within 30 minutes. Treat merging the release pull request as
+deploying. The stack can also be redeployed by hand (pull the image, recreate the container). In Komodo,
 the production container is named `fablabot`.
 
 The host also reboots every Sunday at 03:00, which restarts the bot on the same image.
@@ -458,6 +458,10 @@ There is no `--user` on purpose: the image runs as the user the bot runs as, so 
 bot. `data/` must belong to that user, root included: the helper drops every capability, so even root cannot write a
 folder that someone else owns, and the import stops with `cannot be used: unable to open database file`. With an image
 that runs as root, a later move to `10001` must take `data/` whole with `chown -R`. Step 8 checks the owner.
+
+When you own `data/` and the image runs as root, as on the first move, you can skip the `chown`: add
+`--user "$(id -u):$(id -g)"` to the helper. The database then belongs to you, and the bot, running as root with its
+usual capabilities, still writes it. It needs no `sudo` and changes no owner.
 
 1. **Tell each server's admins, the day before.** The first start removes every `Admin -temp-` given by hand, within a
    minute, on every server. Only roles from `/user op` stay. A holder the bot cannot touch, because the role sits above

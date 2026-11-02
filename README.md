@@ -161,7 +161,7 @@ Images published before the first release keep their `:<commit sha>` tags.
 1. Every push to `main` updates one pull request titled `chore(main): release X.Y.Z`. It holds the next version and its changelog, worked out from the commit titles on `main`: `fix:` bumps Z, `feat:` bumps Y, and below 1.0.0 a breaking change (`feat!:`) bumps Y as well.
 2. The check runs on that pull request too. Review it and merge it like any other.
 3. The merge tags `vX.Y.Z`, publishes the GitHub release, and builds the image under `:latest`, `:X.Y.Z`, `:X.Y`, `:edge` and `:sha-<commit>`.
-4. Publishing can restart production: an automatic update has done so within the hour. Archive before merging, as the [operator guide](docs/OPERATIONS.md#releasing-and-redeploying) says, and redeploy the stack if the running revision stays old.
+4. Publishing restarts production: the stack updates itself every 30 minutes. Archive before merging, as the [operator guide](docs/OPERATIONS.md#releasing-and-redeploying) says, and redeploy the stack if the running revision stays old.
 
 If the image build of a release fails, the tag exists but `:latest` has not moved. Open that run in the Actions tab and choose "Re-run failed jobs": re-running all jobs would publish `:edge` only.
 
