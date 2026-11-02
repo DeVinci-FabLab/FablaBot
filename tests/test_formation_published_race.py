@@ -541,6 +541,54 @@ async def test_a_member_who_left_and_came_back_in_the_log_keeps_the_new_place_th
     assert len(env.cog._reaction_logs.history(GUILD_ID, MESSAGE_ID)) == 4
 
 
+def _discord_shows(env: _Env, *reactors: int) -> None:
+    """Make the published message show the reactions of these members and no others."""
+    users = []
+    for reactor in reactors:
+        user = MagicMock(display_name=NAMES[reactor].title(), bot=False, id=reactor)
+        user.name = NAMES[reactor]
+        users.append(user)
+
+    async def _users() -> Any:
+        for user in users:
+            yield user
+
+    env.message.reactions[0].users = _users
+
+
+async def test_a_removal_past_the_deadline_is_logged_so_that_the_member_does_not_take_the_old_place_back(
+    started_bot: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only an add is closed by the deadline: a member who leaves late is out, and their late re-add changes nothing."""
+    env = _Env(
+        started_bot.get_cog("FormationManagement"),
+        monkeypatch,
+        seats=1,
+        start_in=timedelta(minutes=-30),
+        reactors=(OTHER_MEMBER_ID,),
+    )
+    _log_events(env, (MEMBER_ID, ReactionAction.ADD, 60), (OTHER_MEMBER_ID, ReactionAction.ADD, 50))
+    schedule = MagicMock()
+    monkeypatch.setattr(env.cog, "_schedule_update", schedule)
+    removal = _reaction_payload()
+    removal.event_type = "REACTION_REMOVE"
+
+    await env.cog.on_raw_reaction_event(removal)
+
+    assert [event.action for event in env.cog._reaction_logs.history(GUILD_ID, MESSAGE_ID)][-1] == ReactionAction.REMOVE
+    schedule.assert_called_once_with(GUILD_ID)
+    await env.cog._update_published_message(GUILD_ID)
+    assert _seats(env) == ([OTHER_MEMBER_ID], [])
+
+    _discord_shows(env, MEMBER_ID, OTHER_MEMBER_ID)
+    await env.cog.on_raw_reaction_event(_reaction_payload())
+
+    assert len(env.cog._reaction_logs.history(GUILD_ID, MESSAGE_ID)) == 3
+    schedule.assert_called_once()
+    await env.cog._update_published_message(GUILD_ID)
+    assert _seats(env) == ([OTHER_MEMBER_ID], [])
+
+
 async def test_a_member_who_left_and_came_back_in_the_hour_the_clock_repeats_keeps_the_seat(
     started_bot: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:

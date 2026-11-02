@@ -746,9 +746,11 @@ class FormationManagement(commands.Cog):
         formations.save_published(guild_id, published)
 
     def _reaction_counts(self, guild_id: int, event: ReactionEvent) -> bool:
-        """Tell whether a reaction is on a server's published message, on one of its emojis, and not past the deadline.
+        """Tell whether a reaction is on a server's published message, on one of its emojis, and not an add past the deadline.
 
-        The deadline is judged at the reaction's own time, so a check that runs late does not change the answer.
+        The deadline is judged at the reaction's own time, so a check that runs late does not change the answer. It
+        closes sign-ups only: a removal is always logged, or the member who left would take their place back at the
+        next update.
 
         Args:
             guild_id (int): The ID of the guild.
@@ -768,7 +770,7 @@ class FormationManagement(commands.Cog):
             return False
 
         formation = next((fm for fm in pub.message.fms if fm.emoji == event.emoji), None)
-        if formation:
+        if formation and event.action == ReactionAction.ADD:
             registration_deadline = formation.start_dt + timedelta(minutes=20)
             if datetime.fromisoformat(event.ts_iso) > registration_deadline:
                 logger.info(
