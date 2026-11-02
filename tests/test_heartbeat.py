@@ -52,8 +52,11 @@ def test_missing_heartbeat_is_unhealthy(monkeypatch, tmp_path: Path, capsys) -> 
 
 def test_healthcheck_imports_no_discord() -> None:
     """The check loads no Discord code, so a container can run it often."""
+    # The child imports the package this test imported, not whichever install its interpreter finds first.
+    source = str(Path(healthcheck.__file__).resolve().parent.parent)
     result = subprocess.run(
         [sys.executable, "-c", "import sys, fablabot.healthcheck; print('discord' in sys.modules)"],
+        env={**os.environ, "PYTHONPATH": source},
         capture_output=True,
         text=True,
         check=True,
