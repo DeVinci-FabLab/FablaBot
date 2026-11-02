@@ -83,6 +83,8 @@ class FormationManagement(commands.Cog):
         self._reaction_lock = asyncio.Lock()
         self._published_locks: dict[int, asyncio.Lock] = {}
         self._pending_update_tasks: dict[int, asyncio.Task] = {}
+        # Servers asked for an update after the running one began: it runs once more when it ends.
+        self._update_wanted: set[int] = set()
         # Servers where a storage failure left a reaction unlogged or an update unsaved. Each reminder tick runs their
         # update, which takes the missed reactions back from Discord. Ceiling: in memory, so a restart during an outage
         # forgets them and a member who reacted then reacts again; the upgrade path is a column.
@@ -816,9 +818,9 @@ class FormationManagement(commands.Cog):
     def _schedule_update(self, guild_id: int, delay: float = 2.0) -> None:
         """Schedule a debounced update for a guild's published message.
 
-        If an update is already scheduled and not finished, this is a no-op. The
-        scheduled coroutine waits `delay` seconds before invoking
-        `_update_published_message`, coalescing rapid events.
+        A request while an update is waiting out its delay is covered by it: it reads the history after the wait.
+        One that comes once the update has begun may have missed that reaction, so the update runs once more
+        when it ends.
 
         Args:
             guild_id (int): The ID of the guild.
@@ -826,12 +828,17 @@ class FormationManagement(commands.Cog):
         """
         existing = self._pending_update_tasks.get(guild_id)
         if existing and not existing.done():
+            self._update_wanted.add(guild_id)
             return
 
         async def _delayed() -> None:
             try:
-                await asyncio.sleep(delay)
-                await self._update_published_message(guild_id)
+                while True:
+                    await asyncio.sleep(delay)
+                    self._update_wanted.discard(guild_id)
+                    await self._update_published_message(guild_id)
+                    if guild_id not in self._update_wanted:
+                        break
             except asyncio.CancelledError:
                 logger.debug(f"Scheduled update for guild {guild_id} was cancelled.")
             except sqlite3.Error:
@@ -842,6 +849,7 @@ class FormationManagement(commands.Cog):
             except Exception:
                 logger.exception(f"Error during scheduled update for guild {guild_id}.")
             finally:
+                self._update_wanted.discard(guild_id)
                 self._pending_update_tasks.pop(guild_id, None)
 
         task = asyncio.create_task(_delayed())

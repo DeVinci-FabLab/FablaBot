@@ -124,6 +124,24 @@ async def env(started_bot: Any, monkeypatch: pytest.MonkeyPatch) -> _Env:
     return _Env(started_bot.get_cog("FormationManagement"), monkeypatch)
 
 
+@pytest.fixture
+async def env_with_two(started_bot: Any, monkeypatch: pytest.MonkeyPatch) -> _Env:
+    """The same, with a second member reacting on Discord and no reaction logged yet but the first member's."""
+    return _Env(started_bot.get_cog("FormationManagement"), monkeypatch, reactors=(MEMBER_ID, OTHER_MEMBER_ID))
+
+
+def _add_event(user_id: int) -> ReactionEvent:
+    """A member's reaction to the published message, as the listener logs it."""
+    return ReactionEvent(
+        message_id=MESSAGE_ID,
+        user_id=user_id,
+        user_name=NAMES[user_id],
+        emoji=EMOJI,
+        action=ReactionAction.ADD,
+        ts_iso=datetime.now(PARIS_TZ).isoformat(timespec="seconds"),
+    )
+
+
 async def _let_others_run() -> None:
     for _ in range(20):
         await asyncio.sleep(0)
@@ -287,6 +305,47 @@ async def test_a_member_who_left_and_came_back_during_an_outage_queues_behind_th
     assert pub is not None
     assert [entry["user_id"] for entry in pub.message.fms[0].registered_users] == [OTHER_MEMBER_ID]
     assert [entry["user_id"] for entry in pub.message.fms[0].waitlisted_users] == [MEMBER_ID]
+
+
+async def test_a_reaction_during_a_running_update_gets_its_own_update(env_with_two: _Env) -> None:
+    """The reaction is logged after the running update read the history: one more update seats the member, once."""
+    env = env_with_two
+    sending = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _held_dm(*_args: Any, **_kwargs: Any) -> None:
+        sending.set()
+        await release.wait()
+
+    env.registration_dm.side_effect = _held_dm
+    env.cog._schedule_update(GUILD_ID, delay=0)
+    running = env.cog._pending_update_tasks[GUILD_ID]
+    await sending.wait()
+
+    env.cog._reaction_logs.append(GUILD_ID, _add_event(OTHER_MEMBER_ID))
+    env.cog._schedule_update(GUILD_ID, delay=0)
+    release.set()
+    await running
+
+    pub = env.cog._get_last_published_in_guild(GUILD_ID)
+    assert pub is not None
+    assert [entry["user_id"] for entry in pub.message.fms[0].registered_users] == [MEMBER_ID, OTHER_MEMBER_ID]
+    assert env.registration_dm.await_count == 2
+    assert GUILD_ID not in env.cog._pending_update_tasks
+
+
+async def test_reactions_before_an_update_reads_the_history_share_that_one_update(
+    env: _Env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A burst of reactions inside the debounce still costs one update."""
+    update = AsyncMock()
+    monkeypatch.setattr(env.cog, "_update_published_message", update)
+
+    env.cog._schedule_update(GUILD_ID, delay=0)
+    env.cog._schedule_update(GUILD_ID, delay=0)
+    await env.cog._pending_update_tasks[GUILD_ID]
+
+    update.assert_awaited_once()
 
 
 async def test_a_reaction_whose_check_could_not_read_is_taken_back_the_same_way(
