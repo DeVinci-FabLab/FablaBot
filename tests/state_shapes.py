@@ -15,6 +15,8 @@ ROLE_ID = 700000000000000001
 REGISTERED = (500000000000000001, 500000000000000002)
 WAITLISTED = (500000000000000003,)
 TS = "2026-10-20T18:00:00+02:00"
+# Reminders already sent on the first server's published message, per formation: (an hour before, at the start).
+REMINDERS_SENT = ((False, False), (True, True), (True, False), (False, False))
 
 
 def user(user_id: int) -> dict[str, Any]:
@@ -23,7 +25,8 @@ def user(user_id: int) -> dict[str, Any]:
 
 
 def formation(index: int, *, members: bool = False) -> dict[str, Any]:
-    """Build a formation with its twelve keys."""
+    """Build a formation with its twelve keys; the one of a published message with members has sent some reminders."""
+    sent = REMINDERS_SENT[index] if members else (False, False)
     return {
         "emoji": "🔧🖨️🪚🧵"[index],
         "name": f"Training {index}",
@@ -35,8 +38,8 @@ def formation(index: int, *, members: bool = False) -> dict[str, Any]:
         "excusable": True,
         "registered_users": [user(u) for u in REGISTERED] if members and index == 0 else [],
         "waitlisted_users": [user(u) for u in WAITLISTED] if members and index == 0 else [],
-        "notified_hour_before": False,
-        "notified_at_start": False,
+        "notified_hour_before": sent[0],
+        "notified_at_start": sent[1],
     }
 
 

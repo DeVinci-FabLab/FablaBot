@@ -13,7 +13,17 @@ import sys
 from typing import Any
 
 import pytest
-from state_shapes import FIRST_GUILD, GONE_GUILD, GUILDS, MESSAGE_ID, REGISTERED, WAITLISTED, state_files, write_state
+from state_shapes import (
+    FIRST_GUILD,
+    GONE_GUILD,
+    GUILDS,
+    MESSAGE_ID,
+    REGISTERED,
+    REMINDERS_SENT,
+    WAITLISTED,
+    state_files,
+    write_state,
+)
 
 from fablabot import db, export_state, guild_config, import_state
 from fablabot.services import formations, messages, op_expiries
@@ -76,6 +86,18 @@ def test_the_production_shapes_are_imported_whole() -> None:
     assert list(messages.tracked_messages(FIRST_GUILD)) == [MESSAGE_ID + 1, MESSAGE_ID + 2]
     assert [r.action_type for r in messages.tracked_messages(FIRST_GUILD)[MESSAGE_ID + 1].reactions] == ["channel", "role_dm"]
     assert db.connection().execute("SELECT count(*) FROM reaction_event WHERE scope = 'formation'").fetchone()[0] == 153
+
+
+def test_the_reminder_flags_come_through_as_the_files_hold_them() -> None:
+    """A reminder already sent is not sent again after the import: the database holds the flags, not the defaults."""
+    write_state()
+
+    import_state.main([])
+
+    db.open_database()
+    published = formations.current_published(FIRST_GUILD)
+    assert published is not None
+    assert [(fm.notified_hour_before, fm.notified_at_start) for fm in published.message.fms] == list(REMINDERS_SENT)
 
 
 def test_the_journal_keeps_the_order_of_the_file() -> None:
