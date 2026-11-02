@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from conftest import make_guild, make_member, make_role, store_ops, stored_ops
 from discord import Guild, Member, Message, TextChannel, VoiceChannel
 import pytest
 
@@ -17,7 +19,10 @@ from fablabot.cogs.user_management import UserManagement
 from fablabot.cogs.welcome_management import WelcomeManagement
 from fablabot.helpers.constants import RoleNames
 from fablabot.helpers.guild_access import GuildAccessPolicy
-from fablabot.services import formations
+from fablabot.services import formations, op_expiries
+
+if TYPE_CHECKING:
+    import sqlite3
 
 LISTED = 111111111111111111
 UNLISTED = 222222222222222222
@@ -276,8 +281,21 @@ async def test_reminder_tick_skips_a_server_the_policy_refuses() -> None:
     assert [call.args[0] for call in remind.call_args_list] == [LISTED]
 
 
-async def test_op_settling_skips_a_server_the_policy_refuses() -> None:
-    """The settling round reconciles a served server only, and leaves the temporary role of any other."""
+def _guild_with_a_holder(guild_id: int) -> tuple[MagicMock, MagicMock]:
+    """Build a guild whose temporary admin role has one holder."""
+    temp = make_role(RoleNames.ADMIN_TEMP)
+    holder = make_member(USER_ID, temp)
+    return make_guild(guild_id, [temp], [holder]), holder
+
+
+def _record_op(guild_id: int, *, expires_in: timedelta) -> None:
+    """Store a temporary right on ``guild_id`` for ``USER_ID`` that ends ``expires_in`` from now."""
+    expires_at = datetime.now(UTC) + expires_in
+    store_ops({str(guild_id): {str(USER_ID): {"expires_at": expires_at.isoformat(), "channel_id": CHANNEL_ID}}})
+
+
+async def test_op_settling_reconciles_a_served_server_and_skips_an_unserved_one_without_a_record() -> None:
+    """The round reconciles a served server, and leaves an unserved server with no recorded right alone."""
     served, unserved = MagicMock(spec=Guild), MagicMock(spec=Guild)
     served.id, unserved.id = LISTED, UNLISTED
     served.unavailable = unserved.unavailable = False
@@ -287,6 +305,69 @@ async def test_op_settling_skips_a_server_the_policy_refuses() -> None:
     reconcile = AsyncMock()
 
     with patch.object(cog, "_reconcile_guild", reconcile):
+        await cog._settle_ops.coro(cog)
+
+    assert [call.args[0] for call in reconcile.call_args_list] == [served]
+
+
+async def test_op_settling_leaves_the_same_named_role_of_an_unserved_server_alone() -> None:
+    """A stranger's server where the bot recorded no right keeps its holders of a role named like the temporary one."""
+    guild, holder = _guild_with_a_holder(UNLISTED)
+    bot = _bot()
+    bot.guilds = [guild]
+    cog = UserManagement(bot)
+
+    await cog._settle_ops.coro(cog)
+
+    holder.remove_roles.assert_not_awaited()
+
+
+async def test_op_settling_still_ends_an_expired_right_on_a_server_the_policy_refuses() -> None:
+    """A right the bot granted ends on time on an unserved server too: the round takes the role off and the record out."""
+    _record_op(UNLISTED, expires_in=timedelta(minutes=-1))
+    guild, holder = _guild_with_a_holder(UNLISTED)
+    bot = _bot()
+    bot.guilds = [guild]
+    cog = UserManagement(bot)
+
+    await cog._settle_ops.coro(cog)
+
+    holder.remove_roles.assert_awaited_once()
+    assert stored_ops() == {}
+
+
+async def test_op_settling_arms_the_timer_of_a_right_still_running_on_a_server_the_policy_refuses() -> None:
+    """After a restart, a right with time left on an unserved server gets its timer back, so it still ends on time."""
+    _record_op(UNLISTED, expires_in=timedelta(minutes=10))
+    guild, holder = _guild_with_a_holder(UNLISTED)
+    bot = _bot()
+    bot.guilds = [guild]
+    cog = UserManagement(bot)
+
+    await cog._settle_ops.coro(cog)
+
+    try:
+        assert (UNLISTED, USER_ID) in cog.deop_tasks
+        holder.remove_roles.assert_not_awaited()
+    finally:
+        for task in cog.deop_tasks.values():
+            task.cancel()
+
+
+async def test_a_storage_failure_reading_the_records_does_not_stop_the_settling_round(storage_error: sqlite3.Error) -> None:
+    """A failed read of an unserved server's records is logged inside the round, and the next server is still settled."""
+    unserved, served = MagicMock(spec=Guild), MagicMock(spec=Guild)
+    unserved.id, served.id = UNLISTED, LISTED
+    unserved.unavailable = served.unavailable = False
+    bot = _bot()
+    bot.guilds = [unserved, served]
+    cog = UserManagement(bot)
+    reconcile = AsyncMock()
+
+    with (
+        patch.object(op_expiries, "member_ids", side_effect=storage_error),
+        patch.object(cog, "_reconcile_guild", reconcile),
+    ):
         await cog._settle_ops.coro(cog)
 
     assert [call.args[0] for call in reconcile.call_args_list] == [served]

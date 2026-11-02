@@ -42,7 +42,7 @@ secrets:
 | Setting | Role |
 | --- | --- |
 | `DISCORD_TOKEN_FILE` | Path of the file holding the bot token (`src/fablabot/main.py:32`). |
-| `ALLOWED_GUILD_IDS` | Server IDs the bot may serve, comma-separated, no quotes. Each ID can carry a name after a colon, `111111111111111111:Main server`: the bot ignores it, and it cannot hold a comma. A server outside the list gets nothing from the bot: its commands are refused, and its messages, reactions, joins, voice changes, reminders and temporary-role checks are ignored. |
+| `ALLOWED_GUILD_IDS` | Server IDs the bot may serve, comma-separated, no quotes. Each ID can carry a name after a colon, `111111111111111111:Main server`: the bot ignores it, and it cannot hold a comma. A server outside the list gets nothing from the bot: its commands are refused, and its messages, reactions, joins, voice changes and reminders are ignored. Only the end of a temporary admin right the bot granted there still runs, on time. |
 | `OPERATOR_LOG_CHANNEL_ID` | Optional. Channel receiving errors that belong to no server. Pick a channel only the bot's administrators can read: those errors come from every server's tasks. |
 | `DEV_GUILD_ID` | Optional, development bot only. Syncs the commands to this one server and leaves global commands alone. Never set on the production bot. |
 | `data/` volume | The database `data/fablabot.db` (see "Stored data"), its copies in `data/backups/`, and the fingerprint of the last command sync (`data/command_sync_state.json`; delete it to force a sync). |
