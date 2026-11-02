@@ -656,11 +656,13 @@ class MessageManagement(commands.Cog):
             return
 
         try:
-            # The draft may have changed while the post went out. The links it holds now go with the post, and a text
-            # written meanwhile stays as the draft; the read and the write have no await between them.
+            # The draft may have changed while the post went out; the read and the write have no await between them.
+            # The links on it now go with the post. A text written meanwhile is a new draft (`/msg start` empties the
+            # links): it stays as it is, and the post keeps the links it was sent with.
             current = self.get_draft(interaction.guild.id) or draft
+            text_changed = current.content != draft.content
             updated_reactions: list[MsgReactionEvent] = []
-            for reaction in current.reactions:
+            for reaction in (draft if text_changed else current).reactions:
                 cloned = copy(reaction)
                 cloned.message_id = msg.id
                 updated_reactions.append(cloned)
@@ -672,9 +674,10 @@ class MessageManagement(commands.Cog):
                 created_by=interaction.user.id,
                 created_at_iso=datetime.now(PARIS_TZ).isoformat(),
             )
-            text_changed = current.content != draft.content
-            if updated_reactions:
-                messages.track_from_draft(interaction.guild.id, tracked, keep_text=text_changed)
+            if updated_reactions and text_changed:
+                messages.save_tracked(interaction.guild.id, tracked)
+            elif updated_reactions:
+                messages.track_from_draft(interaction.guild.id, tracked, keep_text=False)
             elif not text_changed:
                 self._clear_draft(interaction.guild.id)
         except sqlite3.Error:

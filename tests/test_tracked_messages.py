@@ -222,17 +222,17 @@ async def test_msg_publish_moves_the_links_to_the_post_and_deletes_the_draft() -
     ("during", "linked", "draft_after"),
     [
         pytest.param(MessageDraft("x", [_reaction("🔧"), _reaction("🎉")]), ["🔧", "🎉"], None, id="link-added"),
+        pytest.param(MessageDraft("neuf", []), ["🔧"], MessageDraft("neuf", []), id="new-text"),
         pytest.param(
-            MessageDraft("neuf", [_reaction("🔧"), _reaction("🎉")]), ["🔧", "🎉"], MessageDraft("neuf", []), id="text-and-link"
+            MessageDraft("neuf", [_reaction("🎉")]), ["🔧"], MessageDraft("neuf", [_reaction("🎉")]), id="new-text-and-link"
         ),
-        pytest.param(MessageDraft("neuf", [_reaction("🔧")]), ["🔧"], MessageDraft("neuf", []), id="text-changed"),
         pytest.param(None, ["🔧"], None, id="draft-deleted"),
     ],
 )
 async def test_msg_publish_keeps_what_the_draft_gained_while_the_post_went_out(
     during: MessageDraft | None, linked: list[str], draft_after: MessageDraft | None
 ) -> None:
-    """The links on the draft when the post is recorded go with it, and a text written meanwhile stays as the draft."""
+    """A link added meanwhile goes with the post; a new text (`/msg start` empties the links) stays as the draft, its own."""
     interaction = make_interaction(guild_id=1234)
     cog = MessageManagement(MagicMock())
     cog._sync_reactions_on_message = AsyncMock()
@@ -277,6 +277,37 @@ async def test_msg_publish_leaves_a_text_written_while_the_post_went_out_when_th
 
     assert messages.tracked_messages(1234) == {}
     assert messages.get_draft(1234) == MessageDraft(content="neuf", reactions=[])
+
+
+async def test_msg_publish_a_refused_write_after_a_new_text_retracts_the_post_and_keeps_the_new_draft(
+    storage_error: sqlite3.Error,
+) -> None:
+    """The post is taken down when it cannot be recorded, also when the draft was restarted meanwhile."""
+    interaction = make_interaction(guild_id=1234)
+    cog = MessageManagement(MagicMock())
+    cog._sync_reactions_on_message = AsyncMock()
+    posted = MagicMock(id=999)
+    posted.delete = AsyncMock()
+
+    async def _send(_content: str) -> MagicMock:
+        messages.save_draft(1234, MessageDraft(content="neuf", reactions=[]))
+        return posted
+
+    channel = MagicMock(spec=TextChannel, id=7)
+    channel.send = AsyncMock(side_effect=_send)
+    messages.save_draft(1234, MessageDraft(content="x", reactions=[_reaction()]))
+
+    with (
+        patch.object(message_management, "ensure_command_context", AsyncMock(return_value=True)),
+        patch.object(messages, "save_tracked", side_effect=storage_error),
+    ):
+        await MessageManagement.msg_publish.callback(cog, interaction, channel=channel)  # pyright: ignore[reportCallIssue]
+
+    posted.delete.assert_awaited_once()
+    cog._sync_reactions_on_message.assert_not_awaited()
+    assert messages.tracked_messages(1234) == {}
+    assert messages.get_draft(1234) == MessageDraft(content="neuf", reactions=[])
+    interaction.response.send_message.assert_awaited_once_with(ErrorMessages.PUBLISH_NOT_SAVED, ephemeral=True)
 
 
 def _follow_setup(draft: MessageDraft | None) -> tuple[MagicMock, MessageManagement, MagicMock]:
