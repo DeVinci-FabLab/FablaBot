@@ -3,8 +3,8 @@
 # uv, pinned by version and digest to the release CI uses; copied only into the stages that run it.
 FROM ghcr.io/astral-sh/uv:0.13.6@sha256:af22a52f5eafef3d78e551599d405c02df61919d18028f0cea8eda93bc9986d0 AS uv
 
-# Base stage with shared configuration
-FROM python:3.13-alpine AS base
+# Base stage with shared configuration. The index digest pins the base for every platform; bump it with the tag.
+FROM python:3.13-alpine@sha256:7984cf56ceaddebe4fefeb75d64000b9f45d8b77b11a09b24524da6cdc3af0c8 AS base
 
 # Set working directory
 WORKDIR /app

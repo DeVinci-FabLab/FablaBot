@@ -13,6 +13,7 @@ DOCKERIGNORE = (ROOT / ".dockerignore").read_text()
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
 UV_FROM = re.compile(r"^FROM ghcr\.io/astral-sh/uv:(\d+\.\d+\.\d+)@sha256:[0-9a-f]{64} AS uv$")
+BASE_FROM = re.compile(r"^FROM python:3\.13-alpine@sha256:[0-9a-f]{64} AS base$")
 
 
 def stages(text: str) -> dict[str, list[str]]:
@@ -43,6 +44,16 @@ def first_from() -> str:
 def test_uv_is_pinned_by_version_and_digest() -> None:
     """Uv comes from its release image, pinned by version and digest."""
     assert UV_FROM.match(first_from())
+
+
+def test_base_image_is_pinned_by_digest() -> None:
+    """Every stage starts from the one base stage, and that stage pins the Python image by digest."""
+    froms = [line for line in DOCKERFILE.splitlines() if line.startswith("FROM")]
+    external = [line for line in froms if not re.match(r"^FROM base AS \w+$", line)]
+    assert len(external) == 2
+    assert UV_FROM.match(external[0])
+    assert BASE_FROM.match(external[1])
+    assert [line.split()[-1] for line in froms if line.startswith("FROM base")] == ["development", "build", "production"]
 
 
 def test_uv_matches_ci() -> None:
