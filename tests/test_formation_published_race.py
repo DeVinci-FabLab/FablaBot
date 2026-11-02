@@ -11,7 +11,7 @@ import logging
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-from discord import NotFound, TextChannel
+from discord import Forbidden, NotFound, TextChannel
 import pytest
 
 from fablabot import db
@@ -698,12 +698,32 @@ async def test_a_published_message_that_cannot_be_fetched_is_tried_again_at_the_
     assert env.registration_dm.await_count == 1
 
 
-async def test_a_published_message_that_no_longer_exists_is_not_fetched_again(env: _Env) -> None:
-    """Nothing is left to update on a deleted post: the tick does not keep asking for it."""
-    env.channel.fetch_message = AsyncMock(side_effect=NotFound(MagicMock(status=404, reason="Not Found"), "gone"))
+@pytest.mark.parametrize(
+    "refusal",
+    [
+        NotFound(MagicMock(status=404, reason="Not Found"), "gone"),
+        Forbidden(MagicMock(status=403, reason="Forbidden"), "missing access"),
+    ],
+    ids=["deleted-post", "no-access"],
+)
+async def test_a_published_message_discord_will_not_return_is_not_fetched_again(env: _Env, refusal: Exception) -> None:
+    """Nothing is left to update on a deleted post or one the bot may not read: the tick does not keep asking for it."""
+    env.channel.fetch_message = AsyncMock(side_effect=refusal)
 
     env.cog._schedule_update(GUILD_ID, delay=0)
     await env.cog._pending_update_tasks[GUILD_ID]
     await _tick_update(env)
 
     env.channel.fetch_message.assert_awaited_once()
+
+
+async def test_a_published_message_in_a_deleted_channel_is_not_tried_again(env: _Env) -> None:
+    """A channel the server no longer has holds nothing to update: no retry mark, no error at each tick."""
+    env.cog.bot.get_guild(GUILD_ID).get_channel = MagicMock(return_value=None)
+
+    env.cog._schedule_update(GUILD_ID, delay=0)
+    await env.cog._pending_update_tasks[GUILD_ID]
+    await _tick_update(env)
+
+    assert env.cog._retry_guilds == set()
+    assert GUILD_ID not in env.cog._pending_update_tasks

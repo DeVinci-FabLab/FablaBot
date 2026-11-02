@@ -12,7 +12,18 @@ import sqlite3
 from typing import Any, override
 from warnings import deprecated
 
-from discord import Embed, File, Interaction, Member, NotFound, RawReactionActionEvent, Role, TextChannel, app_commands
+from discord import (
+    Embed,
+    File,
+    Forbidden,
+    Interaction,
+    Member,
+    NotFound,
+    RawReactionActionEvent,
+    Role,
+    TextChannel,
+    app_commands,
+)
 from discord.ext import commands, tasks
 
 from fablabot.helpers.access import AnyRole, access
@@ -888,13 +899,17 @@ class FormationManagement(commands.Cog):
             )
             return
         channel = guild.get_channel(channel_id)
-        assert isinstance(channel, TextChannel)
+        if not isinstance(channel, TextChannel):
+            logger.warning(
+                f"Channel {channel_id} of the published formations message is gone for guild {guild_id}; skipping update."
+            )
+            return
 
         try:
             msg = await channel.fetch_message(message_id)
         except Exception as exc:
             logger.exception(f"Failed to fetch message {message_id} in channel {channel_id}.")
-            if not isinstance(exc, NotFound):  # a deleted post has nothing left to update
+            if not isinstance(exc, NotFound | Forbidden):  # a deleted post or a refused read stays so at the next tick
                 self._retry_guilds.add(guild_id)
             return
         logger.debug(f"Fetched published message {message_id} in channel {channel_id} for guild {guild_id}.")

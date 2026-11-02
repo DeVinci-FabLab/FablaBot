@@ -262,8 +262,9 @@ A restart during the failure forgets which servers to catch up: a member who rea
 
 An update of the training message that stops for another reason (Discord does not return the post, or the run
 fails) is run again at the next 5-minute tick: the log shows `Error during scheduled update` or `Failed to fetch
-message`, and a member whose reaction is logged gets their place and their DM then. A post that was deleted is not
-asked for again, and a restart forgets the retry, as above.
+message`, and a member whose reaction is logged gets their place and their DM then. A post that was deleted, a
+channel that is gone (`is gone for guild` in the log) or a post the bot may not read (403) is not asked for again at
+the tick: the next reaction runs the update. A restart forgets the retry, as above.
 
 ## Server check at start
 
