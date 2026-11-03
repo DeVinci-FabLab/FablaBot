@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import logging
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from conftest import make_guild, make_interaction, make_member, make_role, stored_ops
@@ -172,7 +173,7 @@ async def test_op_without_member_ops_the_caller(cog: UserManagement) -> None:
     server = Server(RoleNames.DIGITAL_MANAGER)
     interaction = server.interaction()
 
-    await UserManagement.user_op.callback(cog, interaction, reason="atelier")
+    await cast("Any", UserManagement.user_op).callback(cog, interaction, reason="atelier")
 
     server.caller.add_roles.assert_awaited_once()
     assert set(stored_ops()[str(GUILD_ID)]) == {str(CALLER_ID)}
@@ -195,7 +196,7 @@ async def test_temp_admin_only_cannot_op_themselves(cog: UserManagement) -> None
     server = Server(RoleNames.ADMIN_TEMP)
     interaction = server.interaction()
 
-    await UserManagement.user_op.callback(cog, interaction, reason="x")
+    await cast("Any", UserManagement.user_op).callback(cog, interaction, reason="x")
 
     _refusal(interaction)
     server.caller.add_roles.assert_not_awaited()
