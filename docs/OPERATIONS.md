@@ -429,6 +429,13 @@ A per-server language setting in the bot is planned and not available yet. The t
 `/user op` gives the `Admin -temp-` role to the caller, or to the member named, for 1 to 5 minutes (5 by default); `/user deop` removes it
 early. The expiry is recorded in the database.
 
+When an op ends, at expiry or by `/user deop`, the bot reads the server's audit log (View Audit Log) from the moment
+it gave the role, renewals included. The end message in the op channel gives only the count of actions the member
+did by hand in Discord, since members may read that channel. The log channel of `/log set` gets one line per action,
+20 at most, pinging nobody. Actions run through the bot's commands are the bot's in the audit log and are not
+counted. An unreadable audit log, a grant older than the bot's last 100 role changes, or no log channel is said in
+the end message instead.
+
 The expiry and the timer are set before the role is given. If the database refuses the expiry, the role is not
 given and the caller is told. The timer holds its own time, so the role ends on time even with the database down.
 

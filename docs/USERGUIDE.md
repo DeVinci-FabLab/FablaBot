@@ -92,7 +92,8 @@ In the tables below, "admin roles" means Administrateur, Président, Vice-Prési
 
 - `/user op` ops you; name a `member` to op someone else. It lasts 1 to 5 minutes, 5 by default. It opens
   only the commands that name `Admin -temp-`, today `/fm`. It needs the `Admin -temp-` and `CoDir` roles on the
-  server.
+  server. When the op ends, the message says how many actions were done by hand in Discord, and the log channel
+  lists them: an op is for what the bot cannot do yet.
 - `/user invite` creates a new invite to a channel and shows it to you alone. It lasts 7 days and has no use
   limit unless you pick otherwise. With `temporary`, Discord kicks a newcomer who disconnects before getting a
   role. You need Discord's Create Invite permission on that channel, and so does the bot.

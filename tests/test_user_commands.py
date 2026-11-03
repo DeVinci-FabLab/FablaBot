@@ -249,3 +249,14 @@ async def test_refusal_lines_carry_ids_but_no_name(cog: UserManagement, caplog: 
     lines = _refusal_lines(caplog)
     assert lines == [f"[user.add_role] refused kind=missing_right guild_id={GUILD_ID} user_id={CALLER_ID}"]
     assert all(CALLER_NAME not in r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING)
+
+
+async def test_deop_reply_carries_the_op_report(cog: UserManagement) -> None:
+    """A deop tells, in its reply, how many actions were done by hand during the op."""
+    server = Server(RoleNames.PRESIDENT, RoleNames.ADMIN_TEMP)
+    interaction = server.interaction()
+
+    with patch.object(user_management, "report_op", AsyncMock(return_value="Aucune action faite à la main.")):
+        await cast("Any", UserManagement.user_deop).callback(cog, interaction, member=server.caller)
+
+    assert interaction.followup.send.await_args.kwargs["content"].endswith(". Aucune action faite à la main.")

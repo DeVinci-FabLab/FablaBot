@@ -31,6 +31,7 @@ from discord.utils import get
 
 from fablabot.helpers.access import AnyRole, Check, access
 from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames, staff_default_permissions
+from fablabot.helpers.op_report import report_op
 from fablabot.helpers.safe_discord_operations import safe_add_roles, safe_remove_roles
 from fablabot.helpers.utils import (
     RefusalKind,
@@ -328,7 +329,8 @@ class UserManagement(commands.Cog):
 
         logger.info(f"Revoked temporary admin from {member}")
         await interaction.response.defer(thinking=True)
-        await interaction.followup.send(content=f"Droits admin retirés de {format_member_mention(member)}")
+        report = await report_op(interaction.guild, member, admin_role)
+        await interaction.followup.send(content=f"Droits admin retirés de {format_member_mention(member)}. {report}")
 
     # -- Role Management --
 
@@ -814,7 +816,7 @@ class UserManagement(commands.Cog):
         self._clear_op_after_removal(guild.id, member.id)
         logger.info(f"Revoked temporary admin at expiry guild_id={guild.id} member_id={member.id}")
         notice = f"Droits admin temporaires retirés de {format_member_mention(member)} : durée écoulée."
-        await self._post_op_notice(guild, member.id, expiry, notice)
+        await self._post_op_notice(guild, member.id, expiry, f"{notice} {await report_op(guild, member, admin_role)}")
 
     @staticmethod
     async def _find_member(guild: Guild, member_id: int) -> Member | None:
