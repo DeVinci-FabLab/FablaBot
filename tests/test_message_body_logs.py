@@ -8,7 +8,8 @@ from unittest.mock import AsyncMock, MagicMock
 from conftest import fill_text_input, make_interaction
 import pytest
 
-from fablabot.ui.message import BulkDMModal, StartMessageModal, _ReactionMessageInputModal
+from fablabot.models import MessageDraft
+from fablabot.ui.message import BulkDMModal, EditMessageModal, StartMessageModal, _ReactionMessageInputModal
 
 SECRET_BODY = "SECRET-DM-BODY"
 
@@ -42,6 +43,23 @@ async def test_start_message_modal_logs_no_body(caplog: pytest.LogCaptureFixture
 
     assert SECRET_BODY not in caplog.text
     assert "StartMessageModal submitted" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_edit_message_modal_logs_no_body(caplog: pytest.LogCaptureFixture) -> None:
+    """Submitting the edit form logs the event but neither the old nor the new text."""
+    caplog.set_level(logging.DEBUG)
+    interaction = make_interaction()
+    cog = MagicMock()
+    cog.get_draft = MagicMock(return_value=MessageDraft(content="OLD-" + SECRET_BODY, reactions=[]))
+    modal = EditMessageModal(cog, "OLD-" + SECRET_BODY)
+    fill_text_input(modal.content_input, SECRET_BODY)
+
+    await modal.on_submit(interaction)
+
+    cog.set_draft.assert_called_once()
+    assert SECRET_BODY not in caplog.text
+    assert "EditMessageModal submitted" in caplog.text
 
 
 @pytest.mark.asyncio

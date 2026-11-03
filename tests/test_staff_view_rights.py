@@ -49,6 +49,7 @@ MESSAGE_SURFACES: dict[str, tuple[Callable[[], Any], set[str]]] = {
     "bulk_dm_view": (lambda: msg_ui._BulkDMView(make_member(1), 2, "salut"), MESSAGE_DM_ROLES),
     "bulk_dm_modal": (lambda: msg_ui.BulkDMModal(cog_bot()), MESSAGE_DM_ROLES),
     "start_modal": (lambda: msg_ui.StartMessageModal(cog_bot()), MESSAGE_ROLES),
+    "edit_modal": (lambda: msg_ui.EditMessageModal(cog_bot(), "x"), MESSAGE_ROLES),
     "reaction_text_modal": (lambda: msg_ui._ReactionMessageInputModal(cog_bot(), GUILD_ID, _reaction()), MESSAGE_ROLES),
     "reaction_target_view": (lambda: msg_ui._ReactionTargetView(cog_bot(), GUILD_ID, 5, "🅰", "channel"), MESSAGE_ROLES),
     "reaction_type_view": (lambda: msg_ui._ReactionActionTypeSelectView(cog_bot(), GUILD_ID, 5, "🅰"), MESSAGE_ROLES),
