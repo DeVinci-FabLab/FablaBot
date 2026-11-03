@@ -277,7 +277,10 @@ async def test_msg_publish_keeps_what_the_draft_gained_while_the_post_went_out(
     assert tracked.content == "x"
     assert [r.emoji for r in tracked.reactions] == linked
     assert messages.get_draft(1234) == draft_after
-    assert f"avec {len(linked)} réaction(s)" in interaction.response.send_message.await_args.args[0]
+    assert (
+        f"avec {len(linked)} réaction{'s' if len(linked) > 1 else ''} configurée"
+        in interaction.response.send_message.await_args.args[0]
+    )
 
 
 async def test_msg_publish_leaves_a_text_written_while_the_post_went_out_when_there_are_no_links() -> None:

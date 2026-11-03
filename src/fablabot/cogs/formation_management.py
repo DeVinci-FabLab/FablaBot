@@ -43,7 +43,7 @@ from fablabot.helpers.formation import (
 )
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.safe_discord_operations import retract_unsaved_post
-from fablabot.helpers.utils import ensure_command_context, is_valid_emoji
+from fablabot.helpers.utils import counted, ensure_command_context, is_valid_emoji
 from fablabot.logging_handlers import guild_log_context
 from fablabot.models import FmCommand, FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
 from fablabot.services import formations
@@ -217,7 +217,10 @@ class FormationManagement(commands.Cog):
 
         await interaction.response.send_message(
             "Brouillon mis à jour.",
-            embed=Embed(title=f"Aperçu brouillon — {len(draft.fms)} formation(s)", description=f"{content or '_(vide)_'}"),
+            embed=Embed(
+                title=f"Aperçu brouillon — {counted(len(draft.fms), 'formation', 'formations')}",
+                description=f"{content or '_(vide)_'}",
+            ),
             ephemeral=True,
         )
 
@@ -228,7 +231,7 @@ class FormationManagement(commands.Cog):
     )
     @app_commands.describe(
         emoji="Émoji unique pour cette FM (ex: 🔧)",
-        trainer="Formateur·ice",
+        trainer="Formateur",
         date="Date au format DD/MM/YYYY",
         hour="Heure au format HH:MM (24h)",
         duration="Durée en texte, ce sera affiché tel quel",
@@ -491,7 +494,8 @@ class FormationManagement(commands.Cog):
         logger.info(f"Guild {interaction.guild.id} published the formations draft in {channel}.")
         await interaction.followup.send(
             f"Message publié dans {channel.mention} (ID: `{msg.id}`) avec "
-            f"{success_reactions}/{len(draft.fms)} réaction(s) ajoutée(s).",
+            f"{success_reactions}/{len(draft.fms)} "
+            + ("réactions ajoutées." if success_reactions > 1 else "réaction ajoutée."),
         )
 
         await asyncio.sleep(1.5 * 60 * 60)

@@ -223,11 +223,11 @@ def format_respo_contacts(guild: Guild) -> str:
     role = get(guild.roles, name=RoleNames.TRAININGS_MANAGER)
     if role is None:
         logger.debug(f"Role '{RoleNames.TRAININGS_MANAGER}' missing in guild {guild.id}; using fallback contacts.")
-        return "un·e membre du Pôle Formations"
+        return "un membre du Pôle Formations"
     members = get_members_by_role(role=role)
     if not members:
         logger.debug(f"Role '{RoleNames.TRAININGS_MANAGER}' has no human members in guild {guild.id}; using fallback contacts.")
-        return "un·e membre du Pôle Formations"
+        return "un membre du Pôle Formations"
     mentions = [m.mention for m in members]
     logger.debug(f"Resolved {len(mentions)} formation contacts for guild {guild.id}.")
     return " ou ".join(mentions)
@@ -253,7 +253,7 @@ def format_formation_export(formation: Formation) -> str:
             ts = user_entry.get("ts_iso", datetime.min.replace(tzinfo=PARIS_TZ).isoformat(timespec="seconds"))
             dt = datetime.fromisoformat(ts)
             when = humanize_dt(dt) if dt != datetime.min.replace(tzinfo=PARIS_TZ) else "n/a"
-            lines.append(f"{idx}. <@{user_id}> ({escape_md(username)}) · inscrit·e le {when}")
+            lines.append(f"{idx}. <@{user_id}> ({escape_md(username)}) · inscrit le {when}")
     else:
         lines.append("_(Aucune inscription)_")
 
@@ -264,7 +264,7 @@ def format_formation_export(formation: Formation) -> str:
             ts = user_entry.get("ts_iso", datetime.min.replace(tzinfo=PARIS_TZ).isoformat(timespec="seconds"))
             dt = datetime.fromisoformat(ts)
             when = humanize_dt(dt) if dt != datetime.min.replace(tzinfo=PARIS_TZ) else "n/a"
-            lines.append(f"{idx}. <@{user_id}> ({escape_md(username)}) · inscrit·e le {when} (en attente)")
+            lines.append(f"{idx}. <@{user_id}> ({escape_md(username)}) · inscrit le {when} (en attente)")
 
     return "\n".join(lines)
 

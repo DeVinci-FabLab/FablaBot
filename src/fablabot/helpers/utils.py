@@ -465,6 +465,20 @@ def escape_md(text: str) -> str:
     return f"`{text}`"
 
 
+def counted(count: int, one: str, many: str) -> str:
+    """Write a count with its noun in the right number: ``1 action``, ``3 actions``, ``0 action``.
+
+    Args:
+        count (int): The count.
+        one (str): The words for one, singular.
+        many (str): The words for several, plural.
+
+    Returns:
+        str: The count followed by the matching words.
+    """
+    return f"{count} {one if abs(count) <= 1 else many}"
+
+
 def format_member_mention(member: Member) -> str:
     """Format a member mention with escaped name.
 

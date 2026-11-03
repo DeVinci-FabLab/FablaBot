@@ -433,7 +433,7 @@ When an op ends, at expiry or by `/user deop`, the bot reads the server's audit 
 it gave the role, renewals included. The end message in the op channel gives only the count of the member's own
 audit log entries, since members may read that channel. The log channel of `/log set` gets them in order, 20 at most,
 each with its changed fields before and after (a permission as the flags turned on and off), split over several
-messages when long, pinging nobody; past 100 the count reads "au moins 100". The audit log holds changes, not messages or
+messages when long, pinging nobody. It shows old topics, names and invite codes: keep that channel for staff; past 100 the count reads "au moins 100". The audit log holds changes, not messages or
 reads, and credits an action to whoever made the call: actions through the bot's commands or another bot are not
 counted, and one made in the last seconds may not be there yet. An unreadable audit log, a read over 30 seconds,
 a grant older than the bot's last 100 role changes, or no log channel is said in the end message instead. An op the

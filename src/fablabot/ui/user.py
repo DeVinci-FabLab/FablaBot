@@ -192,7 +192,7 @@ class MultiRoleSelectorView(ui.View):
             members &= role_members
 
         lines.append(
-            f"\nMembre(s) avec{' tous' if multi_string else ''} le{multi_string}"
+            f"\nMembre{'s' if len(members) != 1 else ''} avec{' tous' if multi_string else ''} le{multi_string}"
             f" rôle{multi_string} sélectionné{multi_string} ({len(members)}) :",
         )
         if not members:

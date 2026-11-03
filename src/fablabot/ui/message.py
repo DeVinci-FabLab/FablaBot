@@ -902,7 +902,7 @@ class _SuggestionModal(ui.Modal, title="Envoyer une suggestion"):
         )
         if not self.anonymous_flag:
             embed.set_author(name=author.display_name, icon_url=author.display_avatar.url)
-            embed.add_field(name="Utilisateur·ice", value=author.mention, inline=False)
+            embed.add_field(name="Utilisateur", value=author.mention, inline=False)
         else:
             embed.set_author(
                 name="Anonymous",

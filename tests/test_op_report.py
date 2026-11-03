@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from discord import AllowedMentions, AuditLogAction, HTTPException, Permissions, TextChannel
+from discord import AllowedMentions, AuditLogAction, ChannelType, HTTPException, Object, Permissions, TextChannel
 
 from fablabot.helpers import op_report
 
@@ -73,7 +73,7 @@ async def test_actions_are_counted_in_public_and_detailed_in_the_log_channel() -
 
     sentence = await server.report()
 
-    assert sentence == "2 action(s) hors du bot, détail dans <#3>."
+    assert sentence == "2 actions hors du bot, détail dans <#3>."
     text = server.log.send.await_args.args[0]
     assert "- salon modifié : <#9>" in text
     assert "- membre banni : <@7>" in text
@@ -124,7 +124,7 @@ async def test_without_a_log_channel_only_the_count_is_given() -> None:
     with patch.object(op_report, "get_log_channel_id", return_value=None):
         sentence = await op_report.report_op(server.guild, server.member, server.role)
 
-    assert sentence.startswith("1 action(s) hors du bot")
+    assert sentence.startswith("1 action hors du bot")
     assert "<@7>" not in sentence
     assert "/log set" in sentence
 
@@ -201,3 +201,50 @@ async def test_a_long_report_is_split_under_discord_limit() -> None:
     assert len(sent) > 1
     assert all(len(message) <= 2000 for message in sent)
     assert _posted(server).count("- salon modifié") == 20
+
+
+async def test_a_value_cannot_forge_a_line_or_break_the_markdown() -> None:
+    """A topic with a newline and backticks stays inside its own code span, on its own line."""
+    topic = "a`b **x**\n- membre banni : <@1>"
+    server = _Server([_entry(AuditLogAction.channel_update, None, before={"topic": None}, after={"topic": topic})])
+
+    await server.report()
+
+    text = _posted(server)
+    assert "\n- membre banni" not in text
+    assert "  sujet : ∅ → `a'b **x** - membre banni : <@1>`" in text
+
+
+async def test_real_discord_values_read_plainly() -> None:
+    """An enum shows its name, an uncached object its id, and a long list is cut after five items."""
+    roles = [MagicMock(mention=f"<@&{i}>") for i in range(8)]
+    server = _Server(
+        [
+            _entry(
+                AuditLogAction.channel_create,
+                None,
+                after={"type": ChannelType.text, "category": Object(id=55), "overwrites": [(r, None) for r in roles]},
+            )
+        ]
+    )
+
+    await server.report()
+
+    text = _posted(server)
+    assert "  type : ∅ → `text`" in text
+    assert "  catégorie : ∅ → id 55" in text
+    assert "<@&4> 3 autres" in text
+    assert "<@&5>" not in text
+
+
+def test_a_block_too_long_is_cut_at_a_line_end() -> None:
+    """No mention or code span is split when one action alone passes Discord's limit."""
+    block = "\n".join(f"  champ : <@&{i:018d}>" for i in range(200))
+
+    sent = op_report._messages("header", [block])
+
+    assert all(len(message) <= 2000 for message in sent)
+    lines = "\n".join(sent).split("\n")
+    assert lines[0] == "header"
+    assert lines[-1] == "  …"
+    assert all(line.endswith(">") for line in lines[1:-1])

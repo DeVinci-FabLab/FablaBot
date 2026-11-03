@@ -108,7 +108,7 @@ async def send_promotion_dm(
     message = (
         f"Salut {member.display_name} !\n"
         "Bonne nouvelle : une place s'est libérée ! "
-        f"Tu es désormais inscrit·e à la formation **{formation.name}** le {datetime_text}.\n"
+        f"Tu es désormais inscrit à la formation **{formation.name}** le {datetime_text}.\n"
         "Si tu ne peux finalement pas y participer, pense à retirer ta réaction pour libérer la place.\n\n"
         f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
     )

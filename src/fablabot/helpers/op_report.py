@@ -6,10 +6,11 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Final
 
-from discord import AllowedMentions, AuditLogAction, HTTPException, Permissions, TextChannel
+from discord import AllowedMentions, AuditLogAction, HTTPException, Object, Permissions, TextChannel
+from discord.enums import Enum as DiscordEnum
 
 from fablabot.guild_config import get_log_channel_id
-from fablabot.helpers.utils import escape_md
+from fablabot.helpers.utils import counted, escape_md
 
 if TYPE_CHECKING:
     from discord import AuditLogEntry, Guild, Member, Role
@@ -48,6 +49,7 @@ _LABELS: Final = {
 # Discord's limit is 2000 characters a message; the rest is headroom for the header.
 _MESSAGE_CHARS: Final = 1900
 _VALUE_CHARS: Final = 80
+_LIST_ITEMS: Final = 5
 _FIELDS_PER_ENTRY: Final = 8
 
 _FIELDS: Final = {
@@ -75,21 +77,35 @@ _FIELDS: Final = {
     "temporary": "temporaire",
     "channel": "salon",
     "code": "code",
+    "overwrites": "permissions du salon",
 }
 
 
-def _value(value: Any) -> str:
+def _value(value: Any) -> str:  # noqa: PLR0911 - one return per kind of value
     """Show one side of a change in a few characters, pinging nobody and breaking no markdown."""
     if value is None or value == []:
         return "∅"
     if isinstance(value, bool):
         return "oui" if value else "non"
+    if isinstance(value, DiscordEnum):  # before the tuple check: discord.py's enums are namedtuples
+        return _text(value.name)
     if isinstance(value, (list, tuple)):
-        return ", ".join(_value(item) for item in value)
+        # An overwrite list holds (target, overwrite) pairs: the target says enough.
+        items = [_value(item[0] if isinstance(item, tuple) else item) for item in value]
+        shown = ", ".join(items[:_LIST_ITEMS])
+        return shown if len(items) <= _LIST_ITEMS else f"{shown} {counted(len(items) - _LIST_ITEMS, 'autre', 'autres')}"
     mention = getattr(value, "mention", None)
     if isinstance(mention, str):
         return mention
-    text = str(value)
+    if isinstance(value, Object):
+        return f"id {value.id}"
+    return _text(str(value))
+
+
+def _text(raw: str) -> str:
+    """Show free text as one short code span that nothing inside can close."""
+    # A newline or a backtick in a name or topic would end the code span and forge a line of the report.
+    text = " ".join(raw.split()).replace("`", "'")
     return escape_md(text if len(text) <= _VALUE_CHARS else f"{text[: _VALUE_CHARS - 1]}…")
 
 
@@ -115,7 +131,10 @@ def _changes(entry: AuditLogEntry) -> list[str]:
         else:
             lines.append(f"  {label} : {_value(old)} → {_value(new)}")
     if len(lines) > _FIELDS_PER_ENTRY:
-        lines = [*lines[:_FIELDS_PER_ENTRY], f"  … et {len(lines) - _FIELDS_PER_ENTRY} autres champs"]
+        lines = [
+            *lines[:_FIELDS_PER_ENTRY],
+            f"  … et {counted(len(lines) - _FIELDS_PER_ENTRY, 'autre champ', 'autres champs')}",
+        ]
     return lines
 
 
@@ -132,11 +151,18 @@ def describe(entry: AuditLogEntry) -> str:
     return "\n".join([head, *_changes(entry)])
 
 
+def _fit(block: str) -> str:
+    """Cut a block too long for one message at a line end, so no mention or code span is split."""
+    lines = block.split("\n")
+    while len("\n".join(lines)) > _MESSAGE_CHARS - 4 and len(lines) > 1:
+        lines.pop()
+    return "\n".join([*lines, "  …"]) if lines != block.split("\n") else block
+
+
 def _messages(header: str, blocks: list[str]) -> list[str]:
     """Pack the header and the blocks into as few messages as Discord's length limit allows."""
     messages = [header]
-    for block in blocks:
-        block = block[:_MESSAGE_CHARS]
+    for block in map(_fit, blocks):
         if len(messages[-1]) + 1 + len(block) > _MESSAGE_CHARS:
             messages.append(block)
         else:
@@ -186,18 +212,19 @@ async def _report(guild: Guild, member: Member, admin_role: Role) -> str:
         return "Actions hors du bot : début de l'op introuvable dans le journal d'audit."
     if not actions:
         return "Aucune action hors du bot dans le journal d'audit."
-    count = f"au moins {len(actions)}" if len(actions) >= _ACTION_SCAN else str(len(actions))
+    done = counted(len(actions), "action hors du bot", "actions hors du bot")
+    done = f"au moins {done}" if len(actions) >= _ACTION_SCAN else done
     blocks = [describe(entry) for entry in actions[:MAX_LINES]]
     if len(actions) > MAX_LINES:
-        blocks.append(f"- … et {len(actions) - MAX_LINES} autres")
+        blocks.append(f"- … et {counted(len(actions) - MAX_LINES, 'autre', 'autres')}")
     channel = guild.get_channel(get_log_channel_id(guild.id) or 0)
     if not isinstance(channel, TextChannel):
         logger.warning(f"No log channel for an op report guild_id={guild.id} member_id={member.id}")
-        return f"{count} action(s) hors du bot ; aucun salon de logs pour le détail (`/log set`)."
+        return f"{done.capitalize()} ; aucun salon de logs pour le détail (`/log set`)."
     try:
-        for message in _messages(f"Op de {member.mention} terminé : {count} action(s) hors du bot, dans l'ordre.", blocks):
+        for message in _messages(f"Op de {member.mention} terminé : {done}, dans l'ordre.", blocks):
             await channel.send(message, allowed_mentions=AllowedMentions.none())
     except HTTPException:
         logger.warning(f"Op report not posted guild_id={guild.id} member_id={member.id}")
-        return f"{count} action(s) hors du bot ; le détail n'a pas pu être posté dans les logs."
-    return f"{count} action(s) hors du bot, détail dans {channel.mention}."
+        return f"{done.capitalize()} ; le détail n'a pas pu être posté dans les logs."
+    return f"{done.capitalize()}, détail dans {channel.mention}."
