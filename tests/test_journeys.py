@@ -15,7 +15,7 @@ from fablabot.cogs import user_management
 from fablabot.helpers.constants import PARIS_TZ, RoleNames
 from fablabot.helpers.utils import RIGHT_LOST_MESSAGE
 from fablabot.import_state import main as run_import
-from fablabot.models import MsgReactionEvent, TrackedMessage
+from fablabot.models import MessageDraft, MsgReactionEvent, TrackedMessage
 from fablabot.services import formations, messages, op_expiries
 
 if TYPE_CHECKING:
@@ -781,3 +781,43 @@ async def test_msg_dm_confirm_still_sends_for_a_member_who_kept_the_role(server:
     # SimCord cannot edit the follow-up the bot reports to once the DM went out: reading the errors accepts it.
     assert len(server.env.errors) == 1
     assert len(recipient.dm_channel.history()) == 1
+
+
+async def test_msg_edit_changes_the_text_and_keeps_the_reactions(server: Server) -> None:
+    """The form opens on the draft's text; saving it changes the text only."""
+    await server.show("msg", "Administrateur")
+    shown = await server.admin.slash(server.commands, "msg start")
+    await server.admin.submit_modal(shown, fill(shown, {"Contenu du message": "Bonjour"}))
+    reaction = MsgReactionEvent(emoji="🅰", action_type="user_dm", message_content="Merci", target_id=0, target_name="")
+    messages.save_draft(GUILD_ID, MessageDraft(content="Bonjour", reactions=[reaction]))
+
+    edit = await server.admin.slash(server.commands, "msg edit")
+    [field] = [item for row in edit.modal["components"] for item in row["components"]]
+    assert field["value"] == "Bonjour"
+    await server.admin.submit_modal(edit, fill(edit, {"Contenu du message": "Bonjour à tous"}))
+
+    draft = messages.get_draft(GUILD_ID)
+    assert draft is not None
+    assert (draft.content, draft.reactions) == ("Bonjour à tous", [reaction])
+
+
+async def test_msg_edit_without_a_draft_points_to_start(server: Server) -> None:
+    """Nothing to edit: the reply says how to begin."""
+    await server.show("msg", "Administrateur")
+    refused = await server.admin.slash(server.commands, "msg edit")
+
+    assert refused.modal is None
+    assert "/msg start" in refused.response.content
+
+
+async def test_msg_edit_does_not_erase_a_draft_changed_meanwhile(server: Server) -> None:
+    """A second staff member's new draft survives a form opened on the old one."""
+    await server.show("msg", "Administrateur")
+    messages.save_draft(GUILD_ID, MessageDraft(content="Ancien", reactions=[]))
+    edit = await server.admin.slash(server.commands, "msg edit")
+    messages.save_draft(GUILD_ID, MessageDraft(content="Nouveau", reactions=[]))
+
+    refused = await server.admin.submit_modal(edit, fill(edit, {"Contenu du message": "Écrasé"}))
+
+    assert "relance `/msg edit`" in refused.response.content
+    assert messages.get_draft(GUILD_ID) == MessageDraft(content="Nouveau", reactions=[])

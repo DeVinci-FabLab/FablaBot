@@ -58,6 +58,7 @@ In the tables below, "admin roles" means Administrateur, Président, Vice-Prési
 | Command | What it does | Who can run it |
 | --- | --- | --- |
 | `/msg start` | Start a draft | Admin roles, Bureau |
+| `/msg edit` | Edit the draft's text, keeping its reactions | Admin roles, Bureau |
 | `/msg preview` | Preview the draft | Admin roles, Bureau |
 | `/msg publish` | Publish the draft and track it | Admin roles, Bureau |
 | `/msg follow` | Track a message already sent | Admin roles, Bureau |

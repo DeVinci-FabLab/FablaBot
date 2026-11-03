@@ -63,6 +63,7 @@ export = "list sign-ups and drop-outs"
 
 [help.cmd.msg]
 start = "start a draft"
+edit = "edit the draft's text"
 preview = "preview the draft"
 publish = "publish and track"
 follow = "track a message already sent"
