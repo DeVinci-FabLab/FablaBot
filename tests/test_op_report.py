@@ -241,7 +241,7 @@ def test_a_block_too_long_is_cut_at_a_line_end() -> None:
     """No mention or code span is split when one action alone passes Discord's limit."""
     block = "\n".join(f"  champ : <@&{i:018d}>" for i in range(200))
 
-    sent = op_report._messages("header", [block])
+    sent = op_report.split_messages("header", [block])
 
     assert all(len(message) <= 2000 for message in sent)
     lines = "\n".join(sent).split("\n")

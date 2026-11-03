@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 
 from fablabot import db
 from fablabot.cogs import (
+    AuditWatch,
     ChannelManagement,
     FormationManagement,
     GuildAccess,
@@ -95,6 +96,7 @@ class Fablabot(commands.Bot):
             - guild_messages: for message handling in guilds
             - reactions: for handling message reactions
             - message_content: for reading message content
+            - moderation: for the audit log entries of watched accounts
         """
         # Parsed before the base class so a malformed list or dev guild stops the process before login.
         policy = GuildAccessPolicy.from_env()
@@ -111,6 +113,7 @@ class Fablabot(commands.Bot):
                 guild_messages=True,
                 reactions=True,
                 message_content=True,
+                moderation=True,
             ),
         )
         self.guild_access: GuildAccessPolicy = policy
@@ -137,6 +140,7 @@ class Fablabot(commands.Bot):
             UserManagement(self),
             WelcomeManagement(self),
             HelpManagement(self),
+            AuditWatch(self),
         ):
             await self.add_cog(cog)
             logger.info(f"Loaded cog {cog.__class__.__name__}.")

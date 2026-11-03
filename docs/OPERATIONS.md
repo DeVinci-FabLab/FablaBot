@@ -52,6 +52,7 @@ services:
       - DISCORD_TOKEN_FILE=/run/secrets/discord_token
       - ALLOWED_GUILD_IDS=${ALLOWED_GUILD_IDS:-}
       - OPERATOR_LOG_CHANNEL_ID=${OPERATOR_LOG_CHANNEL_ID:-}
+      - AUDIT_WATCH_USER_IDS=${AUDIT_WATCH_USER_IDS:-}
     secrets:
       - discord_token
     volumes:
@@ -70,6 +71,7 @@ The image runs as `10001:10001`; the volumes and the token file must belong to t
 | `DISCORD_TOKEN_FILE` | Path of the file holding the bot token. Read at start, before connecting; must be readable by 10001. |
 | `ALLOWED_GUILD_IDS` | Server IDs the bot may serve, comma-separated, no quotes. Each ID can carry a name after a colon, `111111111111111111:Main server`: the bot ignores it, and it cannot hold a comma. A server outside the list gets nothing from the bot: its commands are refused, and its messages, reactions, joins, voice changes and reminders are ignored. A temporary admin right still ends on time there. |
 | `OPERATOR_LOG_CHANNEL_ID` | Optional. Channel receiving errors that belong to no server. Pick a channel only the bot's administrators can read: those errors come from every server's tasks. |
+| `AUDIT_WATCH_USER_IDS` | Optional. Account IDs, comma-separated, whose every change on a served server is posted at once in that server's log channel (see "Watched accounts"). For an account nobody answers for, such as a shared admin login. |
 | `DEV_GUILD_ID` | Optional, development bot only. Syncs the commands to this one server and leaves global commands alone. Never set on the production bot. |
 | `data/` volume | The database `data/fablabot.db` (see "Stored data"), its copies in `data/backups/`, the release that last opened it (`data/fablabot.release`), and the fingerprint of the last command sync (`data/command_sync_state.json`; delete it to force a sync). |
 | `logs/` volume | `logs/<date>.log` (every line, never sent) and `logs/guilds/<server ID>/<date>.log` (one server's lines). |
@@ -235,6 +237,28 @@ Log files live in `logs/`:
 - `logs/<date>.log` holds every line, stays on the host and is never sent.
 - `logs/guilds/<server ID>/<date>.log` holds one server's lines. `/log export` sends that file to that server only.
 - The bot deletes no log file. See "Before every redeploy" for archiving before a redeploy.
+
+### Watched accounts
+
+`AUDIT_WATCH_USER_IDS` lists accounts whose every change is posted at once in the server's log channel, the one of
+`/log set`: an account nobody answers for, such as a shared admin login. Find an ID with Discord's developer mode
+(right-click the member, Copy User ID).
+
+```bash
+AUDIT_WATCH_USER_IDS=111111111111111111
+```
+
+- Each change shows what was done, to what, and each changed field before and after, as in the op report (see
+  "Temporary admin"). The post pings nobody.
+- The bot reads the audit log, so messages sent are not reported, nor a member deleting their own message. Every
+  other entry is: the server, channels, roles, members, invites, webhooks, emojis, threads, events, AutoMod, and
+  messages deleted by someone else. Entries without a French label show Discord's name for them.
+- The watched account can still silence the alerts by deleting the log channel, taking View Audit Log from the
+  bot, or running `/log set` elsewhere. None of these is sure to be posted: look at the log channel from time to
+  time.
+- It needs the View Audit Log permission, already in the invite link. Without a log channel, the change stays in
+  the log file only (`Watched account acted with no log channel`).
+- Servers outside `ALLOWED_GUILD_IDS` are ignored. The count of watched accounts is logged at start, and a malformed ID is dropped with a warning then.
 
 ### Development bot
 
