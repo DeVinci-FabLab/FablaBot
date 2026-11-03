@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.6.2...v0.7.0) (2026-11-03)
+
+
+### Features
+
+* **user:** create server invites with /user invite ([#148](https://github.com/DeVinci-FabLab/FablaBot/issues/148)) ([4ff822a](https://github.com/DeVinci-FabLab/FablaBot/commit/4ff822a3b303690c91d88163f4acbba47a23289a))
+* **user:** op yourself by default, for 1 to 5 minutes ([#147](https://github.com/DeVinci-FabLab/FablaBot/issues/147)) ([1e1ec5f](https://github.com/DeVinci-FabLab/FablaBot/commit/1e1ec5fd73c158fcef0ec8d92a85a9198bca951c))
+
 ## [0.6.2](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.6.1...v0.6.2) (2026-11-02)
 
 
