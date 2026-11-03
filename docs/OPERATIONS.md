@@ -268,12 +268,13 @@ Order matters: the allow-list comes before the invite, otherwise the bot joins a
 2. Only then invite the bot with this link, after replacing the two placeholders:
 
    ```text
-   https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot+applications.commands&permissions=268561616&guild_id=<SERVER_ID>&disable_guild_select=true
+   https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot+applications.commands&permissions=268561617&guild_id=<SERVER_ID>&disable_guild_select=true
    ```
 
-   The permission integer `268561616` grants: Manage Roles, Manage Channels, View Audit Log, View
-   Channels, Send Messages, Manage Messages, Embed Links, Attach Files, Read Message History and Add
-   Reactions. It does not include Administrator.
+   The permission integer `268561617` grants: Manage Roles, Manage Channels, View Audit Log, Create
+   Invite, View Channels, Send Messages, Manage Messages, Embed Links, Attach Files, Read Message History
+   and Add Reactions. It does not include Administrator. A bot invited before `/user invite` existed lacks
+   Create Invite: give it to the bot's role in Server Settings, Roles.
 
 3. In Server Settings, Roles, drag the bot's role above every role it manages, `Admin -temp-`
    included. Discord refuses to add or remove a role that sits above the bot's own.

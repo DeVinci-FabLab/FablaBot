@@ -83,6 +83,7 @@ remove_role = "take a role away"
 add_roles = "give a role to several members"
 remove_roles = "take a role from several members"
 with_roles = "who has these roles"
+invite = "create an invite to the server"
 
 [help.cmd.welcome]
 verify = "turn welcoming on or off"

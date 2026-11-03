@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-INVITE_PERMISSIONS: Final = Permissions(268561616)
+INVITE_PERMISSIONS: Final = Permissions(268561617)
 """The permissions the invitation link asks for, as written in the operator guide."""
 
 type Severity = Literal["blocking", "warning"]

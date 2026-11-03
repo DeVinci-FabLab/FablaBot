@@ -338,6 +338,7 @@ def test_the_invite_integer_matches_the_guide() -> None:
         "manage_roles",
         "manage_channels",
         "view_audit_log",
+        "create_instant_invite",
         "view_channel",
         "send_messages",
         "manage_messages",
