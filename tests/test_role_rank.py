@@ -166,7 +166,7 @@ async def test_president_still_ops_with_admin_temp_above(cog: UserManagement) ->
     server = Server(RoleNames.PRESIDENT, RoleNames.CODIR, ranks={RoleNames.CODIR: 5})
     interaction = server.interaction()
 
-    await _call(UserManagement.user_op)(cog, interaction, member=server.target, reason="atelier", time=30)
+    await _call(UserManagement.user_op)(cog, interaction, member=server.target, reason="atelier", time=5)
 
     server.target.add_roles.assert_awaited_once()
     for task in cog.deop_tasks.values():

@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 EXPIRY_RETRY_DELAY = timedelta(seconds=60)
+OP_MAX_MINUTES = 5
 
 _OP_NOT_RECORDED = "La durée n'a pas pu être enregistrée : aucun droit n'a été donné ni prolongé. Réessaie plus tard."
 _TEMP_ROLE_REFUSED = f"Le rôle {RoleNames.ADMIN_TEMP} se donne uniquement avec `/user op`, qui fixe sa durée."
@@ -187,7 +188,7 @@ class UserManagement(commands.Cog):
         *,
         reason: str,
         member: Member | None = None,
-        time: app_commands.Range[int, 1, 5] = 5,
+        time: app_commands.Range[int, 1, OP_MAX_MINUTES] = OP_MAX_MINUTES,
     ) -> None:
         """Grant temporary admin privileges to the caller or to another member.
 
@@ -200,6 +201,8 @@ class UserManagement(commands.Cog):
         """
         assert isinstance(interaction.user, Member)  # the group is synced to servers only
         member = member or interaction.user
+        # Discord alone checks the option range; a server still on an older sync could send more.
+        time = max(1, min(time, OP_MAX_MINUTES))
         if not await ensure_command_context(
             logger,
             "user.op",

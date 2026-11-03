@@ -80,7 +80,7 @@ def _refusal_lines(caplog: pytest.LogCaptureFixture) -> list[str]:
     return [r.getMessage() for r in caplog.records if "refused" in r.getMessage()]
 
 
-async def _op(cog: UserManagement, server: Server, member: MagicMock, minutes: int = 30) -> MagicMock:
+async def _op(cog: UserManagement, server: Server, member: MagicMock, minutes: int = 5) -> MagicMock:
     interaction = server.interaction()
     await UserManagement.user_op.callback(cog, interaction, member=member, reason="atelier", time=minutes)
     return interaction
@@ -107,7 +107,7 @@ async def test_temp_admin_only_cannot_grant_op_or_deop(
     elif command == "remove_role":
         await UserManagement.user_remove_role.callback(cog, interaction, member=target, role=server.roles["F - Laser"])
     elif command == "op":
-        await UserManagement.user_op.callback(cog, interaction, member=target, reason="x", time=90)
+        await UserManagement.user_op.callback(cog, interaction, member=target, reason="x", time=5)
     else:
         await UserManagement.user_deop.callback(cog, interaction, member=target)
 
@@ -179,10 +179,27 @@ async def test_op_without_member_ops_the_caller(cog: UserManagement) -> None:
     assert set(cog.deop_tasks) == {(GUILD_ID, CALLER_ID)}
 
 
-async def test_op_lasts_five_minutes_at_most() -> None:
-    """Discord offers 1 to 5 minutes, 5 by default."""
+async def test_op_lasts_five_minutes_at_most(cog: UserManagement) -> None:
+    """Discord offers 1 to 5 minutes, 5 by default, and a longer time from an older sync is cut to 5."""
     time = next(p for p in UserManagement.user_op.parameters if p.name == "time")
     assert (time.min_value, time.max_value, time.default) == (1, 5, 5)
+    server = Server(RoleNames.PRESIDENT)
+
+    await _op(cog, server, server.target, minutes=90)
+
+    assert stored_ops()[str(GUILD_ID)][str(TARGET_ID)]["expires_at"] == "2026-10-28T15:05:00+00:00"
+
+
+async def test_temp_admin_only_cannot_op_themselves(cog: UserManagement) -> None:
+    """The temporary role alone does not let its holder renew it on themselves."""
+    server = Server(RoleNames.ADMIN_TEMP)
+    interaction = server.interaction()
+
+    await UserManagement.user_op.callback(cog, interaction, reason="x")
+
+    _refusal(interaction)
+    server.caller.add_roles.assert_not_awaited()
+    assert not stored_ops()
 
 
 async def test_remove_role_from_self_is_allowed(cog: UserManagement) -> None:
