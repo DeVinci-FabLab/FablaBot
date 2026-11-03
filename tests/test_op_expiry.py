@@ -603,3 +603,20 @@ async def test_a_failed_clear_after_a_deop_removal_still_replies(
 
     target.remove_roles.assert_awaited_once()
     interaction.followup.send.assert_awaited_once()
+
+
+async def test_the_end_notice_carries_the_op_report(cog: UserManagement) -> None:
+    """The notice in the op channel adds the count of actions done by hand."""
+    guild, target, caller = _server(GUILD_A)
+    await _op(cog, guild, caller, target, 5)
+    target.roles.append(guild.roles[0])
+    cog.bot.get_guild = MagicMock(return_value=guild)
+
+    with (
+        patch.object(user_management, "report_op", AsyncMock(return_value="Aucune action hors du bot.")),
+        patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=5)),
+    ):
+        await cog._expire(GUILD_A, TARGET_ID, EXPIRY)
+
+    notice = guild.get_channel.return_value.send.await_args.args[0]
+    assert notice.endswith("durée écoulée. Aucune action hors du bot.")
