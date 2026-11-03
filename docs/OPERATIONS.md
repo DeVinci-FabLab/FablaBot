@@ -430,11 +430,13 @@ A per-server language setting in the bot is planned and not available yet. The t
 early. The expiry is recorded in the database.
 
 When an op ends, at expiry or by `/user deop`, the bot reads the server's audit log (View Audit Log) from the moment
-it gave the role, renewals included. The end message in the op channel gives only the count of actions the member
-did by hand in Discord, since members may read that channel. The log channel of `/log set` gets one line per action,
-20 at most, pinging nobody. Actions run through the bot's commands are the bot's in the audit log and are not
-counted. An unreadable audit log, a grant older than the bot's last 100 role changes, or no log channel is said in
-the end message instead.
+it gave the role, renewals included. The end message in the op channel gives only the count of the member's own
+audit log entries, since members may read that channel. The log channel of `/log set` gets them in order, 20 lines
+at most, pinging nobody; past 100 the count reads "au moins 100". The audit log holds changes, not messages or
+reads, and credits an action to whoever made the call: actions through the bot's commands or another bot are not
+counted, and one made in the last seconds may not be there yet. An unreadable audit log, a read over 30 seconds,
+a grant older than the bot's last 100 role changes, or no log channel is said in the end message instead. An op the
+bot ends at start (its holder had no future expiry) gets no report.
 
 The expiry and the timer are set before the role is given. If the database refuses the expiry, the role is not
 given and the caller is told. The timer holds its own time, so the role ends on time even with the database down.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Final
 
@@ -18,6 +19,8 @@ MAX_LINES: Final = 20
 # How far back the bot looks for the grant of the role, and for the member's actions since.
 _GRANT_SCAN: Final = 100
 _ACTION_SCAN: Final = 100
+# Well inside the 15 minutes a deferred reply stays open, and short enough not to hold the end notice.
+_TIMEOUT: Final = 30
 
 _LABELS: Final = {
     AuditLogAction.guild_update: "serveur modifié",
@@ -58,12 +61,15 @@ async def _manual_actions(guild: Guild, member: Member, admin_role: Role) -> lis
     async for grant in guild.audit_logs(limit=_GRANT_SCAN, user=guild.me, action=AuditLogAction.member_role_update):
         target_id = getattr(grant.target, "id", None)
         if target_id == member.id and admin_role in getattr(grant.after, "roles", []):
-            return [entry async for entry in guild.audit_logs(limit=_ACTION_SCAN, user=member, after=grant)]
+            return [entry async for entry in guild.audit_logs(limit=_ACTION_SCAN, user=member, after=grant, oldest_first=True)]
     return None
 
 
 async def report_op(guild: Guild, member: Member, admin_role: Role) -> str:
     """Post the detail of an ended op in the log channel and return the sentence for the op channel.
+
+    The role is already gone when this runs: any failure, a slow audit log included, ends in a sentence, never
+    in an error that would hide the end of the op.
 
     Args:
         guild (Guild): The server.
@@ -74,27 +80,34 @@ async def report_op(guild: Guild, member: Member, admin_role: Role) -> str:
         str: One sentence giving the count, never the detail: the op channel may be open to members.
     """
     try:
-        actions = await _manual_actions(guild, member, admin_role)
-    except Exception:  # the role is already gone: a report that fails must not hide that
-        logger.exception(f"Audit log unreadable at op end guild_id={guild.id} member_id={member.id}")
-        return "Actions faites à la main : journal d'audit illisible."
+        async with asyncio.timeout(_TIMEOUT):
+            return await _report(guild, member, admin_role)
+    except Exception:
+        logger.exception(f"Op report failed guild_id={guild.id} member_id={member.id}")
+        return "Actions hors du bot : journal d'audit illisible."
+
+
+async def _report(guild: Guild, member: Member, admin_role: Role) -> str:
+    """Do the work of ``report_op``, letting any failure through."""
+    actions = await _manual_actions(guild, member, admin_role)
     if actions is None:
-        return "Actions faites à la main : début de l'op introuvable dans le journal d'audit."
+        return "Actions hors du bot : début de l'op introuvable dans le journal d'audit."
     if not actions:
-        return "Aucune action faite à la main."
+        return "Aucune action hors du bot dans le journal d'audit."
+    count = f"au moins {len(actions)}" if len(actions) >= _ACTION_SCAN else str(len(actions))
     lines = [describe(entry) for entry in actions[:MAX_LINES]]
     if len(actions) > MAX_LINES:
         lines.append(f"- … et {len(actions) - MAX_LINES} autres")
     channel = guild.get_channel(get_log_channel_id(guild.id) or 0)
     if not isinstance(channel, TextChannel):
         logger.warning(f"No log channel for an op report guild_id={guild.id} member_id={member.id}")
-        return f"{len(actions)} action(s) faite(s) à la main ; aucun salon de logs pour le détail (`/log set`)."
+        return f"{count} action(s) hors du bot ; aucun salon de logs pour le détail (`/log set`)."
     try:
         await channel.send(
-            f"Op de {member.mention} terminé : {len(actions)} action(s) faite(s) à la main.\n" + "\n".join(lines),
+            f"Op de {member.mention} terminé : {count} action(s) hors du bot, dans l'ordre.\n" + "\n".join(lines),
             allowed_mentions=AllowedMentions.none(),
         )
     except HTTPException:
         logger.warning(f"Op report not posted guild_id={guild.id} member_id={member.id}")
-        return f"{len(actions)} action(s) faite(s) à la main ; le détail n'a pas pu être posté dans les logs."
-    return f"{len(actions)} action(s) faite(s) à la main, détail dans {channel.mention}."
+        return f"{count} action(s) hors du bot ; le détail n'a pas pu être posté dans les logs."
+    return f"{count} action(s) hors du bot, détail dans {channel.mention}."

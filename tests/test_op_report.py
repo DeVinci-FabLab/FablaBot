@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import sqlite3
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -54,19 +56,20 @@ async def test_actions_are_counted_in_public_and_detailed_in_the_log_channel() -
 
     sentence = await server.report()
 
-    assert sentence == "2 action(s) faite(s) à la main, détail dans <#3>."
+    assert sentence == "2 action(s) hors du bot, détail dans <#3>."
     text = server.log.send.await_args.args[0]
     assert "- salon modifié : <#9>" in text
     assert "- membre banni : <@7>" in text
     assert server.log.send.await_args.kwargs["allowed_mentions"].to_dict() == AllowedMentions.none().to_dict()
     assert server.seen[1]["after"].action is AuditLogAction.member_role_update
+    assert server.seen[1]["oldest_first"] is True
 
 
 async def test_no_manual_action_is_said_and_nothing_is_posted() -> None:
     """An op used only through the bot leaves the log channel quiet."""
     server = _Server([])
 
-    assert await server.report() == "Aucune action faite à la main."
+    assert await server.report() == "Aucune action hors du bot dans le journal d'audit."
     server.log.send.assert_not_awaited()
 
 
@@ -104,6 +107,29 @@ async def test_without_a_log_channel_only_the_count_is_given() -> None:
     with patch.object(op_report, "get_log_channel_id", return_value=None):
         sentence = await op_report.report_op(server.guild, server.member, server.role)
 
-    assert sentence.startswith("1 action(s) faite(s) à la main")
+    assert sentence.startswith("1 action(s) hors du bot")
     assert "<@7>" not in sentence
     assert "/log set" in sentence
+
+
+async def test_a_database_failure_still_gives_a_sentence() -> None:
+    """The log channel lookup reads the database: its failure must not take the end notice with it."""
+    server = _Server([_entry(AuditLogAction.kick, None)])
+
+    with patch.object(op_report, "get_log_channel_id", side_effect=sqlite3.OperationalError("locked")):
+        sentence = await op_report.report_op(server.guild, server.member, server.role)
+
+    assert "illisible" in sentence
+
+
+async def test_a_slow_audit_log_gives_up() -> None:
+    """A read that hangs ends in a sentence, not in a reply that never comes."""
+    server = _Server([])
+
+    async def hang(**_kwargs: Any) -> Any:
+        await asyncio.sleep(3600)
+        yield
+
+    server.guild.audit_logs = hang
+    with patch.object(op_report, "_TIMEOUT", 0.01):
+        assert "illisible" in await server.report()

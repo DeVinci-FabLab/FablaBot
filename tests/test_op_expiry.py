@@ -613,10 +613,10 @@ async def test_the_end_notice_carries_the_op_report(cog: UserManagement) -> None
     cog.bot.get_guild = MagicMock(return_value=guild)
 
     with (
-        patch.object(user_management, "report_op", AsyncMock(return_value="Aucune action faite à la main.")),
+        patch.object(user_management, "report_op", AsyncMock(return_value="Aucune action hors du bot.")),
         patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=5)),
     ):
         await cog._expire(GUILD_A, TARGET_ID, EXPIRY)
 
     notice = guild.get_channel.return_value.send.await_args.args[0]
-    assert notice.endswith("durée écoulée. Aucune action faite à la main.")
+    assert notice.endswith("durée écoulée. Aucune action hors du bot.")

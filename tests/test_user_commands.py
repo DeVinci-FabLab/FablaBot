@@ -256,7 +256,7 @@ async def test_deop_reply_carries_the_op_report(cog: UserManagement) -> None:
     server = Server(RoleNames.PRESIDENT, RoleNames.ADMIN_TEMP)
     interaction = server.interaction()
 
-    with patch.object(user_management, "report_op", AsyncMock(return_value="Aucune action faite à la main.")):
+    with patch.object(user_management, "report_op", AsyncMock(return_value="Aucune action hors du bot.")):
         await cast("Any", UserManagement.user_deop).callback(cog, interaction, member=server.caller)
 
-    assert interaction.followup.send.await_args.kwargs["content"].endswith(". Aucune action faite à la main.")
+    assert interaction.followup.send.await_args.kwargs["content"].endswith(". Aucune action hors du bot.")
