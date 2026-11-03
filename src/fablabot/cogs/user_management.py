@@ -558,6 +558,8 @@ class UserManagement(commands.Cog):
         if not channel.permissions_for(interaction.user).create_instant_invite:
             await self._refuse(interaction, "user.invite", RefusalKind.MISSING_RIGHT, _INVITE_REFUSED)
             return
+        # discord.py retries a 5xx for 16 s, past Discord's 3 s to answer; private, or the link would go public.
+        await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             invite = await channel.create_invite(
                 max_age=duration,
@@ -568,11 +570,11 @@ class UserManagement(commands.Cog):
             )
         except Forbidden:
             logger.exception(f"Forbidden to create an invite channel_id={channel.id}")
-            await interaction.response.send_message(_INVITE_FORBIDDEN, ephemeral=True)
+            await interaction.followup.send(_INVITE_FORBIDDEN, ephemeral=True)
             return
         except HTTPException:
             logger.exception(f"HTTP error while creating an invite channel_id={channel.id}")
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 ErrorMessages.HTTP_ERROR.format(operation="la création de l'invitation"), ephemeral=True
             )
             return
@@ -581,7 +583,7 @@ class UserManagement(commands.Cog):
         limits = f"{_INVITE_DURATIONS.get(duration, f'{duration} s')}, " + (
             f"{uses} utilisation{'s' if uses > 1 else ''}" if uses else "utilisations illimitées"
         )
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Invitation vers {channel.mention} ({limits}{', membre temporaire' if temporary else ''}) : {invite.url}",
             ephemeral=True,
         )

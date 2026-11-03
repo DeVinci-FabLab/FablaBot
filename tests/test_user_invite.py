@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from conftest import make_interaction, make_member, make_role
-from discord import Forbidden, Permissions, TextChannel
+from discord import Forbidden, HTTPException, Permissions, TextChannel
 import pytest
 
 from fablabot.cogs import user_management
@@ -31,7 +32,8 @@ def _channel(*, caller_may_invite: bool = True) -> MagicMock:
 async def _invite(channel: MagicMock, **options: object) -> MagicMock:
     interaction = make_interaction()
     interaction.user = make_member(1, make_role(RoleNames.PRESIDENT))
-    await UserManagement.user_invite.callback(UserManagement(MagicMock()), interaction, channel=channel, **options)
+    callback = cast("Any", UserManagement.user_invite).callback
+    await callback(UserManagement(MagicMock()), interaction, channel=channel, **options)
     return interaction
 
 
@@ -44,10 +46,11 @@ async def test_invite_uses_the_given_settings_and_answers_in_private() -> None:
     channel.create_invite.assert_awaited_once()
     sent = channel.create_invite.await_args.kwargs
     assert (sent["max_age"], sent["max_uses"], sent["temporary"], sent["unique"]) == (3600, 1, True, True)
-    text = interaction.response.send_message.await_args.args[0]
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=True)
+    text = interaction.followup.send.await_args.args[0]
     assert "https://discord.gg/abc" in text
     assert "1 heure" in text
-    assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+    assert interaction.followup.send.await_args.kwargs["ephemeral"] is True
 
 
 async def test_defaults_are_seven_days_and_no_use_limit() -> None:
@@ -63,7 +66,7 @@ async def test_caller_who_cannot_invite_there_is_refused() -> None:
     interaction = await _invite(channel)
 
     channel.create_invite.assert_not_awaited()
-    assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+    interaction.response.send_message.assert_awaited_once_with(user_management._INVITE_REFUSED, ephemeral=True)
 
 
 async def test_bot_without_the_permission_says_so() -> None:
@@ -73,4 +76,15 @@ async def test_bot_without_the_permission_says_so() -> None:
 
     interaction = await _invite(channel)
 
-    assert "Créer une invitation" in interaction.response.send_message.await_args.args[0]
+    interaction.followup.send.assert_awaited_once_with(user_management._INVITE_FORBIDDEN, ephemeral=True)
+
+
+async def test_discord_failure_is_told_in_private() -> None:
+    """A 5xx after discord.py's own retries still reaches the caller, privately."""
+    channel = _channel()
+    channel.create_invite.side_effect = HTTPException(MagicMock(status=503), "unavailable")
+
+    interaction = await _invite(channel)
+
+    assert "invitation" in interaction.followup.send.await_args.args[0]
+    assert interaction.followup.send.await_args.kwargs["ephemeral"] is True
