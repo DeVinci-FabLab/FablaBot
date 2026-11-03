@@ -66,7 +66,7 @@ def test_user_guide_documents_help() -> None:
 def test_user_guide_keeps_the_old_details() -> None:
     """The details the old helps carried are in the user guide."""
     text = _read("docs/USERGUIDE.md")
-    for detail in ("DD/MM/YYYY", "5 minutes", "90", "user_dm", "role_dm", "Manage Messages", "Administrator", "F - "):
+    for detail in ("DD/MM/YYYY", "1 to 5 minutes", "user_dm", "role_dm", "Manage Messages", "Administrator", "F - "):
         assert detail in text, detail
 
 

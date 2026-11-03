@@ -373,7 +373,7 @@ async def test_president_ops_with_the_temporary_role_above_and_deop_revokes(rank
     president = ranked.member("president", RoleNames.PRESIDENT)
     target = ranked.member("target")
 
-    await president.slash(ranked.commands, "user op", member=target, reason="atelier", time=30)
+    await president.slash(ranked.commands, "user op", member=target, reason="atelier", time=5)
     assert RoleNames.ADMIN_TEMP in role_names(target)
 
     refused = await president.slash(ranked.commands, "user remove_role", member=target, role=ranked.role(RoleNames.ADMIN_TEMP))
@@ -432,11 +432,20 @@ async def test_a_tracked_message_survives_a_restart(server: Server) -> None:
     assert str(target.id) in listed.response.content
 
 
+async def test_op_with_no_member_ops_the_caller(ranked: Server) -> None:
+    """A president who names nobody gets the temporary role themselves."""
+    president = ranked.member("president", RoleNames.PRESIDENT)
+
+    await president.slash(ranked.commands, "user op", reason="atelier")
+
+    assert RoleNames.ADMIN_TEMP in role_names(president)
+
+
 async def test_a_temporary_role_keeps_its_expiry_after_a_restart(ranked: Server) -> None:
     """An op recorded before a restart is still recorded after it."""
     president = ranked.member("president", RoleNames.PRESIDENT)
     target = ranked.member("target")
-    await president.slash(ranked.commands, "user op", member=target, reason="atelier", time=30)
+    await president.slash(ranked.commands, "user op", member=target, reason="atelier", time=5)
 
     _restart()
 

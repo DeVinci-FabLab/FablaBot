@@ -79,10 +79,10 @@ async def test_op_records_expiry_before_replying(cog: UserManagement) -> None:
     seen: list[dict] = []
     interaction.response.send_message = AsyncMock(side_effect=lambda *_a, **_k: seen.append(stored_ops()))
 
-    await UserManagement.user_op.callback(cog, interaction, member=target, reason="atelier", time=30)
+    await UserManagement.user_op.callback(cog, interaction, member=target, reason="atelier", time=3)
 
     record = seen[0][str(GUILD_A)][str(TARGET_ID)]
-    assert record == {"expires_at": "2026-10-28T15:30:00+00:00", "channel_id": OP_CHANNEL_ID}
+    assert record == {"expires_at": "2026-10-28T15:03:00+00:00", "channel_id": OP_CHANNEL_ID}
     assert set(cog.deop_tasks) == {(GUILD_A, TARGET_ID)}
 
 
@@ -107,7 +107,7 @@ async def test_a_reop_that_cannot_be_recorded_leaves_the_running_op(cog: UserMan
     stored = stored_ops()
 
     with patch.object(op_expiries, "record", side_effect=storage_error):
-        await _op(cog, guild, caller, target, 90)
+        await _op(cog, guild, caller, target, 5)
 
     assert cog.deop_tasks[GUILD_A, TARGET_ID] is timer
     assert stored_ops() == stored
@@ -205,13 +205,13 @@ async def test_a_network_failure_on_deop_gets_a_reply_and_the_timer_stays(cog: U
 async def test_reop_replaces_expiry_and_keeps_one_timer(cog: UserManagement) -> None:
     """Opping again replaces the expiry and leaves a single timer."""
     guild, target, caller = _server(GUILD_A)
-    await _op(cog, guild, caller, target, 30)
+    await _op(cog, guild, caller, target, 5)
     first = cog.deop_tasks[(GUILD_A, TARGET_ID)]
 
-    await _op(cog, guild, caller, target, 10)
+    await _op(cog, guild, caller, target, 2)
     await asyncio.sleep(0)
 
-    assert stored_ops()[str(GUILD_A)][str(TARGET_ID)]["expires_at"] == "2026-10-28T15:10:00+00:00"
+    assert stored_ops()[str(GUILD_A)][str(TARGET_ID)]["expires_at"] == "2026-10-28T15:02:00+00:00"
     assert first.cancelled()
     assert len(cog.deop_tasks) == 1
 
@@ -219,12 +219,12 @@ async def test_reop_replaces_expiry_and_keeps_one_timer(cog: UserManagement) -> 
 async def test_expiry_removes_role_clears_record_and_posts_in_op_channel(cog: UserManagement) -> None:
     """Expiry removes the role, clears the record and posts in the op channel."""
     guild, target, caller = _server(GUILD_A)
-    interaction = await _op(cog, guild, caller, target, 90)
+    interaction = await _op(cog, guild, caller, target, 5)
     temp = guild.roles[0]
     target.roles.append(temp)
     cog.bot.get_guild = MagicMock(return_value=guild)
 
-    with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=90)):
+    with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=5)):
         await cog._expire(GUILD_A, TARGET_ID, EXPIRY)
 
     target.remove_roles.assert_awaited_once()
@@ -300,7 +300,7 @@ async def test_failed_expiry_keeps_record_and_warns_op_channel(cog: UserManageme
 async def test_deop_cancels_timer_and_clears_record(cog: UserManagement) -> None:
     """Deopping cancels the timer and clears the record."""
     guild, target, caller = _server(GUILD_A)
-    await _op(cog, guild, caller, target, 30)
+    await _op(cog, guild, caller, target, 5)
     task = cog.deop_tasks[(GUILD_A, TARGET_ID)]
 
     await UserManagement.user_deop.callback(cog, _interaction(guild, caller), member=target)
@@ -315,15 +315,15 @@ async def test_servers_are_kept_apart(cog: UserManagement) -> None:
     """Ops on one server never touch another server's records."""
     guild_a, target_a, caller_a = _server(GUILD_A)
     guild_b, target_b, caller_b = _server(GUILD_B)
-    await _op(cog, guild_a, caller_a, target_a, 30)
-    await _op(cog, guild_b, caller_b, target_b, 60)
+    await _op(cog, guild_a, caller_a, target_a, 2)
+    await _op(cog, guild_b, caller_b, target_b, 4)
     task_b = cog.deop_tasks[(GUILD_B, TARGET_ID)]
 
     await UserManagement.user_deop.callback(cog, _interaction(guild_a, caller_a), member=target_a)
     await asyncio.sleep(0)
 
     assert not task_b.done()
-    assert stored_ops()[str(GUILD_B)][str(TARGET_ID)]["expires_at"] == "2026-10-28T16:00:00+00:00"
+    assert stored_ops()[str(GUILD_B)][str(TARGET_ID)]["expires_at"] == "2026-10-28T15:04:00+00:00"
     assert str(TARGET_ID) not in stored_ops().get(str(GUILD_A), {})
 
 
@@ -502,7 +502,7 @@ async def test_expiry_keeps_record_and_asks_for_a_retry_when_discord_cannot_say_
 async def test_deop_does_not_erase_an_op_made_while_it_was_in_flight(cog: UserManagement) -> None:
     """A deop does not erase an op made while it was in flight."""
     guild, target, caller = _server(GUILD_A)
-    await _op(cog, guild, caller, target, 30)
+    await _op(cog, guild, caller, target, 2)
     gate = asyncio.Event()
 
     async def gated_remove(*_args: object, **_kwargs: object) -> None:
@@ -515,12 +515,12 @@ async def test_deop_does_not_erase_an_op_made_while_it_was_in_flight(cog: UserMa
     assert not deop.done()
 
     with patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=1)):
-        await _op(cog, guild, caller, target, 60)
+        await _op(cog, guild, caller, target, 4)
     newer = cog.deop_tasks[GUILD_A, TARGET_ID]
     gate.set()
     await deop
 
-    assert stored_ops()[str(GUILD_A)][str(TARGET_ID)]["expires_at"] == "2026-10-28T16:01:00+00:00"
+    assert stored_ops()[str(GUILD_A)][str(TARGET_ID)]["expires_at"] == "2026-10-28T15:05:00+00:00"
     assert cog.deop_tasks[GUILD_A, TARGET_ID] is newer
     assert not newer.done()
 
@@ -573,12 +573,12 @@ async def test_a_failed_clear_after_the_expiry_removal_still_posts_the_notice(
 ) -> None:
     """The role is gone at expiry even when the record cannot be dropped: the op channel is still told."""
     guild, target, caller = _server(GUILD_A)
-    await _op(cog, guild, caller, target, 90)
+    await _op(cog, guild, caller, target, 5)
     target.roles.append(guild.roles[0])
     cog.bot.get_guild = MagicMock(return_value=guild)
 
     with (
-        patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=90)),
+        patch.object(user_management, "_utcnow", return_value=NOW + timedelta(minutes=5)),
         patch.object(op_expiries, "clear", side_effect=storage_error),
     ):
         done = await cog._expire(GUILD_A, TARGET_ID, EXPIRY)
@@ -594,7 +594,7 @@ async def test_a_failed_clear_after_a_deop_removal_still_replies(
 ) -> None:
     """The role is gone after a deop even when the record cannot be dropped: the caller is still answered."""
     guild, target, caller = _server(GUILD_A)
-    await _op(cog, guild, caller, target, 30)
+    await _op(cog, guild, caller, target, 5)
     interaction = _interaction(guild, caller)
 
     monkeypatch.setattr(op_expiries, "clear", MagicMock(side_effect=storage_error))
