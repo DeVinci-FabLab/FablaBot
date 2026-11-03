@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final
 
-from discord import AllowedMentions, AuditLogAction, HTTPException, TextChannel
+from discord import AllowedMentions, AuditLogAction, HTTPException, Permissions, TextChannel
 
 from fablabot.guild_config import get_log_channel_id
+from fablabot.helpers.utils import escape_md
 
 if TYPE_CHECKING:
     from discord import AuditLogEntry, Guild, Member, Role
@@ -44,12 +45,103 @@ _LABELS: Final = {
 }
 
 
+# Discord's limit is 2000 characters a message; the rest is headroom for the header.
+_MESSAGE_CHARS: Final = 1900
+_VALUE_CHARS: Final = 80
+_FIELDS_PER_ENTRY: Final = 8
+
+_FIELDS: Final = {
+    "name": "nom",
+    "topic": "sujet",
+    "position": "position",
+    "nsfw": "NSFW",
+    "slowmode_delay": "mode lent (s)",
+    "user_limit": "limite de membres",
+    "bitrate": "débit",
+    "category": "catégorie",
+    "colour": "couleur",
+    "color": "couleur",
+    "hoist": "affiché à part",
+    "mentionable": "mentionnable",
+    "permissions": "permissions",
+    "allow": "autorisé",
+    "deny": "refusé",
+    "nick": "pseudo",
+    "roles": "rôles",
+    "mute": "muet",
+    "deaf": "sourd",
+    "max_age": "durée (s)",
+    "max_uses": "utilisations max",
+    "temporary": "temporaire",
+    "channel": "salon",
+    "code": "code",
+}
+
+
+def _value(value: Any) -> str:
+    """Show one side of a change in a few characters, pinging nobody and breaking no markdown."""
+    if value is None or value == []:
+        return "∅"
+    if isinstance(value, bool):
+        return "oui" if value else "non"
+    if isinstance(value, (list, tuple)):
+        return ", ".join(_value(item) for item in value)
+    mention = getattr(value, "mention", None)
+    if isinstance(mention, str):
+        return mention
+    text = str(value)
+    return escape_md(text if len(text) <= _VALUE_CHARS else f"{text[: _VALUE_CHARS - 1]}…")
+
+
+def _permissions(before: Any, after: Any) -> str:
+    """Show a permission change as the flags it turned on and off."""
+    was = {name for name, on in (before or Permissions.none()) if on}
+    now = {name for name, on in (after or Permissions.none()) if on}
+    return " ".join([f"+{name}" for name in sorted(now - was)] + [f"-{name}" for name in sorted(was - now)]) or "∅"
+
+
+def _changes(entry: AuditLogEntry) -> list[str]:
+    """Return one line per changed field of an entry: its name, the value before and after."""
+    before, after = dict(entry.changes.before), dict(entry.changes.after)
+    lines: list[str] = []
+    for field in list(dict.fromkeys([*before, *after])):
+        old, new = before.get(field), after.get(field)
+        label = _FIELDS.get(field, field)
+        if isinstance(old, Permissions) or isinstance(new, Permissions):
+            lines.append(f"  {label} : {_permissions(old, new)}")
+        elif entry.action is AuditLogAction.member_role_update and field == "roles":
+            # Discord lists the roles added on one side and the roles removed on the other.
+            lines.append(f"  {label} : +{_value(new)} -{_value(old)}")
+        else:
+            lines.append(f"  {label} : {_value(old)} → {_value(new)}")
+    if len(lines) > _FIELDS_PER_ENTRY:
+        lines = [*lines[:_FIELDS_PER_ENTRY], f"  … et {len(lines) - _FIELDS_PER_ENTRY} autres champs"]
+    return lines
+
+
 def describe(entry: AuditLogEntry) -> str:
-    """Return one line for an audit log entry: what was done, and to what."""
+    """Return the lines of an audit log entry: what was done, to what, then each field before and after."""
     label = _LABELS.get(entry.action, entry.action.name)
     target = entry.target
-    shown = getattr(target, "mention", None) or (f"id {target.id}" if target is not None else None)
-    return f"- {label} : {shown}" if shown else f"- {label}"
+    shown = (
+        getattr(target, "mention", None)
+        or (escape_md(code) if isinstance(code := getattr(target, "code", None), str) else None)
+        or (f"id {target.id}" if target is not None else None)
+    )
+    head = f"- {label} : {shown}" if shown else f"- {label}"
+    return "\n".join([head, *_changes(entry)])
+
+
+def _messages(header: str, blocks: list[str]) -> list[str]:
+    """Pack the header and the blocks into as few messages as Discord's length limit allows."""
+    messages = [header]
+    for block in blocks:
+        block = block[:_MESSAGE_CHARS]
+        if len(messages[-1]) + 1 + len(block) > _MESSAGE_CHARS:
+            messages.append(block)
+        else:
+            messages[-1] = f"{messages[-1]}\n{block}"
+    return messages
 
 
 async def _manual_actions(guild: Guild, member: Member, admin_role: Role) -> list[AuditLogEntry] | None:
@@ -95,18 +187,16 @@ async def _report(guild: Guild, member: Member, admin_role: Role) -> str:
     if not actions:
         return "Aucune action hors du bot dans le journal d'audit."
     count = f"au moins {len(actions)}" if len(actions) >= _ACTION_SCAN else str(len(actions))
-    lines = [describe(entry) for entry in actions[:MAX_LINES]]
+    blocks = [describe(entry) for entry in actions[:MAX_LINES]]
     if len(actions) > MAX_LINES:
-        lines.append(f"- … et {len(actions) - MAX_LINES} autres")
+        blocks.append(f"- … et {len(actions) - MAX_LINES} autres")
     channel = guild.get_channel(get_log_channel_id(guild.id) or 0)
     if not isinstance(channel, TextChannel):
         logger.warning(f"No log channel for an op report guild_id={guild.id} member_id={member.id}")
         return f"{count} action(s) hors du bot ; aucun salon de logs pour le détail (`/log set`)."
     try:
-        await channel.send(
-            f"Op de {member.mention} terminé : {count} action(s) hors du bot, dans l'ordre.\n" + "\n".join(lines),
-            allowed_mentions=AllowedMentions.none(),
-        )
+        for message in _messages(f"Op de {member.mention} terminé : {count} action(s) hors du bot, dans l'ordre.", blocks):
+            await channel.send(message, allowed_mentions=AllowedMentions.none())
     except HTTPException:
         logger.warning(f"Op report not posted guild_id={guild.id} member_id={member.id}")
         return f"{count} action(s) hors du bot ; le détail n'a pas pu être posté dans les logs."

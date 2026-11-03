@@ -8,15 +8,32 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from discord import AllowedMentions, AuditLogAction, HTTPException, TextChannel
+from discord import AllowedMentions, AuditLogAction, HTTPException, Permissions, TextChannel
 
 from fablabot.helpers import op_report
 
 GUILD_ID, MEMBER_ID, LOG_ID = 1, 2, 3
 
 
-def _entry(action: AuditLogAction, target: Any, *, added: tuple[Any, ...] = ()) -> SimpleNamespace:
-    return SimpleNamespace(action=action, target=target, after=SimpleNamespace(roles=list(added)), id=hash(action))
+def _entry(
+    action: AuditLogAction,
+    target: Any,
+    *,
+    added: tuple[Any, ...] = (),
+    before: dict[str, Any] | None = None,
+    after: dict[str, Any] | None = None,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        action=action,
+        target=target,
+        after=SimpleNamespace(roles=list(added)),
+        changes=SimpleNamespace(before=before or {}, after=after or {}),
+        id=hash(action),
+    )
+
+
+def _posted(server: Any) -> str:
+    return "\n".join(call.args[0] for call in server.log.send.await_args_list)
 
 
 class _Server:
@@ -79,7 +96,7 @@ async def test_a_long_op_is_cut_after_twenty_lines() -> None:
 
     await server.report()
 
-    text = server.log.send.await_args.args[0]
+    text = _posted(server)
     assert text.count("- rôle modifié") == 20
     assert "- … et 5 autres" in text
 
@@ -133,3 +150,54 @@ async def test_a_slow_audit_log_gives_up() -> None:
     server.guild.audit_logs = hang
     with patch.object(op_report, "_TIMEOUT", 0.01):
         assert "illisible" in await server.report()
+
+
+async def test_each_change_shows_before_and_after() -> None:
+    """A renamed channel, a permission turned on, roles given and taken, an invite: each says what changed."""
+    laser, admin = MagicMock(mention="<@&10>"), MagicMock(mention="<@&11>")
+    server = _Server(
+        [
+            _entry(
+                AuditLogAction.channel_update,
+                MagicMock(mention="<#9>"),
+                before={"name": "numérique"},
+                after={"name": "numerique"},
+            ),
+            _entry(
+                AuditLogAction.role_update,
+                MagicMock(mention="<@&12>"),
+                before={"permissions": Permissions(send_messages=True)},
+                after={"permissions": Permissions(send_messages=True, manage_messages=True)},
+            ),
+            _entry(
+                AuditLogAction.member_role_update,
+                MagicMock(mention="<@7>"),
+                before={"roles": [admin]},
+                after={"roles": [laser]},
+            ),
+            _entry(AuditLogAction.invite_create, SimpleNamespace(code="twdhxe7pt", id="twdhxe7pt"), after={"max_uses": 0}),
+        ]
+    )
+
+    await server.report()
+
+    text = _posted(server)
+    assert "  nom : `numérique` → `numerique`" in text
+    assert "  permissions : +manage_messages" in text
+    assert "  rôles : +<@&10> -<@&11>" in text
+    assert "- invitation créée : `twdhxe7pt`" in text
+    assert "  utilisations max : ∅ → `0`" in text
+
+
+async def test_a_long_report_is_split_under_discord_limit() -> None:
+    """Long values are cut, and the detail goes out in several messages rather than failing as one."""
+    server = _Server(
+        [_entry(AuditLogAction.channel_update, None, before={"topic": "a" * 500}, after={"topic": "b" * 500})] * 20
+    )
+
+    await server.report()
+
+    sent = [call.args[0] for call in server.log.send.await_args_list]
+    assert len(sent) > 1
+    assert all(len(message) <= 2000 for message in sent)
+    assert _posted(server).count("- salon modifié") == 20
