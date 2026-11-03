@@ -65,6 +65,8 @@ class AuditWatch(commands.Cog):
             bot (Fablabot): The bot instance.
         """
         self.bot = bot
+        # Read at start, so a malformed value is reported then and not at the first change.
+        logger.info(f"Accounts watched through {AUDIT_WATCH_ENV}: {len(watched_ids())}.")
 
     @commands.Cog.listener()
     async def on_audit_log_entry_create(self, entry: AuditLogEntry) -> None:

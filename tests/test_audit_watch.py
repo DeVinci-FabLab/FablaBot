@@ -36,7 +36,7 @@ def world() -> Any:
     bot.guild_access.is_served = MagicMock(return_value=True)
     with (
         patch.object(audit_watch, "watched_ids", return_value=frozenset({WATCHED})),
-        patch.object(audit_watch, "get_log_channel_id", return_value=LOG_ID),
+        patch.object(audit_watch, "get_log_channel_id", side_effect=lambda gid: LOG_ID if gid == GUILD_ID else None),
     ):
         yield SimpleNamespace(cog=AuditWatch(bot), guild=guild, log=log, bot=bot)
 
@@ -73,5 +73,18 @@ async def test_a_failed_post_is_logged_not_raised(world: SimpleNamespace, caplog
 def test_the_list_parses_ids_and_drops_the_rest(caplog: pytest.LogCaptureFixture) -> None:
     """Commas and spaces are fine; a name or a negative number is dropped without being echoed."""
     assert parse_watched_ids(" 1, 22 ,,secret-token,-3") == frozenset({1, 22})
+    assert "is not an account ID" in caplog.text
     assert "secret-token" not in caplog.text
     assert parse_watched_ids(None) == frozenset()
+
+
+async def test_another_server_never_posts_in_this_one(world: SimpleNamespace, caplog: pytest.LogCaptureFixture) -> None:
+    """The log channel is the entry's own server's: a server with none posts nowhere and says so in the log file."""
+    other = MagicMock(id=GUILD_ID + 1)
+    other.get_channel = MagicMock(side_effect=lambda cid: world.log if cid == LOG_ID else None)
+
+    await world.cog.on_audit_log_entry_create(_entry(WATCHED, other))
+
+    world.log.send.assert_not_awaited()
+    other.get_channel.assert_called_once_with(0)
+    assert f"Watched account acted with no log channel guild_id={GUILD_ID + 1} user_id={WATCHED}" in caplog.text

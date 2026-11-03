@@ -250,11 +250,15 @@ AUDIT_WATCH_USER_IDS=111111111111111111
 
 - Each change shows what was done, to what, and each changed field before and after, as in the op report (see
   "Temporary admin"). The post pings nobody.
-- The bot reads the audit log, so messages sent are not reported: only changes to the server, channels, roles,
-  members, invites, and messages deleted.
+- The bot reads the audit log, so messages sent are not reported, nor a member deleting their own message. Every
+  other entry is: the server, channels, roles, members, invites, webhooks, emojis, threads, events, AutoMod, and
+  messages deleted by someone else. Entries without a French label show Discord's name for them.
+- The watched account can still silence the alerts by deleting the log channel, taking View Audit Log from the
+  bot, or running `/log set` elsewhere. None of these is sure to be posted: look at the log channel from time to
+  time.
 - It needs the View Audit Log permission, already in the invite link. Without a log channel, the change stays in
   the log file only (`Watched account acted with no log channel`).
-- Servers outside `ALLOWED_GUILD_IDS` are ignored. A malformed ID is dropped with a warning at the first change.
+- Servers outside `ALLOWED_GUILD_IDS` are ignored. The count of watched accounts is logged at start, and a malformed ID is dropped with a warning then.
 
 ### Development bot
 
