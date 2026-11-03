@@ -45,6 +45,7 @@ from fablabot.helpers.constants import PARIS_TZ, ErrorMessages, staff_default_pe
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.safe_discord_operations import retract_unsaved_post
 from fablabot.helpers.utils import (
+    counted,
     ensure_command_context,
     get_members_by_role,
     is_valid_emoji,
@@ -350,7 +351,7 @@ class MessageManagement(commands.Cog):
 
             success_embed = Embed(
                 title="Suppression complétée",
-                description=f"{total_deleted} message(s) supprimé(s)",
+                description=counted(total_deleted, "message supprimé", "messages supprimés"),
                 color=0x51CF66,
             )
             success_embed.add_field(name="Utilisateur", value=user.mention, inline=True)
@@ -448,7 +449,7 @@ class MessageManagement(commands.Cog):
         )
         await interaction.response.send_message(
             f"Suivi démarré sur le message `{fetched.id}` dans {channel.mention}.\n"
-            f"{len(migrated_reactions)} réaction(s) importée(s) depuis le brouillon.",
+            f"{counted(len(migrated_reactions), 'réaction importée', 'réactions importées')} depuis le brouillon.",
         )
 
     @msg_group.command(
@@ -695,7 +696,8 @@ class MessageManagement(commands.Cog):
             f"Published message {msg.id} in guild {interaction.guild.id} with {len(updated_reactions)} reaction actions",
         )
         await interaction.response.send_message(
-            f"Message publié dans {channel.mention} (ID `{msg.id}`) avec {len(updated_reactions)} réaction(s) configurée(s).",
+            f"Message publié dans {channel.mention} (ID `{msg.id}`) avec "
+            f"{counted(len(updated_reactions), 'réaction configurée', 'réactions configurées')}.",
         )
 
     @msg_group.command(

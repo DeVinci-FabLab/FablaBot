@@ -297,7 +297,7 @@ _COMMUNICATION_SUGGESTION_CONFIG = SuggestionConfig(
     role_name=RoleNames.COMMUNICATION_MANAGER,
     channel_name="pole-communication",
     success_message="Suggestion envoyée au Pôle Communication. Merci !",
-    error_message="Aucun·e Respo Communication et aucun salon 'pole-communication'"
+    error_message="Aucun Respo Communication et aucun salon 'pole-communication'"
     " ne sont configurés pour recevoir les suggestions.",
 )
 
@@ -308,7 +308,7 @@ _EVENTS_SUGGESTION_CONFIG = SuggestionConfig(
     role_name=RoleNames.EVENTS_MANAGER,
     channel_name="pole-event",
     success_message="Suggestion envoyée au Pôle Event. Merci !",
-    error_message="Aucun·e Respo Event et aucun salon 'pole-event' ne sont configurés pour recevoir les suggestions.",
+    error_message="Aucun Respo Event et aucun salon 'pole-event' ne sont configurés pour recevoir les suggestions.",
 )
 
 _TRAINING_SUGGESTION_CONFIG = SuggestionConfig(
@@ -318,7 +318,7 @@ _TRAINING_SUGGESTION_CONFIG = SuggestionConfig(
     role_name=RoleNames.TRAININGS_MANAGER,
     channel_name="pole-formation",
     success_message="Suggestion envoyée au Pôle Formation. Merci !",
-    error_message="Aucun·e Respo Formation et aucun salon 'pole-formation' ne sont configurés pour recevoir les suggestions.",
+    error_message="Aucun Respo Formation et aucun salon 'pole-formation' ne sont configurés pour recevoir les suggestions.",
 )
 
 _IT_SUGGESTION_CONFIG = SuggestionConfig(
@@ -328,7 +328,7 @@ _IT_SUGGESTION_CONFIG = SuggestionConfig(
     role_name=RoleNames.DIGITAL_MANAGER,
     channel_name="pole-numerique",
     success_message="Suggestion envoyée au Pôle Numérique. Merci !",
-    error_message="Aucun·e Respo Numérique et aucun salon 'pole-numerique' ne sont configurés pour recevoir les suggestions.",
+    error_message="Aucun Respo Numérique et aucun salon 'pole-numerique' ne sont configurés pour recevoir les suggestions.",
 )
 
 _PARTNERSHIPS_SUGGESTION_CONFIG = SuggestionConfig(
@@ -338,8 +338,7 @@ _PARTNERSHIPS_SUGGESTION_CONFIG = SuggestionConfig(
     role_name=RoleNames.PARTNERSHIPS_MANAGER,
     channel_name="pole-partenariat",
     success_message="Suggestion envoyée au Pôle Partenariat. Merci !",
-    error_message="Aucun·e Respo Partenariat et aucun salon 'pole-partenariat'"
-    " ne sont configurés pour recevoir les suggestions.",
+    error_message="Aucun Respo Partenariat et aucun salon 'pole-partenariat' ne sont configurés pour recevoir les suggestions.",
 )
 
 _PROJECTS_SUGGESTION_CONFIG = SuggestionConfig(
@@ -349,7 +348,7 @@ _PROJECTS_SUGGESTION_CONFIG = SuggestionConfig(
     role_name=RoleNames.PROJECTS_MANAGER,
     channel_name=None,
     success_message="Suggestion envoyée au Pôle Projet. Merci !",
-    error_message="Aucun·e Respo Projet n'est configuré·e pour recevoir les suggestions.",
+    error_message="Aucun Respo Projet n'est configuré pour recevoir les suggestions.",
 )
 
 SUGGESTION_OPTIONS: dict[str, SuggestionConfig] = {

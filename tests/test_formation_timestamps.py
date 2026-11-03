@@ -70,7 +70,7 @@ def test_export_stays_plain_text() -> None:
     """The export has no Discord timestamp and keeps the registration date as words."""
     export = rendering.format_formation_export(_fm(WINTER))
     assert "<t:" not in export
-    assert "inscrit·e le vendredi 01/03 à 10h00" in export
+    assert "inscrit le vendredi 01/03 à 10h00" in export
 
 
 def test_export_waitlist_stays_plain_text() -> None:
@@ -78,7 +78,7 @@ def test_export_waitlist_stays_plain_text() -> None:
     waitlisted = [{"user_id": 8, "username": "bob", "ts_iso": "2030-03-02T11:15:00+01:00"}]
     export = rendering.format_formation_export(_fm(WINTER, waitlisted))
     assert "<t:" not in export
-    assert "inscrit·e le samedi 02/03 à 11h15 (en attente)" in export
+    assert "inscrit le samedi 02/03 à 11h15 (en attente)" in export
 
 
 def test_export_entry_without_date_reads_n_a() -> None:
@@ -86,8 +86,8 @@ def test_export_entry_without_date_reads_n_a() -> None:
     fm = _fm(WINTER, [{"user_id": 8, "username": "bob"}])
     fm.registered_users = [{"user_id": 7, "username": "ada"}]
     lines = rendering.format_formation_export(fm).split("\n")
-    assert lines[1].endswith("· inscrit·e le n/a")
-    assert lines[2].endswith("· inscrit·e le n/a (en attente)")
+    assert lines[1].endswith("· inscrit le n/a")
+    assert lines[2].endswith("· inscrit le n/a (en attente)")
 
 
 def test_export_numbers_the_waitlist_after_the_registered() -> None:

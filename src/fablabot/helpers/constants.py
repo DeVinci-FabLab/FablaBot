@@ -124,7 +124,7 @@ class ErrorMessages:
     ROLE_REMOVE_FAILED = "Impossible de retirer le rôle."
     """Failed to remove role from user."""
 
-    ROLE_NOT_FOUND = "Impossible de trouver le(s) rôle(s) {role_name} sur ce serveur."
+    ROLE_NOT_FOUND = "Rôle introuvable sur ce serveur : {role_name}."
     """Role not found on server."""
 
     ROLE_REQUIRED = (

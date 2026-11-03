@@ -11,7 +11,7 @@ from emoji import emojize
 
 from fablabot.helpers.constants import FORMATION_ROLES, MAX_TRACKED_OPTIONS, PARIS_TZ, ErrorMessages
 from fablabot.helpers.formation import Emojis, is_past, parse_date_time, render_formation, render_message
-from fablabot.helpers.utils import is_valid_emoji, log_request, right_check
+from fablabot.helpers.utils import counted, is_valid_emoji, log_request, right_check
 from fablabot.models.formation import FmCommand, FmMessageDraft, Formation
 
 if TYPE_CHECKING:
@@ -228,7 +228,10 @@ class EditTextModal(ui.Modal, title="Modifier le texte de l'annonce de formation
 
         await interaction.response.send_message(
             "Brouillon mis à jour.",
-            embed=Embed(title=f"Aperçu brouillon — {len(draft.fms)} formation(s)", description=content or "_(vide)_"),
+            embed=Embed(
+                title=f"Aperçu brouillon — {counted(len(draft.fms), 'formation', 'formations')}",
+                description=content or "_(vide)_",
+            ),
             ephemeral=True,
         )
 
@@ -311,7 +314,9 @@ class AddFmModal(ui.Modal, title="Ajouter une formation"):
         await interaction.response.send_message(
             "Formation ajoutée & brouillon mis à jour (trié). "
             "Utilise **/fm add** pour ajouter d'autres formations. **/fm preview** pour voir le rendu.",
-            embed=Embed(title=f"Aperçu brouillon — {len(fms)} formation(s)", description=preview or "_(vide)_"),
+            embed=Embed(
+                title=f"Aperçu brouillon — {counted(len(fms), 'formation', 'formations')}", description=preview or "_(vide)_"
+            ),
             ephemeral=True,
         )
 
@@ -442,7 +447,10 @@ class FormationSelectView(ui.View):
 
         await interaction.response.edit_message(
             content=f"Supprimé: {removed.emoji} {removed.name}",
-            embed=Embed(title=f"Aperçu brouillon — {len(draft.fms)} formation(s)", description=preview or "_(vide)_"),
+            embed=Embed(
+                title=f"Aperçu brouillon — {counted(len(draft.fms), 'formation', 'formations')}",
+                description=preview or "_(vide)_",
+            ),
             view=None,
         )
 
@@ -579,7 +587,7 @@ class _SelectTrainerView(ui.View):
         super().__init__(timeout=None)
         self.edit_formation_view = edit_formation_view
 
-    @ui.select(cls=ui.UserSelect, placeholder="Sélectionne lae formateur·ice", min_values=1, max_values=1)
+    @ui.select(cls=ui.UserSelect, placeholder="Sélectionne le formateur", min_values=1, max_values=1)
     async def select_trainer(self, interaction: Interaction, select: ui.UserSelect) -> None:
         """Called when a user is selected.
 
@@ -595,7 +603,7 @@ class _SelectTrainerView(ui.View):
         self.edit_formation_view.updated_formation.trainer_mention = selected_user.mention
 
         edit_trainer_button = self.edit_formation_view.get_button(EDIT_TRAINER_BUTTON_ID)
-        edit_trainer_button.label = f"Modifier lae formateur·ice : {selected_user.display_name}"
+        edit_trainer_button.label = f"Modifier le formateur : {selected_user.display_name}"
 
         await interaction.response.edit_message(
             content=f"Modification : {self.edit_formation_view.updated_formation.emoji}"
@@ -787,7 +795,7 @@ class _EditFormationView(ui.View):
         )
         await interaction.response.send_modal(_EditNameDescriptionModal(self))
 
-    @ui.button(label="Modifier lae formateur·ice", style=ButtonStyle.secondary, row=1, id=EDIT_TRAINER_BUTTON_ID)
+    @ui.button(label="Modifier le formateur", style=ButtonStyle.secondary, row=1, id=EDIT_TRAINER_BUTTON_ID)
     async def edit_trainer_button(self, interaction: Interaction, _button: ui.Button) -> None:
         """Button to open view for selecting trainer.
 
@@ -799,7 +807,7 @@ class _EditFormationView(ui.View):
             f"Edit trainer button clicked user={interaction.user} formation_index={self.formation_index} "
             f"name={self.updated_formation.name!r}",
         )
-        await interaction.response.edit_message(content="Sélectionne lae formateur·ice :", view=_SelectTrainerView(self))
+        await interaction.response.edit_message(content="Sélectionne le formateur :", view=_SelectTrainerView(self))
 
     @ui.button(label="Date & Heure", style=ButtonStyle.secondary, row=2)
     async def edit_datetime_button(self, interaction: Interaction, _button: ui.Button) -> None:
@@ -911,7 +919,9 @@ class _EditFormationView(ui.View):
         await interaction.response.edit_message(
             content=f"Mise à jour: {self.updated_formation.emoji} {self.updated_formation.name} (position {new_position}).",
             view=None,
-            embed=Embed(title=f"Aperçu brouillon — {len(fms)} formation(s)", description=preview or "_(vide)_"),
+            embed=Embed(
+                title=f"Aperçu brouillon — {counted(len(fms), 'formation', 'formations')}", description=preview or "_(vide)_"
+            ),
         )
 
     def get_button(self, button_id: int) -> ui.Button[_EditFormationView]:
