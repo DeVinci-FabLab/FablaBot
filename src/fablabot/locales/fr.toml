@@ -63,6 +63,7 @@ export = "liste les inscriptions et désinscriptions"
 
 [help.cmd.msg]
 start = "commence un brouillon"
+edit = "modifie le texte du brouillon"
 preview = "montre l’aperçu"
 publish = "publie et suit"
 follow = "suit un message envoyé"

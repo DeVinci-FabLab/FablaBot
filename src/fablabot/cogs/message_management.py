@@ -79,6 +79,7 @@ class MessageManagement(commands.Cog):
         - /msg unlink_reaction: Unlink an action linked to a reaction.
         - /msg list: List active trackings.
         - /msg stop: Stop tracking.
+        - /msg edit: Edit the draft's text, keeping its reactions.
         - /msg preview: Preview the current draft.
         - /msg publish: Publish the draft to a channel.
         - /msg export: Export reaction history of a tracked message.
@@ -385,6 +386,22 @@ class MessageManagement(commands.Cog):
             return
 
         await interaction.response.send_modal(mui.StartMessageModal(self))
+
+    @msg_group.command(name="edit", extras=access(_ACCESS), description="Modifier le texte du brouillon, réactions gardées.")
+    async def msg_edit(self, interaction: Interaction) -> None:
+        """Edit the draft's text in a form filled with it, keeping its reactions.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+        """
+        if not await ensure_command_context(logger, "msg.edit", interaction, required_roles=ALLOWED_ROLES):
+            return
+        assert interaction.guild is not None
+        draft = self.get_draft(interaction.guild.id)
+        if draft is None:
+            await interaction.response.send_message("Aucun brouillon : commence-le avec `/msg start`.", ephemeral=True)
+            return
+        await interaction.response.send_modal(mui.EditMessageModal(self, draft.content))
 
     @msg_group.command(name="follow", description="Démarrer le suivi sur un message déjà envoyé.", extras=access(_ACCESS))
     @app_commands.describe(

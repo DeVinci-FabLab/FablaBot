@@ -57,10 +57,10 @@ PROFILES = {
     "trainer-with-F-roles": Profile((RoleNames.TRAININGS_MANAGER,), Permissions.none(), 13, f_roles=True),
     "temp-admin": Profile((RoleNames.ADMIN_TEMP,), Permissions.none(), 9),
     "codir": Profile((RoleNames.CODIR,), Permissions.none(), 9),
-    "bureau": Profile((RoleNames.BUREAU,), Permissions.none(), 16),
+    "bureau": Profile((RoleNames.BUREAU,), Permissions.none(), 17),
     "digital-manager": Profile((RoleNames.DIGITAL_MANAGER,), Permissions.none(), 7),
-    "admin-no-permission": Profile((RoleNames.ADMIN,), Permissions.none(), 36),
-    "admin-bureau-administrator": Profile((RoleNames.BUREAU, RoleNames.ADMIN), Permissions.all(), 39),
+    "admin-no-permission": Profile((RoleNames.ADMIN,), Permissions.none(), 37),
+    "admin-bureau-administrator": Profile((RoleNames.BUREAU, RoleNames.ADMIN), Permissions.all(), 40),
     "manage-messages-only": Profile((), Permissions(manage_messages=True), 1),
 }
 

@@ -31,6 +31,7 @@ DOMAINS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
         "msg",
         (
             "start",
+            "edit",
             "preview",
             "publish",
             "follow",

@@ -233,6 +233,58 @@ class StartMessageModal(ui.Modal, title="Préparer un message"):
         )
 
 
+class EditMessageModal(ui.Modal, title="Modifier le brouillon"):
+    """Modal to change the text of the draft, filled with it, keeping its reactions.
+
+    Attributes:
+        content_input (ui.TextInput): Input field for the message content.
+    """
+
+    interaction_check = right_check(logger, "msg.edit", MESSAGE_ROLES)
+
+    content_input: ui.TextInput = ui.TextInput(
+        label="Contenu du message",
+        style=TextStyle.long,
+        required=True,
+        max_length=2000,
+    )
+
+    def __init__(self, cog: MessageManagement, opened_on: str) -> None:
+        """Initialize the modal with the draft's text.
+
+        Args:
+            cog (MessageManagement): MessageManagement cog instance.
+            opened_on (str): The draft's text when the form opened.
+        """
+        super().__init__()
+        self.cog = cog
+        self.opened_on = opened_on
+        self.content_input.default = opened_on
+
+    async def on_submit(self, interaction: Interaction) -> None:
+        """Save the new text over the draft, unless the draft changed while the form was open.
+
+        Args:
+            interaction (Interaction): The interaction context.
+        """
+        assert interaction.guild is not None
+        draft = self.cog.get_draft(interaction.guild.id)
+        if draft is None or draft.content != self.opened_on:
+            # Someone else started or edited the draft meanwhile: saving would erase their text.
+            await interaction.response.send_message(
+                "Le brouillon a changé pendant ta modification : relance `/msg edit`.", ephemeral=True
+            )
+            return
+        draft = MessageDraft(content=self.content_input.value.strip(), reactions=draft.reactions)
+        self.cog.set_draft(interaction.guild.id, draft)
+        logger.info(f"EditMessageModal submitted guild_id={interaction.guild.id}")
+        await interaction.response.send_message(
+            "Brouillon modifié, réactions gardées. `/msg preview` pour le voir.",
+            embed=Embed(title="Aperçu brouillon", description=draft.content or "_(vide)_"),
+            ephemeral=True,
+        )
+
+
 # region ====== UI Components for Linking Reactions ======
 
 

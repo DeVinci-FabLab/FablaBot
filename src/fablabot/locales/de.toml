@@ -62,6 +62,7 @@ export = "listet An- und Abmeldungen auf"
 
 [help.cmd.msg]
 start = "beginnt einen Entwurf"
+edit = "ändert den Text des Entwurfs"
 preview = "zeigt die Vorschau"
 publish = "veröffentlicht und verfolgt"
 follow = "verfolgt eine bereits gesendete Nachricht"
