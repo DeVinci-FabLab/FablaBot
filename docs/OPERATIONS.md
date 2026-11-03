@@ -71,7 +71,7 @@ The image runs as `10001:10001`; the volumes and the token file must belong to t
 | `ALLOWED_GUILD_IDS` | Server IDs the bot may serve, comma-separated, no quotes. Each ID can carry a name after a colon, `111111111111111111:Main server`: the bot ignores it, and it cannot hold a comma. A server outside the list gets nothing from the bot: its commands are refused, and its messages, reactions, joins, voice changes and reminders are ignored. A temporary admin right still ends on time there. |
 | `OPERATOR_LOG_CHANNEL_ID` | Optional. Channel receiving errors that belong to no server. Pick a channel only the bot's administrators can read: those errors come from every server's tasks. |
 | `DEV_GUILD_ID` | Optional, development bot only. Syncs the commands to this one server and leaves global commands alone. Never set on the production bot. |
-| `data/` volume | The database `data/fablabot.db` (see "Stored data"), its copies in `data/backups/`, and the fingerprint of the last command sync (`data/command_sync_state.json`; delete it to force a sync). |
+| `data/` volume | The database `data/fablabot.db` (see "Stored data"), its copies in `data/backups/`, the release that last opened it (`data/fablabot.release`), and the fingerprint of the last command sync (`data/command_sync_state.json`; delete it to force a sync). |
 | `logs/` volume | `logs/<date>.log` (every line, never sent) and `logs/guilds/<server ID>/<date>.log` (one server's lines). |
 
 ### Before every redeploy
@@ -121,7 +121,7 @@ is a decision for the association (GDPR), not for the bot.
 ### Releasing and redeploying
 
 1. Archive `logs/` and `data/`, as in "Before every redeploy": do it before the merge, since the release can
-   deploy itself.
+   deploy itself. The bot also copies the database to `data/backups/` at its first start on the new release.
 2. Merge the release pull request `chore(main): release X.Y.Z`.
 3. Wait for the "Build and Push Docker Image" run to finish green: `:latest` is then `:X.Y.Z`.
 4. Read the running revision. If it is still the old one, redeploy the stack in Komodo, or wait for the update.
@@ -541,8 +541,13 @@ step that keeps only anonymous statistics after 3 years.
 
 - The file is one database at rest: no `-wal` or `-shm` file. A `data/fablabot.db-journal` file only exists while a write is
   in progress, or after a crash, and the next start finishes the recovery from it. Never delete it.
-- When a release changes the schema, the bot first copies the database to `data/backups/`, then moves the schema at start.
-  It never removes these copies, and they count in the archive of "Before every redeploy".
+- At the first start of another release, the bot copies the database to `data/backups/fablabot-<previous release>-<time>.db`
+  before anything else. `data/fablabot.release` names the release that last opened it; without that file, the copy is
+  named `unknown`. A rollback to an older release is copied the same way.
+- When a release changes the schema, the bot also copies the database to `data/backups/fablabot-v<schema>-<time>.db`, then
+  moves the schema at start.
+- The bot never removes these copies, and they count in the archive of "Before every redeploy". They sit on the same
+  volume as the database, so they do not replace that archive if the volume is lost.
 - A release never goes back: a database from a newer release stops an older one.
 - JSON state files left by an older release (`guild_config.json`, `formations_state.json`, `messages_state.json`,
   `temp_admin_state.json`) stop the bot until they are imported (see "Moving to the database"). The bot never reads,

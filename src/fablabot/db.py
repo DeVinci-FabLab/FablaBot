@@ -5,8 +5,10 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import UTC, datetime
 import hashlib
+from importlib.metadata import PackageNotFoundError, version
 import logging
 from pathlib import Path
+import re
 import sqlite3
 from typing import TYPE_CHECKING, Final
 
@@ -75,24 +77,24 @@ def _configure(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA temp_store = MEMORY")
 
 
-def _backup(conn: sqlite3.Connection, path: Path, version: int) -> None:
-    """Copy the database next to it before its schema changes; copies are never removed.
+def _backup(conn: sqlite3.Connection, path: Path, label: str) -> None:
+    """Copy the database next to it before a change of schema or of release; copies are never removed.
 
     A failed upgrade restarts in a loop, so a copy newer than the database stands for it: one copy per data.
 
     Args:
         conn (sqlite3.Connection): The open connection.
         path (Path): The database file.
-        version (int): The schema version being left.
+        label (str): What is being left: ``v<schema version>`` or the release that last opened the file.
     """
     folder = path.parent / "backups"
     folder.mkdir(parents=True, exist_ok=True)
     changed = path.stat().st_mtime_ns
-    if any(copy.stat().st_mtime_ns >= changed for copy in folder.glob(f"{path.stem}-v{version}-*.db")):
+    if any(copy.stat().st_mtime_ns >= changed for copy in folder.glob(f"{path.stem}-{label}-*.db")):
         return
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
-    target = folder / f"{path.stem}-v{version}-{stamp}.db"
-    partial = folder / f"{path.stem}-v{version}.partial"
+    target = folder / f"{path.stem}-{label}-{stamp}.db"
+    partial = folder / f"{path.stem}-{label}.partial"
     partial.unlink(missing_ok=True)
     try:
         _copy_to(conn, partial)
@@ -129,7 +131,7 @@ def _migrate(conn: sqlite3.Connection, path: Path, migrations: Path) -> None:
         msg = f"{path.as_posix()} is at schema version {current}, newer than this release ({latest}): run a newer image."
         raise StorageError(msg)
     if 0 < current < latest:
-        _backup(conn, path, current)
+        _backup(conn, path, f"v{current}")
     # Off while files run: a table rebuild drops the old table, which would cascade into its children.
     # The pragma does nothing inside a transaction, so it is set here, and each file is checked instead.
     conn.execute("PRAGMA foreign_keys = OFF")
@@ -177,6 +179,33 @@ def _apply(conn: sqlite3.Connection, path: Path, file: Path, number: int) -> Non
             conn.execute("ROLLBACK")
         raise
     logger.info(f"Database schema moved to version {number} ({file.name}).")
+
+
+def _release() -> str:
+    """Return the release of the running code, ``unknown`` outside an installed package."""
+    try:
+        return version("fablabot")
+    except PackageNotFoundError:
+        return "unknown"
+
+
+def _release_file(path: Path) -> Path:
+    """Return the file naming the release that last opened the database."""
+    return path.with_suffix(".release")
+
+
+def _backup_on_release_change(conn: sqlite3.Connection, path: Path) -> None:
+    """Copy a database that another release opened last, or one whose last release is not known.
+
+    Args:
+        conn (sqlite3.Connection): The open connection, on a file that existed before this start.
+        path (Path): The database file.
+    """
+    marker = _release_file(path)
+    last = marker.read_text(encoding="utf-8").strip() if marker.exists() else ""
+    if last != _release():
+        # The name goes into a file name: anything but a version reads as unknown.
+        _backup(conn, path, last if re.fullmatch(r"[0-9A-Za-z.+-]+", last) else "unknown")
 
 
 def _not_imported(files: list[Path], path: Path) -> StorageError:
@@ -256,7 +285,7 @@ def _state_files(path: Path) -> list[Path]:
 
 
 def open_database(path: Path = DATABASE_FILE, *, migrations: Path = MIGRATIONS_DIR, gate: bool = True) -> None:
-    """Open the database, creating it when missing, and bring its schema up to date.
+    """Open the database, creating it when missing, copy it when another release opened it last, and move its schema.
 
     JSON state left by an older release must have been imported first: the bot never starts over
     it, and a refused start creates and changes nothing.
@@ -274,12 +303,16 @@ def open_database(path: Path = DATABASE_FILE, *, migrations: Path = MIGRATIONS_D
     conn: sqlite3.Connection | None = None
     try:
         state_files = _state_files(path) if gate else []
+        existed = path.exists()
         path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(path, autocommit=True)
         _configure(conn)
         _check_imported(conn, path, state_files)
+        if existed:
+            _backup_on_release_change(conn, path)
         _migrate(conn, path, migrations)
         _check_writable(conn)
+        _release_file(path).write_text(_release(), encoding="utf-8")
     except (sqlite3.DatabaseError, OSError) as error:
         if conn is not None:
             conn.close()

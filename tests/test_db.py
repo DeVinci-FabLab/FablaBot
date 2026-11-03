@@ -65,7 +65,7 @@ def test_no_journal_is_left_at_rest() -> None:
     with db.transaction() as conn:
         conn.execute("INSERT INTO guild_settings (guild_id) VALUES (1)")
 
-    assert [path.name for path in DB_FILE.parent.iterdir()] == [DB_FILE.name]
+    assert sorted(path.name for path in DB_FILE.parent.iterdir()) == ["test.db", "test.release"]
 
 
 def test_a_transaction_commits_as_a_whole() -> None:
@@ -335,7 +335,7 @@ def test_the_start_leaves_no_journal_and_no_open_transaction() -> None:
     db.open_database(DB_FILE)
 
     assert not db.connection().in_transaction
-    assert [path.name for path in DB_FILE.parent.iterdir()] == [DB_FILE.name]
+    assert sorted(path.name for path in DB_FILE.parent.iterdir()) == ["test.db", "test.release"]
 
 
 def test_an_upgrade_copies_the_database_first(tmp_path: Path) -> None:
@@ -563,3 +563,47 @@ def test_main_stops_before_login_when_the_database_cannot_be_used(fablabot_main:
         fablabot_main.main()
 
     assert str(stopped.value).startswith("Cannot start: data/fablabot.db cannot be used")
+
+
+def _open_as(release: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Open the database as the given release would, then close it."""
+    monkeypatch.setattr(db, "_release", lambda: release)
+    db.open_database(DB_FILE)
+    db.close_database()
+
+
+def test_a_new_release_copies_the_database_of_the_previous_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A database last opened by another release is copied under that release's name, once, and the new one is noted."""
+    _open_as("0.7.0", monkeypatch)
+    with sqlite3.connect(DB_FILE) as conn:
+        conn.execute("INSERT INTO op_expiry VALUES (1, 2, '2026-11-03T10:00:00+00:00', 3)")
+    conn.close()
+
+    _open_as("0.7.1", monkeypatch)
+    _open_as("0.7.1", monkeypatch)
+
+    [copy] = DB_FILE.parent.glob("backups/test-*.db")
+    assert copy.name.startswith("test-0.7.0-")
+    kept = sqlite3.connect(copy)
+    assert kept.execute("SELECT COUNT(*) FROM op_expiry").fetchone()[0] == 1
+    kept.close()
+    assert (DB_FILE.parent / "test.release").read_text(encoding="utf-8") == "0.7.1"
+
+
+def test_a_new_database_or_the_same_release_is_not_copied(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nothing to keep on a first start, nor when the release did not change."""
+    _open_as("0.7.0", monkeypatch)
+    _open_as("0.7.0", monkeypatch)
+
+    assert list(DB_FILE.parent.glob("backups/*")) == []
+
+
+def test_a_database_with_no_known_release_is_copied(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A database from before the release file, or with an odd one, is copied as unknown."""
+    _open_as("0.7.0", monkeypatch)
+    (DB_FILE.parent / "test.release").write_text("../../x", encoding="utf-8")
+
+    _open_as("0.7.1", monkeypatch)
+
+    [copy] = DB_FILE.parent.glob("backups/test-*.db")
+    assert copy.name.startswith("test-unknown-")
