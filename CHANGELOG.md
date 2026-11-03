@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.10.0...v0.11.0) (2026-11-03)
+
+
+### Features
+
+* **log:** post every change of a watched account in the log channel ([#156](https://github.com/DeVinci-FabLab/FablaBot/issues/156)) ([b45ec21](https://github.com/DeVinci-FabLab/FablaBot/commit/b45ec218db7d1b4c066c35f76b1299fd4fb2ef6c))
+
 ## [0.10.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.9.0...v0.10.0) (2026-11-03)
 
 
