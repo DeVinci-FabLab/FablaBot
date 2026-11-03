@@ -1,5 +1,6 @@
 """Initialization module for the fablabot.cogs package."""
 
+from fablabot.cogs.audit_watch import AuditWatch
 from fablabot.cogs.channel_management import ChannelManagement
 from fablabot.cogs.formation_management import FormationManagement
 from fablabot.cogs.guild_access import GuildAccess
@@ -10,6 +11,7 @@ from fablabot.cogs.user_management import UserManagement
 from fablabot.cogs.welcome_management import WelcomeManagement
 
 __all__ = [
+    "AuditWatch",
     "ChannelManagement",
     "FormationManagement",
     "GuildAccess",

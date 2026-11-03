@@ -159,7 +159,7 @@ def _fit(block: str) -> str:
     return "\n".join([*lines, "  …"]) if lines != block.split("\n") else block
 
 
-def _messages(header: str, blocks: list[str]) -> list[str]:
+def split_messages(header: str, blocks: list[str]) -> list[str]:
     """Pack the header and the blocks into as few messages as Discord's length limit allows."""
     messages = [header]
     for block in map(_fit, blocks):
@@ -222,7 +222,7 @@ async def _report(guild: Guild, member: Member, admin_role: Role) -> str:
         logger.warning(f"No log channel for an op report guild_id={guild.id} member_id={member.id}")
         return f"{done.capitalize()} ; aucun salon de logs pour le détail (`/log set`)."
     try:
-        for message in _messages(f"Op de {member.mention} terminé : {done}, dans l'ordre.", blocks):
+        for message in split_messages(f"Op de {member.mention} terminé : {done}, dans l'ordre.", blocks):
             await channel.send(message, allowed_mentions=AllowedMentions.none())
     except HTTPException:
         logger.warning(f"Op report not posted guild_id={guild.id} member_id={member.id}")
