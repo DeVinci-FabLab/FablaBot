@@ -44,7 +44,7 @@ DOMAINS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
             "dm",
         ),
     ),
-    ("user", ("op", "deop", "add_role", "remove_role", "add_roles", "remove_roles", "with_roles")),
+    ("user", ("op", "deop", "add_role", "remove_role", "add_roles", "remove_roles", "with_roles", "invite")),
     ("welcome", ("verify", "approve")),
     ("log", ("set", "export")),
     (EVERYONE_DOMAIN, ("suggest", HELP_COMMAND)),

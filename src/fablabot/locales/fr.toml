@@ -83,6 +83,7 @@ remove_role = "retire un rôle"
 add_roles = "donne un rôle à plusieurs"
 remove_roles = "retire un rôle à plusieurs"
 with_roles = "qui a ces rôles"
+invite = "créer une invitation au serveur"
 
 [help.cmd.welcome]
 verify = "allume ou coupe l’accueil"

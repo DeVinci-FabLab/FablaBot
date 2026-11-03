@@ -82,6 +82,7 @@ remove_role = "entzieht eine Rolle"
 add_roles = "gibt mehreren eine Rolle"
 remove_roles = "entzieht mehreren eine Rolle"
 with_roles = "wer diese Rollen hat"
+invite = "eine Einladung zum Server erstellen"
 
 [help.cmd.welcome]
 verify = "schaltet die Begrüßung ein oder aus"

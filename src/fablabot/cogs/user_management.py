@@ -12,7 +12,19 @@ import sqlite3
 from typing import TYPE_CHECKING, Literal, override
 from warnings import deprecated
 
-from discord import Guild, HTTPException, Interaction, Member, NotFound, Role, User, app_commands
+from discord import (
+    Forbidden,
+    Guild,
+    HTTPException,
+    Interaction,
+    Member,
+    NotFound,
+    Role,
+    TextChannel,
+    User,
+    VoiceChannel,
+    app_commands,
+)
 from discord.abc import Messageable
 from discord.ext import commands, tasks
 from discord.utils import get
@@ -51,6 +63,17 @@ _ROLE_NOT_BELOW_REFUSED = (
     "Ce rôle est au même rang que votre rôle le plus haut, ou au-dessus : "
     "demandez à un membre dont le rôle le plus haut est au-dessus de celui-ci."
 )
+_INVITE_REFUSED = "Vous n'avez pas la permission de créer une invitation vers ce salon."
+_INVITE_FORBIDDEN = "Le bot ne peut pas créer d'invitation vers ce salon : donnez-lui la permission Créer une invitation."
+_INVITE_DURATIONS = {
+    1800: "30 minutes",
+    3600: "1 heure",
+    6 * 3600: "6 heures",
+    12 * 3600: "12 heures",
+    86400: "1 jour",
+    7 * 86400: "7 jours",
+    0: "sans expiration",
+}
 _ADD_REFUSALS = {
     RefusalKind.MISSING_RIGHT: ErrorMessages.NO_PERMISSION_ADD_ROLE,
     RefusalKind.ROLE_NOT_BELOW: _ROLE_NOT_BELOW_REFUSED,
@@ -122,6 +145,7 @@ _DEOP_ACCESS = Check(lambda c: RoleNames.ADMIN_TEMP in c.server_roles and can_op
 _GIVE_ACCESS = Check(lambda c: any(role_refusal(c.roles, r, action="add") is None for r in c.server_roles))
 _TAKE_ACCESS = Check(lambda c: any(role_refusal(c.roles, r, action="remove") is None for r in c.server_roles))
 _WITH_ROLES_ACCESS = AnyRole(_WITH_ROLES_ALLOWED)
+_INVITE_ACCESS = AnyRole(ADMIN_ROLES)
 
 
 def _utcnow() -> datetime:
@@ -152,6 +176,7 @@ class UserManagement(commands.Cog):
         - /user add_roles: Add a role to multiple users via a selector.
         - /user remove_roles: Remove a role from multiple users via a selector.
         - /user with_roles: Get members with specific roles.
+        - /user invite: Create an invite to the server.
 
     Attributes:
         user_group (app_commands.Group): Command group for user management commands.
@@ -485,6 +510,81 @@ class UserManagement(commands.Cog):
         await interaction.response.send_message(
             "Sélectionnez les rôles que vous recherchez puis cliquez sur **Confirmer**.",
             view=view,
+            ephemeral=True,
+        )
+
+    @user_group.command(
+        name="invite",
+        description="Crée une invitation au serveur.",
+        extras=access(_INVITE_ACCESS),
+    )
+    @app_commands.describe(
+        channel="Le salon où arrive le nouveau membre",
+        duration="Durée de validité (7 jours par défaut)",
+        uses="Nombre d'utilisations, 0 pour illimité (par défaut)",
+        temporary="Exclure le membre à sa déconnexion s'il n'a reçu aucun rôle (non par défaut)",
+    )
+    @app_commands.choices(
+        duration=[app_commands.Choice(name=name, value=seconds) for seconds, name in _INVITE_DURATIONS.items()]
+    )
+    async def user_invite(
+        self,
+        interaction: Interaction,
+        *,
+        channel: TextChannel | VoiceChannel,
+        duration: int = 7 * 86400,
+        uses: app_commands.Range[int, 0, 100] = 0,
+        temporary: bool = False,
+    ) -> None:
+        """Create a fresh invite to the server.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            channel (TextChannel | VoiceChannel): The channel the invite opens on.
+            duration (int, optional): Seconds the invite lasts, 0 for never. Defaults to 7 days.
+            uses (app_commands.Range[int, 0, 100], optional): Uses allowed, 0 for no limit. Defaults to 0.
+            temporary (bool, optional): Whether members who join get kicked when they leave without a role.
+        """
+        if not await ensure_command_context(
+            logger,
+            "user.invite",
+            interaction,
+            log_details={"channel_id": channel.id, "duration": duration, "uses": uses, "temporary": temporary},
+            required_roles=ADMIN_ROLES,
+        ):
+            return
+        assert isinstance(interaction.user, Member)
+        # The bot never opens a door its caller could not open in Discord itself.
+        if not channel.permissions_for(interaction.user).create_instant_invite:
+            await self._refuse(interaction, "user.invite", RefusalKind.MISSING_RIGHT, _INVITE_REFUSED)
+            return
+        # discord.py retries a 5xx for 16 s, past Discord's 3 s to answer; private, or the link would go public.
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            invite = await channel.create_invite(
+                max_age=duration,
+                max_uses=uses,
+                temporary=temporary,
+                unique=True,
+                reason=f"With invite command by {interaction.user}",
+            )
+        except Forbidden:
+            logger.exception(f"Forbidden to create an invite channel_id={channel.id}")
+            await interaction.followup.send(_INVITE_FORBIDDEN, ephemeral=True)
+            return
+        except HTTPException:
+            logger.exception(f"HTTP error while creating an invite channel_id={channel.id}")
+            await interaction.followup.send(
+                ErrorMessages.HTTP_ERROR.format(operation="la création de l'invitation"), ephemeral=True
+            )
+            return
+
+        logger.info(f"Created invite channel_id={channel.id} duration={duration} uses={uses} temporary={temporary}")
+        limits = f"{_INVITE_DURATIONS.get(duration, f'{duration} s')}, " + (
+            f"{uses} utilisation{'s' if uses > 1 else ''}" if uses else "utilisations illimitées"
+        )
+        await interaction.followup.send(
+            f"Invitation vers {channel.mention} ({limits}{', membre temporaire' if temporary else ''}) : {invite.url}",
             ephemeral=True,
         )
 

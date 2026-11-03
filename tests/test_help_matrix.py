@@ -59,8 +59,8 @@ PROFILES = {
     "codir": Profile((RoleNames.CODIR,), Permissions.none(), 9),
     "bureau": Profile((RoleNames.BUREAU,), Permissions.none(), 16),
     "digital-manager": Profile((RoleNames.DIGITAL_MANAGER,), Permissions.none(), 7),
-    "admin-no-permission": Profile((RoleNames.ADMIN,), Permissions.none(), 35),
-    "admin-bureau-administrator": Profile((RoleNames.BUREAU, RoleNames.ADMIN), Permissions.all(), 38),
+    "admin-no-permission": Profile((RoleNames.ADMIN,), Permissions.none(), 36),
+    "admin-bureau-administrator": Profile((RoleNames.BUREAU, RoleNames.ADMIN), Permissions.all(), 39),
     "manage-messages-only": Profile((), Permissions(manage_messages=True), 1),
 }
 
