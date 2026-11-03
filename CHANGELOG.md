@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.7.0...v0.8.0) (2026-11-03)
+
+
+### Features
+
+* **db:** copy the database when another release opens it ([#150](https://github.com/DeVinci-FabLab/FablaBot/issues/150)) ([1c69598](https://github.com/DeVinci-FabLab/FablaBot/commit/1c6959854beb99e1bd3cc5ed62b60de1ffde356d))
+
 ## [0.7.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.6.2...v0.7.0) (2026-11-03)
 
 
