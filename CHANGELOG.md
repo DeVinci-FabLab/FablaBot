@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.8.0...v0.9.0) (2026-11-03)
+
+
+### Features
+
+* **user:** report what an op did outside the bot when it ends ([#152](https://github.com/DeVinci-FabLab/FablaBot/issues/152)) ([6ad7f28](https://github.com/DeVinci-FabLab/FablaBot/commit/6ad7f2810e368d0aefd44b694b13ed973d1f9991))
+
 ## [0.8.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.7.0...v0.8.0) (2026-11-03)
 
 
