@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.9.0...v0.10.0) (2026-11-03)
+
+
+### Features
+
+* **user:** show each change before and after in the op report ([#154](https://github.com/DeVinci-FabLab/FablaBot/issues/154)) ([5110835](https://github.com/DeVinci-FabLab/FablaBot/commit/51108357abade1378584d5f44d8732b57b81854f))
+
 ## [0.9.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.8.0...v0.9.0) (2026-11-03)
 
 
