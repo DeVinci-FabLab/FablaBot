@@ -94,8 +94,8 @@ In the tables below, "admin roles" means Administrateur, Président, Vice-Prési
   only the commands that name `Admin -temp-`, today `/fm`. It needs the `Admin -temp-` and `CoDir` roles on the
   server.
 - `/user invite` creates a new invite to a channel and shows it to you alone. It lasts 7 days and has no use
-  limit unless you pick otherwise; with `temporary`, Discord kicks a newcomer who disconnects before getting a role. You need
-  Discord's Create Invite permission on that channel, and so does the bot.
+  limit unless you pick otherwise. With `temporary`, Discord kicks a newcomer who disconnects before getting a
+  role. You need Discord's Create Invite permission on that channel, and so does the bot.
 - `/user add_role` never gives a role to oneself. `Admin -temp-` is given only by `/user op`, and nobody
   gives `Administrateur`.
 - Whoever gives or takes a role holds a role that sits strictly above it in the server's role list; the server
