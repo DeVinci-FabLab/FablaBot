@@ -425,7 +425,7 @@ A per-server language setting in the bot is planned and not available yet. The t
 
 ## Temporary admin
 
-`/user op` gives the `Admin -temp-` role for a limited time (5 minutes by default); `/user deop` removes it
+`/user op` gives the `Admin -temp-` role to the caller, or to the member named, for 1 to 5 minutes (5 by default); `/user deop` removes it
 early. The expiry is recorded in the database.
 
 The expiry and the timer are set before the role is given. If the database refuses the expiry, the role is not

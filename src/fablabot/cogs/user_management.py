@@ -43,7 +43,6 @@ logger = logging.getLogger(__name__)
 EXPIRY_RETRY_DELAY = timedelta(seconds=60)
 
 _OP_NOT_RECORDED = "La durée n'a pas pu être enregistrée : aucun droit n'a été donné ni prolongé. Réessaie plus tard."
-_SELF_OP_REFUSED = "Vous ne pouvez pas vous op vous-même : un autre membre du staff doit le faire."
 _TEMP_ROLE_REFUSED = f"Le rôle {RoleNames.ADMIN_TEMP} se donne uniquement avec `/user op`, qui fixe sa durée."
 _TEMP_ROLE_TAKE_REFUSED = f"Le rôle {RoleNames.ADMIN_TEMP} se retire uniquement avec `/user deop`."
 _SELF_ADD_REFUSED = "Vous ne pouvez pas vous donner un rôle vous-même : un autre membre du staff doit le faire."
@@ -145,7 +144,7 @@ class UserManagement(commands.Cog):
     """Cog to register user management commands.
 
     Commands:
-        - /user op: Grant temporary admin privileges to a user.
+        - /user op: Grant temporary admin privileges to oneself or another member.
         - /user deop: Revoke temporary admin privileges from a user.
         - /user add_role: Add a role to a single user.
         - /user remove_role: Remove a role from a single user.
@@ -175,30 +174,32 @@ class UserManagement(commands.Cog):
     )
 
     @user_group.command(
-        name="op", description="Donne des droits admin temporaires à un utilisateur.", extras=access(_OP_ACCESS)
+        name="op", description="Donne des droits admin temporaires, à vous ou à un autre membre.", extras=access(_OP_ACCESS)
     )
     @app_commands.describe(
-        member="L'utilisateur cible",
         reason="Raison de l'attribution",
-        time="Durée en minutes (par défaut 5)",
+        member="Le membre à op (vous-même par défaut)",
+        time="Durée en minutes, de 1 à 5 (par défaut 5)",
     )
     async def user_op(
         self,
         interaction: Interaction,
         *,
-        member: Member,
         reason: str,
-        time: app_commands.Range[int, 1, 90] = 5,
+        member: Member | None = None,
+        time: app_commands.Range[int, 1, 5] = 5,
     ) -> None:
-        """Grant temporary admin privileges to a user.
+        """Grant temporary admin privileges to the caller or to another member.
 
         Args:
             interaction (Interaction): The Discord interaction context.
-            member (Member): The user to give privileges to.
             reason (str): The reason for granting privileges.
-            time (app_commands.Range[int, 1, 90], optional):
+            member (Member | None, optional): The member to give privileges to. Defaults to the caller.
+            time (app_commands.Range[int, 1, 5], optional):
                 The duration in minutes for which privileges are granted. Defaults to 5.
         """
+        assert isinstance(interaction.user, Member)  # the group is synced to servers only
+        member = member or interaction.user
         if not await ensure_command_context(
             logger,
             "user.op",
@@ -217,12 +218,8 @@ class UserManagement(commands.Cog):
                 ephemeral=True,
             )
             return
-        assert isinstance(interaction.user, Member)
         if not can_op(_role_names(interaction.user)):
             await self._refuse(interaction, "user.op", RefusalKind.MISSING_RIGHT, ErrorMessages.INSUFFICIENT_PERMISSIONS)
-            return
-        if member.id == interaction.user.id:
-            await self._refuse(interaction, "user.op", RefusalKind.SELF_TARGET, _SELF_OP_REFUSED)
             return
 
         # Record and timer first: the role is never given without its end, and a role that lands although Discord

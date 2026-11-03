@@ -89,8 +89,9 @@ In the tables below, "admin roles" means Administrateur, Président, Vice-Prési
 | `/user remove_roles` | Take a role from several members | Depends on the role, see below |
 | `/user with_roles` | List who has these roles | Admin roles, Bureau |
 
-- `/user op` lasts 5 minutes by default and 90 at most. It opens only the commands that name `Admin -temp-`,
-  today `/fm`. Nobody can op themselves. It needs the `Admin -temp-` and `CoDir` roles on the server.
+- `/user op` ops you; name a `member` to op someone else. It lasts 1 to 5 minutes, 5 by default. It opens
+  only the commands that name `Admin -temp-`, today `/fm`. It needs the `Admin -temp-` and `CoDir` roles on the
+  server.
 - `/user add_role` never gives a role to oneself. `Admin -temp-` is given only by `/user op`, and nobody
   gives `Administrateur`.
 - Whoever gives or takes a role holds a role that sits strictly above it in the server's role list; the server

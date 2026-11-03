@@ -167,14 +167,22 @@ async def test_add_role_to_self_is_refused(cog: UserManagement, caplog: pytest.L
     assert any("kind=self_target" in line for line in _refusal_lines(caplog))
 
 
-async def test_op_self_is_refused_even_for_digital_manager(cog: UserManagement) -> None:
-    """Opping oneself is refused even for a digital manager."""
+async def test_op_without_member_ops_the_caller(cog: UserManagement) -> None:
+    """With no member given, the caller ops themselves, recorded and timed like any op."""
     server = Server(RoleNames.DIGITAL_MANAGER)
-    interaction = await _op(cog, server, server.caller)
+    interaction = server.interaction()
 
-    assert "vous-même" in _refusal(interaction)
-    server.caller.add_roles.assert_not_awaited()
-    assert not stored_ops()
+    await UserManagement.user_op.callback(cog, interaction, reason="atelier")
+
+    server.caller.add_roles.assert_awaited_once()
+    assert set(stored_ops()[str(GUILD_ID)]) == {str(CALLER_ID)}
+    assert set(cog.deop_tasks) == {(GUILD_ID, CALLER_ID)}
+
+
+async def test_op_lasts_five_minutes_at_most() -> None:
+    """Discord offers 1 to 5 minutes, 5 by default."""
+    time = next(p for p in UserManagement.user_op.parameters if p.name == "time")
+    assert (time.min_value, time.max_value, time.default) == (1, 5, 5)
 
 
 async def test_remove_role_from_self_is_allowed(cog: UserManagement) -> None:
