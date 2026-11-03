@@ -607,3 +607,28 @@ def test_a_database_with_no_known_release_is_copied(monkeypatch: pytest.MonkeyPa
 
     [copy] = DB_FILE.parent.glob("backups/test-*.db")
     assert copy.name.startswith("test-unknown-")
+
+
+def test_an_in_memory_database_writes_no_release_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The import's --check opens ``:memory:`` from a read-only folder: no file may be written there."""
+    folder = tmp_path / "ro"
+    folder.mkdir()
+    monkeypatch.chdir(folder)
+    folder.chmod(0o500)
+    try:
+        db.open_database(Path(":memory:"), gate=False)
+    finally:
+        folder.chmod(0o700)
+
+    assert list(folder.iterdir()) == []
+
+
+def test_a_release_file_that_cannot_be_written_does_not_stop_the_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The database is fine: the bot starts, and the next start copies once more."""
+    _open_as("0.7.0", monkeypatch)
+    (DB_FILE.parent / "test.release").unlink()
+    (DB_FILE.parent / "test.release").mkdir()
+
+    _open_as("0.7.1", monkeypatch)
+
+    assert [copy.name.split("-")[1] for copy in DB_FILE.parent.glob("backups/test-*.db")] == ["unknown"]

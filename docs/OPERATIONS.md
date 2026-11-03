@@ -543,7 +543,8 @@ step that keeps only anonymous statistics after 3 years.
   in progress, or after a crash, and the next start finishes the recovery from it. Never delete it.
 - At the first start of another release, the bot copies the database to `data/backups/fablabot-<previous release>-<time>.db`
   before anything else. `data/fablabot.release` names the release that last opened it; without that file, the copy is
-  named `unknown`. A rollback to an older release is copied the same way.
+  named `unknown`. A rollback to an older release is copied the same way, from 0.8.0 on: older releases do not write
+  that file, so the next upgrade names its copy after the last release that did.
 - When a release changes the schema, the bot also copies the database to `data/backups/fablabot-v<schema>-<time>.db`, then
   moves the schema at start.
 - The bot never removes these copies, and they count in the archive of "Before every redeploy". They sit on the same

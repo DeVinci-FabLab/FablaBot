@@ -202,10 +202,25 @@ def _backup_on_release_change(conn: sqlite3.Connection, path: Path) -> None:
         path (Path): The database file.
     """
     marker = _release_file(path)
-    last = marker.read_text(encoding="utf-8").strip() if marker.exists() else ""
+    last = marker.read_text(encoding="utf-8").strip() if marker.is_file() else ""
     if last != _release():
         # The name goes into a file name: anything but a version reads as unknown.
         _backup(conn, path, last if re.fullmatch(r"[0-9A-Za-z.+-]+", last) else "unknown")
+
+
+def _note_release(path: Path) -> None:
+    """Name the running release as the last to open the database; a failure only costs one more copy next start.
+
+    Args:
+        path (Path): The database file.
+    """
+    marker = _release_file(path)
+    partial = marker.with_suffix(".release.partial")
+    try:
+        partial.write_text(_release(), encoding="utf-8")
+        partial.replace(marker)
+    except OSError:
+        logger.warning(f"{marker.as_posix()} not written: the next start copies the database again.")
 
 
 def _not_imported(files: list[Path], path: Path) -> StorageError:
@@ -312,7 +327,8 @@ def open_database(path: Path = DATABASE_FILE, *, migrations: Path = MIGRATIONS_D
             _backup_on_release_change(conn, path)
         _migrate(conn, path, migrations)
         _check_writable(conn)
-        _release_file(path).write_text(_release(), encoding="utf-8")
+        if path.exists():  # an in-memory database, such as the import's --check, has no file to mark
+            _note_release(path)
     except (sqlite3.DatabaseError, OSError) as error:
         if conn is not None:
             conn.close()
