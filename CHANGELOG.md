@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.11.0...v0.12.0) (2026-11-03)
+
+
+### Features
+
+* **msg:** edit the draft's text with /msg edit ([#158](https://github.com/DeVinci-FabLab/FablaBot/issues/158)) ([5bb9509](https://github.com/DeVinci-FabLab/FablaBot/commit/5bb9509982c055b03e1b621abc531d25e28ac629))
+
 ## [0.11.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.10.0...v0.11.0) (2026-11-03)
 
 
