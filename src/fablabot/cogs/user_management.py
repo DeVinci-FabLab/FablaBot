@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Literal, override
 from warnings import deprecated
 
 from discord import (
+    AllowedMentions,
     Forbidden,
     Guild,
     HTTPException,
@@ -29,6 +30,7 @@ from discord.abc import Messageable
 from discord.ext import commands, tasks
 from discord.utils import get
 
+from fablabot.guild_config import get_log_channel_id
 from fablabot.helpers.access import AnyRole, Check, access
 from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames, staff_default_permissions
 from fablabot.helpers.op_report import report_op
@@ -64,7 +66,7 @@ _ROLE_NOT_BELOW_REFUSED = (
     "Ce rôle est au même rang que votre rôle le plus haut, ou au-dessus : "
     "demandez à un membre dont le rôle le plus haut est au-dessus de celui-ci."
 )
-_INVITE_REFUSED = "Vous n'avez pas la permission de créer une invitation vers ce salon."
+_INVITE_REFUSED = "Tu ne vois pas ce salon, ou tu es exclu temporairement : aucune invitation créée."
 _INVITE_FORBIDDEN = "Le bot ne peut pas créer d'invitation vers ce salon : donnez-lui la permission Créer une invitation."
 _INVITE_DURATIONS = {
     1800: "30 minutes",
@@ -146,7 +148,9 @@ _DEOP_ACCESS = Check(lambda c: RoleNames.ADMIN_TEMP in c.server_roles and can_op
 _GIVE_ACCESS = Check(lambda c: any(role_refusal(c.roles, r, action="add") is None for r in c.server_roles))
 _TAKE_ACCESS = Check(lambda c: any(role_refusal(c.roles, r, action="remove") is None for r in c.server_roles))
 _WITH_ROLES_ACCESS = AnyRole(_WITH_ROLES_ALLOWED)
-_INVITE_ACCESS = AnyRole(ADMIN_ROLES)
+# The bot is the way in: Discord's own Create Invite can stay off for every role, and each invite is posted in the logs.
+_INVITE_ROLES = ADMIN_ROLES | {RoleNames.CODIR}
+_INVITE_ACCESS = AnyRole(_INVITE_ROLES)
 
 
 def _utcnow() -> datetime:
@@ -552,12 +556,12 @@ class UserManagement(commands.Cog):
             "user.invite",
             interaction,
             log_details={"channel_id": channel.id, "duration": duration, "uses": uses, "temporary": temporary},
-            required_roles=ADMIN_ROLES,
+            required_roles=_INVITE_ROLES,
         ):
             return
         assert isinstance(interaction.user, Member)
-        # The bot never opens a door its caller could not open in Discord itself.
-        if not channel.permissions_for(interaction.user).create_instant_invite:
+        # An invite lands its newcomer in the channel: never one its caller cannot see.
+        if interaction.user.is_timed_out() or not channel.permissions_for(interaction.user).view_channel:
             await self._refuse(interaction, "user.invite", RefusalKind.MISSING_RIGHT, _INVITE_REFUSED)
             return
         # discord.py retries a 5xx for 16 s, past Discord's 3 s to answer; private, or the link would go public.
@@ -585,10 +589,27 @@ class UserManagement(commands.Cog):
         limits = f"{_INVITE_DURATIONS.get(duration, f'{duration} s')}, " + (
             f"{uses} utilisation{'s' if uses > 1 else ''}" if uses else "utilisations illimitées"
         )
-        await interaction.followup.send(
-            f"Invitation vers {channel.mention} ({limits}{', membre temporaire' if temporary else ''}) : {invite.url}",
-            ephemeral=True,
-        )
+        summary = f"{channel.mention} ({limits}{', membre temporaire' if temporary else ''})"
+        try:
+            await interaction.followup.send(f"Invitation vers {summary} : {invite.url}", ephemeral=True)
+        finally:
+            # The invite exists even if the reply fails: it is logged either way.
+            await self._post_invite_log(interaction.guild, interaction.user, summary)
+
+    @staticmethod
+    async def _post_invite_log(guild: Guild | None, author: Member, summary: str) -> None:
+        """Post who created an invite, and to where, in the server's log channel; the link itself stays private."""
+        assert guild is not None
+        channel = guild.get_channel(get_log_channel_id(guild.id) or 0)
+        if not isinstance(channel, TextChannel):
+            logger.warning(f"No log channel for an invite guild_id={guild.id} member_id={author.id}")
+            return
+        try:
+            await channel.send(
+                f"Invitation créée par {author.mention} vers {summary}.", allowed_mentions=AllowedMentions.none()
+            )
+        except HTTPException:
+            logger.warning(f"Invite log not posted guild_id={guild.id} member_id={author.id}")
 
     # endregion User Slash Commands Group
 

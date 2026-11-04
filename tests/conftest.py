@@ -237,6 +237,7 @@ def make_member(member_id: int, *roles: MagicMock) -> MagicMock:
     member.display_name = f"Member {member_id}"
     member.mention = f"<@{member_id}>"
     member.bot = False
+    member.is_timed_out = MagicMock(return_value=False)
     member.roles = list(roles)
     member.add_roles = AsyncMock()
     member.remove_roles = AsyncMock()
