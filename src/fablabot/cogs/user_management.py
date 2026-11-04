@@ -66,7 +66,7 @@ _ROLE_NOT_BELOW_REFUSED = (
     "Ce rôle est au même rang que votre rôle le plus haut, ou au-dessus : "
     "demandez à un membre dont le rôle le plus haut est au-dessus de celui-ci."
 )
-_INVITE_REFUSED = "Tu ne vois pas ce salon : choisis-en un que tu vois."
+_INVITE_REFUSED = "Tu ne vois pas ce salon, ou tu es exclu temporairement : aucune invitation créée."
 _INVITE_FORBIDDEN = "Le bot ne peut pas créer d'invitation vers ce salon : donnez-lui la permission Créer une invitation."
 _INVITE_DURATIONS = {
     1800: "30 minutes",
@@ -561,7 +561,7 @@ class UserManagement(commands.Cog):
             return
         assert isinstance(interaction.user, Member)
         # An invite lands its newcomer in the channel: never one its caller cannot see.
-        if not channel.permissions_for(interaction.user).view_channel:
+        if interaction.user.is_timed_out() or not channel.permissions_for(interaction.user).view_channel:
             await self._refuse(interaction, "user.invite", RefusalKind.MISSING_RIGHT, _INVITE_REFUSED)
             return
         # discord.py retries a 5xx for 16 s, past Discord's 3 s to answer; private, or the link would go public.
@@ -590,8 +590,11 @@ class UserManagement(commands.Cog):
             f"{uses} utilisation{'s' if uses > 1 else ''}" if uses else "utilisations illimitées"
         )
         summary = f"{channel.mention} ({limits}{', membre temporaire' if temporary else ''})"
-        await interaction.followup.send(f"Invitation vers {summary} : {invite.url}", ephemeral=True)
-        await self._post_invite_log(interaction.guild, interaction.user, summary)
+        try:
+            await interaction.followup.send(f"Invitation vers {summary} : {invite.url}", ephemeral=True)
+        finally:
+            # The invite exists even if the reply fails: it is logged either way.
+            await self._post_invite_log(interaction.guild, interaction.user, summary)
 
     @staticmethod
     async def _post_invite_log(guild: Guild | None, author: Member, summary: str) -> None:

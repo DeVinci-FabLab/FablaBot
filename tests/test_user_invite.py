@@ -1,4 +1,4 @@
-"""/user invite: a fresh invite with the caller's settings, never one the caller could not make in Discord."""
+"""/user invite: a fresh invite with the caller's settings, to a channel the caller sees, logged without its link."""
 
 from __future__ import annotations
 
@@ -97,11 +97,42 @@ async def test_discord_create_invite_is_not_needed_and_the_invite_is_logged() ->
     log = MagicMock(spec=TextChannel)
     log.send = AsyncMock()
 
-    with patch.object(user_management, "get_log_channel_id", return_value=7):
-        await _invite(channel, log)
+    with patch.object(user_management, "get_log_channel_id", return_value=7) as lookup:
+        interaction = await _invite(channel, log)
+
+    lookup.assert_called_once_with(interaction.guild.id)
+    interaction.guild.get_channel.assert_called_once_with(7)
 
     channel.create_invite.assert_awaited_once()
     posted = log.send.await_args.args[0]
     assert posted.startswith("Invitation créée par <@1> vers <#42> (7 jours")
     assert "discord.gg" not in posted
     assert log.send.await_args.kwargs["allowed_mentions"].to_dict()["parse"] == []
+
+
+async def test_a_failed_reply_still_logs_the_invite() -> None:
+    """The invite exists once Discord made it: the log line goes out even when the private reply fails."""
+    channel = _channel()
+    log = MagicMock(spec=TextChannel)
+    log.send = AsyncMock()
+    interaction = make_interaction()
+    interaction.user = make_member(1, make_role(RoleNames.PRESIDENT))
+    interaction.guild.get_channel = MagicMock(return_value=log)
+    interaction.followup.send = AsyncMock(side_effect=HTTPException(MagicMock(status=500), "down"))
+
+    with patch.object(user_management, "get_log_channel_id", return_value=7), pytest.raises(HTTPException):
+        await cast("Any", UserManagement.user_invite).callback(UserManagement(MagicMock()), interaction, channel=channel)
+
+    log.send.assert_awaited_once()
+
+
+async def test_a_timed_out_member_is_refused() -> None:
+    """A timeout used to mask Create Invite; seeing the channel must not undo that."""
+    channel = _channel()
+    interaction = make_interaction()
+    interaction.user = make_member(1, make_role(RoleNames.PRESIDENT))
+    interaction.user.is_timed_out = MagicMock(return_value=True)
+
+    await cast("Any", UserManagement.user_invite).callback(UserManagement(MagicMock()), interaction, channel=channel)
+
+    channel.create_invite.assert_not_awaited()
