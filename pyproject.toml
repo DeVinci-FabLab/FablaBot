@@ -11,7 +11,7 @@ name = "fablabot"
 readme = "README.md"
 requires-python = ">=3.13"
 license = "MIT"
-version = "0.12.0"
+version = "0.12.1"
 
 [project.urls]
 Homepage = "https://github.com/DeVinci-FabLab/FablaBot"

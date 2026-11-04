@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.12.0...v0.12.1) (2026-11-04)
+
+
+### Bug Fixes
+
+* **user:** let CoDir create invites through the bot alone ([#160](https://github.com/DeVinci-FabLab/FablaBot/issues/160)) ([cc141a9](https://github.com/DeVinci-FabLab/FablaBot/commit/cc141a96867ba6bc6e7a3db603b2663003b45aaf))
+
 ## [0.12.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.11.0...v0.12.0) (2026-11-03)
 
 
