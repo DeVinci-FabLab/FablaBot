@@ -56,7 +56,7 @@ PROFILES = {
     "trainer": Profile((RoleNames.TRAININGS_MANAGER,), Permissions.none(), 9),
     "trainer-with-F-roles": Profile((RoleNames.TRAININGS_MANAGER,), Permissions.none(), 13, f_roles=True),
     "temp-admin": Profile((RoleNames.ADMIN_TEMP,), Permissions.none(), 9),
-    "codir": Profile((RoleNames.CODIR,), Permissions.none(), 9),
+    "codir": Profile((RoleNames.CODIR,), Permissions.none(), 10),
     "bureau": Profile((RoleNames.BUREAU,), Permissions.none(), 17),
     "digital-manager": Profile((RoleNames.DIGITAL_MANAGER,), Permissions.none(), 7),
     "admin-no-permission": Profile((RoleNames.ADMIN,), Permissions.none(), 37),

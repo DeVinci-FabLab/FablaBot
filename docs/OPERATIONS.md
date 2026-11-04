@@ -298,7 +298,8 @@ Order matters: the allow-list comes before the invite, otherwise the bot joins a
    The permission integer `268561617` grants: Manage Roles, Manage Channels, View Audit Log, Create
    Invite, View Channels, Send Messages, Manage Messages, Embed Links, Attach Files, Read Message History
    and Add Reactions. It does not include Administrator. A bot invited before `/user invite` existed lacks
-   Create Invite: give it to the bot's role in Server Settings, Roles.
+   Create Invite: give it to the bot's role in Server Settings, Roles. To have invites go through `/user invite`
+   only, take Create Invite off `@everyone` and every other role: the bot's own role keeps it.
 
 3. In Server Settings, Roles, drag the bot's role above every role it manages, `Admin -temp-`
    included. Discord refuses to add or remove a role that sits above the bot's own.
