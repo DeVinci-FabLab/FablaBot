@@ -429,3 +429,26 @@ async def test_a_trainer_who_left_gets_no_dm_but_the_appel_opens(hall: Hall) -> 
     assert appel is not None
     assert appel.trainer_id == 424242
     assert all("Fais l'appel" not in m.content for m in hall.dm(hall.respo))
+
+
+@pytest.mark.parametrize("closed_by", ["cancelled", "old"])
+async def test_a_member_without_rights_never_learns_the_name_of_a_closed_appel(hall: Hall, closed_by: str) -> None:
+    """A plain member hears the no-right line and a stranger hears the gone line, whether the check is closed or cancelled."""
+    first, *_ = hall.register(2)
+    start = datetime.now(PARIS_TZ) - (timedelta(days=8) if closed_by == "old" else timedelta())
+    hall.publish(start=start)
+    attendance.open_appel(
+        GUILD_ID, MESSAGE_ID, 0, trainer_id=hall.trainer.id, starts_at=start, ends_at=start + timedelta(hours=2)
+    )
+    if closed_by == "cancelled":
+        attendance.handle(hall.appel_id, hall.respo.id, attendance.AlertAction.CANCEL, datetime.now(PARIS_TZ))
+    stranger = hall.env.create_user("stranger")
+    before = _stored(hall.appel_id)
+
+    for clicker, expected in ((hall.plain, NO_RIGHT), (stranger, GONE)):
+        allowed, interaction = await hall.forged_click(clicker, hall.toggle_id(first))
+
+        assert not allowed
+        assert _refused(interaction) == expected
+        assert "Découpe laser" not in _refused(interaction)
+    assert _stored(hall.appel_id) == before
