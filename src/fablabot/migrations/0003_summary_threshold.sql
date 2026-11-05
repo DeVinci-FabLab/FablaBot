@@ -24,8 +24,8 @@ CREATE TABLE training_summary (
 INSERT INTO training_summary
 SELECT
     guild_id, message_id, position, name, starts_at, registered, waitlisted, withdrawn,
-    CASE WHEN registered < 3 THEN NULL ELSE present END,
-    CASE WHEN registered < 3 THEN NULL ELSE absent END,
+    CASE WHEN registered < 3 OR (outcome = 'done' AND present + absent < 3) THEN NULL ELSE present END,
+    CASE WHEN registered < 3 OR (outcome = 'done' AND present + absent < 3) THEN NULL ELSE absent END,
     outcome
 FROM training_summary_before;
 

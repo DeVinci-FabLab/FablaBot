@@ -88,8 +88,11 @@ def summarise(now: datetime) -> int:
                 for flag in (0, 1)
             )
             outcome, present, absent = _attendance(conn, row)
-            # A small training's counts could point at a person, since reactions stay public.
-            counts = (present, absent) if registered >= ANONYMOUS_MIN_REGISTERED else (None, None)
+            # A small training's counts could point at a person, since reactions stay public. The check may have been
+            # validated on fewer members than are registered now (a copy published again), so both must reach the threshold.
+            checked = present + absent if outcome == "done" else registered
+            small = min(registered, checked) < ANONYMOUS_MIN_REGISTERED
+            counts = (None, None) if small else (present, absent)
             conn.execute(
                 "INSERT INTO training_summary (guild_id, message_id, position, name, starts_at, registered, waitlisted, "
                 "withdrawn, present, absent, outcome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",

@@ -143,6 +143,18 @@ def test_a_training_at_the_threshold_keeps_its_counts() -> None:
     assert ANONYMOUS_MIN_REGISTERED == 3
 
 
+def test_a_check_validated_on_fewer_members_than_the_threshold_keeps_no_counts() -> None:
+    """Members registered after the validation do not make a small check's counts safe to keep."""
+    start = NOW - timedelta(days=7)
+    _check(start, registered=(1, 2, 3), present=[1])
+    with db.transaction() as conn:
+        conn.execute("UPDATE appel SET present_count = 1, absent_count = 1")
+
+    assert retention.summarise(NOW) == 1
+
+    assert _summaries()[0][7:9] == (None, None)
+
+
 def test_a_training_published_again_is_counted_once_on_its_newest_copy() -> None:
     """The older copy is skipped: one real training gives one row, with the newest copy's registrations and the check."""
     start = NOW - timedelta(days=7)
