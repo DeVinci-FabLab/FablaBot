@@ -15,7 +15,8 @@ import pytest
 
 from fablabot.cogs import user_management
 from fablabot.helpers.access import EVERYONE, AnyRole, rule_of
-from fablabot.helpers.constants import ADMIN_ROLES, RoleNames
+from fablabot.helpers.constants import ADMIN_ROLES, APPEL_EDIT_WINDOW, APPEL_ROLES, RoleNames
+from fablabot.helpers.formation.attendance import MAX_BUTTONS, MAX_MENUS, MENU_SIZE
 from fablabot.helpers.help_page import leaf_commands
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -645,3 +646,15 @@ def test_operator_guide_says_the_export_leaves_the_attendance_data_in_the_databa
     forward = rolling.split("To move forward again")[1]
     assert "attendance checks" in forward
     assert "training counts" in forward
+
+
+def test_user_guide_says_who_may_take_the_attendance_check_and_for_how_long() -> None:
+    """The trainings section names every role that may take a check, the two that may not, and the correction window."""
+    section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
+    for role in APPEL_ROLES:
+        assert role in section, role
+    assert f"`{RoleNames.ADMIN_TEMP}`" in section.split("Not ")[1]
+    assert RoleNames.CODIR in section.split("Not ")[1]
+    assert f"{APPEL_EDIT_WINDOW.days} days after the start" in section
+    assert f"{MAX_BUTTONS} registered members" in section
+    assert f"{MENU_SIZE * MAX_MENUS} members" in section

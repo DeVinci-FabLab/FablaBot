@@ -53,6 +53,22 @@ In the tables below, "admin roles" means Administrateur, Président, Vice-Prési
 | `/fm publish` | Post the draft in a channel | Same |
 | `/fm export` | List sign-ups and drop-outs | Same |
 
+### Attendance check
+
+When a training starts, the bot sends its trainer a private message: that message is the attendance check (the "appel"). The trainer touches the pseudo of each member who came, and touches it again to take the mark back. A green tick shows who is marked, and the counter under the text follows. Pressing **Valider l'appel** saves the counts of present and absent members; the button then reads **Mettre à jour l'appel**.
+
+The trainer can keep correcting for 7 days after the start. A correction made after the validation shows a counter marked "pas encore enregistré" until the update button is pressed. The check lives in the database, so its buttons keep working after the bot restarts.
+
+Up to 20 registered members get a button each. Past that, the message holds menus of 25 members, and it lists 100 members at most: the others count as absent, and the message says so. The waitlist is never listed.
+
+Who can take or correct a check:
+
+- The trainer named in the announcement, while still on the server.
+- The Respo Formation holders and the admin roles: Administrateur, Président, Vice-Président, Secrétaire Général.
+- Not `Admin -temp-` and not CoDir, whatever else they can do with `/fm`.
+
+Anyone else, and anyone after the 7 days or once the training is cancelled, gets a private refusal that says nothing was changed. If the announcement names no member as trainer, or the trainer's private messages are closed, the check is opened but no message is sent.
+
 ## Bot messages
 
 | Command | What it does | Who can run it |

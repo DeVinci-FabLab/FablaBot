@@ -31,6 +31,7 @@ class Appel:
         position (int): The training's place in the announcement.
         name (str): The training's name, read from the announcement.
         duration (str): The training's duration as typed, read from the announcement.
+        excusable (bool): Whether absences are excusable for the training, read from the announcement.
         trainer_id (int | None): The trainer, when the announcement names one.
         starts_at (datetime): The start.
         ends_at (datetime): The end of the slot.
@@ -53,6 +54,7 @@ class Appel:
     position: int
     name: str
     duration: str
+    excusable: bool
     trainer_id: int | None
     starts_at: datetime
     ends_at: datetime

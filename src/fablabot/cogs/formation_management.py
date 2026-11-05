@@ -40,6 +40,7 @@ from fablabot.helpers.formation import (
     send_promotion_dm,
     send_registration_dm,
     send_waitlist_dm,
+    start_appel,
 )
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.safe_discord_operations import retract_unsaved_post
@@ -48,6 +49,7 @@ from fablabot.logging_handlers import guild_log_context
 from fablabot.models import FmCommand, FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
 from fablabot.services import formations
 from fablabot.ui import fmui
+from fablabot.ui.attendance import DYNAMIC_ITEMS
 
 if TYPE_CHECKING:
     from fablabot.main import Fablabot
@@ -115,6 +117,7 @@ class FormationManagement(commands.Cog):
         # are logged and wait for the next reminder tick to run it again. Same ceiling: a restart forgets them.
         self._retry_guilds: set[int] = set()
         self._reaction_logs.purge_all()
+        self.bot.add_dynamic_items(*DYNAMIC_ITEMS)
         self._check_upcoming_formations.start()
         logger.info("FormationManagement initialized")
 
@@ -122,6 +125,7 @@ class FormationManagement(commands.Cog):
     async def cog_unload(self) -> None:
         """Clean up when the cog is unloaded."""
         self._check_upcoming_formations.cancel()
+        self.bot.remove_dynamic_items(*DYNAMIC_ITEMS)
         for task in list(self._pending_update_tasks.values()):
             try:
                 task.cancel()
@@ -698,12 +702,12 @@ class FormationManagement(commands.Cog):
 
             send_contacts: str = format_respo_contacts(guild)
 
-            for fm in fms:
+            for position, fm in enumerate(fms):
                 if fm.notified_at_start:
                     continue
 
                 if not fm.notified_hour_before and notification_window_start <= fm.start_dt <= notification_window_end:
-                    await notify_trainer_before_formation(guild, fm, send_contacts, moment="hour_before")
+                    await notify_trainer_before_formation(guild, fm, send_contacts)
                     await notify_responsible_before_formation(guild, fm, moment="hour_before")
                     await notify_participants_before_formation(guild, fm, send_contacts)
 
@@ -711,7 +715,7 @@ class FormationManagement(commands.Cog):
                     continue
 
                 if start_window_start <= fm.start_dt <= start_window_end:
-                    await notify_trainer_before_formation(guild, fm, send_contacts, moment="start")
+                    await start_appel(guild, pub, position)
                     await notify_responsible_before_formation(guild, fm, moment="start")
 
                     fm.notified_at_start = True

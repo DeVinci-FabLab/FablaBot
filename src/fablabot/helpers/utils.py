@@ -18,6 +18,7 @@ from discord import (
     TextChannel,
     User,
     VoiceChannel,
+    ui,
 )
 from discord.utils import get
 from emoji import EMOJI_DATA
@@ -46,6 +47,10 @@ class RefusalKind(StrEnum):
     ROLE_NOT_BELOW = "role_not_below"
     TEMP_ROLE_OUTSIDE_DEOP = "temp_role_outside_deop"
     RIGHT_LOST = "right_lost_before_confirm"
+    APPEL_UNKNOWN = "appel_unknown"
+    SERVER_NOT_SERVED = "server_not_served"
+    APPEL_CLOSED = "appel_closed"
+    APPEL_CANCELLED = "appel_cancelled"
 
 
 def log_refusal(
@@ -356,8 +361,9 @@ async def send_dm_to_member(  # noqa: PLR0913 - keyword-only options; group them
     message_content: str | None,
     *,
     embed: Embed | None = None,
+    view: ui.View | None = None,
     dm_type: str,
-) -> bool:
+) -> Message | None:
     """Send a direct message to a guild member.
 
     Args:
@@ -366,33 +372,36 @@ async def send_dm_to_member(  # noqa: PLR0913 - keyword-only options; group them
         member (Member): The member to notify.
         message_content (str | None): The message content to send.
         embed (Embed | None): The embed to send. Defaults to None.
+        view (ui.View | None): The components to send. Defaults to None.
         dm_type (str): The type of DM being sent (for logging purposes).
 
     Returns:
-        bool: True if the message was sent successfully, False otherwise.
+        Message | None: The message sent, or None when nothing was sent.
     """
     logger.debug(f"Preparing {dm_type} DM for guild {guild.id} user {member.id}.")
 
     if member.bot:
-        return False
+        return None
 
     if not await _can_dm_user(member):
         logger.error(f"Cannot DM user {member.id} in guild {guild.id}; skipping {dm_type} DM.")
-        return False
+        return None
 
     logger.debug(f"Resolved member {member.id} for {dm_type} DM in guild {guild.id}.")
 
+    options: dict[str, Any] = {}
+    if embed is not None:
+        options["embed"] = embed
+    if view is not None:
+        options["view"] = view
     try:
-        if embed is not None:
-            await member.send(message_content, embed=embed)
-        else:
-            await member.send(message_content)
+        sent = await member.send(message_content, **options)
     except Exception:
         logger.exception(f"Failed to send {dm_type} DM to user {member.id} in guild {guild.id}.")
-        return False
+        return None
 
     logger.info(f"Sent {dm_type} DM to user {member.id} in guild {guild.id}.")
-    return True
+    return sent
 
 
 async def get_or_fetch_member(guild: Guild, member_id: int) -> Member | None:

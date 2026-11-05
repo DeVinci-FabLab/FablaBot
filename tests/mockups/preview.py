@@ -89,7 +89,7 @@ _BOLD = re.compile(r"\*\*(.+?)\*\*")
 _UNDERLINE = re.compile(r"__(.+?)__")
 _ITALIC = re.compile(r"(?<![\w*])[*_](?![\s*_])(.+?)(?<![\s*_])[*_](?![\w*])")
 _STRIKE = re.compile(r"~~(.+?)~~")
-_TIMESTAMP = re.compile(r"&lt;t:(-?\d+):F&gt;")
+_TIMESTAMP = re.compile(r"&lt;t:(-?\d+):([FtD])&gt;")
 _MENTION = re.compile(r"&lt;(@&amp;|@!?|#)(\d+)&gt;")
 
 
@@ -110,10 +110,14 @@ _MONTHS = [
 ]
 
 
-def timestamp_text(unix: int) -> str:
-    """Write a ``<t:UNIX:F>`` timestamp the way Discord shows it to a French reader in Paris."""
+def timestamp_text(unix: int, style: str = "F") -> str:
+    """Write a ``<t:UNIX:STYLE>`` timestamp the way Discord shows it to a French reader in Paris.
+
+    ``F`` is the full date and time, ``D`` the date and ``t`` the time of day.
+    """
     dt = datetime.fromtimestamp(unix, UTC).astimezone(ZoneInfo("Europe/Paris"))
-    return f"{_WEEKDAYS[dt.weekday()]} {dt.day} {_MONTHS[dt.month - 1]} {dt.year} à {dt:%H:%M}"
+    day = f"{dt.day} {_MONTHS[dt.month - 1]} {dt.year}"
+    return {"t": f"{dt:%H:%M}", "D": day}.get(style, f"{_WEEKDAYS[dt.weekday()]} {day} à {dt:%H:%M}")
 
 
 def _inline(text: str, names: Mapping[int, str]) -> str:
@@ -134,7 +138,7 @@ def _inline(text: str, names: Mapping[int, str]) -> str:
         return f'<span class="mention">{sigil}{html.escape(name)}</span>'
 
     def timestamp(match: re.Match[str]) -> str:
-        return f'<span class="timestamp">{timestamp_text(int(match[1]))}</span>'
+        return f'<span class="timestamp">{timestamp_text(int(match[1]), match[2])}</span>'
 
     def keep_target(match: re.Match[str]) -> str:
         targets.append(match[2])

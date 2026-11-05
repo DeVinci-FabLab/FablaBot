@@ -1,5 +1,6 @@
 """Helpers for formation management cog."""
 
+from fablabot.helpers.formation.attendance import start_appel
 from fablabot.helpers.formation.notifications import (
     notify_participants_before_formation,
     notify_responsible_before_formation,
@@ -36,4 +37,5 @@ __all__ = [
     "send_promotion_dm",
     "send_registration_dm",
     "send_waitlist_dm",
+    "start_appel",
 ]

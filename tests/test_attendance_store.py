@@ -64,6 +64,7 @@ def test_a_check_opens_once_per_training() -> None:
     assert appel is not None
     assert (appel.guild_id, appel.message_id, appel.channel_id) == (GUILD, MESSAGE, CHANNEL)
     assert (appel.position, appel.name, appel.duration, appel.trainer_id) == (0, "Laser", "2h", 7)
+    assert appel.excusable is True
     assert (appel.starts_at, appel.ends_at) == (START, END)
     assert appel.closes_at == START + APPEL_EDIT_WINDOW
     assert appel.validated_at is None
@@ -75,6 +76,19 @@ def test_a_check_needs_a_published_message() -> None:
     """A check for a message the bot never published is refused and stores nothing."""
     with pytest.raises(LookupError):
         _open()
+
+    assert _count("appel") == 0
+
+
+def test_a_check_needs_timezone_aware_times() -> None:
+    """A start or an end without a timezone is refused and stores nothing."""
+    _publish()
+    naive = START.replace(tzinfo=None)
+
+    with pytest.raises(ValueError, match="timezone"):
+        _open(starts_at=naive)
+    with pytest.raises(ValueError, match="timezone"):
+        _open(ends_at=naive)
 
     assert _count("appel") == 0
 

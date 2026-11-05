@@ -17,8 +17,9 @@ if TYPE_CHECKING:
 # stores its ID. LEFT JOIN: a training taken out of the message leaves its check readable.
 _SELECT = (
     "SELECT a.id, m.guild_id, m.message_id, m.channel_id, a.position, COALESCE(f.name, '') AS name, "
-    "COALESCE(f.duration, '') AS duration, a.trainer_id, a.starts_at, a.ends_at, a.closes_at, a.thread_id, a.validated_by, "
-    "a.validated_at, a.present_count, a.absent_count, a.alert_sent, a.handled_by, a.handled_at, a.handled_action "
+    "COALESCE(f.duration, '') AS duration, COALESCE(f.excusable, 1) AS excusable, a.trainer_id, a.starts_at, a.ends_at, "
+    "a.closes_at, a.thread_id, a.validated_by, a.validated_at, a.present_count, a.absent_count, a.alert_sent, "
+    "a.handled_by, a.handled_at, a.handled_action "
     "FROM appel a JOIN fm_message m ON m.id = a.fm_message_id "
     "LEFT JOIN formation f ON f.fm_message_id = a.fm_message_id AND f.position = a.position "
 )
@@ -39,6 +40,7 @@ def _appel(row: sqlite3.Row) -> Appel:
         position=row["position"],
         name=row["name"],
         duration=row["duration"],
+        excusable=bool(row["excusable"]),
         trainer_id=row["trainer_id"],
         starts_at=datetime.fromisoformat(row["starts_at"]),
         ends_at=datetime.fromisoformat(row["ends_at"]),
@@ -73,7 +75,11 @@ def open_appel(  # noqa: PLR0913
 
     Raises:
         LookupError: If the announcement is not stored as published.
+        ValueError: If a time has no timezone.
     """
+    if starts_at.tzinfo is None or ends_at.tzinfo is None:
+        msg = "A check needs timezone-aware times."
+        raise ValueError(msg)
     with db.transaction() as conn:
         message = conn.execute(
             "SELECT id FROM fm_message WHERE guild_id = ? AND message_id = ?", (guild_id, message_id)

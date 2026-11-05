@@ -85,6 +85,9 @@ ADMIN_ROLES = {
 # Who may run each family of staff commands. The cogs check them on the command, the views and modals again on each click.
 MESSAGE_ROLES = ADMIN_ROLES | {RoleNames.BUREAU}
 MESSAGE_DM_ROLES = {RoleNames.BUREAU}
+# Who may take any attendance check besides its trainer. Unlike /fm, the temporary role stays out: five minutes of admin
+# rights do not rewrite a training's attendance.
+APPEL_ROLES = ADMIN_ROLES | {RoleNames.TRAININGS_MANAGER}
 FORMATION_ROLES = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN_TEMP, RoleNames.ADMIN, RoleNames.CODIR}
 
 
