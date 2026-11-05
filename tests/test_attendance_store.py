@@ -178,13 +178,16 @@ def test_validation_counts_registered_members_only() -> None:
     attendance.mark(appel_id, [1, 2, 3], [1, 2])
     _publish(registered=(2, 3))
 
-    assert attendance.validate(appel_id, 7, START) == (1, 1)
+    saved = attendance.validate(appel_id, 7, START)
 
+    assert (saved.here, saved.away, saved.first) == ([2], [3], True)
+    assert (saved.appel.validated_by, saved.appel.present_count, saved.appel.absent_count) == (7, 1, 1)
     appel = attendance.get(appel_id)
     assert appel is not None
     assert (appel.present_count, appel.absent_count) == (1, 1)
     assert (appel.validated_by, appel.validated_at) == (7, START)
-    assert attendance.validate(appel_id, 8, START + timedelta(hours=1)) == (1, 1)
+    again_saved = attendance.validate(appel_id, 8, START + timedelta(hours=1))
+    assert (again_saved.here, again_saved.away, again_saved.first) == ([2], [3], False)
     again = attendance.get(appel_id)
     assert again is not None
     assert (again.validated_by, again.validated_at) == (8, START + timedelta(hours=1))

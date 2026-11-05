@@ -276,20 +276,19 @@ class AppelValidate(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<app
     @override
     async def callback(self, interaction: Interaction[Any]) -> None:
         """Save the counts for the registered members marked present and the others, then show the check."""
-        before = attendance.get(self.appel_id)
         try:
-            present, absent = attendance.validate(self.appel_id, interaction.user.id, datetime.now(PARIS_TZ))
+            saved = attendance.validate(self.appel_id, interaction.user.id, datetime.now(PARIS_TZ))
         except LookupError:
             await interaction.response.send_message(f"{_GONE} {_UNCHANGED}", ephemeral=True)
             return
         logger.info(
-            f"[appel] validated appel_id={self.appel_id} user_id={interaction.user.id} present={present} absent={absent}"
+            f"[appel] validated appel_id={self.appel_id} user_id={interaction.user.id} "
+            f"present={len(saved.here)} absent={len(saved.away)}"
         )
         await _show(interaction, self.appel_id)
-        appel = attendance.get(self.appel_id)
-        guild = interaction.client.get_guild(appel.guild_id) if appel else None
-        if appel is not None and guild is not None:
-            await notify_validation(guild, appel, first=before is None or before.validated_at is None)
+        guild = interaction.client.get_guild(saved.appel.guild_id)
+        if guild is not None:
+            await notify_validation(guild, saved)
 
 
 DYNAMIC_ITEMS: Final = (AppelToggle, AppelMenu, AppelValidate)

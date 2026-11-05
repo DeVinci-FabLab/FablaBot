@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
     from discord import Guild, Member
 
-    from fablabot.models import Appel, PublishedMessage, Registrant
+    from fablabot.models import Appel, PublishedMessage, Registrant, Validation
 
 logger = logging.getLogger(__name__)
 
@@ -329,28 +329,26 @@ def log_line(appel: Appel, here: int, away: int, *, first: bool) -> str:
     )
 
 
-async def notify_validation(guild: Guild, appel: Appel, *, first: bool) -> None:
+async def notify_validation(guild: Guild, saved: Validation) -> None:
     """Tell each Respo Formation who came, then leave the counts in the log channel.
 
-    A Respo who cannot be reached does not stop the others, and a missing or refusing log channel stops nothing.
+    Everything comes from what the validation saved, never from a later read, so a mark made afterwards or a second
+    validation is not reported as this one. A Respo who cannot be reached does not stop the others, and a missing or
+    refusing log channel stops nothing.
 
     Args:
         guild (Guild): The check's server.
-        appel (Appel): The check, as saved.
-        first (bool): True for the first validation, False for a correction.
+        saved (Validation): What the validation saved.
     """
+    appel = saved.appel
     if appel.validated_by is None:
         return
-    registrants = attendance.registrants(appel.id)
-    marked = attendance.present(appel.id)
-    here = [r.user_id for r in registrants if r.user_id in marked]
-    away = [r.user_id for r in registrants if r.user_id not in marked]
-    messages = respo_messages(appel, here, away, first=first)
+    messages = respo_messages(appel, saved.here, saved.away, first=saved.first)
     for respo in sorted(get_members_by_role(logger, guild, role=RoleNames.TRAININGS_MANAGER), key=lambda m: m.id):
         for text in messages:
             if await send_dm_to_member(logger, guild, respo, text, dm_type=f"attendance lists {appel.id}") is None:
                 break
-    line = log_line(appel, len(here), len(away), first=first)
+    line = log_line(appel, len(saved.here), len(saved.away), first=saved.first)
     try:
         channel = guild.get_channel(get_log_channel_id(guild.id) or 0)
         if not isinstance(channel, TextChannel):

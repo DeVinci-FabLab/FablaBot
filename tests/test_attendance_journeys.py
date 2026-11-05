@@ -20,6 +20,7 @@ from fablabot.helpers.constants import MAX_MSG_CHARS, PARIS_TZ, RoleNames
 from fablabot.helpers.guild_access import GuildAccessPolicy
 from fablabot.models.formation import FmMessageDraft, Formation, PublishedMessage
 from fablabot.services import attendance, formations
+from fablabot.ui import attendance as ui_attendance
 from fablabot.ui.attendance import DYNAMIC_ITEMS
 
 if TYPE_CHECKING:
@@ -832,3 +833,55 @@ async def test_the_log_line_notifies_nobody(hall: Hall, monkeypatch: pytest.Monk
 
     (kwargs,) = [k for k in sends if "allowed_mentions" in k]
     assert kwargs["allowed_mentions"].to_dict() == discord.AllowedMentions.none().to_dict()
+
+
+async def test_the_lists_report_what_was_saved_not_what_a_toggle_changed_meanwhile(
+    hall: Hall, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A mark landing while the validated message is edited is not reported as saved: lists and counts match the save."""
+    first, second = hall.register(2)
+    hall.publish()
+    await hall.tick()
+    real_show = ui_attendance._show
+
+    async def show(interaction: Any, appel_id: int) -> None:
+        stored = attendance.get(appel_id)
+        if stored is not None and stored.validated_at is not None:
+            attendance.mark(appel_id, [second.id], [second.id])
+        await real_show(interaction, appel_id)
+
+    monkeypatch.setattr(ui_attendance, "_show", show)
+
+    await hall.validate(first)
+
+    stored = attendance.get(hall.appel_id)
+    assert stored is not None
+    assert (stored.present_count, stored.absent_count) == (1, 1)
+    (message,) = _lists(hall, hall.respo)
+    assert f"**Présents (1)** : <@{first.id}>\n" in message.content
+    assert message.content.endswith(f"**Absents (1)** : <@{second.id}>")
+    (line,) = [m.content for m in hall.logs.history()]  # pyright: ignore[reportAttributeAccessIssue]
+    assert "1 présent, 1 absent." in line
+
+
+async def test_the_lists_name_who_validated_not_who_validated_meanwhile(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Someone else validating while the message is being edited does not take the credit for the first save."""
+    hall.register(1)
+    hall.publish()
+    await hall.tick()
+    real_show = ui_attendance._show
+
+    async def show(interaction: Any, appel_id: int) -> None:
+        stored = attendance.get(appel_id)
+        if stored is not None and stored.validated_at is not None:
+            attendance.validate(appel_id, hall.plain.id, datetime.now(PARIS_TZ))
+        await real_show(interaction, appel_id)
+
+    monkeypatch.setattr(ui_attendance, "_show", show)
+
+    await hall.validate()
+
+    (message,) = _lists(hall, hall.respo)
+    assert f"a été fait par <@{hall.trainer.id}>." in message.content
+    (line,) = [m.content for m in hall.logs.history()]  # pyright: ignore[reportAttributeAccessIssue]
+    assert f"validé par <@{hall.trainer.id}>" in line

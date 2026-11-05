@@ -97,3 +97,20 @@ class Registrant:
 
     user_id: int
     username: str
+
+
+@dataclass(frozen=True)
+class Validation:
+    """What one validation saved, read in the same transaction as the save.
+
+    Attributes:
+        appel (Appel): The check as it stands after the save.
+        here (list[int]): The registered members saved present, in their order.
+        away (list[int]): The registered members saved absent, in their order.
+        first (bool): Whether the check was never validated before.
+    """
+
+    appel: Appel
+    here: list[int]
+    away: list[int]
+    first: bool

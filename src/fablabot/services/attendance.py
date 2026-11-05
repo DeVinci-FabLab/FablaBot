@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from fablabot import db
 from fablabot.helpers.constants import APPEL_EDIT_WINDOW
-from fablabot.models.attendance import AlertAction, Appel, Registrant
+from fablabot.models.attendance import AlertAction, Appel, Registrant, Validation
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -191,7 +191,7 @@ def mark(appel_id: int, shown: Iterable[int], chosen: Iterable[int]) -> None:
         )
 
 
-def validate(appel_id: int, user_id: int, at: datetime) -> tuple[int, int]:
+def validate(appel_id: int, user_id: int, at: datetime) -> Validation:
     """Record the check: the registered members marked present, and the rest of the registered ones absent.
 
     Args:
@@ -200,29 +200,28 @@ def validate(appel_id: int, user_id: int, at: datetime) -> tuple[int, int]:
         at (datetime): When.
 
     Returns:
-        tuple[int, int]: The present and absent counts.
+        Validation: The check and the members saved present and absent, read with the save so that nothing marked
+            afterwards is reported as saved.
 
     Raises:
         LookupError: If the check does not exist.
     """
     with db.transaction() as conn:
-        row = conn.execute(
-            "SELECT COUNT(*) AS total, COUNT(p.user_id) AS here "
-            "FROM appel a JOIN formation f ON f.fm_message_id = a.fm_message_id AND f.position = a.position "
-            "JOIN registration r ON r.formation_id = f.id AND r.waitlisted = 0 "
-            "LEFT JOIN appel_present p ON p.appel_id = a.id AND p.user_id = r.user_id WHERE a.id = ?",
-            (appel_id,),
-        ).fetchone()
-        here: int = row["here"]
-        absent: int = row["total"] - here
-        changed = conn.execute(
-            "UPDATE appel SET validated_by = ?, validated_at = ?, present_count = ?, absent_count = ? WHERE id = ?",
-            (user_id, at.isoformat(), here, absent, appel_id),
-        ).rowcount
-        if not changed:
+        before = conn.execute(_SELECT + "WHERE a.id = ?", (appel_id,)).fetchone()
+        if before is None:
             msg = f"No check {appel_id}."
             raise LookupError(msg)
-    return here, absent
+        # One connection: these reads sit inside the transaction, so they see what the save counts.
+        registered = [r.user_id for r in registrants(appel_id)]
+        marked = present(appel_id)
+        here = [user for user in registered if user in marked]
+        away = [user for user in registered if user not in marked]
+        conn.execute(
+            "UPDATE appel SET validated_by = ?, validated_at = ?, present_count = ?, absent_count = ? WHERE id = ?",
+            (user_id, at.isoformat(), len(here), len(away), appel_id),
+        )
+        saved = conn.execute(_SELECT + "WHERE a.id = ?", (appel_id,)).fetchone()
+    return Validation(appel=_appel(saved), here=here, away=away, first=before["validated_at"] is None)
 
 
 def set_thread(appel_id: int, thread_id: int) -> None:
