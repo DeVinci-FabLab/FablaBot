@@ -346,6 +346,8 @@ def test_the_invite_integer_matches_the_guide() -> None:
         "attach_files",
         "read_message_history",
         "add_reactions",
+        "create_private_threads",
+        "send_messages_in_threads",
     }
     assert Permissions(**dict.fromkeys(listed, True)) == INVITE_PERMISSIONS
     assert f"permissions={INVITE_PERMISSIONS.value}" in guide
@@ -1049,3 +1051,25 @@ async def test_an_unexpected_integrations_answer_keeps_the_rest_of_the_report(
     assert f"detail=[step=integrations status={status}]" in problems(caplog)[-1]
     assert "step=report" not in caplog.text
     assert "not-a-number" not in caplog.text
+
+
+def test_the_invitation_asks_for_the_thread_permissions() -> None:
+    """The invitation asks for the integer that adds private threads and messages in threads to the earlier one."""
+    assert INVITE_PERMISSIONS.value == 343865945297
+    assert INVITE_PERMISSIONS.create_private_threads
+    assert INVITE_PERMISSIONS.send_messages_in_threads
+    assert INVITE_PERMISSIONS.value & 268561617 == 268561617
+
+
+async def test_a_bot_without_the_thread_permissions_is_reported(
+    simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A bot installed with the older integer is reported as lacking Create Private Threads, by flag.
+
+    Send Messages in Threads is granted to every member by default, so it shows only on a server that took it from them.
+    """
+    server = await ready_server(simcord_env)
+    server.me.top_role._permissions = 268561617
+    await run(simcord_env)
+    assert codes(caplog) == ["permissions_missing"]
+    assert "detail=[create_private_threads]" in problems(caplog)[0]

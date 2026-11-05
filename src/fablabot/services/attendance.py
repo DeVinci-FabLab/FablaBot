@@ -224,15 +224,21 @@ def validate(appel_id: int, user_id: int, at: datetime) -> Validation:
     return Validation(appel=_appel(saved), here=here, away=away, first=before["validated_at"] is None)
 
 
-def set_thread(appel_id: int, thread_id: int) -> None:
-    """Remember the thread made for a trainer whose DMs are closed.
+def set_thread(appel_id: int, thread_id: int) -> bool:
+    """Remember the thread made for a trainer whose DMs are closed, unless the check already has one.
 
     Args:
         appel_id (int): The check's ID.
         thread_id (int): The thread.
+
+    Returns:
+        bool: True when the thread was stored, False when the check already had one or does not exist.
     """
     with db.transaction() as conn:
-        conn.execute("UPDATE appel SET thread_id = ? WHERE id = ?", (thread_id, appel_id))
+        return (
+            conn.execute("UPDATE appel SET thread_id = ? WHERE id = ? AND thread_id IS NULL", (thread_id, appel_id)).rowcount
+            == 1
+        )
 
 
 def due_alerts(now: datetime) -> list[Appel]:

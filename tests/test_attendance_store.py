@@ -327,3 +327,16 @@ def test_summaries_are_counted_by_month() -> None:
         "not_done",
         "cancelled",
     ]
+
+
+def test_a_second_thread_for_one_check_is_refused() -> None:
+    """The first thread stays: a later one is reported as not stored."""
+    _publish()
+    appel_id = _open()
+
+    assert attendance.set_thread(appel_id, 901) is True
+    assert attendance.set_thread(appel_id, 902) is False
+
+    stored = attendance.get(appel_id)
+    assert stored is not None
+    assert stored.thread_id == 901

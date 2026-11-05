@@ -201,13 +201,13 @@ def _appel(**changes: Any) -> Appel:
     return replace(appel, **changes)
 
 
-async def _appel_screen(registrants: list[Registrant], present: set[int], **changes: Any) -> Screen:
+async def _appel_screen(registrants: list[Registrant], present: set[int], *, thread: bool = False, **changes: Any) -> Screen:
     """The start message of a check, as the trainer sees it, with these members registered and these marked present."""
     capture = Capture()
     appel = _appel(**changes)
     now = APPEL_START + timedelta(minutes=30)
     names = {r.user_id: r.username for r in registrants}
-    content = appel_content(appel, registrants, present, opening="Salut Camille !", now=now)
+    content = appel_content(appel, registrants, present, opening="Salut Camille !", now=now, thread=thread)
     view = appel_view(appel, registrants, present, names, now=now)
     await capture.interaction().response.send_message(content, view=view)
     return Screen(capture.sent)
@@ -221,6 +221,11 @@ def _five() -> list[Registrant]:
 async def appel_start() -> Screen:
     """The trainer's message when the training starts: a button per registered member, nobody ticked."""
     return await _appel_screen(_five(), set())
+
+
+async def appel_thread() -> Screen:
+    """The message the trainer finds in the private thread when their DMs are closed."""
+    return await _appel_screen(_five(), set(), thread=True)
 
 
 async def appel_ongoing() -> Screen:
@@ -281,6 +286,7 @@ SCREENS: dict[str, Callable[[], Coroutine[Any, Any, Screen]]] = {
     "suggest-modal": suggest_modal,
     "fm-start-modal": fm_start_modal,
     "appel-start": appel_start,
+    "appel-thread": appel_thread,
     "appel-ongoing": appel_ongoing,
     "appel-validated": appel_validated,
     "appel-menus": appel_menus,

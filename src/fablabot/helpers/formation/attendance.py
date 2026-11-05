@@ -10,13 +10,19 @@ import sqlite3
 from typing import TYPE_CHECKING, Final
 from weakref import WeakValueDictionary
 
-from discord import AllowedMentions, HTTPException, SelectOption, TextChannel, ui
+from discord import AllowedMentions, ChannelType, HTTPException, Object, SelectOption, TextChannel, Thread, ui
 
 from fablabot.guild_config import get_log_channel_id
 from fablabot.helpers.constants import APPEL_ROLES, MAX_MSG_CHARS, PARIS_TZ, RoleNames
 from fablabot.helpers.formation.rendering import discord_timestamp
 from fablabot.helpers.op_report import split_messages
-from fablabot.helpers.utils import counted, get_members_by_role, get_or_fetch_member, send_dm_to_member
+from fablabot.helpers.utils import (
+    counted,
+    find_commands_channel,
+    get_members_by_role,
+    get_or_fetch_member,
+    send_dm_to_member,
+)
 from fablabot.services import attendance
 
 if TYPE_CHECKING:
@@ -43,6 +49,10 @@ MAX_MENUS: Final = 4
 Ceiling: a hundred listed members. The upgrade path is pages.
 """
 
+THREAD_ARCHIVE_MINUTES: Final = 10080
+"""A thread archives after seven days without a message, the length of the correction window."""
+
+_THREAD_NAME_MAX: Final = 100
 _ROW_SIZE: Final = 5
 _VALIDATE_ROW: Final = 4
 _LABEL_MAX: Final = 80
@@ -120,7 +130,15 @@ def _counter(here: int, registered: int) -> str:
     return f"{counted(here, 'présent', 'présents')} sur {counted(registered, 'inscrit', 'inscrits')}"
 
 
-def appel_content(appel: Appel, registrants: Sequence[Registrant], present: set[int], *, opening: str, now: datetime) -> str:
+def appel_content(  # noqa: PLR0913 - the check, its state and how the message is addressed
+    appel: Appel,
+    registrants: Sequence[Registrant],
+    present: set[int],
+    *,
+    opening: str,
+    now: datetime,
+    thread: bool = False,
+) -> str:
     """Write the message of a check from what is stored.
 
     Args:
@@ -129,6 +147,8 @@ def appel_content(appel: Appel, registrants: Sequence[Registrant], present: set[
         present (set[int]): The members marked present.
         opening (str): The first line, which greets the person the message is for.
         now (datetime): The current time, to tell a training that starts from one that is over.
+        thread (bool): True for the private thread of a trainer whose DMs are closed, which says so in place of the
+            greeting and the training line while the check is not saved.
 
     Returns:
         str: The text to show above the controls.
@@ -141,8 +161,14 @@ def appel_content(appel: Appel, registrants: Sequence[Registrant], present: set[
     if appel.validated_at is None:
         timing = f"commence maintenant ({_slot(appel)})" if now < appel.ends_at else f"a eu lieu le {_slot(appel)}"
         codir = f"{_CODIR_LINE}\n\n" if appel.excusable else ""
+        head = (
+            f"<@{appel.trainer_id}> tes MP sont fermés, alors l'appel de **{appel.name}** se fait ici. "
+            "Ce fil n'est visible que de toi et du staff."
+            if thread
+            else f"{opening}\nTa formation **{appel.name}** {timing}."
+        )
         text = (
-            f"{opening}\nTa formation **{appel.name}** {timing}.\n\n"
+            f"{head}\n\n"
             "**Fais l'appel** : touche le pseudo de chaque présent, puis **Valider l'appel**. "
             f"Tu peux le corriger jusqu'au {closes}.\n\n{codir}_{counter}._"
         )
@@ -220,13 +246,14 @@ def appel_view(
     return view
 
 
-def appel_message(guild: Guild, appel: Appel, now: datetime) -> tuple[str, ui.View]:
+def appel_message(guild: Guild, appel: Appel, now: datetime, *, thread: bool = False) -> tuple[str, ui.View]:
     """Read a check from the database and build its message as it should show now.
 
     Args:
         guild (Guild): The check's server, to name the members.
         appel (Appel): The check.
         now (datetime): The current time.
+        thread (bool): True when the message lives in the private thread of a trainer whose DMs are closed.
 
     Returns:
         tuple[str, ui.View]: The text and the controls.
@@ -239,12 +266,95 @@ def appel_message(guild: Guild, appel: Appel, now: datetime) -> tuple[str, ui.Vi
         names[registrant.user_id] = member.display_name if member else registrant.username
     trainer = guild.get_member(appel.trainer_id) if appel.trainer_id is not None else None
     opening = f"Salut {trainer.display_name} !" if trainer else "Salut !"
-    content = appel_content(appel, registrants, present, opening=opening, now=now)
+    content = appel_content(appel, registrants, present, opening=opening, now=now, thread=thread)
     return content, appel_view(appel, registrants, present, names, now=now)
 
 
+async def _stored_thread(guild: Guild, thread_id: int) -> Thread | None:
+    """Find the thread a check stored, in the cache or on Discord; None when it cannot be reached."""
+    thread = guild.get_thread(thread_id)
+    if thread is not None:
+        return thread
+    try:
+        found = await guild.fetch_channel(thread_id)
+    except HTTPException:
+        return None
+    return found if isinstance(found, Thread) else None
+
+
+def _thread_parents(guild: Guild, appel: Appel) -> list[TextChannel]:
+    """List where a private thread may be made, in order.
+
+    The announcement's channel comes first when it is a plain text channel, then the commands channel.
+    """
+    parents: list[TextChannel] = []
+    announced = guild.get_channel(appel.channel_id) if appel.channel_id is not None else None
+    if isinstance(announced, TextChannel) and not announced.is_news():
+        parents.append(announced)
+    commands = find_commands_channel(guild)
+    if commands is not None and commands not in parents:
+        parents.append(commands)
+    return parents
+
+
+async def _fill_thread(guild: Guild, appel: Appel, thread: Thread, trainer_id_: int) -> None:
+    """Add the trainer and each Respo Formation to a thread; one who cannot be added is logged and the others still go."""
+    respos = get_members_by_role(logger, guild, role=RoleNames.TRAININGS_MANAGER)
+    wanted = dict.fromkeys([trainer_id_, *sorted(m.id for m in respos)])
+    for user_id in wanted:
+        try:
+            await thread.add_user(Object(user_id))
+        except HTTPException:
+            logger.exception(f"Could not add user {user_id} to thread {thread.id} of appel {appel.id} in guild {guild.id}.")
+
+
+async def open_thread(guild: Guild, appel: Appel) -> Thread | None:
+    """Give the check a private thread, or find the one it already has.
+
+    The thread is made in the announcement's channel when that is a plain text channel, else, or when Discord refuses
+    there, in the commands channel. It holds the trainer and every Respo Formation, and nobody else can join it.
+
+    Args:
+        guild (Guild): The check's server.
+        appel (Appel): The check.
+
+    Returns:
+        Thread | None: The thread, or None when the check has none and none could be made.
+    """
+    if appel.thread_id is not None:
+        thread = await _stored_thread(guild, appel.thread_id)
+        if thread is None:
+            logger.error(f"Thread {appel.thread_id} of appel {appel.id} in guild {guild.id} cannot be reached.")
+        return thread
+    if appel.trainer_id is None:
+        return None
+    for parent in _thread_parents(guild, appel):
+        try:
+            thread = await parent.create_thread(
+                name=f"Appel : {appel.name}"[:_THREAD_NAME_MAX],
+                type=ChannelType.private_thread,
+                invitable=False,
+                auto_archive_duration=THREAD_ARCHIVE_MINUTES,
+            )
+        except HTTPException:
+            logger.exception(f"Could not make a thread in channel {parent.id} for appel {appel.id} in guild {guild.id}.")
+            continue
+        if not attendance.set_thread(appel.id, thread.id):
+            logger.warning(f"Appel {appel.id} in guild {guild.id} already has a thread: dropping thread {thread.id}.")
+            try:
+                await thread.delete()
+            except HTTPException:
+                logger.exception(f"Could not delete thread {thread.id} of appel {appel.id} in guild {guild.id}.")
+            stored = attendance.get(appel.id)
+            return await _stored_thread(guild, stored.thread_id) if stored and stored.thread_id else None
+        await _fill_thread(guild, appel, thread, appel.trainer_id)
+        return thread
+    logger.error(f"Could not open a thread for appel {appel.id} in guild {guild.id}.")
+    return None
+
+
 async def deliver(guild: Guild, appel: Appel) -> bool:
-    """Send a check to its trainer in private.
+    """Send a check to its trainer: in private, else in a private thread when their DMs are closed.
 
     Args:
         guild (Guild): The check's server.
@@ -260,9 +370,22 @@ async def deliver(guild: Guild, appel: Appel) -> bool:
     if trainer is None:
         logger.error(f"Failed to fetch trainer {appel.trainer_id} for appel {appel.id} in guild {guild.id}.")
         return False
-    content, view = appel_message(guild, appel, datetime.now(PARIS_TZ))
+    now = datetime.now(PARIS_TZ)
+    content, view = appel_message(guild, appel, now)
     sent = await send_dm_to_member(logger, guild, trainer, content, view=view, dm_type=f"attendance check {appel.id}")
-    return sent is not None
+    if sent is not None:
+        return True
+    thread = await open_thread(guild, appel)
+    if thread is None:
+        return False
+    content, view = appel_message(guild, appel, now, thread=True)
+    try:
+        await thread.send(content, view=view, allowed_mentions=AllowedMentions(users=[Object(trainer.id)]))
+    except HTTPException:
+        logger.exception(f"Could not send appel {appel.id} to thread {thread.id} in guild {guild.id}.")
+        return False
+    logger.info(f"Sent appel {appel.id} to thread {thread.id} in guild {guild.id}.")
+    return True
 
 
 async def start_appel(guild: Guild, published: PublishedMessage, position: int) -> bool:

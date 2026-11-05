@@ -314,15 +314,23 @@ Order matters: the allow-list comes before the invite, otherwise the bot joins a
 2. Only then invite the bot with this link, after replacing the two placeholders:
 
    ```text
-   https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot+applications.commands&permissions=268561617&guild_id=<SERVER_ID>&disable_guild_select=true
+   https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot+applications.commands&permissions=343865945297&guild_id=<SERVER_ID>&disable_guild_select=true
    ```
 
-   The permission integer `268561617` grants: Manage Roles, Manage Channels, View Audit Log, Create
-   Invite, View Channels, Send Messages, Manage Messages, Embed Links, Attach Files, Read Message History
-   and Add Reactions. It does not include Administrator. A bot invited before `/user invite` existed lacks
-   Create Invite: give it to the bot's role in Server Settings, Roles. To have invites go through `/user invite`
+   The permission integer `343865945297` grants: Manage Roles, Manage Channels, View Audit Log, Create
+   Invite, View Channels, Send Messages, Manage Messages, Embed Links, Attach Files, Read Message History,
+   Add Reactions, Create Private Threads and Send Messages in Threads. It does not include Administrator. A bot
+   invited before `/user invite` existed lacks Create Invite: give it to the bot's role in Server Settings, Roles.
+   To have invites go through `/user invite`
    only, take Create Invite off `@everyone` and every other role: the bot's own role keeps it. Members with
    Administrator, and channel overwrites that grant Create Invite, still allow invites by hand: check both.
+
+   Where the attendance check goes: to the trainer's private messages first. When those are closed, to the
+   thread already stored for the check, else to a new private thread of the announcement's channel when that is a
+   text channel and not an announcement (news) channel, else, or when Discord refuses there, to a private thread
+   of the commands channel. The thread holds the trainer and every Respo Formation, nobody can invite others
+   into it, and it archives after 7 days without a message. If no thread can be made, the log holds
+   `Could not open a thread for appel <ID> in guild <ID>.` and the check stays open.
 
 3. In Server Settings, Roles, drag the bot's role above every role it manages, `Admin -temp-`
    included. Discord refuses to add or remove a role that sits above the bot's own.
@@ -333,6 +341,15 @@ Order matters: the allow-list comes before the invite, otherwise the bot joins a
    then, only members with the Administrator permission see the staff commands.
 6. Restart the stack and read the server's `Server check` lines (see "Server check at start"). The check
    runs once per start, so a server invited since the last start is read at the next one.
+7. For every server already installed with the earlier integer `268561617`: in Server Settings, Roles, open the
+   bot's role and turn on Create Private Threads and Send Messages in Threads. Until then each start prints this
+   `permissions_missing` line, and a trainer whose private messages are closed gets no thread:
+
+   ```text
+   Server check problem: guild_id=<SERVER_ID> severity=blocking code=permissions_missing detail=[create_private_threads] fix: give these permissions to the bot's role, or invite the bot again
+   ```
+
+   The detail also names `send_messages_in_threads` on a server that took it from `@everyone`.
 
 At the next start, the log shows one summary line:
 

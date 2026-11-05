@@ -698,3 +698,18 @@ def test_user_guide_says_a_training_published_twice_gets_one_attendance_check() 
     section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
     assert "published again in a newer announcement gets one check" in section
     assert "a check already open stays where it is" in section
+
+
+def test_operator_guide_gives_the_invite_integer_with_the_thread_permissions() -> None:
+    """The invite link holds the integer with the thread permissions, the list names both, and a step fixes an installed bot."""
+    guide = _read("docs/OPERATIONS.md")
+    section = _section(guide, "## Add a server")
+    assert "permissions=343865945297&" in section
+    assert "`343865945297`" in section
+    assert "Create Private Threads" in section
+    assert "Send Messages in Threads" in section
+    assert "permissions=268561617" not in section
+    assert "already installed" in section
+    assert "Create Private Threads and Send Messages in Threads" in section
+    assert "Server Settings, Roles" in section
+    assert "`permissions_missing` line" in section

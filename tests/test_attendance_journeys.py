@@ -18,6 +18,7 @@ import pytest
 from fablabot import db
 from fablabot.guild_config import set_log_channel_id
 from fablabot.helpers.constants import MAX_MSG_CHARS, PARIS_TZ, RoleNames
+from fablabot.helpers.formation.attendance import deliver
 from fablabot.helpers.guild_access import GuildAccessPolicy
 from fablabot.models.formation import FmMessageDraft, Formation, PublishedMessage
 from fablabot.services import attendance, formations
@@ -1105,3 +1106,201 @@ async def test_a_trainer_who_only_holds_codir_takes_the_appel(hall: Hall) -> Non
     assert (stored.validated_by, stored.present_count, stored.absent_count) == (lead.id, 1, 1)
     (lists,) = _lists(hall, hall.respo)
     assert f"a été fait par <@{lead.id}>." in lists.content
+
+
+def _close_dms(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every private message fail the way a closed DM does."""
+
+    async def closed(_user: Any) -> bool:
+        return False
+
+    monkeypatch.setattr("fablabot.helpers.utils._can_dm_user", closed)
+
+
+def _threads(channel: Any) -> list[Any]:
+    """List the threads made under a channel."""
+    return list(channel.threads)
+
+
+def _thread_members(hall: Hall, thread: Any) -> set[int]:
+    """List the members a thread holds, the bot included."""
+    return set(hall.env.backend.channels[thread.id].thread_members)
+
+
+async def test_closed_dms_open_a_private_thread_in_a_text_announcement_channel(
+    hall: Hall, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the trainer's DMs closed the appel goes to a private thread of the announcement's channel."""
+    hall.register(2)
+    hall.publish()
+    _close_dms(monkeypatch)
+    created: list[dict[str, Any]] = []
+    real_create = discord.TextChannel.create_thread
+
+    async def create_thread(channel: Any, **kwargs: Any) -> Any:
+        created.append(kwargs)
+        return await real_create(channel, **kwargs)
+
+    monkeypatch.setattr(discord.TextChannel, "create_thread", create_thread)
+
+    await hall.tick()
+
+    (thread,) = _threads(hall.general)
+    assert created == [
+        {
+            "name": "Appel : Découpe laser",
+            "type": discord.ChannelType.private_thread,
+            "invitable": False,
+            "auto_archive_duration": 10080,
+        }
+    ]
+    (message,) = thread.history()
+    assert message.content.startswith(
+        f"<@{hall.trainer.id}> tes MP sont fermés, alors l'appel de **Découpe laser** se fait ici. "
+        "Ce fil n'est visible que de toi et du staff.\n\n**Fais l'appel**"
+    )
+    assert message.content.endswith("_0 présent sur 2 inscrits._")
+    assert f"appel:{hall.appel_id}:ok" in _buttons(message)
+    appel = attendance.get(hall.appel_id)
+    assert appel is not None
+    assert appel.thread_id == thread.id
+    assert hall.dm() == []
+
+
+async def test_an_announcement_channel_sends_the_thread_to_the_commands_channel(
+    hall: Hall, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An announcement posted in a news channel cannot hold a private thread: the commands channel does."""
+    commands = hall.guild.create_text_channel("commandes_bot")
+    hall.general = hall.guild.create_news_channel("annonces")
+    hall.register(1)
+    hall.publish()
+    _close_dms(monkeypatch)
+
+    await hall.tick()
+
+    assert _threads(hall.general) == []
+    (thread,) = _threads(commands)
+    appel = attendance.get(hall.appel_id)
+    assert appel is not None
+    assert appel.thread_id == thread.id
+    assert len(thread.history()) == 1
+
+
+async def test_the_thread_holds_the_trainer_and_each_respo_formation(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The trainer and every Respo Formation are added to the thread; nobody else is."""
+    other_respo = hall.member("respo2", RoleNames.TRAININGS_MANAGER)
+    hall.register(1)
+    hall.publish()
+    _close_dms(monkeypatch)
+
+    await hall.tick()
+
+    (thread,) = _threads(hall.general)
+    members = _thread_members(hall, thread)
+    assert {hall.trainer.id, hall.respo.id, other_respo.id} <= members
+    assert not members & {hall.plain.id, hall.codir.id, hall.admin_temp.id}
+
+
+async def test_a_relaunch_reuses_the_thread(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Delivering the appel again sends to the thread already stored and makes no second one."""
+    hall.register(1)
+    hall.publish()
+    _close_dms(monkeypatch)
+    await hall.tick()
+    appel = attendance.get(hall.appel_id)
+    assert appel is not None
+    guild = hall.env.bot.get_guild(GUILD_ID)  # pyright: ignore[reportAttributeAccessIssue]
+    assert guild is not None
+
+    assert await deliver(guild, appel)
+
+    (thread,) = _threads(hall.general)
+    assert len(thread.history()) == 2
+    assert attendance.get(hall.appel_id).thread_id == thread.id  # pyright: ignore[reportOptionalMemberAccess]
+
+
+async def test_a_thread_refused_by_discord_leaves_the_appel_open_and_logged(
+    hall: Hall, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """When no channel accepts the thread the appel stays open, nothing is stored for it, and the failure is logged by ID."""
+    hall.guild.create_text_channel("commandes_bot")
+    hall.register(1)
+    hall.publish()
+    _close_dms(monkeypatch)
+
+    async def refuse(_channel: Any, **_kwargs: Any) -> Any:
+        raise discord.Forbidden(MagicMock(status=403), "Missing Permissions")
+
+    monkeypatch.setattr(discord.TextChannel, "create_thread", refuse)
+    caplog.set_level(logging.INFO)
+
+    await hall.tick()
+
+    appel = attendance.get(hall.appel_id)
+    assert appel is not None
+    assert appel.thread_id is None
+    assert appel.is_open(datetime.now(PARIS_TZ))
+    assert f"Could not open a thread for appel {hall.appel_id} in guild {GUILD_ID}" in caplog.text
+    assert hall.handled
+
+
+async def test_a_respo_formation_takes_the_appel_in_the_thread(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A Respo Formation clicks the thread's buttons and the mark is stored."""
+    first, *_ = hall.register(2)
+    hall.publish()
+    _close_dms(monkeypatch)
+    await hall.tick()
+    (thread,) = _threads(hall.general)
+    (message,) = thread.history()
+
+    await hall.respo.click(message, custom_id=hall.toggle_id(first))
+
+    assert attendance.present(hall.appel_id) == {first.id}
+    (message,) = thread.history()
+    assert message.content.endswith("_1 présent sur 2 inscrits._")
+    assert "se fait ici" in message.content
+
+
+async def test_a_member_who_only_manages_threads_is_refused(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Seeing private threads through Manage Threads gives no right to take the appel."""
+    first, *_ = hall.register(2)
+    hall.publish()
+    _close_dms(monkeypatch)
+    await hall.tick()
+    role = hall.guild.create_role("modos", permissions=Permissions(manage_threads=True))
+    moderator = hall.guild.add_member(hall.env.create_user("modo"), roles=[role])
+    before = _stored(hall.appel_id)
+
+    allowed, interaction = await hall.forged_click(moderator, hall.toggle_id(first))
+
+    assert not allowed
+    assert _refused(interaction) == NO_RIGHT
+    assert _stored(hall.appel_id) == before
+
+
+async def test_a_thread_made_while_another_won_the_race_is_dropped(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When another delivery stored its thread first, the second thread is deleted and the first one is used."""
+    hall.register(1)
+    hall.publish()
+    _close_dms(monkeypatch)
+    backend = hall.env.backend
+    winner = backend.create_thread(
+        hall.general.id, "Appel : Découpe laser", hall.trainer.id, type=discord.ChannelType.private_thread.value
+    )
+    backend.add_thread_member(winner.id, hall.trainer.id)
+    await hall.env.settle()
+    real_set = attendance.set_thread
+
+    def lose(appel_id: int, thread_id: int) -> bool:
+        assert real_set(appel_id, winner.id)
+        return real_set(appel_id, thread_id)
+
+    monkeypatch.setattr(attendance, "set_thread", lose)
+
+    await hall.tick()
+
+    threads = [c.id for c in backend.channels.values() if c.is_thread]
+    assert threads == [winner.id]
+    assert len(backend.messages[winner.id]) == 1
+    assert attendance.get(hall.appel_id).thread_id == winner.id  # pyright: ignore[reportOptionalMemberAccess]

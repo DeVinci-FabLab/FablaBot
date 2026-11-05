@@ -6,7 +6,7 @@ from datetime import datetime
 import logging
 from typing import TYPE_CHECKING, Any, Final, override
 
-from discord import ButtonStyle, SelectOption, ui
+from discord import ButtonStyle, SelectOption, Thread, ui
 from discord.components import Button, SelectMenu
 
 from fablabot.helpers.constants import PARIS_TZ, ErrorMessages
@@ -94,7 +94,7 @@ async def _show(interaction: Interaction[Fablabot], appel_id: int) -> None:
     guild = interaction.client.get_guild(appel.guild_id) if appel else None
     if appel is None or guild is None:
         return
-    content, view = appel_message(guild, appel, datetime.now(PARIS_TZ))
+    content, view = appel_message(guild, appel, datetime.now(PARIS_TZ), thread=isinstance(interaction.channel, Thread))
     await interaction.response.edit_message(content=content, view=view)
 
 
