@@ -204,6 +204,8 @@ def test_an_alert_is_due_once_the_slot_is_over_and_until_the_check_closes() -> N
     assert [a.id for a in attendance.due_alerts(closes - timedelta(seconds=1))] == [appel_id]
     assert attendance.due_alerts(closes) == []
 
+    attendance.claim_alert(appel_id)
+
     attendance.record_alert(appel_id, [(10, 100), (11, 101)])
 
     assert attendance.due_alerts(END) == []
@@ -211,6 +213,32 @@ def test_an_alert_is_due_once_the_slot_is_over_and_until_the_check_closes() -> N
     appel = attendance.get(appel_id)
     assert appel is not None
     assert appel.alert_sent is True
+
+
+def test_claiming_the_alert_marks_it_sent_before_any_message_is_kept() -> None:
+    """The claim alone ends the alert's due state, once, and keeps no message: the IDs are stored after the sends."""
+    _publish()
+    appel_id = _open()
+
+    assert attendance.claim_alert(appel_id) is True
+
+    appel = attendance.get(appel_id)
+    assert appel is not None
+    assert appel.alert_sent is True
+    assert attendance.due_alerts(END) == []
+    assert attendance.alert_messages(appel_id) == []
+    assert attendance.claim_alert(appel_id) is False
+
+
+def test_a_saved_or_answered_check_cannot_be_claimed() -> None:
+    """A check saved or answered since it was listed takes no alert: the claim says so and marks nothing."""
+    _publish()
+    saved, answered = _open(), _open(position=1)
+    attendance.validate(saved, 7, END)
+    attendance.handle(answered, 5, AlertAction.IGNORE, END)
+
+    assert (attendance.claim_alert(saved), attendance.claim_alert(answered)) == (False, False)
+    assert [a.alert_sent for a in (attendance.get(saved), attendance.get(answered)) if a] == [False, False]
 
 
 def test_a_saved_check_needs_no_alert() -> None:
@@ -243,6 +271,7 @@ def test_a_save_closes_the_alert_in_its_own_transaction() -> None:
     """Saving a check whose alert nobody answered records the answer done with the save, and says it closed the alert."""
     _publish()
     appel_id = _open()
+    attendance.claim_alert(appel_id)
     attendance.record_alert(appel_id, [(10, 100)])
     at = END + timedelta(minutes=5)
 
@@ -258,6 +287,7 @@ def test_a_save_leaves_an_answer_or_a_missing_alert_alone(alerted: bool) -> None
     _publish()
     appel_id = _open()
     if alerted:
+        attendance.claim_alert(appel_id)
         attendance.record_alert(appel_id, [(10, 100)])
         attendance.handle(appel_id, 5, AlertAction.IGNORE, END)
 
@@ -340,6 +370,7 @@ def test_a_check_goes_with_its_message() -> None:
     _publish()
     appel_id = _open()
     attendance.mark(appel_id, [1], [1])
+    attendance.claim_alert(appel_id)
     attendance.record_alert(appel_id, [(10, 100)])
 
     with db.transaction() as conn:

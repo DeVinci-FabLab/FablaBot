@@ -599,8 +599,8 @@ def alert_message(appel: Appel) -> tuple[str, ui.View]:
     return content, view
 
 
-async def _alert_respos(guild: Guild, appel: Appel) -> None:
-    """Send the alert of one check to each Respo Formation, then record it with every message sent."""
+async def _alert_respos(guild: Guild, appel: Appel) -> list[tuple[int, int]]:
+    """Send the alert of one check to each Respo Formation; return where each copy went."""
     content, _ = alert_message(appel)
     sent: list[tuple[int, int]] = []
     for respo in sorted(get_members_by_role(logger, guild, role=RoleNames.TRAININGS_MANAGER), key=lambda m: m.id):
@@ -611,24 +611,39 @@ async def _alert_respos(guild: Guild, appel: Appel) -> None:
             sent.append((message.channel.id, message.id))
     if not sent:
         logger.warning(f"Alert of appel {appel.id} in guild {guild.id} reached no Respo Formation.")
-    # Recorded once the sends are over: it keeps where each copy went, which a record made before could not. A crash in
-    # between sends the alert again, and both copies answer alike; a record made first would lose it.
+    return sent
+
+
+async def _alert(bot: Fablabot, guild: Guild, appel: Appel) -> None:
+    """Alert the Respo Formation about one check, then keep where each copy went and show the answer it already has.
+
+    The check is marked alerted first, in its own transaction: whatever fails after that, the next tick does not send the
+    alert again. A failure while keeping the message IDs leaves those copies unedited when the alert is answered.
+    """
+    if not attendance.claim_alert(appel.id):
+        return
+    sent = await _alert_respos(guild, appel)
     attendance.record_alert(appel.id, sent)
     logger.info(f"Alerted {len(sent)} Respo Formation about appel {appel.id} in guild {guild.id}.")
+    # The trainer may have saved, or a Respo answered, while the alerts went out: their copies were not stored yet.
+    fresh = attendance.get(appel.id)
+    if fresh is not None and alert_answer(fresh) is not None:
+        await refresh_alerts(bot, fresh)
 
 
 async def send_due_alerts(bot: Fablabot, now: datetime) -> None:
     """Alert the Respo Formation of each served server about the checks nobody made once their slot is over.
 
-    Each check is alerted once: the record that follows the sends stops the next tick. A Respo who cannot be reached
-    does not stop the others, and a check that reached nobody is recorded anyway.
+    Each check is alerted once: it is marked before the first message goes out, so a crash or a failed record does not
+    send it again at the next tick. A Respo who cannot be reached does not stop the others, a check that reached nobody
+    stays marked, and a check that fails is logged and does not stop the next ones.
 
     Args:
         bot (Fablabot): The bot.
         now (datetime): The time of this tick.
 
     Raises:
-        sqlite3.Error: When the checks cannot be read or an alert cannot be recorded; the next tick tries again.
+        sqlite3.Error: When the checks cannot be read; the next tick tries again.
     """
     for appel in attendance.due_alerts(now):
         if not bot.guild_access.is_served(appel.guild_id):
@@ -637,11 +652,10 @@ async def send_due_alerts(bot: Fablabot, now: datetime) -> None:
         if guild is None:
             continue
         with guild_log_context(guild.id):
-            await _alert_respos(guild, appel)
-            # The trainer may have saved while the alerts went out; the save found no alert to close.
-            fresh = attendance.get(appel.id)
-            if fresh is not None:
-                await settle_alert(bot, fresh)
+            try:
+                await _alert(bot, guild, appel)
+            except Exception:  # one check must not stop the others of the tick: it is marked, the next tick skips it
+                logger.exception(f"Could not alert for appel {appel.id} in guild {guild.id}.")
 
 
 async def refresh_alerts(bot: Fablabot, appel: Appel, *, skip: int | None = None) -> None:

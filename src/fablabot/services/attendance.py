@@ -293,15 +293,34 @@ def due_alerts(now: datetime) -> list[Appel]:
     return [_appel(row) for row in rows]
 
 
+def claim_alert(appel_id: int) -> bool:
+    """Mark a check as alerted, before any alert goes out, so that no tick can send it a second time.
+
+    Args:
+        appel_id (int): The check's ID.
+
+    Returns:
+        bool: True when this call marked it, False when it was alerted already, saved or answered since it was listed.
+    """
+    with db.transaction() as conn:
+        return (
+            conn.execute(
+                "UPDATE appel SET alert_sent = 1 WHERE id = ? AND alert_sent = 0 AND validated_at IS NULL "
+                "AND handled_action IS NULL",
+                (appel_id,),
+            ).rowcount
+            == 1
+        )
+
+
 def record_alert(appel_id: int, messages: Iterable[tuple[int, int]]) -> None:
-    """Mark a check as alerted and keep where the alert went.
+    """Keep where the alert of a check went, once the messages are sent.
 
     Args:
         appel_id (int): The check's ID.
         messages (Iterable[tuple[int, int]]): The ``(channel_id, message_id)`` of each copy sent.
     """
     with db.transaction() as conn:
-        conn.execute("UPDATE appel SET alert_sent = 1 WHERE id = ?", (appel_id,))
         conn.executemany(
             "INSERT OR IGNORE INTO appel_alert (appel_id, channel_id, message_id) VALUES (?, ?, ?)",
             [(appel_id, channel, message) for channel, message in messages],

@@ -18,6 +18,7 @@ import pytest
 from fablabot import db
 from fablabot.guild_config import set_log_channel_id
 from fablabot.helpers.constants import MAX_MSG_CHARS, PARIS_TZ, RoleNames
+from fablabot.helpers.formation import attendance as formation_attendance
 from fablabot.helpers.formation.attendance import deliver
 from fablabot.helpers.formation.rendering import discord_timestamp
 from fablabot.helpers.guild_access import GuildAccessPolicy
@@ -1634,6 +1635,67 @@ async def test_an_alert_that_reaches_nobody_is_recorded_and_not_sent_again(
     await hall.tick()
 
     assert _dms(hall.respo) == []
+
+
+@pytest.mark.parametrize("failure", ["record", "send"])
+async def test_a_failing_alert_is_never_sent_twice(
+    hall: Hall, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, failure: str
+) -> None:
+    """A record or a send that fails mid-alert is logged and does not make the next ticks alert every Respo again."""
+    other_respo = hall.member("respo2", RoleNames.TRAININGS_MANAGER)
+    if failure == "record":
+
+        def broken(_appel_id: int, _messages: Any) -> None:
+            raise sqlite3.OperationalError
+
+        monkeypatch.setattr(attendance, "record_alert", broken)
+    else:
+        real_send = formation_attendance.send_dm_to_member
+
+        async def send(logger: Any, guild: Any, member: Any, *args: Any, **kwargs: Any) -> Any:
+            if member.id == max(hall.respo.id, other_respo.id):
+                raise RuntimeError
+            return await real_send(logger, guild, member, *args, **kwargs)
+
+        monkeypatch.setattr(formation_attendance, "send_dm_to_member", send)
+
+    await _overdue(hall)
+    await hall.tick()
+    await hall.tick()
+
+    for respo in (hall.respo, other_respo):
+        assert len([m for m in _dms(respo) if "n'a pas fait l'appel" in m.content]) <= 1
+    assert len(_dms(min(hall.respo, other_respo, key=lambda r: r.id))) == 1
+    appel = attendance.get(hall.appel_id)
+    assert appel is not None
+    assert appel.alert_sent
+    assert f"Could not alert for appel {hall.appel_id} in guild {GUILD_ID}" in caplog.text
+
+
+async def test_one_check_failing_does_not_stop_the_alerts_of_the_tick(
+    hall: Hall, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A failure while alerting one check is logged, and the other checks of the tick are still alerted."""
+    hall.register(1)
+    start = datetime.now(PARIS_TZ) - OVERDUE
+    hall.store(
+        [hall.training(start=start, name="Premier", duration="1h"), hall.training(start=start, name="Second", duration="1h")]
+    )
+    real_send = formation_attendance.send_dm_to_member
+
+    async def send(logger: Any, guild: Any, member: Any, content: str, *args: Any, **kwargs: Any) -> Any:
+        if "n'a pas fait l'appel de **Premier**" in content:
+            raise RuntimeError
+        return await real_send(logger, guild, member, content, *args, **kwargs)
+
+    monkeypatch.setattr(formation_attendance, "send_dm_to_member", send)
+
+    await hall.tick()
+
+    alerts = [m.content for m in _dms(hall.respo) if "n'a pas fait l'appel" in m.content]
+    assert len(alerts) == 1
+    assert "**Second**" in alerts[0]
+    assert "Could not alert for appel" in caplog.text
 
 
 async def test_a_save_during_a_failed_relaunch_closes_the_alert_done(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
