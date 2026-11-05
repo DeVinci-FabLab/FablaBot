@@ -47,7 +47,7 @@ from fablabot.helpers.safe_discord_operations import retract_unsaved_post
 from fablabot.helpers.utils import counted, ensure_command_context, is_valid_emoji
 from fablabot.logging_handlers import guild_log_context
 from fablabot.models import FmCommand, FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
-from fablabot.services import formations
+from fablabot.services import attendance, formations
 from fablabot.ui import fmui
 from fablabot.ui.attendance import DYNAMIC_ITEMS
 
@@ -704,8 +704,9 @@ class FormationManagement(commands.Cog):
     ) -> None:
         """Notify for the trainings of one published message that are due, and store that they were.
 
-        An older message is only caught up on starts: it gets no hour-before reminder, and a training that a newer
-        message holds again is left to that message, so a training published twice gets one check.
+        An older message is only caught up on starts: it gets no hour-before reminder. A training published in two
+        messages gets one check: a message leaves the training to the other when that one already has its check, and an
+        older message also leaves it to a newer one that holds it again.
 
         Args:
             guild (Guild): The guild.
@@ -720,12 +721,14 @@ class FormationManagement(commands.Cog):
         start_window_end = now + window_tolerance
 
         fms = list(pub.message.fms)
-        reissued = formations.reissued_positions(guild.id, pub.message_id) if catch_up else set()
+        held = attendance.checked_elsewhere(guild.id, pub.message_id)
+        if catch_up:
+            held |= formations.reissued_positions(guild.id, pub.message_id)
         for position, fm in enumerate(fms):
             if fm.notified_at_start:
                 continue
 
-            if position in reissued:
+            if position in held:
                 fm.notified_at_start = True
                 continue
 

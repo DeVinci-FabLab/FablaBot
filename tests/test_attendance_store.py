@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 import sqlite3
 
 import pytest
@@ -91,6 +91,35 @@ def test_a_check_needs_timezone_aware_times() -> None:
         _open(ends_at=naive)
 
     assert _count("appel") == 0
+
+
+def test_trainings_whose_twin_in_another_message_already_has_a_check_are_listed_by_place() -> None:
+    """A training is checked elsewhere when another message of the server has a check for its name, trainer and start."""
+
+    def training(*, name: str = "Laser", trainer: str = "<@7>", at: datetime = START) -> Formation:
+        return Formation(emoji="A", name=name, trainer_mention=trainer, start_iso=at.isoformat(), duration="2h", seats=3)
+
+    def publish(message_id: int, *trainings: Formation, guild_id: int = GUILD) -> None:
+        draft = FmMessageDraft(header="h", role_id=1, intro="i", fms=list(trainings), end="e")
+        formations.save_published(guild_id, PublishedMessage(message_id=message_id, channel_id=CHANNEL, message=draft))
+
+    publish(MESSAGE, training(), training(name="3D"), training(trainer="<@9>"), training(at=START + timedelta(days=1)))
+    publish(
+        MESSAGE + 1,
+        training(at=START.astimezone(UTC)),
+        training(name="3D", trainer="<@8>"),
+        training(trainer="<@9>"),
+        training(name="Soudure"),
+    )
+    publish(MESSAGE + 2, training(), guild_id=GUILD + 1)
+    for position in (0, 1, 3):
+        attendance.open_appel(GUILD, MESSAGE, position, trainer_id=7, starts_at=START, ends_at=END)
+    attendance.open_appel(GUILD + 1, MESSAGE + 2, 0, trainer_id=7, starts_at=START, ends_at=END)
+
+    assert attendance.checked_elsewhere(GUILD, MESSAGE + 1) == {0}
+    assert attendance.checked_elsewhere(GUILD, MESSAGE) == set()  # its own checks do not count
+    assert attendance.checked_elsewhere(GUILD + 1, MESSAGE + 2) == set()  # the other server's check is not this server's
+    assert attendance.checked_elsewhere(GUILD, MESSAGE + 3) == set()
 
 
 def test_a_check_cannot_be_opened_on_another_servers_message() -> None:

@@ -105,6 +105,31 @@ def open_appel(  # noqa: PLR0913
     return row["id"]
 
 
+def checked_elsewhere(guild_id: int, message_id: int) -> set[int]:
+    """List the trainings of a published message whose check is already open from another message of the server.
+
+    A training is checked elsewhere when another message of the server holds it again, with the same name, trainer
+    and start instant, and that copy has a check: the announcement was published anew after the start was handled.
+
+    Args:
+        guild_id (int): The server.
+        message_id (int): The published message.
+
+    Returns:
+        set[int]: The places of those trainings in the message.
+    """
+    rows = db.connection().execute(
+        "SELECT f.position FROM formation f JOIN fm_message m ON m.id = f.fm_message_id "
+        "WHERE m.guild_id = ? AND m.message_id = ? AND EXISTS ("
+        "SELECT 1 FROM formation g JOIN fm_message n ON n.id = g.fm_message_id "
+        "JOIN appel a ON a.fm_message_id = g.fm_message_id AND a.position = g.position "
+        "WHERE n.guild_id = m.guild_id AND n.message_id <> m.message_id AND g.name = f.name "
+        "AND g.trainer_mention = f.trainer_mention AND unixepoch(g.start_iso) = unixepoch(f.start_iso))",
+        (guild_id, message_id),
+    )
+    return {row["position"] for row in rows}
+
+
 def get(appel_id: int) -> Appel | None:
     """Read a check.
 

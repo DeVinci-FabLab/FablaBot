@@ -668,6 +668,7 @@ def test_user_guide_says_a_missed_start_still_sends_the_attendance_check() -> No
 
 
 def test_user_guide_says_a_training_published_twice_gets_one_attendance_check() -> None:
-    """The trainings section says a training published again in a newer announcement gets one check, from the newer one."""
+    """The trainings section says a training published again in a newer announcement gets one check, the open one staying."""
     section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
-    assert "published again in a newer announcement gets one check, from the newer one" in section
+    assert "published again in a newer announcement gets one check" in section
+    assert "a check already open stays where it is" in section

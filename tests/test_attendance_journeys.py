@@ -580,6 +580,26 @@ async def test_an_older_copy_of_a_training_the_newer_announcement_handled_gets_n
     assert len(hall.dm()) == 1
 
 
+@pytest.mark.parametrize("started_ago", [timedelta(minutes=1), timedelta(days=1)])
+async def test_a_training_published_again_after_its_appel_opened_gets_no_second_appel(
+    hall: Hall, started_ago: timedelta
+) -> None:
+    """A newer announcement of a training whose check is already open keeps that check and sends nothing more."""
+    hall.register(2)
+    start = datetime.now(PARIS_TZ) - started_ago
+    hall.publish(start=start, message_id=MESSAGE_ID)
+    await hall.tick()
+    hall.publish(start=start, message_id=MESSAGE_ID + 1)
+
+    await hall.tick()
+    await hall.tick()
+
+    assert db.connection().execute("SELECT COUNT(*) FROM appel").fetchone()[0] == 1
+    assert attendance.get(hall.appel_id).message_id == MESSAGE_ID  # pyright: ignore[reportOptionalMemberAccess]
+    assert len(hall.dm()) == 1
+    assert hall.handled  # the newer copy is done too, so no later tick looks at it again
+
+
 async def test_only_the_trainings_an_announcement_alone_holds_open_a_check_from_it(hall: Hall) -> None:
     """An older announcement keeps the check of its own training and leaves the one a newer announcement holds again."""
     hall.register(2)
