@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 import logging
+from pathlib import Path
 import re
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -186,3 +188,45 @@ async def test_msg_purge_refuses_anyone_but_a_server_administrator(monkeypatch: 
     interaction.response.send_message.assert_awaited_once()
     assert "administrateurs" in interaction.response.send_message.await_args.args[0]
     channel.purge.assert_not_awaited()
+
+
+_NAMED: frozenset[str] = frozenset(
+    {"user", "member", "author", "sender", "selected_user", "members", "delivered", "failed", "modified", "already"}
+)
+_NAME_ATTRS: frozenset[str] = frozenset({"name", "display_name", "global_name", "nick"})
+_LOG_METHODS: frozenset[str] = frozenset({"debug", "info", "warning", "error", "exception", "critical"})
+
+
+def _names_a_member(node: ast.expr) -> bool:
+    """Tell whether an interpolated value is a member, a list of members, or a member's name."""
+    if isinstance(node, ast.Name):
+        return node.id in _NAMED
+    if isinstance(node, ast.Attribute):
+        base = node.value
+        base_name = base.attr if isinstance(base, ast.Attribute) else base.id if isinstance(base, ast.Name) else ""
+        if node.attr in _NAME_ATTRS:
+            return base_name in _NAMED
+        return node.attr in _NAMED
+    return False
+
+
+def test_no_log_call_in_the_source_interpolates_a_member() -> None:
+    """Every logger call writes members by ID: no member, member list, name or display name is interpolated."""
+    offenders: list[str] = []
+    sources = sorted((Path(__file__).resolve().parents[1] / "src" / "fablabot").rglob("*.py"))
+    assert len(sources) > 30
+    for path in sources:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for call in ast.walk(tree):
+            func = getattr(call, "func", None)
+            if not (isinstance(call, ast.Call) and isinstance(func, ast.Attribute) and func.attr in _LOG_METHODS):
+                continue
+            owner = func.value
+            if not (isinstance(owner, ast.Name) and owner.id == "logger") and not (
+                isinstance(owner, ast.Attribute) and owner.attr == "logger"
+            ):
+                continue
+            for value in ast.walk(call):
+                if isinstance(value, ast.FormattedValue) and _names_a_member(value.value):
+                    offenders.append(f"{path}:{call.lineno} {ast.unparse(value.value)}")
+    assert offenders == []

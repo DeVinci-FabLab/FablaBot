@@ -768,7 +768,7 @@ class FormationManagement(commands.Cog):
         """Get the last published state for a specific guild."""
         published = formations.current_published(guild_id)
         if published is None:
-            logger.warning(f"No published formations data stored for guild {guild_id}.")
+            logger.debug(f"No published formations data stored for guild {guild_id}.")
         return published
 
     def _set_last_published_in_guild(self, guild_id: int, published: PublishedMessage) -> None:

@@ -128,10 +128,10 @@ class WelcomeManagement(commands.Cog):
         member_name = channel.name.removeprefix("welcome-")
         member = get(interaction.guild.members, name=member_name)
         if member is None:
-            logger.warning(f"Member not found by name: {member_name}")
+            logger.warning(f"Member not found by the name of welcome channel {channel.id}")
             member = next((u for u in channel.overwrites if isinstance(u, Member)), None)
         if member is None:
-            logger.warning(f"Member not found: {member_name}")
+            logger.warning(f"Member not found for welcome channel {channel.id}")
             await interaction.response.send_message(
                 ErrorMessages.MEMBER_NOT_FOUND.format(member_name=escape_md(member_name)),
                 ephemeral=True,
@@ -186,7 +186,7 @@ class WelcomeManagement(commands.Cog):
         """
         if not self.bot.guild_access.is_served(member.guild.id):
             return
-        logger.debug(f"Member joined: {member} ({member.id})")
+        logger.debug(f"Member joined member_id={member.id}")
         is_enabled = is_welcome_verify_enabled(member.guild.id)
         if not is_enabled:
             logger.debug(f"Auto welcome is disabled for guild {member.guild.id}, skipping welcome channel creation.")
@@ -216,7 +216,7 @@ class WelcomeManagement(commands.Cog):
             reason=f"Welcome channel for new member {member.name}",
         )
         if not channel or error:
-            logger.exception(ErrorMessages.CHANNEL_CREATE_FAILED.format(channel_type=f"salon de bienvenue pour {member.name}"))
+            logger.exception(f"Welcome channel not created member_id={member.id}")
             return
 
         try:
@@ -230,7 +230,7 @@ class WelcomeManagement(commands.Cog):
                 "Vous êtes un ancien ? Envoyez simplement un message précisant que vous en êtes un 🙂",
             )
         except HTTPException:
-            logger.exception(f"Failed to send welcome message for {member.name}")
+            logger.exception(f"Failed to send welcome message member_id={member.id}")
             return
 
     # endregion Event Listeners

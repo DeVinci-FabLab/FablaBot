@@ -889,7 +889,7 @@ class MessageManagement(commands.Cog):
             except Exception:
                 logger.exception(
                     f"Failed to execute reaction action {action.action_type} for emoji {emoji_str} "
-                    f"on message {payload.message_id} by {member}",
+                    f"on message {payload.message_id} by member_id={member.id}",
                 )
             try:
                 self._reaction_logs.append(

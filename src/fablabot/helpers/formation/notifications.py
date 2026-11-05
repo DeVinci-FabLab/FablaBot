@@ -36,7 +36,7 @@ async def send_registration_dm(
     if member is None:
         logger.error(f"Failed to fetch member {user_id} for registration DM in guild {guild.id}.")
         return
-    logger.debug(f"Resolved member {member.id} ({member.display_name}) for registration DM in guild {guild.id}.")
+    logger.debug(f"Resolved member {member.id} for registration DM in guild {guild.id}.")
 
     datetime_text = discord_timestamp(formation.start_dt)
 
@@ -70,7 +70,7 @@ async def send_waitlist_dm(
     if member is None:
         logger.error(f"Failed to fetch member {user_id} for waitlist DM in guild {guild.id}.")
         return
-    logger.debug(f"Resolved member {member.id} ({member.display_name}) for waitlist DM in guild {guild.id}.")
+    logger.debug(f"Resolved member {member.id} for waitlist DM in guild {guild.id}.")
 
     position_text = f"en **{waitlist_position}{'e' if waitlist_position > 1 else 're'} position**"
     message = (
@@ -101,7 +101,7 @@ async def send_promotion_dm(
     if member is None:
         logger.error(f"Failed to fetch member {user_id} for promotion DM in guild {guild.id}.")
         return
-    logger.debug(f"Resolved member {member.id} ({member.display_name}) for waitlist promotion DM in guild {guild.id}.")
+    logger.debug(f"Resolved member {member.id} for waitlist promotion DM in guild {guild.id}.")
 
     datetime_text = discord_timestamp(formation.start_dt)
 

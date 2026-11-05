@@ -61,7 +61,7 @@ class BulkRoleAssignmentView(ui.View):
             interaction (Interaction): The interaction that triggered the selection.
             _select (ui.UserSelect): The select component.
         """
-        logger.debug(f"Bulk role select_members user={interaction.user} selection={_select.values}")
+        logger.debug(f"Bulk role select_members user_id={interaction.user.id} selection_ids={[v.id for v in _select.values]}")
         if not interaction.response.is_done():
             await interaction.response.defer()
 
@@ -83,7 +83,10 @@ class BulkRoleAssignmentView(ui.View):
             await interaction.response.send_message(RIGHT_LOST_MESSAGE, ephemeral=True)
             return
 
-        logger.info(f"Bulk role confirm user={interaction.user} role={self.role} action={self.action} members={members}")
+        logger.info(
+            f"Bulk role confirm user_id={interaction.user.id} role={self.role} action={self.action} "
+            f"member_ids={[m.id for m in members]}"
+        )
         self.select_members.disabled = True
         button.disabled = True
         await interaction.response.edit_message(view=self)
@@ -131,7 +134,8 @@ class BulkRoleAssignmentView(ui.View):
                 success, _error = await safe_remove_roles(logger, m, self.role, reason=f"Bulk remove by {self.user}")
             (modified if success else failed).append(m)
         logger.info(
-            f"Members to {self.action} role={self.role} success={modified} already={already} failed={failed}",
+            f"Members to {self.action} role={self.role} success_ids={[m.id for m in modified]} "
+            f"already_ids={[m.id for m in already]} failed_ids={[m.id for m in failed]}",
         )
         return modified, already, failed
 
@@ -156,7 +160,7 @@ class MultiRoleSelectorView(ui.View):
             interaction (Interaction): The interaction that triggered the selection.
             _select (ui.RoleSelect): The select component.
         """
-        logger.debug(f"Multi-role select_roles user={interaction.user} selection={_select.values}")
+        logger.debug(f"Multi-role select_roles user_id={interaction.user.id} selection_ids={[v.id for v in _select.values]}")
         if not interaction.response.is_done():
             await interaction.response.defer()
 
@@ -178,7 +182,7 @@ class MultiRoleSelectorView(ui.View):
             await interaction.response.send_message(RIGHT_LOST_MESSAGE, ephemeral=True)
             return
 
-        logger.info(f"Roles selected user={interaction.user} roles={roles}")
+        logger.info(f"Roles selected user_id={interaction.user.id} roles={roles}")
 
         assert interaction.guild is not None
         members: set[Member] = set(interaction.guild.members)
