@@ -1724,6 +1724,38 @@ async def test_an_alert_click_from_a_member_who_lost_respo_formation_is_refused(
     assert _stored_answer(hall) == (None, None, None)
 
 
+async def test_an_unanswered_alert_is_refused_once_the_appel_closed(hall: Hall) -> None:
+    """An alert nobody answered cannot cancel the training after the correction window: closed text, nothing stored."""
+    await _overdue(hall)
+    closed = datetime.now(PARIS_TZ) - timedelta(minutes=1)
+    db.connection().execute("UPDATE appel SET closes_at = ?", (closed.isoformat(),))
+    before = _stored_answer(hall)
+
+    allowed, interaction = await hall.forged_click(hall.respo, _alert_id(hall, "c"), shown=_alert(hall, hall.respo))
+
+    assert not allowed
+    assert _refused(interaction) == (
+        f"L'appel de **Découpe laser** est fermé depuis le {discord_timestamp(closed, 'D')}. Rien n'a été modifié."
+    )
+    assert _stored_answer(hall) == before == (None, None, None)
+
+
+async def test_a_member_who_lost_respo_formation_is_not_told_the_first_answer(hall: Hall) -> None:
+    """On an alert already answered, a clicker who lost the right gets the refusal, not who answered and when."""
+    other_respo = hall.member("respo2", RoleNames.TRAININGS_MANAGER)
+    await _overdue(hall)
+    await hall.click(other_respo, _alert(hall, other_respo), _alert_id(hall, "i"))
+    before = _stored_answer(hall)
+    hall.env.backend.edit_member(GUILD_ID, hall.respo.id, {"role_ids": []})
+    await asyncio.sleep(0)
+
+    allowed, interaction = await hall.forged_click(hall.respo, _alert_id(hall, "c"), shown=_alert(hall, hall.respo))
+
+    assert not allowed
+    assert _refused(interaction) == NO_RIGHT
+    assert _stored_answer(hall) == before
+
+
 async def test_the_alert_survives_a_restart(hall: Hall, started_bot: Any) -> None:
     """A second bot on the same database answers a click on the first bot's alert, from the database alone."""
     await _overdue(hall)
