@@ -257,13 +257,17 @@ async def deliver(guild: Guild, appel: Appel) -> bool:
     return sent is not None
 
 
-async def start_appel(guild: Guild, published: PublishedMessage, position: int) -> None:
+async def start_appel(guild: Guild, published: PublishedMessage, position: int) -> bool:
     """Open the check of a training that starts now, once, and send it to its trainer.
 
     Args:
         guild (Guild): The server.
         published (PublishedMessage): The announcement the training belongs to.
         position (int): The training's place in it.
+
+    Returns:
+        bool: True when the check exists, new or already there, even if its trainer could not be reached; False when
+            it could not be opened, so that the start is tried again.
     """
     training = published.message.fms[position]
     length = read_duration(training.duration) or SLOT_FALLBACK
@@ -279,8 +283,9 @@ async def start_appel(guild: Guild, published: PublishedMessage, position: int) 
         appel = attendance.get(appel_id)
     except (LookupError, sqlite3.Error):
         logger.exception(f"Could not open the appel of message {published.message_id} in guild {guild.id}.")
-        return
+        return False
     if appel is None:
         logger.error(f"Appel {appel_id} of message {published.message_id} in guild {guild.id} vanished after opening.")
-        return
+        return False
     await deliver(guild, appel)
+    return True

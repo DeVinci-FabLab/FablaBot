@@ -741,12 +741,11 @@ class FormationManagement(commands.Cog):
                 fm.notified_hour_before = True
                 continue
 
-            if now - APPEL_EDIT_WINDOW < fm.start_dt <= start_window_end:
-                await start_appel(guild, pub, position)
+            if now - APPEL_EDIT_WINDOW < fm.start_dt <= start_window_end and await start_appel(guild, pub, position):
                 if fm.start_dt >= now - window_tolerance:  # "starts now" is only true in the window
                     await notify_responsible_before_formation(guild, fm, moment="start")
 
-                fm.notified_at_start = True
+                fm.notified_at_start = True  # only once the check exists: a failed opening is tried again at the next tick
 
         updated_pub_msg = FmMessageDraft(
             header=pub.message.header,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import logging
+import sqlite3
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
@@ -104,6 +105,13 @@ class Hall:
     async def click(self, who: Any, message: discord.Message, custom_id: str) -> Any:
         """Click a button of a private message as its recipient."""
         return await who.user.click(message, custom_id=custom_id)
+
+    @property
+    def handled(self) -> bool:
+        """Whether the stored start of the only training is recorded as done."""
+        published = formations.current_published(GUILD_ID)
+        assert published is not None
+        return published.message.fms[0].notified_at_start
 
     @property
     def appel_id(self) -> int:
@@ -603,3 +611,46 @@ async def test_an_older_announcement_sends_no_hour_before_reminder(hall: Hall) -
     (message,) = hall.dm()
     assert "Découpe laser" in message.content
     assert all(hall.dm(member) == [] for member in registered)
+
+
+async def test_a_failed_opening_is_tried_again_at_the_next_tick(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A storage error at the start leaves the training unhandled, so the next tick opens its check once."""
+    hall.register(2)
+    hall.publish(start=datetime.now(PARIS_TZ) - timedelta(minutes=1))
+    real_open = attendance.open_appel
+    attempts: list[int] = []
+
+    def locked_once(*args: Any, **kwargs: Any) -> int:
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise sqlite3.OperationalError
+        return real_open(*args, **kwargs)
+
+    monkeypatch.setattr(attendance, "open_appel", locked_once)
+
+    await hall.tick()
+
+    assert db.connection().execute("SELECT COUNT(*) FROM appel").fetchone()[0] == 0
+    assert not hall.handled
+    assert hall.dm() == []
+    assert hall.dm(hall.respo) == []
+
+    await hall.tick()
+    await hall.tick()
+
+    assert db.connection().execute("SELECT COUNT(*) FROM appel").fetchone()[0] == 1
+    assert hall.handled
+    assert len(hall.dm()) == 1
+    assert len(hall.dm(hall.respo)) == 1
+
+
+@pytest.mark.parametrize("trainer_mention", ["Camille", "<@424242>"])
+async def test_a_check_nobody_can_be_sent_is_still_handled(hall: Hall, trainer_mention: str) -> None:
+    """Once the check exists the start is done, whether or not its trainer can be reached."""
+    hall.register(2)
+    hall.publish(trainer_mention=trainer_mention)
+
+    await hall.tick()
+
+    assert db.connection().execute("SELECT COUNT(*) FROM appel").fetchone()[0] == 1
+    assert hall.handled
