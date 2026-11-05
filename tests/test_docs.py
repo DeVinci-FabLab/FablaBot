@@ -625,3 +625,13 @@ def test_operator_guide_says_a_rollback_past_the_attendance_schema_needs_the_v1_
     row = next(line for line in troubleshooting.splitlines() if "first start of a release" in line)
     assert "Cannot start: data/fablabot.db cannot be used: <cause>." in row
     assert "previous image" in row
+
+
+def test_operator_guide_says_the_export_leaves_the_attendance_data_in_the_database() -> None:
+    """The export step and the way forward both name the attendance checks and counts the JSON files cannot hold."""
+    rolling = _section(_read("docs/OPERATIONS.md"), "### Rolling back")
+    export_step = rolling.split("2. Export,")[1].split("3. Look at the export")[0]
+    assert "attendance checks and training counts" in export_step
+    forward = rolling.split("To move forward again")[1]
+    assert "attendance checks" in forward
+    assert "training counts" in forward

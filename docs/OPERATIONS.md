@@ -159,9 +159,9 @@ So write fresh JSON files first. If the database release never started, skip to 
 
 1. Stop the stack, then archive, as in "Before every redeploy".
 2. Export, with the image that was running and the `fablabot_state` helper of "Moving to the database". The command
-   writes a new folder, and says how many replaced training messages have no place in those files: they stay in
-   `data/fablabot.db`. On a volume that is not the bot's, a wrong `VOLUMES_PATH` or an empty folder, it stops with
-   `Cannot export` and writes nothing: fix the path and run it again.
+   writes a new folder, and says how many replaced training messages, attendance checks and training counts have no
+   place in those files: they stay in `data/fablabot.db`. On a volume that is not the bot's, a wrong `VOLUMES_PATH` or
+   an empty folder, it stops with `Cannot export` and writes nothing: fix the path and run it again.
 
    ```bash
    IMAGE=ghcr.io/devinci-fablab/fablabot:X.Y.Z   # the release that was running
@@ -201,7 +201,8 @@ To move forward again, the JSON files now hold what the database lacks, so the d
 says `changed since it was imported` when the older release ran and wrote to the files. It says
 `data/temp_admin_state.json not imported` when you went back by export and the older release never ran: the export
 brings that fourth file, which the first import never saw. Either way, stop the stack, archive, set the database aside,
-then follow "Moving to the database" from step 8. The file set aside keeps the replaced messages.
+then follow "Moving to the database" from step 8. The file set aside keeps the replaced messages, the attendance checks
+and the training counts, which the new database starts without.
 
 ```bash
 sudo mv "$VOLUMES_PATH/fablabot/data/fablabot.db" "$VOLUMES_PATH/fablabot/data/fablabot-before-$STAMP.db"
