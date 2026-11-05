@@ -1083,3 +1083,21 @@ async def test_a_failed_read_before_the_report_still_sends_what_can_be_sent(
     assert len(hall.logs.history()) == 1  # pyright: ignore[reportAttributeAccessIssue]
     assert f"Could not check appel {hall.appel_id} in guild {GUILD_ID} for a newer validation" in caplog.text
     assert "Découpe laser" not in caplog.text
+
+
+async def test_a_server_without_a_log_channel_still_sends_the_lists(hall: Hall, caplog: pytest.LogCaptureFixture) -> None:
+    """With no log channel set, nothing raises, the Respo still get the lists, and the warning holds IDs only."""
+    first, _second = hall.register(2)
+    with db.transaction() as conn:
+        conn.execute("DELETE FROM guild_settings WHERE guild_id = ?", (GUILD_ID,))
+    hall.publish()
+    await hall.tick()
+    caplog.set_level(logging.INFO)
+
+    await hall.validate(first)
+
+    (lists,) = _lists(hall, hall.respo)
+    assert f"**Présents (1)** : <@{first.id}>" in lists.content
+    assert hall.logs.history() == []  # pyright: ignore[reportAttributeAccessIssue]
+    assert f"No log channel for the counts of appel {hall.appel_id} in guild {GUILD_ID}." in caplog.text
+    assert "Découpe laser" not in caplog.text
