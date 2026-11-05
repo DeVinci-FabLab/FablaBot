@@ -206,6 +206,32 @@ def test_a_training_renamed_after_its_counts_were_written_is_not_counted_again()
     assert retention.forget(NOW) == 1
 
 
+def test_a_later_session_of_a_recurring_training_gets_its_own_row() -> None:
+    """The same name on the same server at another start is another session: counted apart from the first."""
+    _publish(1, NOW - timedelta(days=30))
+    assert retention.summarise(NOW - timedelta(days=15)) == 1
+    _publish(2, NOW - timedelta(days=20))
+
+    assert retention.summarise(NOW) == 1
+
+    assert [row[:3] for row in _summaries()] == [(1, 0, "Training 0"), (2, 0, "Training 0")]
+
+
+def test_a_later_session_keeps_its_message_until_it_has_its_own_row() -> None:
+    """The first session's counts do not stand for the next one of the same name: its registrations stay."""
+    first, second = NOW - RETENTION - timedelta(days=30), NOW - RETENTION - timedelta(days=20)
+    _publish(1, first)
+    assert retention.summarise(NOW) == 1
+    _publish(2, second)
+
+    assert retention.forget(NOW - RETENTION) == 1
+
+    assert _count("registration") == 4
+    assert retention.summarise(NOW) == 1
+    assert retention.forget(NOW - RETENTION) == 1
+    assert _count("registration") == 0
+
+
 def test_a_training_of_another_server_is_not_a_copy_of_this_one() -> None:
     """The same training published on a second server still gets its own row on each."""
     start = NOW - timedelta(days=30)
