@@ -154,8 +154,8 @@ fablabot_state "$VOLUMES_PATH/fablabot/data" fablabot.downgrade_schema
 ```
 
 The command drops the attendance checks and the anonymous counts, in one transaction, and nothing else: sign-ups,
-reaction history, tracked messages and temporary admins stay. The dropped data stays in the archive and in the `v1`
-copy. If it fails, it says `Cannot go back` and changes nothing. Then set the stack's image to the older release and
+reaction history, tracked messages and temporary admins stay. The dropped data stays in the archive only: the `v1`
+copy was taken before the attendance tables existed. If it fails, it says `Cannot go back` and changes nothing. Then set the stack's image to the older release and
 deploy. The next start of the release with the attendance tables adds them again, empty.
 
 Only when the file itself is damaged, put the newest `data/backups/fablabot-v1-*.db` in place of `data/fablabot.db`

@@ -83,7 +83,7 @@ Who can take or correct a check:
 - `Admin -temp-` and CoDir only as the trainer: whoever `/fm` names as trainer takes the check. Each validation
   is posted in the log channel and sent to Respo Formation, so a check taken by someone else shows at once.
 
-Anyone else, and anyone after the 7 days or once the training is cancelled, gets a private refusal that says nothing was changed. If the announcement names no member as trainer, or the trainer's private messages are closed, the check is opened but no message is sent.
+Anyone else, and anyone after the 7 days or once the training is cancelled, gets a private refusal that says nothing was changed. If the announcement names no member as trainer, the check is opened but no message is sent: Respo Formation or Administrateur takes it with `/fm appel`.
 
 ## Bot messages
 
