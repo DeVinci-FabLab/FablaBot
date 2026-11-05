@@ -649,12 +649,11 @@ def test_operator_guide_says_the_export_leaves_the_attendance_data_in_the_databa
 
 
 def test_user_guide_says_who_may_take_the_attendance_check_and_for_how_long() -> None:
-    """The trainings section names every role that may take a check, the two that may not, and the correction window."""
+    """The trainings section names every role that may take a check, says the trainer is whoever /fm names, and the window."""
     section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
     for role in APPEL_ROLES:
         assert role in section, role
-    assert f"`{RoleNames.ADMIN_TEMP}`" in section.split("Not ")[1]
-    assert RoleNames.CODIR in section.split("Not ")[1]
+    assert f"`{RoleNames.ADMIN_TEMP}` and {RoleNames.CODIR} only as the trainer" in section
     assert f"{APPEL_EDIT_WINDOW.days} days after the start" in section
     assert f"{MAX_BUTTONS} registered members" in section
     assert f"{MENU_SIZE * MAX_MENUS} members" in section

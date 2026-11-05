@@ -65,7 +65,8 @@ Who can take or correct a check:
 
 - The trainer named in the announcement, while still on the server.
 - The Respo Formation holders and the admin roles: Administrateur, Président, Vice-Président, Secrétaire Général.
-- Not `Admin -temp-` and not CoDir, whatever else they can do with `/fm`.
+- `Admin -temp-` and CoDir only as the trainer: whoever `/fm` names as trainer takes the check. Each validation
+  is posted in the log channel and sent to Respo Formation, so a check taken by someone else shows at once.
 
 Anyone else, and anyone after the 7 days or once the training is cancelled, gets a private refusal that says nothing was changed. If the announcement names no member as trainer, or the trainer's private messages are closed, the check is opened but no message is sent.
 
