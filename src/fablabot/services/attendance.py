@@ -241,6 +241,16 @@ def set_thread(appel_id: int, thread_id: int) -> bool:
         )
 
 
+def clear_thread(thread_id: int) -> None:
+    """Forget a thread Discord no longer has, so that the next delivery makes a new one.
+
+    Args:
+        thread_id (int): The thread that cannot be found.
+    """
+    with db.transaction() as conn:
+        conn.execute("UPDATE appel SET thread_id = NULL WHERE thread_id = ?", (thread_id,))
+
+
 def due_alerts(now: datetime) -> list[Appel]:
     """List the checks nobody made whose slot is over, still open, not alerted and not answered.
 
@@ -307,6 +317,22 @@ def handle(appel_id: int, user_id: int, action: AlertAction, at: datetime) -> bo
             (user_id, at.isoformat(), action.value, appel_id),
         ).rowcount
     return changed == 1
+
+
+def release(appel_id: int, user_id: int, action: AlertAction) -> None:
+    """Take back an answer that turned out to do nothing, so that the alert can be answered again.
+
+    Args:
+        appel_id (int): The check's ID.
+        user_id (int): Who answered.
+        action (AlertAction): The answer; another answer, or one by someone else, is left alone.
+    """
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE appel SET handled_by = NULL, handled_at = NULL, handled_action = NULL "
+            "WHERE id = ? AND handled_by = ? AND handled_action = ?",
+            (appel_id, user_id, action.value),
+        )
 
 
 def open_in(guild_id: int, now: datetime) -> list[Appel]:

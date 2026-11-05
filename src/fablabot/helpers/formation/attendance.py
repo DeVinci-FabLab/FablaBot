@@ -10,7 +10,7 @@ import sqlite3
 from typing import TYPE_CHECKING, Final
 from weakref import WeakValueDictionary
 
-from discord import AllowedMentions, ChannelType, HTTPException, Object, SelectOption, TextChannel, Thread, ui
+from discord import AllowedMentions, ChannelType, HTTPException, NotFound, Object, SelectOption, TextChannel, Thread, ui
 
 from fablabot.guild_config import get_log_channel_id
 from fablabot.helpers.constants import APPEL_ROLES, MAX_MSG_CHARS, PARIS_TZ, RoleNames
@@ -23,6 +23,8 @@ from fablabot.helpers.utils import (
     get_or_fetch_member,
     send_dm_to_member,
 )
+from fablabot.logging_handlers import guild_log_context
+from fablabot.models import AlertAction
 from fablabot.services import attendance
 
 if TYPE_CHECKING:
@@ -30,6 +32,7 @@ if TYPE_CHECKING:
 
     from discord import Guild, Member
 
+    from fablabot.main import Fablabot
     from fablabot.models import Appel, PublishedMessage, Registrant, Validation
 
 logger = logging.getLogger(__name__)
@@ -277,6 +280,14 @@ async def _stored_thread(guild: Guild, thread_id: int) -> Thread | None:
         return thread
     try:
         found = await guild.fetch_channel(thread_id)
+    except NotFound:
+        # A deleted thread must not cut the trainer off for good: forget it, the next delivery makes a new one.
+        logger.warning(f"Thread {thread_id} in guild {guild.id} no longer exists; forgetting it.")
+        try:
+            attendance.clear_thread(thread_id)
+        except sqlite3.Error:
+            logger.exception(f"Could not forget thread {thread_id} in guild {guild.id}.")
+        return None
     except Exception:  # a network error must not abort the tick that sent other trainers' messages
         logger.exception(f"Could not fetch thread {thread_id} in guild {guild.id}.")
         return None
@@ -342,6 +353,19 @@ async def _keep_thread(guild: Guild, appel: Appel, thread: Thread) -> Thread | N
     return await _stored_thread(guild, winner.thread_id) if winner and winner.thread_id else None
 
 
+def _without_thread(guild: Guild, appel: Appel) -> Appel | None:
+    """Read a check whose stored thread could not be reached; None, logged, unless the thread was forgotten as gone."""
+    try:
+        current = attendance.get(appel.id)
+    except sqlite3.Error:
+        logger.exception(f"Could not read the thread of appel {appel.id} in guild {guild.id}.")
+        return None
+    if current is None or current.thread_id is not None:
+        logger.error(f"Thread {appel.thread_id} of appel {appel.id} in guild {guild.id} cannot be reached.")
+        return None
+    return current
+
+
 async def open_thread(guild: Guild, appel: Appel) -> Thread | None:
     """Give the check a private thread, or find the one it already has.
 
@@ -357,9 +381,12 @@ async def open_thread(guild: Guild, appel: Appel) -> Thread | None:
     """
     if appel.thread_id is not None:
         thread = await _stored_thread(guild, appel.thread_id)
-        if thread is None:
-            logger.error(f"Thread {appel.thread_id} of appel {appel.id} in guild {guild.id} cannot be reached.")
-        return thread
+        if thread is not None:
+            return thread
+        forgotten = _without_thread(guild, appel)
+        if forgotten is None:
+            return None
+        appel = forgotten  # the thread was gone: a new one is made below
     if appel.trainer_id is None:
         return None
     for parent in _thread_parents(guild, appel):
@@ -409,7 +436,9 @@ async def deliver(guild: Guild, appel: Appel) -> bool:
         return False
     content, view = appel_message(guild, appel, now, thread=True)
     try:
-        await thread.send(content, view=view, allowed_mentions=AllowedMentions(users=[Object(trainer.id)]))
+        await thread.send(
+            content, view=view, allowed_mentions=AllowedMentions(everyone=False, roles=False, users=[Object(trainer.id)])
+        )
     except Exception:  # a network error must not abort the tick: the start is recorded as handled
         logger.exception(f"Could not send appel {appel.id} to thread {thread.id} in guild {guild.id}.")
         return False
@@ -524,3 +553,130 @@ async def notify_validation(guild: Guild, saved: Validation) -> None:
             await channel.send(line, allowed_mentions=AllowedMentions.none())
         except (HTTPException, sqlite3.Error):
             logger.exception(f"Could not post the counts of appel {appel.id} in guild {guild.id}.")
+
+
+def alert_answer(appel: Appel) -> str | None:
+    """Write how an alert was answered, who did it and when; None while it waits for an answer."""
+    if appel.handled_action is None or appel.handled_by is None or appel.handled_at is None:
+        return None
+    by = f"<@{appel.handled_by}>"
+    at = discord_timestamp(appel.handled_at, "t")
+    return {
+        AlertAction.RELAUNCH: f"🔁 **Formateur relancé par {by}** à {at}.",
+        AlertAction.IGNORE: f"➖ **Ignoré par {by}** à {at}.",  # noqa: RUF001 - the sign the copy asks for
+        AlertAction.CANCEL: f"❌ **Formation annulée par {by}** à {at} : elle compte comme non tenue.",
+        AlertAction.DONE: f"✅ **Appel fait par {by}** à {at}.",
+    }[appel.handled_action]
+
+
+def alert_message(appel: Appel) -> tuple[str, ui.View]:
+    """Build the alert of a check nobody made, as it shows now: asking for an answer, or showing the one it got.
+
+    Args:
+        appel (Appel): The check.
+
+    Returns:
+        tuple[str, ui.View]: The text and the three buttons, off once the alert was answered.
+    """
+    # Imported here: the components call back into this module for the message.
+    from fablabot.ui.attendance import AppelAlertAction
+
+    who = f"<@{appel.trainer_id}>" if appel.trainer_id is not None else "Le formateur"
+    answer = alert_answer(appel) or "Relance le formateur, ignore, ou annule la formation si elle n'a pas eu lieu."
+    content = (
+        f"Salut !\n{who} n'a pas fait l'appel de **{appel.name}** ({_slot(appel)}), et le créneau est terminé.\n\n{answer}"
+    )
+    view = ui.View(timeout=None)
+    for action in AppelAlertAction.ORDER:
+        view.add_item(AppelAlertAction(appel.id, action, disabled=appel.handled_action is not None))
+    return content, view
+
+
+async def _alert_respos(guild: Guild, appel: Appel) -> None:
+    """Send the alert of one check to each Respo Formation, then record it with every message sent."""
+    content, _ = alert_message(appel)
+    sent: list[tuple[int, int]] = []
+    for respo in sorted(get_members_by_role(logger, guild, role=RoleNames.TRAININGS_MANAGER), key=lambda m: m.id):
+        message = await send_dm_to_member(
+            logger, guild, respo, content, view=alert_message(appel)[1], dm_type=f"alert {appel.id}"
+        )
+        if message is not None:
+            sent.append((message.channel.id, message.id))
+    if not sent:
+        logger.warning(f"Alert of appel {appel.id} in guild {guild.id} reached no Respo Formation.")
+    # Recorded once the sends are over: it keeps where each copy went, which a record made before could not. A crash in
+    # between sends the alert again, and both copies answer alike; a record made first would lose it.
+    attendance.record_alert(appel.id, sent)
+    logger.info(f"Alerted {len(sent)} Respo Formation about appel {appel.id} in guild {guild.id}.")
+
+
+async def send_due_alerts(bot: Fablabot, now: datetime) -> None:
+    """Alert the Respo Formation of each served server about the checks nobody made once their slot is over.
+
+    Each check is alerted once: the record that follows the sends stops the next tick. A Respo who cannot be reached
+    does not stop the others, and a check that reached nobody is recorded anyway.
+
+    Args:
+        bot (Fablabot): The bot.
+        now (datetime): The time of this tick.
+
+    Raises:
+        sqlite3.Error: When the checks cannot be read or an alert cannot be recorded; the next tick tries again.
+    """
+    for appel in attendance.due_alerts(now):
+        if not bot.guild_access.is_served(appel.guild_id):
+            continue
+        guild = bot.get_guild(appel.guild_id)
+        if guild is None:
+            continue
+        with guild_log_context(guild.id):
+            await _alert_respos(guild, appel)
+            # The trainer may have saved while the alerts went out; the save found no alert to close.
+            fresh = attendance.get(appel.id)
+            if fresh is not None:
+                await settle_alert(bot, fresh)
+
+
+async def refresh_alerts(bot: Fablabot, appel: Appel, *, skip: int | None = None) -> None:
+    """Edit every stored copy of a check's alert to show it as it stands, except one.
+
+    Args:
+        bot (Fablabot): The bot.
+        appel (Appel): The check, as it stands now.
+        skip (int | None): A message not to edit, the one the clicker's own response already edits.
+    """
+    try:
+        copies = attendance.alert_messages(appel.id)
+    except sqlite3.Error:
+        logger.exception(f"Could not read the alert messages of appel {appel.id} in guild {appel.guild_id}.")
+        return
+    content, _ = alert_message(appel)
+    for channel_id, message_id in copies:
+        if message_id == skip:
+            continue
+        try:
+            await (
+                bot.get_partial_messageable(channel_id)
+                .get_partial_message(message_id)
+                .edit(content=content, view=alert_message(appel)[1])
+            )
+        except Exception:  # one copy that cannot be edited must not stop the others
+            logger.exception(f"Could not edit alert message {message_id} of appel {appel.id} in guild {appel.guild_id}.")
+
+
+async def settle_alert(bot: Fablabot, appel: Appel) -> None:
+    """Close an alert the trainer's save made pointless: answer it done by them and show it in every inbox.
+
+    Nothing happens when no alert went out, when it was answered already, or when the check was not saved.
+
+    Args:
+        bot (Fablabot): The bot.
+        appel (Appel): The check as a read or a save left it.
+    """
+    if not appel.alert_sent or appel.handled_action is not None or appel.validated_by is None or appel.validated_at is None:
+        return
+    if not attendance.handle(appel.id, appel.validated_by, AlertAction.DONE, appel.validated_at):
+        return
+    closed = attendance.get(appel.id)
+    if closed is not None:
+        await refresh_alerts(bot, closed)

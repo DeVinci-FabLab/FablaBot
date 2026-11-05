@@ -65,6 +65,14 @@ Up to 20 registered members get a button each. Past that, the message holds menu
 
 Each validation, and each update after it, sends every Respo Formation a private message: who validated, then the members present and the members absent, each as a mention, `aucun` when a list is empty. A long list goes out in several messages, and an update says "a été mis à jour par". The log channel gets one line per validation with the training, who validated and the counts only; it names no registered member and pings nobody. A Respo Formation whose private messages are closed is skipped, and the others still get theirs. The lists and the counts are those saved at the click, whatever is marked afterwards, and they go out even when the trainer's message could not be refreshed. They are not kept for later: if the bot restarts between the save and the sending, nothing is sent again, and the trainer presses `Mettre à jour l'appel` within the 7 days of the edit window to send the lists (worded as an update). When validations of the same check overlap, the reports go out one after the other, and a report that a newer validation already replaced is not sent, and leaves no line in the log channel either, so the last one a Respo Formation reads is the newest.
 
+When the training's slot is over and nobody saved the check, the bot sends every Respo Formation an alert, once, at its next five-minute check. The slot ends at the start plus the duration of the announcement, or three hours after the start when the duration cannot be read. Nothing is sent once the trainer has saved the check, nor after the 7 days of the edit window. The alert names the trainer (or says "Le formateur" when the announcement names none) and offers three buttons:
+
+- **Relancer le formateur** sends the trainer the check again, in private or in the thread when their private messages are closed. If nobody could be reached, you are told and the alert stays open for another answer.
+- **Ignorer** changes nothing else: the check stays open and the trainer can still take it.
+- **Annuler la formation** closes the check: nobody can mark or save it any more, and the training counts as not held. Nothing is sent to the registered members.
+
+The first answer decides. Every Respo Formation's copy then shows who answered and when, with the buttons off, and a later click is told the first answer (`Déjà traité : …`) and changes nothing. If the trainer saves the check after the alert, every copy shows `Appel fait par` the trainer, and the alert is closed. Only the Respo Formation holders and the admin roles can answer: someone who lost the role since the alert was sent is refused.
+
 Who can take or correct a check:
 
 - The trainer named in the announcement, while still on the server.

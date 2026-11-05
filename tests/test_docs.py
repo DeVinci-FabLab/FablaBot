@@ -686,6 +686,19 @@ def test_user_guide_says_a_replaced_validation_is_not_reported_and_the_newest_is
     assert "the last one a Respo Formation reads is the newest" in section
 
 
+def test_user_guide_says_what_the_alert_offers_and_that_the_first_answer_decides() -> None:
+    """The trainings section says when the alert goes out, its three answers, and that the first answer decides."""
+    section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
+    assert "nobody saved the check, the bot sends every Respo Formation an alert, once" in section
+    assert "three hours after the start when the duration cannot be read" in section
+    for button in ("**Relancer le formateur**", "**Ignorer**", "**Annuler la formation**"):
+        assert button in section
+    assert "the training counts as not held. Nothing is sent to the registered members" in section
+    assert "The first answer decides" in section
+    assert "`Déjà traité : …`" in section
+    assert "`Appel fait par` the trainer" in section
+
+
 def test_user_guide_says_a_missed_start_still_sends_the_attendance_check() -> None:
     """The trainings section says a check missed at the start is sent at the next five-minute check, within the window."""
     section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")

@@ -12,9 +12,9 @@ from discord import Locale, Member, Permissions, Role
 import fablabot.cogs as cogs_package
 from fablabot.cogs import formation_management, help_management, message_management
 from fablabot.helpers.constants import APPEL_EDIT_WINDOW, PARIS_TZ, RoleNames
-from fablabot.helpers.formation.attendance import appel_content, appel_view, log_line, respo_messages
+from fablabot.helpers.formation.attendance import alert_message, appel_content, appel_view, log_line, respo_messages
 from fablabot.helpers.help_page import leaf_commands
-from fablabot.models import Appel, Registrant
+from fablabot.models import AlertAction, Appel, Registrant
 from fablabot.models.formation import FmMessageDraft, Formation
 from fablabot.ui.formation import StartFmModal
 from fablabot.ui.message import SuggestionView
@@ -277,6 +277,47 @@ async def appel_log() -> Screen:
     return Screen(capture.sent, _people())
 
 
+RESPO = 4444
+
+
+async def _alert_screen(**changes: Any) -> Screen:
+    """The alert a Respo Formation gets when nobody made the check, as it stands with these changes."""
+    capture = Capture()
+    content, view = alert_message(_appel(**changes))
+    await capture.interaction().response.send_message(content, view=view)
+    return Screen(capture.sent, {**NAMES, RESPO: "Morgan"})
+
+
+def _answered(action: AlertAction, **changes: Any) -> dict[str, Any]:
+    """The fields an answer to the alert sets: Morgan, seven minutes after the end of the slot."""
+    return {"handled_by": RESPO, "handled_at": APPEL_START + timedelta(hours=2, minutes=7), "handled_action": action, **changes}
+
+
+async def appel_alert() -> Screen:
+    """The alert the Respo Formation get when the slot is over and nobody made the check, with its three answers."""
+    return await _alert_screen()
+
+
+async def appel_alert_relaunched() -> Screen:
+    """The alert once a Respo Formation relaunched the trainer: the answer in place of the question, buttons off."""
+    return await _alert_screen(**_answered(AlertAction.RELAUNCH))
+
+
+async def appel_alert_ignored() -> Screen:
+    """The alert once a Respo Formation ignored it."""
+    return await _alert_screen(**_answered(AlertAction.IGNORE))
+
+
+async def appel_alert_cancelled() -> Screen:
+    """The alert once a Respo Formation cancelled the training: it counts as not held."""
+    return await _alert_screen(**_answered(AlertAction.CANCEL))
+
+
+async def appel_alert_done() -> Screen:
+    """The alert once the trainer saved the check: the Respo Formation read who did it."""
+    return await _alert_screen(**_answered(AlertAction.DONE, handled_by=TRAINER))
+
+
 SCREENS: dict[str, Callable[[], Coroutine[Any, Any, Screen]]] = {
     "help-member": help_member,
     "help-trainer": help_trainer,
@@ -292,4 +333,9 @@ SCREENS: dict[str, Callable[[], Coroutine[Any, Any, Screen]]] = {
     "appel-menus": appel_menus,
     "appel-respo": appel_respo,
     "appel-log": appel_log,
+    "appel-alert": appel_alert,
+    "appel-alert-relaunched": appel_alert_relaunched,
+    "appel-alert-ignored": appel_alert_ignored,
+    "appel-alert-cancelled": appel_alert_cancelled,
+    "appel-alert-done": appel_alert_done,
 }

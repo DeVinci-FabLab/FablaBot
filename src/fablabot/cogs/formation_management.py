@@ -37,6 +37,7 @@ from fablabot.helpers.formation import (
     notify_trainer_before_formation,
     parse_date_time,
     render_message,
+    send_due_alerts,
     send_promotion_dm,
     send_registration_dm,
     send_waitlist_dm,
@@ -674,6 +675,10 @@ class FormationManagement(commands.Cog):
                     await self._send_due_reminders(guild_id, now)
                 except sqlite3.Error:
                     logger.exception(f"Reminders of guild {guild_id} stopped by a storage failure; next tick tries again.")
+        try:
+            await send_due_alerts(self.bot, now)
+        except sqlite3.Error:
+            logger.exception("Alerts stopped by a storage failure; next tick tries again.")
 
     async def _send_due_reminders(self, guild_id: int, now: datetime) -> None:
         """Notify the people of one guild's formations that are due, and record that they were.

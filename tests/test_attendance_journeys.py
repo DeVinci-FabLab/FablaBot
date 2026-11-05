@@ -19,6 +19,7 @@ from fablabot import db
 from fablabot.guild_config import set_log_channel_id
 from fablabot.helpers.constants import MAX_MSG_CHARS, PARIS_TZ, RoleNames
 from fablabot.helpers.formation.attendance import deliver
+from fablabot.helpers.formation.rendering import discord_timestamp
 from fablabot.helpers.guild_access import GuildAccessPolicy
 from fablabot.models.formation import FmMessageDraft, Formation, PublishedMessage
 from fablabot.services import attendance, formations
@@ -1410,3 +1411,366 @@ async def test_an_error_sending_to_the_thread_is_logged_and_leaves_the_tick_whol
 
     assert len(hall.dm()) == 1
     assert "to thread" in caplog.text
+
+
+OVERDUE = timedelta(minutes=90)
+ALERT_ACTIONS = ("r", "i", "c")
+IGNORED = "\N{HEAVY MINUS SIGN}"
+
+
+async def _overdue(hall: Hall, *, registered: int = 2, **publish: Any) -> None:
+    """Register members, store a one-hour training that began ninety minutes ago, and run the tick that alerts."""
+    hall.register(registered)
+    hall.publish(start=datetime.now(PARIS_TZ) - OVERDUE, duration="1h", **publish)
+    await hall.tick()
+
+
+def _dms(member: Any) -> list[discord.Message]:
+    """List what the bot sent a member in private, none when no private channel was ever opened."""
+    channel = member.user.dm_channel
+    return channel.history() if channel else []
+
+
+def _alert(hall: Hall, who: Any) -> discord.Message:
+    """Find the alert a Respo Formation got, as it stands now."""
+    (found,) = [m for m in _dms(who) if f"appel:{hall.appel_id}:a:r" in _buttons(m)]
+    return found
+
+
+def _alert_id(hall: Hall, action: str) -> str:
+    """Write the custom ID of an alert button."""
+    return f"appel:{hall.appel_id}:a:{action}"
+
+
+def _answer(hall: Hall, line: str) -> str:
+    """Write an answer line with the time the check stored for it, in the form the alert shows."""
+    appel = attendance.get(hall.appel_id)
+    assert appel is not None
+    assert appel.handled_at is not None
+    return line.replace("{at}", discord_timestamp(appel.handled_at, "t"))
+
+
+def _stored_answer(hall: Hall) -> tuple[Any, ...]:
+    """Read who answered the alert, how and when."""
+    appel = attendance.get(hall.appel_id)
+    assert appel is not None
+    return appel.handled_by, appel.handled_action, appel.handled_at
+
+
+async def test_the_end_of_the_slot_alerts_each_respo_once(hall: Hall) -> None:
+    """When the slot is over and nobody made the appel, each Respo Formation gets one alert, however many ticks pass."""
+    other_respo = hall.member("respo2", RoleNames.TRAININGS_MANAGER)
+    await _overdue(hall)
+    await hall.tick()
+
+    appel = attendance.get(hall.appel_id)
+    assert appel is not None
+    slot = f"{discord_timestamp(appel.starts_at)} à {discord_timestamp(appel.ends_at, 't')}"
+    for respo in (hall.respo, other_respo):
+        (message,) = _dms(respo)
+        assert message.content == (
+            f"Salut !\n<@{hall.trainer.id}> n'a pas fait l'appel de **Découpe laser** ({slot}), et le créneau est terminé.\n\n"
+            "Relance le formateur, ignore, ou annule la formation si elle n'a pas eu lieu."
+        )
+        buttons = _buttons(message)
+        assert [(b["label"], b["style"], b.get("disabled", False)) for b in buttons.values()] == [
+            ("Relancer le formateur", 1, False),
+            ("Ignorer", 2, False),
+            ("Annuler la formation", 4, False),
+        ]
+        assert list(buttons) == [_alert_id(hall, a) for a in ALERT_ACTIONS]
+    assert not [m for m in _dms(hall.trainer) if "n'a pas fait l'appel" in m.content]
+    assert appel.alert_sent
+    assert len(attendance.alert_messages(hall.appel_id)) == 2
+
+
+async def test_no_alert_before_the_end_or_after_a_validation(hall: Hall) -> None:
+    """A slot still running is not alerted, nor one whose appel was saved before the end."""
+    hall.register(1)
+    hall.publish(start=datetime.now(PARIS_TZ) - timedelta(minutes=30), duration="2h")
+    await hall.tick()
+    assert _dms(hall.respo) == []
+
+    await hall.validate()
+    attendance_end = (datetime.now(PARIS_TZ) - timedelta(minutes=1)).isoformat()
+    db.connection().execute("UPDATE appel SET ends_at = ?", (attendance_end,))
+    await hall.tick()
+
+    assert [m for m in _dms(hall.respo) if "n'a pas fait l'appel" in m.content] == []
+    appel = attendance.get(hall.appel_id)
+    assert appel is not None
+    assert not appel.alert_sent
+
+
+async def test_no_alert_once_the_appel_closed(hall: Hall) -> None:
+    """A check past its correction window, or one answered already, is not alerted."""
+    hall.register(1)
+    long_ago = datetime.now(PARIS_TZ) - timedelta(days=8)
+    hall.publish(start=long_ago, duration="1h")
+    attendance.open_appel(
+        GUILD_ID, MESSAGE_ID, 0, trainer_id=hall.trainer.id, starts_at=long_ago, ends_at=long_ago + timedelta(hours=1)
+    )
+
+    await hall.tick()
+
+    assert _dms(hall.respo) == []
+    appel = attendance.get(hall.appel_id)
+    assert appel is not None
+    assert not appel.alert_sent
+
+
+async def test_relaunch_sends_the_trainer_the_appel_again(hall: Hall) -> None:
+    """Relaunching sends the trainer the appel again in private and shows who did it, with the buttons off."""
+    await _overdue(hall)
+    assert len(_dms(hall.trainer)) == 1
+
+    await hall.click(hall.respo, _alert(hall, hall.respo), _alert_id(hall, "r"))
+
+    again = _dms(hall.trainer)
+    assert len(again) == 2
+    assert "a eu lieu le" in again[1].content
+    assert f"appel:{hall.appel_id}:ok" in _buttons(again[1])
+    alert = _alert(hall, hall.respo)
+    assert alert.content.endswith(_answer(hall, f"🔁 **Formateur relancé par <@{hall.respo.id}>** à {{at}}."))
+    assert all(b.get("disabled") for b in _buttons(alert).values())
+    assert _stored_answer(hall)[:2] == (hall.respo.id, attendance.AlertAction.RELAUNCH)
+
+
+def _close_dms_of(monkeypatch: pytest.MonkeyPatch, user_id: int) -> None:
+    """Make private messages to one member fail the way a closed DM does."""
+
+    async def can_dm(member: Any) -> bool:
+        return member.id != user_id
+
+    monkeypatch.setattr("fablabot.helpers.utils._can_dm_user", can_dm)
+
+
+async def test_relaunch_falls_back_to_the_thread(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A trainer whose DMs closed since the start gets the relaunched appel in a private thread."""
+    await _overdue(hall)
+    _close_dms_of(monkeypatch, hall.trainer.id)
+
+    await hall.click(hall.respo, _alert(hall, hall.respo), _alert_id(hall, "r"))
+
+    (thread,) = _threads(hall.general)
+    (message,) = thread.history()
+    assert message.content.startswith(f"<@{hall.trainer.id}> tes MP sont fermés")
+    assert len(_dms(hall.trainer)) == 1
+    assert _stored_answer(hall)[1] is attendance.AlertAction.RELAUNCH
+
+
+async def test_a_relaunch_that_reaches_nobody_says_so_and_leaves_the_alert_open(
+    hall: Hall, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With DMs closed and no thread possible, the clicker is told, the alert stays answerable and nothing is stored."""
+    await _overdue(hall)
+    _close_dms_of(monkeypatch, hall.trainer.id)
+
+    async def refuse(_channel: Any, **_kwargs: Any) -> Any:
+        raise discord.Forbidden(MagicMock(status=403), "Missing Permissions")
+
+    monkeypatch.setattr(discord.TextChannel, "create_thread", refuse)
+
+    allowed, interaction = await hall.forged_click(hall.respo, _alert_id(hall, "r"))
+
+    assert allowed
+    assert _refused(interaction) == ("Le formateur n'a pas pu être relancé : ses MP sont fermés et aucun fil n'a pu être créé.")
+    assert _stored_answer(hall) == (None, None, None)
+    assert not any(b.get("disabled") for b in _buttons(_alert(hall, hall.respo)).values())
+
+
+async def test_cancel_closes_the_appel_and_tells_no_registrant(hall: Hall) -> None:
+    """Cancelling closes the appel, shows it counts as not held, and sends nothing to the registered members."""
+    await _overdue(hall)
+
+    await hall.click(hall.respo, _alert(hall, hall.respo), _alert_id(hall, "c"))
+
+    appel = attendance.get(hall.appel_id)
+    assert appel is not None
+    assert appel.cancelled
+    assert not appel.is_open(datetime.now(PARIS_TZ))
+    assert _alert(hall, hall.respo).content.endswith(
+        _answer(hall, f"❌ **Formation annulée par <@{hall.respo.id}>** à {{at}} : elle compte comme non tenue.")
+    )
+    assert all(_dms(member) == [] for member in hall.registered)
+    allowed, interaction = await hall.forged_click(hall.trainer, hall.toggle_id(hall.registered[0]))
+    assert not allowed
+    assert _refused(interaction) == "La formation **Découpe laser** a été annulée : l'appel est fermé. Rien n'a été modifié."
+
+
+async def test_ignore_does_nothing_else(hall: Hall) -> None:
+    """Ignoring is recorded and shown, and leaves the appel open and the trainer untouched."""
+    await _overdue(hall)
+
+    await hall.click(hall.respo, _alert(hall, hall.respo), _alert_id(hall, "i"))
+
+    assert _alert(hall, hall.respo).content.endswith(_answer(hall, f"{IGNORED} **Ignoré par <@{hall.respo.id}>** à {{at}}."))
+    assert _stored_answer(hall)[:2] == (hall.respo.id, attendance.AlertAction.IGNORE)
+    assert len(_dms(hall.trainer)) == 1
+    assert all(_dms(member) == [] for member in hall.registered)
+    allowed, _ = await hall.forged_click(hall.trainer, hall.toggle_id(hall.registered[0]))
+    assert allowed
+
+
+async def test_the_first_click_wins_and_every_inbox_shows_it(hall: Hall) -> None:
+    """Every Respo Formation's copy shows the first answer, with its buttons off."""
+    other_respo = hall.member("respo2", RoleNames.TRAININGS_MANAGER)
+    await _overdue(hall)
+
+    await hall.click(other_respo, _alert(hall, other_respo), _alert_id(hall, "i"))
+
+    for respo in (hall.respo, other_respo):
+        alert = _alert(hall, respo)
+        assert alert.content.endswith(_answer(hall, f"{IGNORED} **Ignoré par <@{other_respo.id}>** à {{at}}."))
+        assert all(b.get("disabled") for b in _buttons(alert).values())
+
+
+async def test_a_second_click_is_refused_with_the_first_answer(hall: Hall) -> None:
+    """A later click is told who answered first and how, and changes nothing."""
+    other_respo = hall.member("respo2", RoleNames.TRAININGS_MANAGER)
+    await _overdue(hall)
+    await hall.click(other_respo, _alert(hall, other_respo), _alert_id(hall, "c"))
+    before = _stored_answer(hall)
+
+    allowed, interaction = await hall.forged_click(hall.respo, _alert_id(hall, "i"))
+
+    assert allowed
+    assert _refused(interaction) == "Déjà traité : " + _answer(
+        hall, f"❌ **Formation annulée par <@{other_respo.id}>** à {{at}} : elle compte comme non tenue."
+    )
+    assert _stored_answer(hall) == before
+
+
+async def test_a_validation_after_the_alert_closes_it_in_every_inbox(hall: Hall) -> None:
+    """When the trainer saves the appel after the alert, every copy shows it done and the buttons go off."""
+    other_respo = hall.member("respo2", RoleNames.TRAININGS_MANAGER)
+    await _overdue(hall)
+
+    await hall.validate()
+
+    assert _stored_answer(hall)[:2] == (hall.trainer.id, attendance.AlertAction.DONE)
+    for respo in (hall.respo, other_respo):
+        alert = _alert(hall, respo)
+        assert alert.content.endswith(_answer(hall, f"✅ **Appel fait par <@{hall.trainer.id}>** à {{at}}."))
+        assert all(b.get("disabled") for b in _buttons(alert).values())
+
+
+async def test_a_validation_that_beats_the_alert_record_still_closes_it(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A validation landing while the alerts are being sent closes them as soon as they are recorded."""
+    hall.register(1)
+    hall.publish(start=datetime.now(PARIS_TZ) - OVERDUE, duration="1h")
+    real_record = attendance.record_alert
+    validated: list[bool] = []
+
+    def record(appel_id: int, messages: Any) -> None:
+        # The trainer saves between the sends and the record.
+        attendance.validate(appel_id, hall.trainer.id, datetime.now(PARIS_TZ))
+        validated.append(True)
+        real_record(appel_id, messages)
+
+    monkeypatch.setattr(attendance, "record_alert", record)
+
+    await hall.tick()
+
+    assert validated
+    assert _stored_answer(hall)[:2] == (hall.trainer.id, attendance.AlertAction.DONE)
+    assert _alert(hall, hall.respo).content.endswith(_answer(hall, f"✅ **Appel fait par <@{hall.trainer.id}>** à {{at}}."))
+
+
+async def test_an_alert_click_from_a_member_who_lost_respo_formation_is_refused(hall: Hall) -> None:
+    """A member who held Respo Formation when the alert was sent but no longer does is refused, and nothing is stored."""
+    await _overdue(hall)
+    alert = _alert(hall, hall.respo)
+    hall.env.backend.edit_member(GUILD_ID, hall.respo.id, {"role_ids": []})
+    await asyncio.sleep(0)
+
+    allowed, interaction = await hall.forged_click(hall.respo, _alert_id(hall, "c"), shown=alert)
+
+    assert not allowed
+    assert _refused(interaction) == NO_RIGHT
+    assert _stored_answer(hall) == (None, None, None)
+
+
+async def test_the_alert_survives_a_restart(hall: Hall, started_bot: Any) -> None:
+    """A second bot on the same database answers a click on the first bot's alert, from the database alone."""
+    await _overdue(hall)
+    custom_id = _alert_id(hall, "i")
+    role = MagicMock(spec=discord.Role)
+    role.name = RoleNames.TRAININGS_MANAGER
+    respo = make_member(hall.respo.id)
+    respo.roles = [role]
+    started_bot.get_guild = MagicMock(return_value=make_guild(GUILD_ID, [role], [respo]))
+    interaction = make_interaction(user_id=hall.respo.id)
+    interaction.client = started_bot
+    interaction.guild = None
+    interaction.guild_id = None
+    interaction.message = MagicMock()
+    store = started_bot._connection._view_store
+    pattern, item_class = next((p, c) for p, c in store._dynamic_items.items() if p.fullmatch(custom_id))
+    item = await item_class.from_custom_id(interaction, MagicMock(), pattern.fullmatch(custom_id))
+    assert await item.interaction_check(interaction)
+
+    await item.callback(interaction)
+
+    assert _stored_answer(hall)[:2] == (hall.respo.id, attendance.AlertAction.IGNORE)
+    assert f"{IGNORED} **Ignoré par" in interaction.response.edit_message.await_args.kwargs["content"]
+
+
+async def test_an_appel_without_trainer_alerts_about_le_formateur(hall: Hall) -> None:
+    """With no trainer named, the alert says "Le formateur" and mentions nobody."""
+    await _overdue(hall, trainer_mention="à définir")
+
+    (message,) = _dms(hall.respo)
+    assert message.content.startswith("Salut !\nLe formateur n'a pas fait l'appel de **Découpe laser** (")
+    assert "<@" not in message.content
+
+
+async def test_an_unreadable_duration_alerts_three_hours_after_the_start(hall: Hall) -> None:
+    """A duration that cannot be read ends the slot three hours after the start, and the alert shows the start alone."""
+    hall.register(1)
+    now = datetime.now(PARIS_TZ)
+    early = hall.training(start=now - timedelta(hours=2, minutes=50), name="Trop tôt", duration="bientôt")
+    late = hall.training(start=now - timedelta(hours=3, minutes=10), name="Assez tard", duration="bientôt")
+    hall.store([early, late])
+
+    await hall.tick()
+
+    (message,) = _dms(hall.respo)
+    assert "**Assez tard**" in message.content
+    assert " à " not in message.content.split("**Assez tard** (")[1].split(")")[0]
+
+
+async def test_a_thread_message_pings_only_the_trainer(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The thread's message allows the mention of the trainer and no one else, no role and no everyone."""
+    hall.register(1)
+    hall.publish()
+    _close_dms(monkeypatch)
+    sent: list[Any] = []
+    real_send = discord.Thread.send
+
+    async def send(thread: Any, *args: Any, **kwargs: Any) -> Any:
+        sent.append(kwargs["allowed_mentions"])
+        return await real_send(thread, *args, **kwargs)
+
+    monkeypatch.setattr(discord.Thread, "send", send)
+
+    await hall.tick()
+
+    (mentions,) = sent
+    assert mentions.to_dict() == {"parse": [], "users": [hall.trainer.id], "replied_user": True}
+
+
+async def test_a_deleted_thread_is_forgotten_and_a_new_one_is_made(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A stored thread that no longer exists is cleared, and the next delivery makes a new one."""
+    _close_dms_of(monkeypatch, hall.trainer.id)
+    await _overdue(hall)
+    (old,) = _threads(hall.general)
+    hall.env.backend.delete_channel(old.id)
+    await asyncio.sleep(0)
+
+    await hall.click(hall.respo, _alert(hall, hall.respo), _alert_id(hall, "r"))
+
+    (new,) = _threads(hall.general)
+    assert new.id != old.id
+    assert attendance.get(hall.appel_id).thread_id == new.id  # pyright: ignore[reportOptionalMemberAccess]
+    assert len(new.history()) == 1
