@@ -8,11 +8,13 @@ import re
 import sqlite3
 from typing import TYPE_CHECKING, Final
 
-from discord import SelectOption, ui
+from discord import AllowedMentions, HTTPException, SelectOption, TextChannel, ui
 
-from fablabot.helpers.constants import APPEL_ROLES, PARIS_TZ
+from fablabot.guild_config import get_log_channel_id
+from fablabot.helpers.constants import APPEL_ROLES, MAX_MSG_CHARS, PARIS_TZ, RoleNames
 from fablabot.helpers.formation.rendering import discord_timestamp
-from fablabot.helpers.utils import counted, get_or_fetch_member, send_dm_to_member
+from fablabot.helpers.op_report import split_messages
+from fablabot.helpers.utils import counted, get_members_by_role, get_or_fetch_member, send_dm_to_member
 from fablabot.services import attendance
 
 if TYPE_CHECKING:
@@ -47,6 +49,8 @@ _DURATION = re.compile(
     r"(?:(?P<hours>\d+)\s*(?:h|heures?)(?:\s*(?P<minutes>\d{1,2})(?:\s*min(?:utes?)?)?)?|(?P<only>\d+)\s*min(?:utes?)?)"
 )
 _MENTION = re.compile(r"<@!?(\d+)>")
+_LIST_CHARS = MAX_MSG_CHARS - 400
+"""The most a line of mentions holds, so that a header and a label fit around it."""
 _CODIR_LINE = "Merci de transmettre au **CoDir** la liste des participants à excuser si besoin."
 
 
@@ -289,3 +293,69 @@ async def start_appel(guild: Guild, published: PublishedMessage, position: int) 
         return False
     await deliver(guild, appel)
     return True
+
+
+def _mention_blocks(label: str, user_ids: Sequence[int]) -> list[str]:
+    """Write a labelled list of mentions as lines short enough for one message each; ``aucun`` when it is empty."""
+    title = f"**{label} ({len(user_ids)})** :"
+    if not user_ids:
+        return [f"{title} aucun"]
+    lines: list[str] = []
+    current = ""
+    for user_id in user_ids:
+        mention = f"<@{user_id}>"
+        if current and len(current) + 2 + len(mention) > _LIST_CHARS:
+            lines.append(current)
+            current = mention
+        else:
+            current = f"{current}, {mention}" if current else mention
+    lines.append(current)
+    return [f"{title} {lines[0]}", *lines[1:]]
+
+
+def respo_messages(appel: Appel, here: Sequence[int], away: Sequence[int], *, first: bool) -> list[str]:
+    """Write what the Respo Formation read after a validation, in as many messages as the lists need."""
+    verb = "a été fait par" if first else "a été mis à jour par"
+    header = f"Salut !\nL'appel de **{appel.name}** ({_slot(appel)}) {verb} <@{appel.validated_by}>.\n"
+    return split_messages(header, [*_mention_blocks("Présents", here), *_mention_blocks("Absents", away)])
+
+
+def log_line(appel: Appel, here: int, away: int, *, first: bool) -> str:
+    """Write the line the log channel gets after a validation: the counts, and nobody who registered."""
+    verb = "validé par" if first else "mis à jour par"
+    return (
+        f"Appel de **{appel.name}** ({discord_timestamp(appel.starts_at)}) {verb} <@{appel.validated_by}> : "
+        f"{counted(here, 'présent', 'présents')}, {counted(away, 'absent', 'absents')}."
+    )
+
+
+async def notify_validation(guild: Guild, appel: Appel, *, first: bool) -> None:
+    """Tell each Respo Formation who came, then leave the counts in the log channel.
+
+    A Respo who cannot be reached does not stop the others, and a missing or refusing log channel stops nothing.
+
+    Args:
+        guild (Guild): The check's server.
+        appel (Appel): The check, as saved.
+        first (bool): True for the first validation, False for a correction.
+    """
+    if appel.validated_by is None:
+        return
+    registrants = attendance.registrants(appel.id)
+    marked = attendance.present(appel.id)
+    here = [r.user_id for r in registrants if r.user_id in marked]
+    away = [r.user_id for r in registrants if r.user_id not in marked]
+    messages = respo_messages(appel, here, away, first=first)
+    for respo in sorted(get_members_by_role(logger, guild, role=RoleNames.TRAININGS_MANAGER), key=lambda m: m.id):
+        for text in messages:
+            if await send_dm_to_member(logger, guild, respo, text, dm_type=f"attendance lists {appel.id}") is None:
+                break
+    line = log_line(appel, len(here), len(away), first=first)
+    try:
+        channel = guild.get_channel(get_log_channel_id(guild.id) or 0)
+        if not isinstance(channel, TextChannel):
+            logger.warning(f"No log channel for the counts of appel {appel.id} in guild {guild.id}.")
+            return
+        await channel.send(line, allowed_mentions=AllowedMentions.none())
+    except (HTTPException, sqlite3.Error):
+        logger.exception(f"Could not post the counts of appel {appel.id} in guild {guild.id}.")

@@ -61,6 +61,8 @@ If the bot was off at the start, or a newer announcement came out since, the mes
 
 Up to 20 registered members get a button each. Past that, the message holds menus of 25 members, and it lists 100 members at most: the others count as absent, and the message says so. The waitlist is never listed.
 
+Each validation, and each update after it, sends every Respo Formation a private message: who validated, then the members present and the members absent, each as a mention, `aucun` when a list is empty. A long list goes out in several messages, and an update says "a été mis à jour par". The log channel gets one line per validation with the training, who validated and the counts only; it names no registered member and pings nobody. A Respo Formation whose private messages are closed is skipped, and the others still get theirs.
+
 Who can take or correct a check:
 
 - The trainer named in the announcement, while still on the server.

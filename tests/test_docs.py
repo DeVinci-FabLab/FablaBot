@@ -659,6 +659,15 @@ def test_user_guide_says_who_may_take_the_attendance_check_and_for_how_long() ->
     assert f"{MENU_SIZE * MAX_MENUS} members" in section
 
 
+def test_user_guide_says_what_respo_formation_receive_and_that_the_log_channel_holds_counts_only() -> None:
+    """The trainings section says each validation and update reaches every Respo Formation, and the log line has counts only."""
+    section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
+    assert "every Respo Formation a private message" in section
+    assert "a été mis à jour par" in section
+    assert "the counts only" in section
+    assert "names no registered member and pings nobody" in section
+
+
 def test_user_guide_says_a_missed_start_still_sends_the_attendance_check() -> None:
     """The trainings section says a check missed at the start is sent at the next five-minute check, within the window."""
     section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")

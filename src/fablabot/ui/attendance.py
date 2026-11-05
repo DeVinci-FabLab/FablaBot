@@ -10,7 +10,7 @@ from discord import ButtonStyle, SelectOption, ui
 from discord.components import Button, SelectMenu
 
 from fablabot.helpers.constants import PARIS_TZ, ErrorMessages
-from fablabot.helpers.formation.attendance import appel_message, may_take
+from fablabot.helpers.formation.attendance import appel_message, may_take, notify_validation
 from fablabot.helpers.formation.rendering import discord_timestamp
 from fablabot.helpers.utils import RefusalKind, get_or_fetch_member, log_refusal
 from fablabot.logging_handlers import guild_log_context
@@ -276,6 +276,7 @@ class AppelValidate(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<app
     @override
     async def callback(self, interaction: Interaction[Any]) -> None:
         """Save the counts for the registered members marked present and the others, then show the check."""
+        before = attendance.get(self.appel_id)
         try:
             present, absent = attendance.validate(self.appel_id, interaction.user.id, datetime.now(PARIS_TZ))
         except LookupError:
@@ -285,6 +286,10 @@ class AppelValidate(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<app
             f"[appel] validated appel_id={self.appel_id} user_id={interaction.user.id} present={present} absent={absent}"
         )
         await _show(interaction, self.appel_id)
+        appel = attendance.get(self.appel_id)
+        guild = interaction.client.get_guild(appel.guild_id) if appel else None
+        if appel is not None and guild is not None:
+            await notify_validation(guild, appel, first=before is None or before.validated_at is None)
 
 
 DYNAMIC_ITEMS: Final = (AppelToggle, AppelMenu, AppelValidate)

@@ -10,18 +10,19 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 from conftest import LISTED_GUILD, OTHER_LISTED_GUILD, make_guild, make_interaction, make_member
+import discord
 from discord import Permissions
 import pytest
 
 from fablabot import db
-from fablabot.helpers.constants import PARIS_TZ, RoleNames
+from fablabot.guild_config import set_log_channel_id
+from fablabot.helpers.constants import MAX_MSG_CHARS, PARIS_TZ, RoleNames
 from fablabot.helpers.guild_access import GuildAccessPolicy
 from fablabot.models.formation import FmMessageDraft, Formation, PublishedMessage
 from fablabot.services import attendance, formations
 from fablabot.ui.attendance import DYNAMIC_ITEMS
 
 if TYPE_CHECKING:
-    import discord
     import simcord
 
 GUILD_ID = int(LISTED_GUILD)
@@ -38,6 +39,8 @@ class Hall:
         self.env = env
         self.guild = env.create_guild(id=GUILD_ID)
         self.general = self.guild.create_text_channel("general")
+        self.logs = self.guild.create_text_channel("logs")
+        set_log_channel_id(GUILD_ID, self.logs.id)
         self.roles = {
             name: self.guild.create_role(name, permissions=Permissions.none())
             for name in (RoleNames.TRAININGS_MANAGER, RoleNames.CODIR, RoleNames.ADMIN_TEMP)
@@ -118,6 +121,14 @@ class Hall:
         """The ID of the only check stored."""
         return db.connection().execute("SELECT id FROM appel").fetchone()["id"]
 
+    async def validate(self, *marked: Any) -> None:
+        """Have the trainer mark these members present, then press the validation button."""
+        for member in marked:
+            (message,) = hall_messages(self)
+            await self.click(self.trainer, message, self.toggle_id(member))
+        (message,) = hall_messages(self)
+        await self.click(self.trainer, message, f"appel:{self.appel_id}:ok")
+
     def toggle_id(self, member: Any) -> str:
         """Write the custom ID of a member's button."""
         return f"appel:{self.appel_id}:m:{member.id}"
@@ -146,6 +157,11 @@ class Hall:
         if allowed:
             await item.callback(interaction)
         return allowed, interaction
+
+
+def hall_messages(hall: Hall) -> list[discord.Message]:
+    """List the messages the trainer got in private."""
+    return hall.dm()
 
 
 @pytest.fixture
@@ -674,3 +690,141 @@ async def test_a_check_nobody_can_be_sent_is_still_handled(hall: Hall, trainer_m
 
     assert db.connection().execute("SELECT COUNT(*) FROM appel").fetchone()[0] == 1
     assert hall.handled
+
+
+def _lists(hall: Hall, who: Any) -> list[discord.Message]:
+    """List what the bot sent a member in private, leaving out the start reminder."""
+    return [m for m in hall.dm(who) if "commence maintenant" not in m.content]
+
+
+async def test_each_respo_formation_gets_the_lists_after_a_validation(hall: Hall) -> None:
+    """Every Respo Formation gets one private message naming who validated, the present and the absent members."""
+    first, second, third = hall.register(3)
+    other_respo = hall.member("respo2", RoleNames.TRAININGS_MANAGER)
+    hall.publish()
+    await hall.tick()
+
+    await hall.validate(first, third)
+
+    for respo in (hall.respo, other_respo):
+        (message,) = _lists(hall, respo)
+        assert message.content.startswith("Salut !\nL'appel de **Découpe laser** (")
+        assert f") a été fait par <@{hall.trainer.id}>.\n\n" in message.content
+        assert f"**Présents (2)** : <@{first.id}>, <@{third.id}>\n" in message.content
+        assert message.content.endswith(f"**Absents (1)** : <@{second.id}>")
+    assert _lists(hall, hall.plain) == []
+
+
+async def test_an_update_says_updated_and_goes_out_again(hall: Hall) -> None:
+    """A correction sends the lists again, worded as an update; the first validation says the check was made."""
+    first, second = hall.register(2)
+    hall.publish()
+    await hall.tick()
+    await hall.validate(first)
+    (message,) = hall.dm()
+    await hall.click(hall.trainer, message, hall.toggle_id(second))
+    (message,) = hall.dm()
+    await hall.click(hall.trainer, message, f"appel:{hall.appel_id}:ok")
+
+    first_dm, update = _lists(hall, hall.respo)
+    assert "a été fait par" in first_dm.content
+    assert f"a été mis à jour par <@{hall.trainer.id}>." in update.content
+    assert "**Présents (2)**" in update.content
+    assert "**Absents (0)** : aucun" in update.content
+    lines = [m.content for m in hall.logs.history()]  # pyright: ignore[reportAttributeAccessIssue]
+    assert "validé par" in lines[0]
+    assert "mis à jour par" in lines[1]
+
+
+async def test_a_long_list_is_split_under_the_limit(hall: Hall) -> None:
+    """A hundred registered members all present make several messages, each under the limit, none losing a mention."""
+    registered = hall.register(100)
+    hall.publish()
+    await hall.tick()
+
+    # Mark them through the store: a hundred clicks add nothing to what is tested here.
+    ids = [m.id for m in registered]
+    attendance.mark(hall.appel_id, ids, ids)
+    await hall.validate()
+
+    texts = [m.content for m in _lists(hall, hall.respo)]
+    assert len(texts) > 1
+    assert all(len(text) <= MAX_MSG_CHARS for text in texts)
+    joined = "\n".join(texts)
+    assert all(f"<@{m.id}>" in joined for m in registered)
+    assert "**Présents (100)**" in joined
+
+
+async def test_an_empty_list_reads_none(hall: Hall) -> None:
+    """With nobody present the present list reads aucun, and with nobody registered the absent list does too."""
+    hall.register(2)
+    hall.publish()
+    await hall.tick()
+
+    await hall.validate()
+
+    (message,) = _lists(hall, hall.respo)
+    assert "**Présents (0)** : aucun\n**Absents (2)** : <@" in message.content
+
+
+async def test_a_respo_with_closed_dms_does_not_stop_the_others(
+    hall: Hall, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A Respo whose DM fails is logged by ID, and the next Respo still gets the lists and the log line goes out."""
+    hall.register(2)
+    other_respo = hall.member("respo2", RoleNames.TRAININGS_MANAGER)
+    hall.publish()
+    await hall.tick()
+    blocked = min(hall.respo.id, other_respo.id)
+    real_send = type(hall.respo).send
+
+    async def send(member: Any, *args: Any, **kwargs: Any) -> Any:
+        if member.id == blocked:
+            raise discord.Forbidden(MagicMock(status=403), "closed")
+        return await real_send(member, *args, **kwargs)
+
+    monkeypatch.setattr(type(hall.respo), "send", send)
+    caplog.set_level(logging.INFO)
+
+    await hall.validate()
+
+    survivor = other_respo if blocked == hall.respo.id else hall.respo
+    assert len(_lists(hall, survivor)) == 1
+    assert str(blocked) in caplog.text
+    assert len(hall.logs.history()) == 1  # pyright: ignore[reportAttributeAccessIssue]
+
+
+async def test_the_log_channel_gets_counts_without_any_registrant(hall: Hall) -> None:
+    """The log line has the training, who validated and the counts, and no registrant ID, mention or name."""
+    registered = hall.register(3)
+    hall.publish()
+    await hall.tick()
+
+    await hall.validate(registered[0])
+
+    (line,) = [m.content for m in hall.logs.history()]  # pyright: ignore[reportAttributeAccessIssue]
+    assert line.startswith("Appel de **Découpe laser** (<t:")
+    assert f"validé par <@{hall.trainer.id}> : 1 présent, 2 absents." in line
+    for member in registered:
+        assert str(member.id) not in line
+        assert member.name not in line
+
+
+async def test_the_log_line_notifies_nobody(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The log line is sent with no mention allowed, so the validator is not pinged."""
+    hall.register(1)
+    hall.publish()
+    await hall.tick()
+    sends: list[dict[str, Any]] = []
+    real_send = discord.TextChannel.send
+
+    async def send(channel: Any, *args: Any, **kwargs: Any) -> Any:
+        sends.append(kwargs)
+        return await real_send(channel, *args, **kwargs)
+
+    monkeypatch.setattr(discord.TextChannel, "send", send)
+
+    await hall.validate()
+
+    (kwargs,) = [k for k in sends if "allowed_mentions" in k]
+    assert kwargs["allowed_mentions"].to_dict() == discord.AllowedMentions.none().to_dict()

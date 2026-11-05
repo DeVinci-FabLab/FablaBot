@@ -3,21 +3,26 @@
 from __future__ import annotations
 
 import ast
+from datetime import datetime, timedelta
 import logging
 from pathlib import Path
 import re
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from conftest import make_interaction
+from conftest import make_guild, make_interaction, make_member, make_role
 from discord import Forbidden, Member, TextChannel, ui
 import pytest
 
 from fablabot.cogs import message_management
 from fablabot.cogs.channel_management import ChannelManagement
 from fablabot.cogs.message_management import MessageManagement
+from fablabot.helpers.constants import PARIS_TZ, RoleNames
 from fablabot.helpers.safe_discord_operations import safe_add_roles, safe_remove_roles
 from fablabot.helpers.utils import log_request, send_dm_to_member
+from fablabot.models.formation import FmMessageDraft, Formation, PublishedMessage
 from fablabot.models.message import EasterEggTrigger
+from fablabot.services import attendance, formations
+from fablabot.ui.attendance import AppelValidate
 
 NAME = "kevin_secret_name"
 
@@ -247,3 +252,38 @@ def test_no_log_call_in_the_source_interpolates_a_member() -> None:
                 offenders.append(f"{path.name}:{call.lineno} reason")
             offenders += [f"{path.name}:{call.lineno} {ast.unparse(n)}" for n in ast.walk(call) if _offence(n)]
     assert offenders == []
+
+
+async def test_attendance_lines_name_members_by_id_only(caplog: pytest.LogCaptureFixture) -> None:
+    """A validation by a member logs IDs and counts: neither the member's name nor the training's name appears."""
+    start = datetime.now(PARIS_TZ)
+    training = Formation(
+        emoji="A",
+        name="Training Secret",
+        trainer_mention="<@7>",
+        start_iso=start.isoformat(),
+        duration="2h",
+        seats=3,
+        registered_users=[{"user_id": 1, "username": NAME, "ts_iso": start.isoformat()}],
+    )
+    draft = FmMessageDraft(header="h", role_id=1, intro="i", fms=[training], end="e")
+    formations.save_published(1234, PublishedMessage(message_id=5000, channel_id=42, message=draft))
+    appel_id = attendance.open_appel(1234, 5000, 0, trainer_id=7, starts_at=start, ends_at=start + timedelta(hours=2))
+    role = make_role(RoleNames.TRAININGS_MANAGER)
+    respo = make_member(9, role)
+    respo.send = AsyncMock()
+    guild = make_guild(1234, [role], [respo])
+    interaction = make_interaction(user_name=NAME)
+    interaction.client.get_guild.return_value = guild
+    caplog.set_level(logging.DEBUG)
+
+    with patch("fablabot.helpers.formation.attendance.get_log_channel_id", return_value=77):
+        await AppelValidate(appel_id).callback(interaction)
+
+    appel = attendance.get(appel_id)
+    assert appel is not None
+    assert appel.validated_at is not None
+    respo.send.assert_awaited()
+    assert "validated" in caplog.text
+    assert NAME not in caplog.text
+    assert "Training Secret" not in caplog.text

@@ -12,7 +12,7 @@ from discord import Locale, Member, Permissions, Role
 import fablabot.cogs as cogs_package
 from fablabot.cogs import formation_management, help_management, message_management
 from fablabot.helpers.constants import APPEL_EDIT_WINDOW, PARIS_TZ, RoleNames
-from fablabot.helpers.formation.attendance import appel_content, appel_view
+from fablabot.helpers.formation.attendance import appel_content, appel_view, log_line, respo_messages
 from fablabot.helpers.help_page import leaf_commands
 from fablabot.models import Appel, Registrant
 from fablabot.models.formation import FmMessageDraft, Formation
@@ -245,6 +245,33 @@ async def appel_menus() -> Screen:
     return await _appel_screen(registrants, {4000, 4001, 4026})
 
 
+def _validated_appel() -> Appel:
+    """The check of the laser cutting training, saved by the trainer with three of five present."""
+    return _appel(validated_by=TRAINER, validated_at=APPEL_START + timedelta(minutes=45), present_count=3, absent_count=2)
+
+
+def _people() -> dict[int, str]:
+    """The names behind the mentions of the Respo message and the log line."""
+    return {**NAMES, **{r.user_id: r.username for r in _five()}}
+
+
+async def appel_respo() -> Screen:
+    """The private message each Respo Formation gets after the validation: who was present and who was not."""
+    capture = Capture()
+    ids = [r.user_id for r in _five()]
+    (text,) = respo_messages(_validated_appel(), [ids[0], ids[2], ids[4]], [ids[1], ids[3]], first=True)
+    await capture.interaction().response.send_message(text)
+    return Screen(capture.sent, _people())
+
+
+async def appel_log() -> Screen:
+    """The line the log channel gets after the validation: the counts, nobody else named."""
+    capture = Capture()
+    appel = _validated_appel()
+    await capture.interaction().response.send_message(log_line(appel, 3, 2, first=True))
+    return Screen(capture.sent, _people())
+
+
 SCREENS: dict[str, Callable[[], Coroutine[Any, Any, Screen]]] = {
     "help-member": help_member,
     "help-trainer": help_trainer,
@@ -257,4 +284,6 @@ SCREENS: dict[str, Callable[[], Coroutine[Any, Any, Screen]]] = {
     "appel-ongoing": appel_ongoing,
     "appel-validated": appel_validated,
     "appel-menus": appel_menus,
+    "appel-respo": appel_respo,
+    "appel-log": appel_log,
 }
