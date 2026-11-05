@@ -20,6 +20,7 @@ from fablabot.models.attendance import AlertAction
 from fablabot.services import attendance, formations, retention
 
 GUILD = 111
+OTHER_GUILD = 222
 NOW = datetime(2029, 11, 20, 4, 0, tzinfo=PARIS_TZ)
 NAME = "member_secret_name"
 
@@ -30,7 +31,11 @@ def _user(user_id: int) -> dict[str, object]:
 
 
 def _publish(
-    message_id: int, *starts: datetime, registered: tuple[int, ...] = (1, 2, 3), waitlisted: tuple[int, ...] = (9,)
+    message_id: int,
+    *starts: datetime,
+    registered: tuple[int, ...] = (1, 2, 3),
+    waitlisted: tuple[int, ...] = (9,),
+    guild: int = GUILD,
 ) -> None:
     """Publish one message with a training per start, each with the same members."""
     fms = [
@@ -46,7 +51,7 @@ def _publish(
         )
         for index, (emoji, start) in enumerate(zip(("🔧", "🪚", "🖨️"), starts, strict=False))
     ]
-    formations.save_published(GUILD, PublishedMessage(message_id, 42, FmMessageDraft("", 0, "", fms, "")))
+    formations.save_published(guild, PublishedMessage(message_id, 42, FmMessageDraft("", 0, "", fms, "")))
 
 
 def _react(message_id: int, emoji: str, user_id: int, action: str, at: datetime) -> None:
@@ -73,6 +78,14 @@ def _summaries() -> list[tuple[object, ...]]:
     """Read every summary row, without the server."""
     rows = db.connection().execute("SELECT * FROM training_summary ORDER BY message_id, position").fetchall()
     return [tuple(row)[1:] for row in rows]
+
+
+def _guild_rows() -> dict[int, tuple[object, ...]]:
+    """Read each server's summary as (message, registered, present, absent, outcome)."""
+    rows = db.connection().execute(
+        "SELECT guild_id, message_id, registered, present, absent, outcome FROM training_summary ORDER BY guild_id"
+    )
+    return {row["guild_id"]: tuple(row)[1:] for row in rows}
 
 
 def _count(table: str) -> int:
@@ -135,6 +148,42 @@ def test_both_copies_of_a_training_published_again_go_after_three_years() -> Non
 
     assert retention.forget(NOW - RETENTION) == 2
     assert _count("registration") == 0
+
+
+def test_a_training_of_another_server_is_not_a_copy_of_this_one() -> None:
+    """The same training published on a second server still gets its own row on each."""
+    start = NOW - timedelta(days=30)
+    _publish(1, start)
+    _publish(2, start, guild=OTHER_GUILD)
+
+    assert retention.summarise(NOW) == 2
+
+    assert _guild_rows() == {GUILD: (1, 3, 0, 0, "not_asked"), OTHER_GUILD: (2, 3, 0, 0, "not_asked")}
+
+
+def test_a_message_is_not_deleted_for_a_copy_on_another_server() -> None:
+    """Without its own counts, a training is kept, though another server published the same one later."""
+    old = NOW - RETENTION - timedelta(days=1)
+    _publish(1, old)
+    _publish(2, old, guild=OTHER_GUILD)
+
+    assert retention.forget(NOW - RETENTION) == 0
+
+
+def test_each_server_summary_takes_the_outcome_of_its_own_check() -> None:
+    """The same training checked on two servers: each row reads the check of its own server."""
+    start = NOW - timedelta(days=30)
+    _publish(1, start, guild=OTHER_GUILD)
+    _publish(2, start)
+    other = attendance.open_appel(OTHER_GUILD, 1, 0, trainer_id=2222, starts_at=start, ends_at=start + timedelta(hours=2))
+    attendance.handle(other, 4444, AlertAction.CANCEL, start)
+    own = attendance.open_appel(GUILD, 2, 0, trainer_id=2222, starts_at=start, ends_at=start + timedelta(hours=2))
+    attendance.mark(own, [1, 2, 3], [1, 2])
+    attendance.validate(own, 2222, start)
+
+    assert retention.summarise(NOW) == 2
+
+    assert _guild_rows() == {GUILD: (2, 3, 2, 1, "done"), OTHER_GUILD: (1, 3, 0, 0, "cancelled")}
 
 
 def test_a_message_whose_trainings_close_on_different_days_is_summarised_in_two_runs() -> None:
