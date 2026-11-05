@@ -1048,3 +1048,38 @@ async def test_swapping_a_present_member_for_another_is_reported_though_the_coun
     _first_dm, update = _lists(hall, hall.respo)
     assert f"**Présents (1)** : <@{second.id}>\n" in update.content
     assert len(hall.logs.history()) == 2  # pyright: ignore[reportAttributeAccessIssue]
+
+
+async def test_a_failed_read_before_the_report_still_sends_what_can_be_sent(
+    hall: Hall, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A storage error while checking for a newer save is logged by ID and the lists and the log line still go out."""
+    first, _second = hall.register(2)
+    hall.publish()
+    await hall.tick()
+    real_notify = ui_attendance.notify_validation
+    real_get = attendance.get
+    armed = False
+
+    async def notify(guild: Any, saved: Any) -> None:
+        nonlocal armed
+        armed = True
+        await real_notify(guild, saved)
+
+    def get(appel_id: int) -> Any:
+        if armed:
+            msg = "disk I/O error"
+            raise sqlite3.OperationalError(msg)
+        return real_get(appel_id)
+
+    monkeypatch.setattr(ui_attendance, "notify_validation", notify)
+    monkeypatch.setattr(attendance, "get", get)
+    caplog.set_level(logging.INFO)
+
+    await hall.validate(first)
+
+    (lists,) = _lists(hall, hall.respo)
+    assert f"**Présents (1)** : <@{first.id}>" in lists.content
+    assert len(hall.logs.history()) == 1  # pyright: ignore[reportAttributeAccessIssue]
+    assert f"Could not check appel {hall.appel_id} in guild {GUILD_ID} for a newer validation" in caplog.text
+    assert "Découpe laser" not in caplog.text

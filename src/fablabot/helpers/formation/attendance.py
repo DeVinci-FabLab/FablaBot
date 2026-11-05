@@ -345,8 +345,9 @@ async def notify_validation(guild: Guild, saved: Validation) -> None:
     Everything comes from what the validation saved, never from a later read, so a mark made afterwards or a second
     validation is not reported as this one. The reports of one check go out one after the other, and a report whose
     save a newer validation replaced is dropped, so the last one the Respo read is the newest. A Respo who cannot be
-    reached does not stop the others, and a missing or refusing log channel stops nothing. A validation that leaves the
-    present and absent members as the last report had them sends nothing: the click changed nothing to tell.
+    reached does not stop the others, a missing or refusing log channel stops nothing, and a storage error while
+    checking for a newer validation is logged and the report goes out. A validation that leaves the present and absent
+    members as the last report had them sends nothing: the click changed nothing to tell.
 
     Args:
         guild (Guild): The check's server.
@@ -356,7 +357,11 @@ async def notify_validation(guild: Guild, saved: Validation) -> None:
     if appel.validated_by is None:
         return
     async with _reporting.setdefault(appel.id, asyncio.Lock()):
-        stored = attendance.get(appel.id)
+        try:
+            stored = attendance.get(appel.id)
+        except sqlite3.Error:
+            logger.exception(f"Could not check appel {appel.id} in guild {guild.id} for a newer validation: sending anyway.")
+            stored = None
         if stored is not None and stored.validated_at != appel.validated_at:
             logger.info(f"Dropped the report of appel {appel.id} in guild {guild.id}: a newer validation replaced it.")
             return
