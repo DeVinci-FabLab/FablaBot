@@ -277,7 +277,8 @@ async def _stored_thread(guild: Guild, thread_id: int) -> Thread | None:
         return thread
     try:
         found = await guild.fetch_channel(thread_id)
-    except HTTPException:
+    except Exception:  # a network error must not abort the tick that sent other trainers' messages
+        logger.exception(f"Could not fetch thread {thread_id} in guild {guild.id}.")
         return None
     return found if isinstance(found, Thread) else None
 
@@ -304,8 +305,41 @@ async def _fill_thread(guild: Guild, appel: Appel, thread: Thread, trainer_id_: 
     for user_id in wanted:
         try:
             await thread.add_user(Object(user_id))
-        except HTTPException:
+        except Exception:  # one user that cannot be added must not stop the others
             logger.exception(f"Could not add user {user_id} to thread {thread.id} of appel {appel.id} in guild {guild.id}.")
+
+
+async def _drop_thread(guild: Guild, appel: Appel, thread: Thread) -> None:
+    """Delete a thread no check keeps; a failure is logged."""
+    try:
+        await thread.delete()
+    except Exception:  # an orphan thread is a nuisance, not a reason to abort the tick
+        logger.exception(f"Could not delete thread {thread.id} of appel {appel.id} in guild {guild.id}.")
+
+
+async def _keep_thread(guild: Guild, appel: Appel, thread: Thread) -> Thread | None:
+    """Store a new thread as the check's own.
+
+    Returns:
+        Thread | None: The new thread when it was stored; else the thread another delivery stored first, or None when the
+            write failed or the winner cannot be reached. A thread that was not stored is deleted.
+    """
+    try:
+        stored = attendance.set_thread(appel.id, thread.id)
+    except sqlite3.Error:
+        logger.exception(f"Could not store thread {thread.id} of appel {appel.id} in guild {guild.id}; dropping it.")
+        await _drop_thread(guild, appel, thread)
+        return None
+    if stored:
+        return thread
+    logger.warning(f"Appel {appel.id} in guild {guild.id} already has a thread: dropping thread {thread.id}.")
+    await _drop_thread(guild, appel, thread)
+    try:
+        winner = attendance.get(appel.id)
+    except sqlite3.Error:
+        logger.exception(f"Could not read the thread of appel {appel.id} in guild {guild.id}.")
+        return None
+    return await _stored_thread(guild, winner.thread_id) if winner and winner.thread_id else None
 
 
 async def open_thread(guild: Guild, appel: Appel) -> Thread | None:
@@ -336,17 +370,12 @@ async def open_thread(guild: Guild, appel: Appel) -> Thread | None:
                 invitable=False,
                 auto_archive_duration=THREAD_ARCHIVE_MINUTES,
             )
-        except HTTPException:
+        except Exception:  # a network error must not abort the tick: the other channel is tried
             logger.exception(f"Could not make a thread in channel {parent.id} for appel {appel.id} in guild {guild.id}.")
             continue
-        if not attendance.set_thread(appel.id, thread.id):
-            logger.warning(f"Appel {appel.id} in guild {guild.id} already has a thread: dropping thread {thread.id}.")
-            try:
-                await thread.delete()
-            except HTTPException:
-                logger.exception(f"Could not delete thread {thread.id} of appel {appel.id} in guild {guild.id}.")
-            stored = attendance.get(appel.id)
-            return await _stored_thread(guild, stored.thread_id) if stored and stored.thread_id else None
+        kept = await _keep_thread(guild, appel, thread)
+        if kept is not thread:
+            return kept
         await _fill_thread(guild, appel, thread, appel.trainer_id)
         return thread
     logger.error(f"Could not open a thread for appel {appel.id} in guild {guild.id}.")
@@ -381,7 +410,7 @@ async def deliver(guild: Guild, appel: Appel) -> bool:
     content, view = appel_message(guild, appel, now, thread=True)
     try:
         await thread.send(content, view=view, allowed_mentions=AllowedMentions(users=[Object(trainer.id)]))
-    except HTTPException:
+    except Exception:  # a network error must not abort the tick: the start is recorded as handled
         logger.exception(f"Could not send appel {appel.id} to thread {thread.id} in guild {guild.id}.")
         return False
     logger.info(f"Sent appel {appel.id} to thread {thread.id} in guild {guild.id}.")

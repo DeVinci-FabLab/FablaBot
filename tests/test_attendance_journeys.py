@@ -1329,3 +1329,84 @@ async def test_a_refusal_in_the_announcement_channel_falls_back_to_the_commands_
     (thread,) = _threads(commands)
     assert len(thread.history()) == 1
     assert attendance.get(hall.appel_id).thread_id == thread.id  # pyright: ignore[reportOptionalMemberAccess]
+
+
+def _two_trainers(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Announce two trainings starting now, the first trainer with open DMs and the second with closed ones.
+
+    Returns:
+        Any: The second trainer, whose appel goes to a thread.
+    """
+    closed_trainer = hall.member("closed")
+    hall.register(1)
+    start = datetime.now(PARIS_TZ)
+    hall.store(
+        [
+            hall.training(start=start),
+            hall.training(start=start, name="Fraiseuse", trainer_mention=f"<@{closed_trainer.id}>"),
+        ]
+    )
+
+    async def can_dm(user: Any) -> bool:
+        return user.id != closed_trainer.id
+
+    monkeypatch.setattr("fablabot.helpers.utils._can_dm_user", can_dm)
+    return closed_trainer
+
+
+async def test_a_network_error_on_the_thread_does_not_send_the_dms_again(
+    hall: Hall, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A timeout while making the thread is logged and the tick still records the start: the first trainer gets one DM."""
+    _two_trainers(hall, monkeypatch)
+    calls: list[int] = []
+
+    async def timeout(_channel: Any, **_kwargs: Any) -> Any:
+        calls.append(1)
+        raise TimeoutError
+
+    monkeypatch.setattr(discord.TextChannel, "create_thread", timeout)
+
+    await hall.tick()
+    await hall.tick()
+
+    assert len(hall.dm()) == 1
+    assert calls == [1]
+    assert "Could not make a thread" in caplog.text
+
+
+async def test_a_storage_error_on_the_thread_deletes_it_and_sends_no_dm_again(
+    hall: Hall, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A failed write of the thread ID is logged, the thread just made is deleted, and the first trainer gets one DM."""
+    _two_trainers(hall, monkeypatch)
+
+    def fail(_appel_id: int, _thread_id: int) -> bool:
+        raise sqlite3.OperationalError
+
+    monkeypatch.setattr(attendance, "set_thread", fail)
+
+    await hall.tick()
+    await hall.tick()
+
+    assert len(hall.dm()) == 1
+    assert _threads(hall.general) == []
+    assert "Could not store thread" in caplog.text
+
+
+async def test_an_error_sending_to_the_thread_is_logged_and_leaves_the_tick_whole(
+    hall: Hall, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A network error on the thread's message does not abort the tick that already sent another trainer's DM."""
+    _two_trainers(hall, monkeypatch)
+
+    async def timeout(_thread: Any, *_args: Any, **_kwargs: Any) -> Any:
+        raise TimeoutError
+
+    monkeypatch.setattr(discord.Thread, "send", timeout)
+
+    await hall.tick()
+    await hall.tick()
+
+    assert len(hall.dm()) == 1
+    assert "to thread" in caplog.text
