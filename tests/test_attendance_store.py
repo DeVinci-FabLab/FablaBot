@@ -79,6 +79,16 @@ def test_a_check_needs_a_published_message() -> None:
     assert _count("appel") == 0
 
 
+def test_a_check_cannot_be_opened_on_another_servers_message() -> None:
+    """A message published on one server cannot take a check from another server."""
+    _publish()
+
+    with pytest.raises(LookupError):
+        attendance.open_appel(GUILD + 1, MESSAGE, 0, trainer_id=7, starts_at=START, ends_at=END)
+
+    assert _count("appel") == 0
+
+
 def test_the_check_and_its_marks_survive_a_new_save_of_the_training() -> None:
     """Saving the message again rebuilds its training rows, and the check, its marks and its counts stay."""
     _publish()
