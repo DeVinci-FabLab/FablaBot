@@ -709,6 +709,12 @@ def test_user_guide_says_a_click_during_a_relaunch_is_told_it_is_in_progress() -
     assert "is taken if the relaunch failed" in section
 
 
+def test_user_guide_says_a_relaunch_that_cannot_go_is_told_and_leaves_the_alert_open() -> None:
+    """The trainings section says a relaunch with no trainer named, no way to reach them or an error is told, alert kept."""
+    section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
+    assert "if the training names no trainer, or if the sending failed, you are told which and the alert stays open" in section
+
+
 def test_user_guide_says_a_missed_start_still_sends_the_attendance_check() -> None:
     """The trainings section says a check missed at the start is sent at the next five-minute check, within the window."""
     section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")

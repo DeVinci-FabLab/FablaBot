@@ -44,6 +44,7 @@ _GONE = "Cet appel n'existe plus."
 _NO_RIGHT = "Seuls le formateur, les Respo Formation et les admins peuvent faire cet appel."
 _COMMAND = "appel"
 _RELAUNCH_UNREACHED = "Le formateur n'a pas pu être relancé : ses MP sont fermés et aucun fil n'a pu être créé."
+_RELAUNCH_NO_TRAINER = "Le formateur n'a pas pu être relancé : aucun formateur n'est nommé pour cette formation."
 _RELAUNCH_ERROR = "Le formateur n'a pas pu être relancé : une erreur est survenue. L'alerte reste ouverte."
 
 # The checks whose relaunch is in flight: the claim is stored before the trainer is reached, so until it settles a stored
@@ -447,7 +448,10 @@ class AppelAlertAction(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<
             await interaction.response.defer()
             appel = attendance.get(self.appel_id)
             guild = interaction.client.get_guild(appel.guild_id) if appel else None
-            reached = appel is not None and guild is not None and await deliver(guild, appel)
+            if appel is not None and appel.trainer_id is None:
+                failed = _RELAUNCH_NO_TRAINER
+            else:
+                reached = appel is not None and guild is not None and await deliver(guild, appel)
         except Exception:  # the click is answered below; raised, it would leave the clicker with a deferred "thinking"
             logger.exception(f"Relaunch of appel {self.appel_id} by user {interaction.user.id} failed.")
             failed = _RELAUNCH_ERROR

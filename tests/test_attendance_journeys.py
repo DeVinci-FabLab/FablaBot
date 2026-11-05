@@ -1751,6 +1751,18 @@ async def test_a_relaunch_that_fails_with_an_error_releases_its_claim(
     assert _stored_answer(hall)[:2] == (hall.respo.id, attendance.AlertAction.IGNORE)
 
 
+async def test_a_relaunch_on_a_training_without_trainer_says_so(hall: Hall) -> None:
+    """With no trainer named, the clicker is told there is nobody to relaunch, and the alert stays answerable."""
+    await _overdue(hall, trainer_mention="à définir")
+
+    allowed, interaction = await hall.forged_click(hall.respo, _alert_id(hall, "r"), shown=_alert(hall, hall.respo))
+
+    assert allowed
+    assert _followed(interaction) == "Le formateur n'a pas pu être relancé : aucun formateur n'est nommé pour cette formation."
+    assert _stored_answer(hall) == (None, None, None)
+    assert not any(b.get("disabled") for b in _buttons(_alert(hall, hall.respo)).values())
+
+
 async def test_a_slow_relaunch_still_answers_the_deferred_click(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
     """A delivery that takes a while is answered through the deferred click, never through a second first response."""
     await _overdue(hall)
