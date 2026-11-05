@@ -11,6 +11,8 @@ PARIS_TZ = ZoneInfo("Europe/Paris")
 MAX_MSG_CHARS = 1900
 RETENTION = timedelta(days=3 * 365)
 """How long the bot keeps personal data: registrations, attendance, reaction history, log files and database copies."""
+ANONYMOUS_MIN_REGISTERED = 3
+"""The fewest registered members for which a training keeps its present and absent counts; below, they could name a person."""
 APPEL_EDIT_WINDOW = timedelta(days=7)
 """How long after its start an attendance check can still be made or corrected."""
 MAX_TRACKED_OPTIONS = 25

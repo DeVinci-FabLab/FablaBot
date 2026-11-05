@@ -15,7 +15,7 @@ import pytest
 
 from fablabot.cogs import user_management
 from fablabot.helpers.access import EVERYONE, AnyRole, rule_of
-from fablabot.helpers.constants import ADMIN_ROLES, APPEL_EDIT_WINDOW, APPEL_ROLES, RoleNames
+from fablabot.helpers.constants import ADMIN_ROLES, ANONYMOUS_MIN_REGISTERED, APPEL_EDIT_WINDOW, APPEL_ROLES, RoleNames
 from fablabot.helpers.formation.attendance import MAX_BUTTONS, MAX_MENUS, MENU_SIZE
 from fablabot.helpers.help_page import leaf_commands
 
@@ -782,6 +782,21 @@ def test_operator_guide_describes_the_whole_retention() -> None:
         "messages already on Discord",
     ):
         assert detail in never, detail
+
+
+def test_operator_guide_says_small_trainings_keep_no_present_and_absent_counts() -> None:
+    """The stored data and the retention name the threshold and what a small training keeps; the rollback says what it fills."""
+    guide = _read("docs/OPERATIONS.md")
+    retention = _section(guide, "### Retention")
+    stored = _section(guide, "## Stored data")
+    for section in (retention, stored):
+        assert f"fewer than {ANONYMOUS_MIN_REGISTERED} registered members" in section
+        assert "present and absent" in section
+    assert "reactions stay public" in retention
+    assert "monthly view" in retention
+    rolling = _section(guide, "### Rolling back")
+    assert "reads 0" in rolling
+    assert "fablabot-v2-*.db" in rolling
 
 
 def test_operator_guide_no_longer_says_the_bot_deletes_no_log_file() -> None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from fablabot import db
-from fablabot.helpers.constants import APPEL_EDIT_WINDOW
+from fablabot.helpers.constants import ANONYMOUS_MIN_REGISTERED, APPEL_EDIT_WINDOW
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -70,6 +70,8 @@ def _attendance(conn: sqlite3.Connection, row: sqlite3.Row) -> tuple[str, int, i
 def summarise(now: datetime) -> int:
     """Write, once, the anonymous counts of every published training whose check can no longer change.
 
+    A training with fewer registered members than ``ANONYMOUS_MIN_REGISTERED`` keeps no present and absent counts.
+
     Args:
         now (datetime): The current time, timezone-aware.
 
@@ -86,6 +88,8 @@ def summarise(now: datetime) -> int:
                 for flag in (0, 1)
             )
             outcome, present, absent = _attendance(conn, row)
+            # A small training's counts could point at a person, since reactions stay public.
+            counts = (present, absent) if registered >= ANONYMOUS_MIN_REGISTERED else (None, None)
             conn.execute(
                 "INSERT INTO training_summary (guild_id, message_id, position, name, starts_at, registered, waitlisted, "
                 "withdrawn, present, absent, outcome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -98,8 +102,7 @@ def summarise(now: datetime) -> int:
                     registered,
                     waitlisted,
                     _withdrawn(conn, row),
-                    present,
-                    absent,
+                    *counts,
                     outcome,
                 ),
             )

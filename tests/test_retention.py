@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from fablabot import db
-from fablabot.helpers.constants import PARIS_TZ, RETENTION
+from fablabot.helpers.constants import ANONYMOUS_MIN_REGISTERED, PARIS_TZ, RETENTION
 from fablabot.helpers.retention import apply_retention, old_copies, old_log_files
 from fablabot.models import FmMessageDraft, Formation, PublishedMessage
 from fablabot.models.attendance import AlertAction
@@ -110,6 +110,38 @@ def test_a_closed_check_gives_one_anonymous_summary() -> None:
     assert _summaries() == [(1, 0, "Training 0", start.isoformat(), 3, 1, 1, 2, 1, "done")]
 
 
+def _check(start: datetime, registered: tuple[int, ...], present: list[int]) -> None:
+    """Publish one training, take its check and validate it."""
+    _publish(1, start, registered=registered)
+    appel_id = attendance.open_appel(GUILD, 1, 0, trainer_id=2222, starts_at=start, ends_at=start + timedelta(hours=2))
+    attendance.mark(appel_id, list(registered), present)
+    attendance.validate(appel_id, 2222, start)
+
+
+def test_a_training_below_the_threshold_keeps_no_present_and_absent_counts() -> None:
+    """With fewer registered members than the threshold the counts could point at a person: they stay empty, the rest stays."""
+    start = NOW - timedelta(days=7)
+    _check(start, registered=(1, 2), present=[1])
+    _react(1, "🔧", 5, "add", start - timedelta(days=2))
+    _react(1, "🔧", 5, "remove", start - timedelta(days=1))
+
+    assert retention.summarise(NOW) == 1
+
+    assert _summaries() == [(1, 0, "Training 0", start.isoformat(), 2, 1, 1, None, None, "done")]
+
+
+def test_a_training_at_the_threshold_keeps_its_counts() -> None:
+    """The threshold is the smallest number of registered members whose counts are kept."""
+    start = NOW - timedelta(days=7)
+    members = tuple(range(1, ANONYMOUS_MIN_REGISTERED + 1))
+    _check(start, registered=members, present=[1])
+
+    assert retention.summarise(NOW) == 1
+
+    assert _summaries() == [(1, 0, "Training 0", start.isoformat(), 3, 1, 0, 1, 2, "done")]
+    assert ANONYMOUS_MIN_REGISTERED == 3
+
+
 def test_a_training_published_again_is_counted_once_on_its_newest_copy() -> None:
     """The older copy is skipped: one real training gives one row, with the newest copy's registrations and the check."""
     start = NOW - timedelta(days=7)
@@ -128,14 +160,14 @@ def test_the_check_held_by_the_older_copy_is_kept_on_the_newest_row() -> None:
     """The start check was opened on the first message: the one row of the training still says done."""
     start = NOW - timedelta(days=7)
     _publish(1, start)
-    _publish(2, start, registered=(3, 4))
+    _publish(2, start, registered=(3, 4, 5))
     appel_id = attendance.open_appel(GUILD, 1, 0, trainer_id=2222, starts_at=start, ends_at=start + timedelta(hours=2))
     attendance.mark(appel_id, [1, 2, 3], [1, 2])
     attendance.validate(appel_id, 2222, start)
 
     retention.summarise(NOW)
 
-    assert _summaries() == [(2, 0, "Training 0", start.isoformat(), 2, 1, 0, 2, 1, "done")]
+    assert _summaries() == [(2, 0, "Training 0", start.isoformat(), 3, 1, 0, 2, 1, "done")]
 
 
 def test_both_copies_of_a_training_published_again_go_after_three_years() -> None:
