@@ -699,6 +699,16 @@ def test_user_guide_says_what_the_alert_offers_and_that_the_first_answer_decides
     assert "`Appel fait par` the trainer" in section
 
 
+def test_user_guide_says_a_click_during_a_relaunch_is_told_it_is_in_progress() -> None:
+    """The trainings section says a click mid-relaunch is told so and stores nothing, and can be repeated after it."""
+    section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
+    assert (
+        "While a relaunch is in progress, a click from another Respo Formation is told `Relance en cours …` and stores nothing"
+        in section
+    )
+    assert "is taken if the relaunch failed" in section
+
+
 def test_user_guide_says_a_missed_start_still_sends_the_attendance_check() -> None:
     """The trainings section says a check missed at the start is sent at the next five-minute check, within the window."""
     section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")

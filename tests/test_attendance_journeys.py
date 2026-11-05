@@ -1464,6 +1464,14 @@ def _answer(hall: Hall, line: str) -> str:
     return line.replace("{at}", discord_timestamp(appel.handled_at, "t"))
 
 
+def _pending(hall: Hall) -> str:
+    """Write what a second Respo Formation is told while the first one's relaunch is in flight."""
+    return (
+        f"Relance en cours par <@{hall.respo.id}>. "
+        "Réessaie dans un instant : si elle échoue, l'alerte redevient disponible. Rien n'a été modifié."
+    )
+
+
 def _stored_answer(hall: Hall) -> tuple[Any, ...]:
     """Read who answered the alert, how and when."""
     appel = attendance.get(hall.appel_id)
@@ -1646,7 +1654,7 @@ async def test_a_save_during_a_failed_relaunch_closes_the_alert_done(hall: Hall,
 
     ((allowed, interaction),) = meanwhile
     assert allowed
-    assert _refused(interaction).startswith(f"Déjà traité : 🔁 **Formateur relancé par <@{hall.respo.id}>**")
+    assert _refused(interaction) == _pending(hall)
     assert _stored_answer(hall)[:2] == (hall.trainer.id, attendance.AlertAction.DONE)
     for respo in (hall.respo, other_respo):
         assert _alert(hall, respo).content.endswith(_answer(hall, f"✅ **Appel fait par <@{hall.trainer.id}>** à {{at}}."))
@@ -1691,6 +1699,68 @@ async def test_a_relaunch_answers_the_click_before_it_sends_anything(hall: Hall,
     assert deferred_before == [1]
     interaction.edit_original_response.assert_awaited_once()
     assert "Formateur relancé par" in interaction.edit_original_response.await_args.kwargs["content"]
+
+
+@pytest.mark.parametrize("failure", ["reaches_nobody", "raises"])
+async def test_a_click_during_a_failed_relaunch_is_told_to_try_again_and_can(
+    hall: Hall, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    """A second Respo answering mid-relaunch is told it is in progress, stores nothing, and can answer once it failed."""
+    other_respo = hall.member("respo2", RoleNames.TRAININGS_MANAGER)
+    await _overdue(hall)
+    shown = _alert(hall, other_respo)
+    meanwhile: list[tuple[bool, MagicMock]] = []
+
+    async def deliver_then_fail(_guild: Any, _appel: Any) -> bool:
+        meanwhile.append(await hall.forged_click(other_respo, _alert_id(hall, "c"), shown=shown))
+        if failure == "raises":
+            raise RuntimeError
+        return False
+
+    monkeypatch.setattr(ui_attendance, "deliver", deliver_then_fail)
+
+    relaunch = hall.forged_click(hall.respo, _alert_id(hall, "r"), shown=_alert(hall, hall.respo))
+    if failure == "raises":
+        with pytest.raises(RuntimeError):
+            await relaunch
+    else:
+        await relaunch
+
+    ((allowed, interaction),) = meanwhile
+    assert allowed
+    assert _refused(interaction) == _pending(hall)
+    assert _stored_answer(hall) == (None, None, None)
+
+    await hall.click(other_respo, _alert(hall, other_respo), _alert_id(hall, "c"))
+
+    appel = attendance.get(hall.appel_id)
+    assert appel is not None
+    assert (appel.handled_by, appel.handled_action) == (other_respo.id, attendance.AlertAction.CANCEL)
+
+
+async def test_a_click_after_a_relaunch_that_got_through_is_told_who_relaunched(
+    hall: Hall, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The in-progress notice ends with the relaunch: a later click is told the alert was answered by it."""
+    other_respo = hall.member("respo2", RoleNames.TRAININGS_MANAGER)
+    await _overdue(hall)
+    shown = _alert(hall, other_respo)
+    meanwhile: list[tuple[bool, MagicMock]] = []
+
+    async def deliver_after_a_click(_guild: Any, _appel: Any) -> bool:
+        meanwhile.append(await hall.forged_click(other_respo, _alert_id(hall, "i"), shown=shown))
+        return True
+
+    monkeypatch.setattr(ui_attendance, "deliver", deliver_after_a_click)
+
+    await hall.forged_click(hall.respo, _alert_id(hall, "r"), shown=_alert(hall, hall.respo))
+
+    ((_, during),) = meanwhile
+    assert _refused(during) == _pending(hall)
+    allowed, later = await hall.forged_click(other_respo, _alert_id(hall, "i"), shown=shown)
+    assert allowed
+    assert _refused(later) == "Déjà traité : " + _answer(hall, f"🔁 **Formateur relancé par <@{hall.respo.id}>** à {{at}}.")
+    assert _stored_answer(hall)[:2] == (hall.respo.id, attendance.AlertAction.RELAUNCH)
 
 
 @pytest.mark.parametrize("action", ["i", "r"])

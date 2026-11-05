@@ -44,6 +44,11 @@ _GONE = "Cet appel n'existe plus."
 _NO_RIGHT = "Seuls le formateur, les Respo Formation et les admins peuvent faire cet appel."
 _COMMAND = "appel"
 
+# The checks whose relaunch is in flight: the claim is stored before the trainer is reached, so until it settles a stored
+# "relaunch" does not yet mean the trainer was. Held in this process only: a restart mid-relaunch leaves the claim stored,
+# and it then reads as done. A stored pending flag would lift that limit, at the price of a migration.
+_relaunching: Final[set[int]] = set()
+
 
 async def _refuse(interaction: Interaction[Fablabot], kind: RefusalKind, text: str, *, logger: Logger) -> None:
     """Log a refused click by kind and tell the clicker, privately, that nothing changed."""
@@ -395,10 +400,23 @@ class AppelAlertAction(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<
         await refresh_alerts(interaction.client, appel, skip=skip)
 
     async def _already(self, interaction: Interaction[Any]) -> None:
-        """Tell the clicker, privately, how the alert was answered first."""
+        """Tell the clicker, privately, how the alert was answered first, or that a relaunch is still in progress.
+
+        A relaunch in flight can still fail and give the answer back, so it is not told as done: the clicker is asked to
+        try again, and nothing was stored for them.
+        """
         appel = attendance.get(self.appel_id)
+        user_id = interaction.user.id
+        if appel is not None and appel.id in _relaunching:
+            logger.info(f"[appel] alert appel_id={self.appel_id} user_id={user_id} met a relaunch in progress")
+            await interaction.response.send_message(
+                f"Relance en cours par <@{appel.handled_by}>. "
+                f"Réessaie dans un instant : si elle échoue, l'alerte redevient disponible. {_UNCHANGED}",
+                ephemeral=True,
+            )
+            return
         answer = alert_answer(appel) if appel else None
-        logger.info(f"[appel] alert appel_id={self.appel_id} user_id={interaction.user.id} already answered")
+        logger.info(f"[appel] alert appel_id={self.appel_id} user_id={user_id} already answered")
         await interaction.response.send_message(f"Déjà traité : {answer or _GONE}", ephemeral=True)
 
     async def _relaunch(self, interaction: Interaction[Any]) -> bool:
@@ -408,17 +426,24 @@ class AppelAlertAction(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<
         three seconds Discord gives a response.
 
         When nobody was reached, or sending failed, the claim is taken back. The trainer may have saved meanwhile, and the
-        save found the alert answered, so it is closed done here rather than left open on a saved check.
+        save found the alert answered, so it is closed done here rather than left open on a saved check. Until then the
+        check is listed as relaunching, so that another Respo's click is told to try again rather than that it is done.
         """
         reached = False
+        _relaunching.add(self.appel_id)
         try:
             await interaction.response.defer()
             appel = attendance.get(self.appel_id)
             guild = interaction.client.get_guild(appel.guild_id) if appel else None
             reached = appel is not None and guild is not None and await deliver(guild, appel)
         finally:
+            try:
+                if not reached:
+                    attendance.release(self.appel_id, interaction.user.id, AlertAction.RELAUNCH)
+            finally:
+                # Dropped with the release, before any await: a click that comes after finds the alert open again.
+                _relaunching.discard(self.appel_id)
             if not reached:
-                attendance.release(self.appel_id, interaction.user.id, AlertAction.RELAUNCH)
                 released = attendance.get(self.appel_id)
                 if released is not None:
                     await settle_alert(interaction.client, released)

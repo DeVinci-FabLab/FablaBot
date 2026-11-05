@@ -67,7 +67,7 @@ Each validation, and each update after it, sends every Respo Formation a private
 
 When the training's slot is over and nobody saved the check, the bot sends every Respo Formation an alert, once, at its next five-minute check. The slot ends at the start plus the duration of the announcement, or three hours after the start when the duration cannot be read. Nothing is sent once the trainer has saved the check, nor after the 7 days of the edit window. The alert names the trainer (or says "Le formateur" when the announcement names none) and offers three buttons:
 
-- **Relancer le formateur** sends the trainer the check again, in private or in the thread when their private messages are closed. If nobody could be reached, you are told and the alert stays open for another answer.
+- **Relancer le formateur** sends the trainer the check again, in private or in the thread when their private messages are closed. If nobody could be reached, you are told and the alert stays open for another answer. While a relaunch is in progress, a click from another Respo Formation is told `Relance en cours …` and stores nothing: once the relaunch is over, the click can be repeated, and is taken if the relaunch failed.
 - **Ignorer** changes nothing else: the check stays open and the trainer can still take it.
 - **Annuler la formation** closes the check: nobody can mark or save it any more, and the training counts as not held. Nothing is sent to the registered members.
 
