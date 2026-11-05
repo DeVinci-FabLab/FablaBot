@@ -351,6 +351,23 @@ def test_a_draft_is_never_deleted() -> None:
     assert formations.get_draft(GUILD) is not None
 
 
+def test_a_draft_holding_a_published_training_is_never_deleted() -> None:
+    """Publishing leaves the draft as it was: its training matches the counted one, and the draft still stays."""
+    old = NOW - RETENTION - timedelta(days=1)
+    _publish(1, old)
+    draft_training = Formation(
+        emoji="🔧", name="Training 0", trainer_mention="<@2222>", start_iso=old.isoformat(), duration="2h", seats=3
+    )
+    formations.save_draft(GUILD, FmMessageDraft("My header", 0, "My intro", [draft_training], "My end"))
+    assert retention.summarise(NOW) == 1
+
+    assert retention.forget(NOW - RETENTION) == 1
+
+    draft = formations.get_draft(GUILD)
+    assert draft is not None
+    assert (draft.header, draft.intro, draft.end, len(draft.fms)) == ("My header", "My intro", "My end", 1)
+
+
 def test_an_empty_draft_is_never_deleted() -> None:
     """A draft with no training yet stays too."""
     formations.save_draft(GUILD, FmMessageDraft("", 0, "", [], ""))

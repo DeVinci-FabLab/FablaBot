@@ -109,8 +109,9 @@ def summarise(now: datetime) -> int:
 def forget(cutoff: datetime) -> int:
     """Delete the training messages whose every training started before ``cutoff`` and has its counts.
 
-    The training rows, their registrations, waitlists and checks go with the message. Only a published training whose
-    start can be read gets counts, so a draft, or a training with such a start, keeps its message. A training
+    The training rows, their registrations, waitlists and checks go with the message. A draft is never deleted, though
+    its trainings can match a counted one, since publishing leaves the draft as it was. Only a published training whose
+    start can be read gets counts, so a message holding a training with an unreadable start is kept. A training
     published again is counted once, on its newest copy or on the copy summarised first, so its other copies need no
     counts of their own, even when the copy that carries them was deleted before.
 
@@ -122,7 +123,8 @@ def forget(cutoff: datetime) -> int:
     """
     with db.transaction() as conn:
         return conn.execute(
-            "DELETE FROM fm_message WHERE EXISTS (SELECT 1 FROM formation AS f WHERE f.fm_message_id = fm_message.id) "
+            "DELETE FROM fm_message WHERE message_id IS NOT NULL "
+            "AND EXISTS (SELECT 1 FROM formation AS f WHERE f.fm_message_id = fm_message.id) "
             "AND NOT EXISTS (SELECT 1 FROM formation AS f WHERE f.fm_message_id = fm_message.id "
             "AND (unixepoch(f.start_iso) >= ? OR (" + _UNCOUNTED.format(m="fm_message", f="f") + ")))",
             (int(cutoff.timestamp()),),
