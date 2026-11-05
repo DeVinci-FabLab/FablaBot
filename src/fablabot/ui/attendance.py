@@ -15,6 +15,7 @@ from fablabot.helpers.formation.attendance import (
     alert_message,
     appel_message,
     deliver,
+    is_staff,
     may_take,
     notify_validation,
     refresh_alerts,
@@ -42,6 +43,7 @@ logger = logging.getLogger(__name__)
 _UNCHANGED = "Rien n'a été modifié."
 _GONE = "Cet appel n'existe plus."
 _NO_RIGHT = "Seuls le formateur, les Respo Formation et les admins peuvent faire cet appel."
+_NO_ALERT_RIGHT = "Seuls les Respo Formation et les admins peuvent répondre à cette alerte."
 _COMMAND = "appel"
 _RELAUNCH_UNREACHED = "Le formateur n'a pas pu être relancé : ses MP sont fermés et aucun fil n'a pu être créé."
 _RELAUNCH_NO_TRAINER = "Le formateur n'a pas pu être relancé : aucun formateur n'est nommé pour cette formation."
@@ -70,7 +72,9 @@ async def _refusal(bot: Fablabot, appel: Appel, user_id: int, *, alert: bool) ->
     member = await get_or_fetch_member(guild, user_id) if guild else None
     if member is None:
         return RefusalKind.MISSING_RIGHT, _GONE
-    if not may_take(appel, member):
+    if alert and not is_staff(member):
+        return RefusalKind.MISSING_RIGHT, _NO_ALERT_RIGHT
+    if not alert and not may_take(appel, member):
         return RefusalKind.MISSING_RIGHT, _NO_RIGHT
     if alert and alert_answer(appel) is not None:
         return None
@@ -107,7 +111,8 @@ async def check_click(
         interaction (Interaction[Fablabot]): The click.
         appel_id (int): The check read from the control's custom ID.
         logger (Logger): The logger of the module that owns the control.
-        alert (bool): True for a button of the alert, which stays answerable with the first answer while the check is closed.
+        alert (bool): True for a button of the alert, which only the staff may answer and which stays answerable with the
+            first answer while the check is closed.
 
     Returns:
         Appel | None: The check when the click may go on, None when it was refused.

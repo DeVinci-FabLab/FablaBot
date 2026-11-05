@@ -105,6 +105,18 @@ def trainer_id(mention: str) -> int | None:
     return int(found[1]) if found else None
 
 
+def is_staff(member: Member | None) -> bool:
+    """Tell whether someone holds one of the roles that run the checks: ``APPEL_ROLES``.
+
+    Args:
+        member (Member | None): The clicker as a member of the check's server, None when they are not one.
+
+    Returns:
+        bool: True for the holders of ``APPEL_ROLES``.
+    """
+    return member is not None and any(role.name in APPEL_ROLES for role in member.roles)
+
+
 def may_take(appel: Appel, member: Member | None) -> bool:
     """Tell whether someone may take or correct a check.
 
@@ -115,9 +127,7 @@ def may_take(appel: Appel, member: Member | None) -> bool:
     Returns:
         bool: True for the trainer while still on the server, and for the holders of ``APPEL_ROLES``.
     """
-    if member is None:
-        return False
-    return member.id == appel.trainer_id or any(role.name in APPEL_ROLES for role in member.roles)
+    return member is not None and (member.id == appel.trainer_id or is_staff(member))
 
 
 def _slot(appel: Appel) -> str:

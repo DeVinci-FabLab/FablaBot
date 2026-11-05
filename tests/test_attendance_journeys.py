@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 GUILD_ID = int(LISTED_GUILD)
 MESSAGE_ID = 5000
 GONE = "Cet appel n'existe plus. Rien n'a été modifié."
+ALERT_NO_RIGHT = "Seuls les Respo Formation et les admins peuvent répondre à cette alerte. Rien n'a été modifié."
 NO_RIGHT = "Seuls le formateur, les Respo Formation et les admins peuvent faire cet appel. Rien n'a été modifié."
 
 
@@ -2062,8 +2063,25 @@ async def test_an_alert_click_from_a_member_who_lost_respo_formation_is_refused(
     allowed, interaction = await hall.forged_click(hall.respo, _alert_id(hall, "c"), shown=alert)
 
     assert not allowed
-    assert _refused(interaction) == NO_RIGHT
+    assert _refused(interaction) == ALERT_NO_RIGHT
     assert _stored_answer(hall) == (None, None, None)
+
+
+@pytest.mark.parametrize("answered", [False, True])
+async def test_the_trainer_cannot_answer_the_alert(hall: Hall, answered: bool) -> None:
+    """The alert is the staff's: the trainer's click is refused, told nothing of an answer, and stores nothing."""
+    await _overdue(hall)
+    if answered:
+        await hall.click(hall.respo, _alert(hall, hall.respo), _alert_id(hall, "i"))
+    before = _stored_answer(hall)
+
+    for action in ALERT_ACTIONS:
+        allowed, interaction = await hall.forged_click(hall.trainer, _alert_id(hall, action), shown=_alert(hall, hall.respo))
+
+        assert not allowed
+        assert _refused(interaction) == ALERT_NO_RIGHT
+    assert _stored_answer(hall) == before
+    assert len(_dms(hall.trainer)) == 1
 
 
 async def test_an_unanswered_alert_is_refused_once_the_appel_closed(hall: Hall) -> None:
@@ -2094,7 +2112,7 @@ async def test_a_member_who_lost_respo_formation_is_not_told_the_first_answer(ha
     allowed, interaction = await hall.forged_click(hall.respo, _alert_id(hall, "c"), shown=_alert(hall, hall.respo))
 
     assert not allowed
-    assert _refused(interaction) == NO_RIGHT
+    assert _refused(interaction) == ALERT_NO_RIGHT
     assert _stored_answer(hall) == before
 
 

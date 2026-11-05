@@ -715,6 +715,12 @@ def test_user_guide_says_a_relaunch_that_cannot_go_is_told_and_leaves_the_alert_
     assert "if the training names no trainer, or if the sending failed, you are told which and the alert stays open" in section
 
 
+def test_user_guide_says_only_staff_answer_the_alert() -> None:
+    """The trainings section says the alert answers to the Respo Formation holders and the admin roles, not the trainer."""
+    section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
+    assert "Only the Respo Formation holders and the admin roles can answer" in section
+
+
 def test_user_guide_says_a_missed_start_still_sends_the_attendance_check() -> None:
     """The trainings section says a check missed at the start is sent at the next five-minute check, within the window."""
     section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
