@@ -1101,3 +1101,22 @@ async def test_a_server_without_a_log_channel_still_sends_the_lists(hall: Hall, 
     assert hall.logs.history() == []  # pyright: ignore[reportAttributeAccessIssue]
     assert f"No log channel for the counts of appel {hall.appel_id} in guild {GUILD_ID}." in caplog.text
     assert "Découpe laser" not in caplog.text
+
+
+async def test_a_trainer_who_only_holds_codir_takes_the_appel(hall: Hall) -> None:
+    """The trainer named in the announcement takes the check whatever their role, even with CoDir alone."""
+    first, _second = hall.register(2)
+    lead = hall.member("lead", RoleNames.CODIR)
+    hall.publish(trainer_mention=f"<@{lead.id}>")
+    await hall.tick()
+    (message,) = hall.dm(lead)
+
+    await hall.click(lead, message, hall.toggle_id(first))
+    (message,) = hall.dm(lead)
+    await hall.click(lead, message, f"appel:{hall.appel_id}:ok")
+
+    stored = attendance.get(hall.appel_id)
+    assert stored is not None
+    assert (stored.validated_by, stored.present_count, stored.absent_count) == (lead.id, 1, 1)
+    (lists,) = _lists(hall, hall.respo)
+    assert f"a été fait par <@{lead.id}>." in lists.content
