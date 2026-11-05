@@ -10,7 +10,7 @@ import re
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from conftest import make_guild, make_interaction, make_member, make_role
-from discord import Forbidden, Member, TextChannel, ui
+from discord import Forbidden, HTTPException, Member, TextChannel, ui
 import pytest
 
 from fablabot.cogs import message_management
@@ -254,8 +254,8 @@ def test_no_log_call_in_the_source_interpolates_a_member() -> None:
     assert offenders == []
 
 
-async def test_attendance_lines_name_members_by_id_only(caplog: pytest.LogCaptureFixture) -> None:
-    """A validation by a member logs IDs and counts: neither the member's name nor the training's name appears."""
+async def _validate_secret_training(log_channel: MagicMock | None, *, log_channel_id: int | None = 77) -> tuple[int, MagicMock]:
+    """Store a training named ``Training Secret``, have a member named ``NAME`` validate its check, and return the check."""
     start = datetime.now(PARIS_TZ)
     training = Formation(
         emoji="A",
@@ -272,18 +272,52 @@ async def test_attendance_lines_name_members_by_id_only(caplog: pytest.LogCaptur
     role = make_role(RoleNames.TRAININGS_MANAGER)
     respo = make_member(9, role)
     respo.send = AsyncMock()
-    guild = make_guild(1234, [role], [respo])
+    guild = make_guild(1234, [role], [respo], channel=log_channel)
+    if log_channel is None:
+        guild.get_channel = MagicMock(return_value=None)
     interaction = make_interaction(user_name=NAME)
     interaction.client.get_guild.return_value = guild
+
+    with patch("fablabot.helpers.formation.attendance.get_log_channel_id", return_value=log_channel_id):
+        await AppelValidate(appel_id).callback(interaction)
+
+    return appel_id, respo
+
+
+async def test_attendance_lines_name_members_by_id_only(caplog: pytest.LogCaptureFixture) -> None:
+    """A validation by a member logs IDs and counts: neither the member's name nor the training's name appears."""
     caplog.set_level(logging.DEBUG)
 
-    with patch("fablabot.helpers.formation.attendance.get_log_channel_id", return_value=77):
-        await AppelValidate(appel_id).callback(interaction)
+    appel_id, respo = await _validate_secret_training(MagicMock(spec=TextChannel, send=AsyncMock()))
 
     appel = attendance.get(appel_id)
     assert appel is not None
     assert appel.validated_at is not None
     respo.send.assert_awaited()
     assert "validated" in caplog.text
+    assert NAME not in caplog.text
+    assert "Training Secret" not in caplog.text
+
+
+async def test_attendance_lines_stay_nameless_without_a_log_channel(caplog: pytest.LogCaptureFixture) -> None:
+    """With no log channel the warning names the check by ID: neither the member's name nor the training's name appears."""
+    caplog.set_level(logging.DEBUG)
+
+    await _validate_secret_training(None, log_channel_id=None)
+
+    assert "No log channel for the counts of appel" in caplog.text
+    assert NAME not in caplog.text
+    assert "Training Secret" not in caplog.text
+
+
+async def test_attendance_lines_stay_nameless_when_the_log_channel_refuses(caplog: pytest.LogCaptureFixture) -> None:
+    """When the log channel refuses the counts the failure line names the check by ID, never the training."""
+    channel = MagicMock(spec=TextChannel)
+    channel.send = AsyncMock(side_effect=HTTPException(MagicMock(status=500, reason="boom"), "boom"))
+    caplog.set_level(logging.DEBUG)
+
+    await _validate_secret_training(channel)
+
+    assert "Could not post the counts of appel" in caplog.text
     assert NAME not in caplog.text
     assert "Training Secret" not in caplog.text

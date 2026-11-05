@@ -770,27 +770,31 @@ async def test_an_empty_list_reads_none(hall: Hall) -> None:
 async def test_a_respo_with_closed_dms_does_not_stop_the_others(
     hall: Hall, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """A Respo whose DM fails is logged by ID, and the next Respo still gets the lists and the log line goes out."""
+    """A Respo whose DM fails gets nothing and is logged by ID; the next Respo still gets the lists and the line goes out."""
     hall.register(2)
     other_respo = hall.member("respo2", RoleNames.TRAININGS_MANAGER)
     hall.publish()
     await hall.tick()
     blocked = min(hall.respo.id, other_respo.id)
-    real_send = type(hall.respo).send
+    real_send = discord.Member.send
 
     async def send(member: Any, *args: Any, **kwargs: Any) -> Any:
         if member.id == blocked:
             raise discord.Forbidden(MagicMock(status=403), "closed")
         return await real_send(member, *args, **kwargs)
 
-    monkeypatch.setattr(type(hall.respo), "send", send)
+    monkeypatch.setattr(discord.Member, "send", send)
     caplog.set_level(logging.INFO)
 
     await hall.validate()
 
     survivor = other_respo if blocked == hall.respo.id else hall.respo
+    stuck = hall.respo if blocked == hall.respo.id else other_respo
     assert len(_lists(hall, survivor)) == 1
-    assert str(blocked) in caplog.text
+    assert _lists(hall, stuck) == []
+    assert f"Cannot DM user {blocked} in guild {GUILD_ID}" in caplog.text
+    assert f"Sent attendance lists {hall.appel_id} DM to user {blocked}" not in caplog.text
+    assert f"Sent attendance lists {hall.appel_id} DM to user {survivor.id}" in caplog.text
     assert len(hall.logs.history()) == 1  # pyright: ignore[reportAttributeAccessIssue]
 
 
