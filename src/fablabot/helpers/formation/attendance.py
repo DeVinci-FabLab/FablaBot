@@ -56,6 +56,12 @@ _LIST_CHARS = MAX_MSG_CHARS - 400
 _CODIR_LINE = "Merci de transmettre au **CoDir** la liste des participants à excuser si besoin."
 _reporting: WeakValueDictionary[int, asyncio.Lock] = WeakValueDictionary()
 """The lock of each check being reported, alive only while a report holds or awaits it: one report of a check at a time."""
+_KEPT: Final = 256
+_reported: dict[int, tuple[frozenset[int], frozenset[int]]] = {}
+"""Who was present and absent in the last report sent of each check, the oldest forgotten past ``_KEPT`` checks.
+
+Kept in memory on purpose: a restart forgets it, so pressing the update button after one sends the lists again.
+"""
 
 
 def read_duration(duration: str) -> timedelta | None:
@@ -339,7 +345,8 @@ async def notify_validation(guild: Guild, saved: Validation) -> None:
     Everything comes from what the validation saved, never from a later read, so a mark made afterwards or a second
     validation is not reported as this one. The reports of one check go out one after the other, and a report whose
     save a newer validation replaced is dropped, so the last one the Respo read is the newest. A Respo who cannot be
-    reached does not stop the others, and a missing or refusing log channel stops nothing.
+    reached does not stop the others, and a missing or refusing log channel stops nothing. A validation that leaves the
+    present and absent members as the last report had them sends nothing: the click changed nothing to tell.
 
     Args:
         guild (Guild): The check's server.
@@ -353,6 +360,14 @@ async def notify_validation(guild: Guild, saved: Validation) -> None:
         if stored is not None and stored.validated_at != appel.validated_at:
             logger.info(f"Dropped the report of appel {appel.id} in guild {guild.id}: a newer validation replaced it.")
             return
+        lists = (frozenset(saved.here), frozenset(saved.away))
+        if _reported.get(appel.id) == lists:
+            logger.info(f"Skipped the report of appel {appel.id} in guild {guild.id}: nobody's presence changed.")
+            return
+        _reported.pop(appel.id, None)
+        _reported[appel.id] = lists
+        while len(_reported) > _KEPT:
+            del _reported[next(iter(_reported))]
         messages = respo_messages(appel, saved.here, saved.away, first=saved.first)
         for respo in sorted(get_members_by_role(logger, guild, role=RoleNames.TRAININGS_MANAGER), key=lambda m: m.id):
             for text in messages:

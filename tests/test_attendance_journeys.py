@@ -1018,3 +1018,33 @@ async def test_a_report_in_flight_does_not_hold_back_the_report_of_another_check
     assert len(texts) == 2
     assert "Soudure" in texts[0]
     assert "Découpe laser" in texts[1]
+
+
+async def test_pressing_update_with_nothing_changed_sends_no_new_report(hall: Hall) -> None:
+    """Pressing update with the same present members as the save answers the click and sends no new report."""
+    first, _second = hall.register(2)
+    hall.publish()
+    await hall.tick()
+    await hall.validate(first)
+
+    allowed, interaction = await hall.forged_click(hall.trainer, f"appel:{hall.appel_id}:ok")
+
+    assert allowed
+    interaction.response.edit_message.assert_awaited_once()
+    assert len(_lists(hall, hall.respo)) == 1
+    assert len(hall.logs.history()) == 1  # pyright: ignore[reportAttributeAccessIssue]
+
+
+async def test_swapping_a_present_member_for_another_is_reported_though_the_counts_match(hall: Hall) -> None:
+    """A correction that keeps the counts but changes who is present still sends the lists and the log line."""
+    first, second = hall.register(2)
+    hall.publish()
+    await hall.tick()
+    await hall.validate(first)
+    attendance.mark(hall.appel_id, [first.id, second.id], [second.id])
+
+    await hall.forged_click(hall.trainer, f"appel:{hall.appel_id}:ok")
+
+    _first_dm, update = _lists(hall, hall.respo)
+    assert f"**Présents (1)** : <@{second.id}>\n" in update.content
+    assert len(hall.logs.history()) == 2  # pyright: ignore[reportAttributeAccessIssue]
