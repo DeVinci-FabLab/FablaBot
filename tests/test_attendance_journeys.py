@@ -27,6 +27,8 @@ from fablabot.ui import attendance as ui_attendance
 from fablabot.ui.attendance import DYNAMIC_ITEMS
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import simcord
 
 GUILD_ID = int(LISTED_GUILD)
@@ -137,13 +139,16 @@ class Hall:
         """Write the custom ID of a member's button."""
         return f"appel:{self.appel_id}:m:{member.id}"
 
-    async def forged_click(self, who: Any, custom_id: str, *, shown: Any | None = None) -> tuple[bool, MagicMock]:
+    async def forged_click(
+        self, who: Any, custom_id: str, *, shown: Any | None = None, setup: Callable[[MagicMock], None] | None = None
+    ) -> tuple[bool, MagicMock]:
         """Send a click the way Discord does for a message the clicker cannot reach, and tell whether the bot let it run.
 
         Args:
             who: The clicker.
             custom_id: The control clicked.
             shown: The message the clicker saw, as Discord sends it with the click; a blank one when left out.
+            setup: Called with the interaction before the item runs, to script how Discord answers it.
 
         Returns:
             tuple[bool, MagicMock]: Whether the item allowed the click, and the interaction the bot answered.
@@ -154,6 +159,8 @@ class Hall:
         interaction.guild = None
         interaction.guild_id = None
         interaction.message = shown or MagicMock()
+        if setup is not None:
+            setup(interaction)
         item_class = next(cls for cls in DYNAMIC_ITEMS if cls.__discord_ui_compiled_template__.fullmatch(custom_id))
         match = item_class.__discord_ui_compiled_template__.fullmatch(custom_id)
         item = await item_class.from_custom_id(interaction, MagicMock(), match)  # pyright: ignore[reportArgumentType]
@@ -189,6 +196,13 @@ def _refused(interaction: MagicMock) -> str:
     interaction.response.send_message.assert_awaited_once()
     assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
     return interaction.response.send_message.await_args.args[0]
+
+
+def _followed(interaction: MagicMock) -> str:
+    """Return the text the bot sent after deferring, once it checked it was private."""
+    interaction.followup.send.assert_awaited_once()
+    assert interaction.followup.send.await_args.kwargs["ephemeral"] is True
+    return interaction.followup.send.await_args.args[0]
 
 
 def _stored(appel_id: int) -> tuple[set[int], tuple[Any, ...]]:
@@ -1574,7 +1588,9 @@ async def test_a_relaunch_that_reaches_nobody_says_so_and_leaves_the_alert_open(
     allowed, interaction = await hall.forged_click(hall.respo, _alert_id(hall, "r"))
 
     assert allowed
-    assert _refused(interaction) == ("Le formateur n'a pas pu être relancé : ses MP sont fermés et aucun fil n'a pu être créé.")
+    assert _followed(interaction) == (
+        "Le formateur n'a pas pu être relancé : ses MP sont fermés et aucun fil n'a pu être créé."
+    )
     assert _stored_answer(hall) == (None, None, None)
     assert not any(b.get("disabled") for b in _buttons(_alert(hall, hall.respo)).values())
 
@@ -1656,6 +1672,42 @@ async def test_a_relaunch_that_fails_with_an_error_releases_its_claim(hall: Hall
 
     assert _stored_answer(hall) == (None, None, None)
     assert not any(b.get("disabled") for b in _buttons(_alert(hall, hall.respo)).values())
+
+
+async def test_a_relaunch_answers_the_click_before_it_sends_anything(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The click is deferred before the trainer is reached, so a slow delivery cannot outlast Discord's response window."""
+    await _overdue(hall)
+    clicked: list[MagicMock] = []
+    deferred_before: list[int] = []
+
+    async def deliver_after_defer(_guild: Any, _appel: Any) -> bool:
+        deferred_before.append(clicked[0].response.defer.await_count)
+        return True
+
+    monkeypatch.setattr(ui_attendance, "deliver", deliver_after_defer)
+
+    _, interaction = await hall.forged_click(hall.respo, _alert_id(hall, "r"), setup=clicked.append)
+
+    assert deferred_before == [1]
+    interaction.edit_original_response.assert_awaited_once()
+    assert "Formateur relancé par" in interaction.edit_original_response.await_args.kwargs["content"]
+
+
+@pytest.mark.parametrize("action", ["i", "r"])
+async def test_a_click_whose_answer_failed_still_shows_the_clickers_own_copy(hall: Hall, action: str) -> None:
+    """When Discord refuses the clicker's response, their own copy is edited with the others, not left live."""
+    await _overdue(hall)
+    shown = _alert(hall, hall.respo)
+
+    def refuse(interaction: MagicMock) -> None:
+        gone = discord.NotFound(MagicMock(status=404), "Unknown interaction")
+        interaction.response.edit_message.side_effect = gone
+        interaction.edit_original_response.side_effect = gone
+
+    await hall.forged_click(hall.respo, _alert_id(hall, action), shown=shown, setup=refuse)
+
+    assert all(b.get("disabled") for b in _buttons(_alert(hall, hall.respo)).values())
+    assert _stored_answer(hall)[0] == hall.respo.id
 
 
 async def test_cancel_closes_the_appel_and_tells_no_registrant(hall: Hall) -> None:

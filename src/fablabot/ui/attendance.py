@@ -6,7 +6,7 @@ from datetime import datetime
 import logging
 from typing import TYPE_CHECKING, Any, Final, override
 
-from discord import ButtonStyle, SelectOption, Thread, ui
+from discord import ButtonStyle, HTTPException, SelectOption, Thread, ui
 from discord.components import Button, SelectMenu
 
 from fablabot.helpers.constants import PARIS_TZ, ErrorMessages
@@ -371,8 +371,9 @@ class AppelAlertAction(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<
         if not attendance.handle(self.appel_id, user_id, answer, datetime.now(PARIS_TZ)):
             await self._already(interaction)
             return
-        if answer is AlertAction.RELAUNCH and not await self._relaunch(interaction):
-            await interaction.response.send_message(
+        relaunch = answer is AlertAction.RELAUNCH
+        if relaunch and not await self._relaunch(interaction):
+            await interaction.followup.send(
                 "Le formateur n'a pas pu être relancé : ses MP sont fermés et aucun fil n'a pu être créé.", ephemeral=True
             )
             return
@@ -381,10 +382,17 @@ class AppelAlertAction(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<
         if appel is None:
             return
         content, view = alert_message(appel)
+        skip = interaction.message.id if interaction.message else None
         try:
-            await interaction.response.edit_message(content=content, view=view)
-        finally:
-            await refresh_alerts(interaction.client, appel, skip=interaction.message.id if interaction.message else None)
+            if relaunch:
+                await interaction.edit_original_response(content=content, view=view)
+            else:
+                await interaction.response.edit_message(content=content, view=view)
+        except HTTPException:
+            # Discord refused the response: the clicker's own copy is edited with the others, not left with live buttons.
+            logger.exception(f"Could not answer the alert click on appel {self.appel_id}; editing the copy directly.")
+            skip = None
+        await refresh_alerts(interaction.client, appel, skip=skip)
 
     async def _already(self, interaction: Interaction[Any]) -> None:
         """Tell the clicker, privately, how the alert was answered first."""
@@ -394,13 +402,17 @@ class AppelAlertAction(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<
         await interaction.response.send_message(f"Déjà traité : {answer or _GONE}", ephemeral=True)
 
     async def _relaunch(self, interaction: Interaction[Any]) -> bool:
-        """Send the trainer the check again; False when nobody could be reached.
+        """Defer the click, then send the trainer the check again; False when nobody could be reached.
+
+        The click is deferred first: reaching the trainer may fetch the member and open a thread, which can outlast the
+        three seconds Discord gives a response.
 
         When nobody was reached, or sending failed, the claim is taken back. The trainer may have saved meanwhile, and the
         save found the alert answered, so it is closed done here rather than left open on a saved check.
         """
         reached = False
         try:
+            await interaction.response.defer()
             appel = attendance.get(self.appel_id)
             guild = interaction.client.get_guild(appel.guild_id) if appel else None
             reached = appel is not None and guild is not None and await deliver(guild, appel)
