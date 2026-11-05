@@ -817,3 +817,14 @@ def test_operator_guide_no_longer_says_the_bot_deletes_no_log_file() -> None:
     for stale in ("Never purge logs", "The bot deletes no log file", "The bot never removes these copies", "no time limit"):
         assert stale not in guide, stale
     assert "past 3 years" in guide
+
+
+def test_operator_guide_says_the_templates_hold_no_member_and_are_the_first_thing_a_rollback_drops() -> None:
+    """The guide names the templates as stored data without members, and the first way back drops them alone."""
+    stored = _section(_read("docs/OPERATIONS.md"), "## Stored data")
+    for detail in ("training templates", "hold no member", "`v3`", "never deletes a template"):
+        assert detail in stored, detail
+    rolling = _section(_read("docs/OPERATIONS.md"), "### Rolling back")
+    schema = rolling.split("#### Back to a release before the database")[0]
+    assert "schema 4" in schema
+    assert schema.index("drops the templates and nothing else") < schema.index("(schema 3)")

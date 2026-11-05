@@ -153,7 +153,11 @@ IMAGE=ghcr.io/devinci-fablab/fablabot:X.Y.Z   # the release that was running
 fablabot_state "$VOLUMES_PATH/fablabot/data" fablabot.downgrade_schema
 ```
 
-The first run, from the release that keeps no present and absent counts for small trainings (schema 3), keeps every
+The first run, from the release that brought the training templates (schema 4), drops the templates and nothing else;
+a server types them again after the next upgrade. Export them first if you want to keep them: `fablabot.export_state`
+counts them, and the archive of "Before every redeploy" holds them.
+
+The next run, from the release that keeps no present and absent counts for small trainings (schema 3), keeps every
 count and gives 0 to a present or absent count that was not kept: the older schema needs a value, so a 0 there
 reads 0 and means "not kept", not zero people. The run that follows drops the attendance checks and the anonymous counts, in one transaction, and
 nothing else: sign-ups, reaction history, tracked messages and temporary admins stay. The dropped data stays in the
@@ -613,7 +617,9 @@ published messages and their registrations, tracked messages, the reaction histo
 expiries, the attendance checks of the trainings (who was marked present, who validated, how the alert was answered)
 and the anonymous counts of each training (registered, waitlisted, withdrawn, present, absent, outcome), which hold no
 member ID or name. A training with fewer than 3 registered members keeps no present and absent counts: with the
-reactions public, they could point at a person. `data/command_sync_state.json` stays a separate file: it is a cache you may delete.
+reactions public, they could point at a person. Each server's training templates (name, duration, seats, description,
+excusable) hold no member either; adding a session copies them, so a changed or deleted template leaves every session as
+it was, and the retention never deletes a template. `data/command_sync_state.json` stays a separate file: it is a cache you may delete.
 
 Personal data is kept for 3 years, then deleted; the anonymous counts stay. See "Retention" below.
 
@@ -625,7 +631,8 @@ Personal data is kept for 3 years, then deleted; the anonymous counts stay. See 
   that file, so the next upgrade names its copy after the last release that did.
 - When a release changes the schema, the bot also copies the database to `data/backups/fablabot-v<schema>-<time>.db`, then
   moves the schema at start. A release that moves the schema therefore leaves two copies of the same data: one under
-  the release label and one under `v<schema>` (`v1` before the attendance tables, `v2` before the counts threshold).
+  the release label and one under `v<schema>` (`v1` before the attendance tables, `v2` before the counts threshold, `v3` before the
+  training templates).
 - The bot removes a copy past 3 years only (see "Retention"). Copies count in the archive of "Before every redeploy". They
   sit on the same volume as the database, so they do not replace that archive if the volume is lost.
 - A release never goes back: a database from a newer release stops an older one.

@@ -14,8 +14,8 @@ from state_shapes import FIRST_GUILD, MESSAGE_ID, state_files
 
 from fablabot import db, export_state
 from fablabot.helpers.constants import PARIS_TZ
-from fablabot.models import FmMessageDraft, PublishedMessage, TrackedMessage
-from fablabot.services import attendance, formations, messages, op_expiries
+from fablabot.models import FmMessageDraft, PublishedMessage, TemplateFields, TrackedMessage
+from fablabot.services import attendance, catalogue, formations, messages, op_expiries
 
 EXPORT = Path("data/exports/one")
 START = datetime(2026, 11, 5, 14, 0, tzinfo=PARIS_TZ)
@@ -151,6 +151,20 @@ def test_the_export_counts_the_attendance_data_that_stays_in_the_database(capsys
     assert "stay in the database" in out
     assert "replaced" not in out
     assert "attendance" not in json.dumps(_load(EXPORT))
+
+
+@pytest.mark.usefixtures("filled")
+def test_the_export_counts_the_templates_that_stay_in_the_database(capsys: pytest.CaptureFixture[str]) -> None:
+    """Training templates have no JSON file: the operator is told how many stay behind."""
+    db.open_database()
+    catalogue.create_template(FIRST_GUILD, TemplateFields("Laser", "1h", 6, "", True))
+    db.close_database()
+
+    export_state.main([str(EXPORT)])
+
+    out = capsys.readouterr().out
+    assert "1 training template has no place in these files; they stay in the database." in out
+    assert "Laser" not in json.dumps(_load(EXPORT))
 
 
 @pytest.mark.usefixtures("filled")

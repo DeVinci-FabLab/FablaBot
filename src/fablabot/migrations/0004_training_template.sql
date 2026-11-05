@@ -1,0 +1,12 @@
+-- The trainings a server gives again and again, typed once: adding a session copies them, so editing or deleting a
+-- template never changes a session already in a draft or published. No member is stored here.
+CREATE TABLE training_template (
+    id INTEGER PRIMARY KEY,
+    guild_id INTEGER NOT NULL,
+    name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 100),
+    duration TEXT NOT NULL CHECK (length(duration) BETWEEN 1 AND 50),
+    seats INTEGER NOT NULL CHECK (seats BETWEEN 1 AND 500),
+    description TEXT NOT NULL CHECK (length(description) <= 500),
+    excusable INTEGER NOT NULL CHECK (excusable IN (0, 1)),
+    UNIQUE (guild_id, name COLLATE NOCASE)
+) STRICT;

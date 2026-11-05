@@ -1,6 +1,7 @@
 """Models for FablaBot."""
 
 from fablabot.models.attendance import AlertAction, Appel, Registrant, Validation
+from fablabot.models.catalogue import TemplateFields, TrainingTemplate
 from fablabot.models.common import ReactionAction, ReactionEvent
 from fablabot.models.formation import FmCommand, FmMessageDraft, Formation, PublishedMessage
 from fablabot.models.message import (
@@ -31,6 +32,8 @@ __all__ = [
     "ReactionAction",
     "ReactionEvent",
     "Registrant",
+    "TemplateFields",
     "TrackedMessage",
+    "TrainingTemplate",
     "Validation",
 ]
