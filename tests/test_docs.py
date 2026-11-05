@@ -665,3 +665,9 @@ def test_user_guide_says_a_missed_start_still_sends_the_attendance_check() -> No
     section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
     assert "bot was off at the start" in section
     assert "next five-minute check" in section
+
+
+def test_user_guide_says_a_training_published_twice_gets_one_attendance_check() -> None:
+    """The trainings section says a training published again in a newer announcement gets one check, from the newer one."""
+    section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
+    assert "published again in a newer announcement gets one check, from the newer one" in section

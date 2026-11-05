@@ -57,6 +57,27 @@ class Hall:
         self.registered = [self.member(f"lab{i:03}") for i in range(count)]
         return self.registered
 
+    def training(
+        self, *, start: datetime, name: str = "Découpe laser", trainer_mention: str | None = None, duration: str = "2h"
+    ) -> Formation:
+        """Build a training the registered members signed up for."""
+        users = [{"user_id": m.id, "username": m.name, "ts_iso": start.isoformat()} for m in self.registered]
+        return Formation(
+            emoji="🔧",
+            name=name,
+            trainer_mention=trainer_mention or f"<@{self.trainer.id}>",
+            start_iso=start.isoformat(),
+            duration=duration,
+            seats=200,
+            excusable=False,
+            registered_users=users,
+        )
+
+    def store(self, trainings: list[Formation], message_id: int = MESSAGE_ID) -> None:
+        """Store an announcement of these trainings as published."""
+        draft = FmMessageDraft(header="h", role_id=1, intro="i", fms=trainings, end="e")
+        formations.save_published(GUILD_ID, PublishedMessage(message_id=message_id, channel_id=self.general.id, message=draft))
+
     def publish(
         self,
         *,
@@ -66,21 +87,8 @@ class Hall:
         message_id: int = MESSAGE_ID,
     ) -> None:
         """Store the published announcement of one training that starts now unless told otherwise."""
-        start = start or datetime.now(PARIS_TZ)
-        users = [{"user_id": m.id, "username": m.name, "ts_iso": start.isoformat()} for m in self.registered]
-        training = Formation(
-            emoji="🔧",
-            name="Découpe laser",
-            trainer_mention=trainer_mention or f"<@{self.trainer.id}>",
-            start_iso=start.isoformat(),
-            duration=duration,
-            seats=200,
-            excusable=False,
-            registered_users=users,
-        )
-        draft = FmMessageDraft(header="h", role_id=1, intro="i", fms=[training], end="e")
-        published = PublishedMessage(message_id=message_id, channel_id=self.general.id, message=draft)
-        formations.save_published(GUILD_ID, published)
+        training = self.training(start=start or datetime.now(PARIS_TZ), trainer_mention=trainer_mention, duration=duration)
+        self.store([training], message_id)
 
     async def tick(self) -> None:
         """Run the formation cog's reminder tick, the way the five-minute loop does."""
@@ -533,3 +541,65 @@ async def test_a_training_past_the_correction_window_gets_no_appel(hall: Hall) -
     await hall.tick()
 
     assert db.connection().execute("SELECT COUNT(*) FROM appel").fetchone()[0] == 0
+
+
+async def test_a_training_published_again_gets_one_appel_and_one_message(hall: Hall) -> None:
+    """The same training in two announcements gets one check and one private message, on the newer announcement."""
+    hall.register(2)
+    start = datetime.now(PARIS_TZ) - timedelta(minutes=1)
+    hall.publish(start=start, message_id=MESSAGE_ID)
+    hall.publish(start=start, message_id=MESSAGE_ID + 1)
+
+    await hall.tick()
+    await hall.tick()
+
+    assert db.connection().execute("SELECT COUNT(*) FROM appel").fetchone()[0] == 1
+    assert attendance.get(hall.appel_id).message_id == MESSAGE_ID + 1  # pyright: ignore[reportOptionalMemberAccess]
+    assert len(hall.dm()) == 1
+
+
+async def test_an_older_copy_of_a_training_the_newer_announcement_handled_gets_no_second_appel(hall: Hall) -> None:
+    """A copy left unhandled in an older announcement does not open a check once the newer one has opened its own."""
+    hall.register(2)
+    start = datetime.now(PARIS_TZ) - timedelta(minutes=1)
+    hall.publish(start=start, message_id=MESSAGE_ID + 1)
+    await hall.tick()
+    hall.publish(start=start, message_id=MESSAGE_ID)
+
+    await hall.tick()
+
+    assert db.connection().execute("SELECT COUNT(*) FROM appel").fetchone()[0] == 1
+    assert len(hall.dm()) == 1
+
+
+async def test_only_the_trainings_an_announcement_alone_holds_open_a_check_from_it(hall: Hall) -> None:
+    """An older announcement keeps the check of its own training and leaves the one a newer announcement holds again."""
+    hall.register(2)
+    now = datetime.now(PARIS_TZ)
+    own = hall.training(start=now - timedelta(minutes=2), name="Soudure")
+    again = hall.training(start=now - timedelta(minutes=1))
+    hall.store([own, again], MESSAGE_ID)
+    hall.store([again], MESSAGE_ID + 1)
+
+    await hall.tick()
+
+    checks = db.connection().execute("SELECT m.message_id, a.position FROM appel a JOIN fm_message m ON m.id = a.fm_message_id")
+    assert {(row["message_id"], row["position"]) for row in checks} == {(MESSAGE_ID, 0), (MESSAGE_ID + 1, 0)}
+    assert len(hall.dm()) == 2
+
+
+async def test_an_older_announcement_sends_no_hour_before_reminder(hall: Hall) -> None:
+    """An older announcement visited for a training that started sends no reminder for its other trainings."""
+    registered = hall.register(2)
+    now = datetime.now(PARIS_TZ)
+    hall.store(
+        [hall.training(start=now - timedelta(minutes=30)), hall.training(start=now + timedelta(hours=1), name="Soudure")],
+        MESSAGE_ID,
+    )
+    hall.publish(start=now + timedelta(days=3), message_id=MESSAGE_ID + 1)
+
+    await hall.tick()
+
+    (message,) = hall.dm()
+    assert "Découpe laser" in message.content
+    assert all(hall.dm(member) == [] for member in registered)

@@ -198,3 +198,27 @@ def published_awaiting_start(guild_id: int, after: datetime, until: datetime) ->
         PublishedMessage(message_id=row["message_id"], channel_id=row["channel_id"], message=_message(conn, row))
         for row in rows
     ]
+
+
+def reissued_positions(guild_id: int, message_id: int) -> set[int]:
+    """List the trainings of a published message that a newer published message of the guild holds again.
+
+    A training is held again when the newer message has the same name, trainer and start instant: the
+    announcement was published anew and the newer copy is the one registrations follow.
+
+    Args:
+        guild_id (int): The ID of the guild.
+        message_id (int): The ID of the published message.
+
+    Returns:
+        set[int]: The places of those trainings in the message.
+    """
+    rows = db.connection().execute(
+        "SELECT f.position FROM formation f JOIN fm_message m ON m.id = f.fm_message_id "
+        "WHERE m.guild_id = ? AND m.message_id = ? AND EXISTS ("
+        "SELECT 1 FROM formation g JOIN fm_message n ON n.id = g.fm_message_id "
+        "WHERE n.guild_id = m.guild_id AND n.message_id > m.message_id AND g.name = f.name "
+        "AND g.trainer_mention = f.trainer_mention AND unixepoch(g.start_iso) = unixepoch(f.start_iso))",
+        (guild_id, message_id),
+    )
+    return {row["position"] for row in rows}

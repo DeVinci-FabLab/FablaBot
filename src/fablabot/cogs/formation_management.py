@@ -697,16 +697,22 @@ class FormationManagement(commands.Cog):
             behind = formations.published_awaiting_start(guild_id, now - APPEL_EDIT_WINDOW, start_window_end)
             send_contacts: str = format_respo_contacts(guild)
             for pub in sorted({p.message_id: p for p in [*behind, newest]}.values(), key=lambda p: p.message_id):
-                await self._remind_message(guild, pub, now, send_contacts)
+                await self._remind_message(guild, pub, now, send_contacts, catch_up=pub.message_id != newest.message_id)
 
-    async def _remind_message(self, guild: Guild, pub: PublishedMessage, now: datetime, send_contacts: str) -> None:
+    async def _remind_message(
+        self, guild: Guild, pub: PublishedMessage, now: datetime, send_contacts: str, *, catch_up: bool
+    ) -> None:
         """Notify for the trainings of one published message that are due, and store that they were.
+
+        An older message is only caught up on starts: it gets no hour-before reminder, and a training that a newer
+        message holds again is left to that message, so a training published twice gets one check.
 
         Args:
             guild (Guild): The guild.
             pub (PublishedMessage): The message, as stored.
             now (datetime): The time of this tick.
             send_contacts (str): The Respo contacts to write in the participants' reminder.
+            catch_up (bool): True for a message that is not the newest.
         """
         window_tolerance = timedelta(minutes=5)
         notification_window_start = now + TRAINER_NOTIFICATION_ADVANCE - window_tolerance
@@ -714,11 +720,20 @@ class FormationManagement(commands.Cog):
         start_window_end = now + window_tolerance
 
         fms = list(pub.message.fms)
+        reissued = formations.reissued_positions(guild.id, pub.message_id) if catch_up else set()
         for position, fm in enumerate(fms):
             if fm.notified_at_start:
                 continue
 
-            if not fm.notified_hour_before and notification_window_start <= fm.start_dt <= notification_window_end:
+            if position in reissued:
+                fm.notified_at_start = True
+                continue
+
+            if (
+                not catch_up
+                and not fm.notified_hour_before
+                and notification_window_start <= fm.start_dt <= notification_window_end
+            ):
                 await notify_trainer_before_formation(guild, fm, send_contacts)
                 await notify_responsible_before_formation(guild, fm, moment="hour_before")
                 await notify_participants_before_formation(guild, fm, send_contacts)
