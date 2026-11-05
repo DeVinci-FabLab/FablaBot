@@ -117,8 +117,8 @@ Stop the stack, then archive `logs/` and `data/`: an archive of a running databa
 
 5. Redeploy the stack.
 
-Never purge logs. Since the per-server log change, the bot deletes no log file. How long to keep them
-is a decision for the association (GDPR), not for the bot.
+The bot deletes log files and database copies past 3 years only (see "Retention"); before that, how long to keep
+them is a decision for the association (GDPR), not for the bot.
 
 ### Releasing and redeploying
 
@@ -143,6 +143,24 @@ To go back past the release that brought the non-root image, take the hardening 
 [Moving a host to the non-root image](DEPLOYMENT.md#moving-a-host-to-the-non-root-image) says: the older image runs as root, and with every capability dropped root cannot read
 or write what belongs to 10001.
 
+From the release that brought the attendance tables (schema 2), an older image stops with
+`newer than this release` and changes nothing. To go back and keep what was written since, take the schema back one
+version first, with the stack stopped and archived as in "Before every redeploy", the image that was running and the
+`fablabot_state` helper of "Moving to the database":
+
+```bash
+IMAGE=ghcr.io/devinci-fablab/fablabot:X.Y.Z   # the release that was running
+fablabot_state "$VOLUMES_PATH/fablabot/data" fablabot.downgrade_schema
+```
+
+The command drops the attendance checks and the anonymous counts, in one transaction, and nothing else: sign-ups,
+reaction history, tracked messages and temporary admins stay. The dropped data stays in the archive only: the `v1`
+copy was taken before the attendance tables existed. If it fails, it says `Cannot go back` and changes nothing. Then set the stack's image to the older release and
+deploy. The next start of the release with the attendance tables adds them again, empty.
+
+Only when the file itself is damaged, put the newest `data/backups/fablabot-v1-*.db` in place of `data/fablabot.db`
+instead: whatever was written since that copy is lost.
+
 After a rollback, delete `data/command_sync_state.json` before upgrading again (see "This command is
 outdated").
 
@@ -154,9 +172,9 @@ So write fresh JSON files first. If the database release never started, skip to 
 
 1. Stop the stack, then archive, as in "Before every redeploy".
 2. Export, with the image that was running and the `fablabot_state` helper of "Moving to the database". The command
-   writes a new folder, and says how many replaced training messages have no place in those files: they stay in
-   `data/fablabot.db`. On a volume that is not the bot's, a wrong `VOLUMES_PATH` or an empty folder, it stops with
-   `Cannot export` and writes nothing: fix the path and run it again.
+   writes a new folder, and says how many replaced training messages, attendance checks and training counts have no
+   place in those files: they stay in `data/fablabot.db`. On a volume that is not the bot's, a wrong `VOLUMES_PATH` or
+   an empty folder, it stops with `Cannot export` and writes nothing: fix the path and run it again.
 
    ```bash
    IMAGE=ghcr.io/devinci-fablab/fablabot:X.Y.Z   # the release that was running
@@ -196,7 +214,8 @@ To move forward again, the JSON files now hold what the database lacks, so the d
 says `changed since it was imported` when the older release ran and wrote to the files. It says
 `data/temp_admin_state.json not imported` when you went back by export and the older release never ran: the export
 brings that fourth file, which the first import never saw. Either way, stop the stack, archive, set the database aside,
-then follow "Moving to the database" from step 8. The file set aside keeps the replaced messages.
+then follow "Moving to the database" from step 8. The file set aside keeps the replaced messages, the attendance checks
+and the training counts, which the new database starts without.
 
 ```bash
 sudo mv "$VOLUMES_PATH/fablabot/data/fablabot.db" "$VOLUMES_PATH/fablabot/data/fablabot-before-$STAMP.db"
@@ -239,7 +258,7 @@ Log files live in `logs/`:
 - Log lines name members by Discord ID (`user_id=`, `member_id=`), never by name, nickname or display name, and
   leave out free text such as an op's reason; `tests/test_id_only_logs.py` fails on a log call that would. A welcome
   channel is named after its member: its name can still appear where a line names a channel.
-- The bot deletes no log file. See "Before every redeploy" for archiving before a redeploy.
+- The bot deletes a log file once its day is more than 3 years back (see "Retention"), and no other. See "Before every redeploy" for archiving before a redeploy.
 
 ### Watched accounts
 
@@ -295,15 +314,23 @@ Order matters: the allow-list comes before the invite, otherwise the bot joins a
 2. Only then invite the bot with this link, after replacing the two placeholders:
 
    ```text
-   https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot+applications.commands&permissions=268561617&guild_id=<SERVER_ID>&disable_guild_select=true
+   https://discord.com/oauth2/authorize?client_id=<APPLICATION_ID>&scope=bot+applications.commands&permissions=343865945297&guild_id=<SERVER_ID>&disable_guild_select=true
    ```
 
-   The permission integer `268561617` grants: Manage Roles, Manage Channels, View Audit Log, Create
-   Invite, View Channels, Send Messages, Manage Messages, Embed Links, Attach Files, Read Message History
-   and Add Reactions. It does not include Administrator. A bot invited before `/user invite` existed lacks
-   Create Invite: give it to the bot's role in Server Settings, Roles. To have invites go through `/user invite`
+   The permission integer `343865945297` grants: Manage Roles, Manage Channels, View Audit Log, Create
+   Invite, View Channels, Send Messages, Manage Messages, Embed Links, Attach Files, Read Message History,
+   Add Reactions, Create Private Threads and Send Messages in Threads. It does not include Administrator. A bot
+   invited before `/user invite` existed lacks Create Invite: give it to the bot's role in Server Settings, Roles.
+   To have invites go through `/user invite`
    only, take Create Invite off `@everyone` and every other role: the bot's own role keeps it. Members with
    Administrator, and channel overwrites that grant Create Invite, still allow invites by hand: check both.
+
+   Where the attendance check goes: to the trainer's private messages first. When those are closed, to the
+   thread already stored for the check, else to a new private thread of the announcement's channel when that is a
+   text channel and not an announcement (news) channel, else, or when Discord refuses there, to a private thread
+   of the commands channel. The thread holds the trainer and every Respo Formation, nobody can invite others
+   into it, and it archives after 7 days without a message. If no thread can be made, the log holds
+   `Could not open a thread for appel <ID> in guild <ID>.` and the check stays open.
 
 3. In Server Settings, Roles, drag the bot's role above every role it manages, `Admin -temp-`
    included. Discord refuses to add or remove a role that sits above the bot's own.
@@ -314,6 +341,15 @@ Order matters: the allow-list comes before the invite, otherwise the bot joins a
    then, only members with the Administrator permission see the staff commands.
 6. Restart the stack and read the server's `Server check` lines (see "Server check at start"). The check
    runs once per start, so a server invited since the last start is read at the next one.
+7. For every server already installed with the earlier integer `268561617`: in Server Settings, Roles, open the
+   bot's role and turn on Create Private Threads and Send Messages in Threads. Until then each start prints this
+   `permissions_missing` line, and a trainer whose private messages are closed gets no thread:
+
+   ```text
+   Server check problem: guild_id=<SERVER_ID> severity=blocking code=permissions_missing detail=[create_private_threads] fix: give these permissions to the bot's role, or invite the bot again
+   ```
+
+   The detail also names `send_messages_in_threads` on a server that took it from `@everyone`.
 
 At the next start, the log shows one summary line:
 
@@ -571,12 +607,12 @@ nothing is removed. A failure is logged as a warning with the error type, and th
 ## Stored data
 
 Everything the bot keeps lives in one SQLite file, `data/fablabot.db`: per-server settings, training drafts,
-published messages and their registrations, tracked messages, the reaction history and the temporary-admin
-expiries. `data/command_sync_state.json` stays a separate file: it is a cache you may delete.
+published messages and their registrations, tracked messages, the reaction history, the temporary-admin
+expiries, the attendance checks of the trainings (who was marked present, who validated, how the alert was answered)
+and the anonymous counts of each training (registered, waitlisted, withdrawn, present, absent, outcome), which hold no
+member ID or name. `data/command_sync_state.json` stays a separate file: it is a cache you may delete.
 
-The reaction history is kept for 3 years, then deleted at the next write. The registrations of a replaced training
-message stay with no time limit, so member IDs and names stay in the file and in `data/backups/` until the planned
-step that keeps only anonymous statistics after 3 years.
+Personal data is kept for 3 years, then deleted; the anonymous counts stay. See "Retention" below.
 
 - The file is one database at rest: no `-wal` or `-shm` file. A `data/fablabot.db-journal` file only exists while a write is
   in progress, or after a crash, and the next start finishes the recovery from it. Never delete it.
@@ -585,9 +621,10 @@ step that keeps only anonymous statistics after 3 years.
   named `unknown`. A rollback to an older release is copied the same way, from 0.8.0 on: older releases do not write
   that file, so the next upgrade names its copy after the last release that did.
 - When a release changes the schema, the bot also copies the database to `data/backups/fablabot-v<schema>-<time>.db`, then
-  moves the schema at start.
-- The bot never removes these copies, and they count in the archive of "Before every redeploy". They sit on the same
-  volume as the database, so they do not replace that archive if the volume is lost.
+  moves the schema at start. A release that moves the schema therefore leaves two copies of the same data: one under
+  the release label and one under `v1`.
+- The bot removes a copy past 3 years only (see "Retention"). Copies count in the archive of "Before every redeploy". They
+  sit on the same volume as the database, so they do not replace that archive if the volume is lost.
 - A release never goes back: a database from a newer release stops an older one.
 - JSON state files left by an older release (`guild_config.json`, `formations_state.json`, `messages_state.json`,
   `temp_admin_state.json`) stop the bot until they are imported (see "Moving to the database"). The bot never reads,
@@ -600,6 +637,33 @@ step that keeps only anonymous statistics after 3 years.
   archive, and are never removed by the bot. Each is private to the image's user: read it with `sudo`, and archive it
   with `sudo` too, or `tar` skips it without an error. Step 4 of "Before every redeploy" checks that the archive holds
   them.
+
+### Retention
+
+The bot deletes personal data after 3 years and keeps anonymous counts. Nothing here is a command: the bot does it.
+
+| What | How long | When | What stays |
+| --- | --- | --- | --- |
+| Training registrations, waitlists, attendance and its alerts, with the training message that holds them | 3 years from the training's start; a message waits for its youngest training | Run at start, then every 24 hours | The anonymous counts of each training: registered, waitlisted, withdrawn, present, absent and the outcome (done, not done, cancelled, not asked), one row per training (a training published again is counted once, on its newest message, or on the earlier one if it was counted before), and a monthly view of them |
+| The reaction history, both histories | 3 years from the reaction | Run at start, then every 24 hours | Nothing |
+| Shared and per-server log files | 3 years from the file's day (the day in its name) | Run at start, then every 24 hours | Nothing |
+| Copies in `data/backups/` | 3 years from the time in the copy's name | Run at start, then every 24 hours | Nothing |
+
+- The counts of a training are written once its check closes, 7 days after the start, and always before its registrations
+  go. A training whose date cannot be read, and a draft, are never deleted. A training with no attendance check counts
+  as not asked.
+- A training counted before is recognised by its server, name and start, since the counts keep no trainer. Two
+  trainings of the same name and start on one server count as one when the second is published after the first was
+  counted.
+- The counts hold no member ID, name or pseudo. Nothing in the retention's log line names anybody: it gives counts.
+- The first start of this release deletes any log file older than 3 years, and any copy older than 3 years. The archive
+  of "Before every redeploy" still holds them; `~/fablabot-archive` is yours to purge.
+- A copy kept 3 years holds data up to 3 years older than itself, so data can outlive its 3 years by that much in a copy.
+- A failed deletion of a file is logged and tried again at the next run.
+
+What the bot never deletes: the old JSON files of an earlier release, `data/exports/`, the `json-before-*` folders,
+`~/fablabot-archive`, and messages already on Discord. Deleting those after 3 years is yours to decide. The bot's only
+deletions are the ones above: logs and copies past 3 years, and the rows of the table.
 
 ## Moving to the database
 
@@ -790,5 +854,6 @@ The log tells which case applies: `Commands synced (9, global).` after a sync, a
 | `Cannot start: data/... changed since it was imported` | An older image ran after the import, so the file holds what the database lacks | Nothing was changed. Do not start this release before you know which side holds the latest data: see "Back to a release before the database". |
 | `Cannot import: ...` | The JSON state holds something this release does not know, the database holds other data, or a file changed since the import | Nothing was written, and the line says where. See "If a step fails". |
 | `Cannot start: data/fablabot.db is at schema version ...` | The database comes from a newer release | Run that release or a later one. |
+| `Cannot start: data/fablabot.db cannot be used: <cause>.` at the first start of a release | The step that moves the schema failed | Nothing changed: the file is still at its old version, with a copy in `data/backups/`. Start the previous image on the same file, and report the line. |
 | `Cannot start: data/fablabot.db cannot be used: ...` | The disk is full, `data/` is not writable, the file is damaged, or a migration left orphan rows | Check the disk and the folder's owner first. Restore the file from an archive or from `data/backups/` only if it is damaged. |
 | A release's image build failed | The tag exists but `:latest` did not move | Re-run the failed jobs of that run (re-running all jobs publishes `:edge` only). |

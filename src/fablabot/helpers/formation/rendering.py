@@ -121,16 +121,17 @@ def is_past(start_dt: datetime) -> bool:
     return start_dt < datetime.now(UTC)
 
 
-def discord_timestamp(dt: datetime) -> str:
-    """Format a datetime as a Discord full timestamp, shown in each reader's language and time zone.
+def discord_timestamp(dt: datetime, style: str = "F") -> str:
+    """Format a datetime as a Discord timestamp, shown in each reader's language and time zone.
 
     Args:
         dt (datetime): The timezone-aware datetime.
+        style (str): Discord's style letter: ``F`` full date and time, ``t`` time of day, ``D`` date.
 
     Returns:
-        str: The ``<t:UNIX:F>`` markup.
+        str: The ``<t:UNIX:STYLE>`` markup.
     """
-    return f"<t:{int(dt.timestamp())}:F>"
+    return f"<t:{int(dt.timestamp())}:{style}>"
 
 
 def humanize_dt(dt: datetime) -> str:

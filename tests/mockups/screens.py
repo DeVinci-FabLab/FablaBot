@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -10,8 +11,10 @@ from discord import Locale, Member, Permissions, Role
 
 import fablabot.cogs as cogs_package
 from fablabot.cogs import formation_management, help_management, message_management
-from fablabot.helpers.constants import RoleNames
+from fablabot.helpers.constants import APPEL_EDIT_WINDOW, PARIS_TZ, RoleNames
+from fablabot.helpers.formation.attendance import alert_message, appel_content, appel_view, log_line, respo_messages
 from fablabot.helpers.help_page import leaf_commands
+from fablabot.models import AlertAction, Appel, Registrant
 from fablabot.models.formation import FmMessageDraft, Formation
 from fablabot.ui.formation import StartFmModal
 from fablabot.ui.message import SuggestionView
@@ -142,6 +145,18 @@ async def fm_edit() -> Screen:
     return Screen(capture.sent)
 
 
+async def fm_appel() -> Screen:
+    """``/fm appel`` on a server with two open checks: the menu of trainings, each with its start."""
+    capture = Capture()
+    older = _appel(id=6, name="Impression 3D", starts_at=APPEL_START - timedelta(days=2))
+    with (
+        patch.object(formation_management, "ensure_command_context", _allowed()),
+        patch.object(formation_management.attendance, "open_in", return_value=[_appel(), older]),
+    ):
+        await _invoke(formation_management.FormationManagement.fm_appel, MagicMock(), capture.interaction())
+    return Screen(capture.sent)
+
+
 async def suggest() -> Screen:
     """``/suggest``: the recipient menu, the anonymity button and the button that opens the modal."""
     capture = Capture()
@@ -166,12 +181,174 @@ async def fm_start_modal() -> Screen:
     return Screen(capture.sent)
 
 
+APPEL_START = datetime(2026, 11, 5, 18, 0, tzinfo=PARIS_TZ)
+PSEUDOS = ["lea.mkr", "hugo3d", "ines_lab", "tom_r", "sarah.fab"]
+
+
+def _appel(**changes: Any) -> Appel:
+    """The check of the laser cutting training, two hours from 18:00, as the trainer's message shows it."""
+    appel = Appel(
+        id=7,
+        guild_id=1234,
+        message_id=5000,
+        channel_id=42,
+        position=0,
+        name="Découpe laser",
+        duration="2h",
+        excusable=False,
+        trainer_id=TRAINER,
+        starts_at=APPEL_START,
+        ends_at=APPEL_START + timedelta(hours=2),
+        closes_at=APPEL_START + APPEL_EDIT_WINDOW,
+        thread_id=None,
+        validated_by=None,
+        validated_at=None,
+        present_count=None,
+        absent_count=None,
+        alert_sent=False,
+        handled_by=None,
+        handled_at=None,
+        handled_action=None,
+    )
+    return replace(appel, **changes)
+
+
+async def _appel_screen(registrants: list[Registrant], present: set[int], *, thread: bool = False, **changes: Any) -> Screen:
+    """The start message of a check, as the trainer sees it, with these members registered and these marked present."""
+    capture = Capture()
+    appel = _appel(**changes)
+    now = APPEL_START + timedelta(minutes=30)
+    names = {r.user_id: r.username for r in registrants}
+    content = appel_content(appel, registrants, present, opening="Salut Camille !", now=now, thread=thread)
+    view = appel_view(appel, registrants, present, names, now=now)
+    await capture.interaction().response.send_message(content, view=view)
+    return Screen(capture.sent)
+
+
+def _five() -> list[Registrant]:
+    """Five registered members."""
+    return [Registrant(user_id=3333 + i, username=pseudo) for i, pseudo in enumerate(PSEUDOS)]
+
+
+async def appel_start() -> Screen:
+    """The trainer's message when the training starts: a button per registered member, nobody ticked."""
+    return await _appel_screen(_five(), set())
+
+
+async def appel_thread() -> Screen:
+    """The message the trainer finds in the private thread when their DMs are closed."""
+    return await _appel_screen(_five(), set(), thread=True)
+
+
+async def appel_ongoing() -> Screen:
+    """The same message with three members ticked and the counter up to date."""
+    return await _appel_screen(_five(), {3333, 3335, 3337})
+
+
+async def appel_validated() -> Screen:
+    """The message after the validation: the saved counts and the update button."""
+    saved = {
+        "validated_by": TRAINER,
+        "validated_at": APPEL_START + timedelta(minutes=45),
+        "present_count": 3,
+        "absent_count": 2,
+    }
+    return await _appel_screen(_five(), {3333, 3335, 3337}, **saved)
+
+
+async def appel_menus() -> Screen:
+    """A training of thirty members: two menus of twenty-five and five, a few members ticked."""
+    registrants = [Registrant(user_id=4000 + i, username=f"membre{i + 1:02}") for i in range(30)]
+    return await _appel_screen(registrants, {4000, 4001, 4026})
+
+
+def _validated_appel() -> Appel:
+    """The check of the laser cutting training, saved by the trainer with three of five present."""
+    return _appel(validated_by=TRAINER, validated_at=APPEL_START + timedelta(minutes=45), present_count=3, absent_count=2)
+
+
+def _people() -> dict[int, str]:
+    """The names behind the mentions of the Respo message and the log line."""
+    return {**NAMES, **{r.user_id: r.username for r in _five()}}
+
+
+async def appel_respo() -> Screen:
+    """The private message each Respo Formation gets after the validation: who was present and who was not."""
+    capture = Capture()
+    ids = [r.user_id for r in _five()]
+    (text,) = respo_messages(_validated_appel(), [ids[0], ids[2], ids[4]], [ids[1], ids[3]], first=True)
+    await capture.interaction().response.send_message(text)
+    return Screen(capture.sent, _people())
+
+
+async def appel_log() -> Screen:
+    """The line the log channel gets after the validation: the counts, nobody else named."""
+    capture = Capture()
+    appel = _validated_appel()
+    await capture.interaction().response.send_message(log_line(appel, 3, 2, first=True))
+    return Screen(capture.sent, _people())
+
+
+RESPO = 4444
+
+
+async def _alert_screen(**changes: Any) -> Screen:
+    """The alert a Respo Formation gets when nobody made the check, as it stands with these changes."""
+    capture = Capture()
+    content, view = alert_message(_appel(**changes))
+    await capture.interaction().response.send_message(content, view=view)
+    return Screen(capture.sent, {**NAMES, RESPO: "Morgan"})
+
+
+def _answered(action: AlertAction, **changes: Any) -> dict[str, Any]:
+    """The fields an answer to the alert sets: Morgan, seven minutes after the end of the slot."""
+    return {"handled_by": RESPO, "handled_at": APPEL_START + timedelta(hours=2, minutes=7), "handled_action": action, **changes}
+
+
+async def appel_alert() -> Screen:
+    """The alert the Respo Formation get when the slot is over and nobody made the check, with its three answers."""
+    return await _alert_screen()
+
+
+async def appel_alert_relaunched() -> Screen:
+    """The alert once a Respo Formation relaunched the trainer: the answer in place of the question, buttons off."""
+    return await _alert_screen(**_answered(AlertAction.RELAUNCH))
+
+
+async def appel_alert_ignored() -> Screen:
+    """The alert once a Respo Formation ignored it."""
+    return await _alert_screen(**_answered(AlertAction.IGNORE))
+
+
+async def appel_alert_cancelled() -> Screen:
+    """The alert once a Respo Formation cancelled the training: it counts as not held."""
+    return await _alert_screen(**_answered(AlertAction.CANCEL))
+
+
+async def appel_alert_done() -> Screen:
+    """The alert once the trainer saved the check: the Respo Formation read who did it."""
+    return await _alert_screen(**_answered(AlertAction.DONE, handled_by=TRAINER))
+
+
 SCREENS: dict[str, Callable[[], Coroutine[Any, Any, Screen]]] = {
     "help-member": help_member,
     "help-trainer": help_trainer,
     "help-admin": help_admin,
     "fm-edit": fm_edit,
+    "fm-appel": fm_appel,
     "suggest": suggest,
     "suggest-modal": suggest_modal,
     "fm-start-modal": fm_start_modal,
+    "appel-start": appel_start,
+    "appel-thread": appel_thread,
+    "appel-ongoing": appel_ongoing,
+    "appel-validated": appel_validated,
+    "appel-menus": appel_menus,
+    "appel-respo": appel_respo,
+    "appel-log": appel_log,
+    "appel-alert": appel_alert,
+    "appel-alert-relaunched": appel_alert_relaunched,
+    "appel-alert-ignored": appel_alert_ignored,
+    "appel-alert-cancelled": appel_alert_cancelled,
+    "appel-alert-done": appel_alert_done,
 }

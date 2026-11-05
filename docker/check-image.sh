@@ -54,10 +54,10 @@ content=$(docker run --rm --network none --entrypoint sh fablabot:check -c \
 echo "ok: runs as 10001:10001, /app holds only .venv, no uv or compiler"
 
 # The database reads its schema from these files at start: an image without one cannot create its tables.
-expected=$(cd "$root/src/fablabot/migrations" && ls ./*.sql | sed 's|^\./||')
+expected=$(cd "$root/src/fablabot/migrations" && ls ./*.sql ./down/*.sql | sed 's|^\./||')
 [ -n "$expected" ] || fail "the source holds no migration file"
 shipped=$(docker run --rm --network none --entrypoint python fablabot:check -c \
-    'from fablabot.db import MIGRATIONS_DIR; print("\n".join(sorted(p.name for p in MIGRATIONS_DIR.glob("*.sql"))))')
+    'from fablabot.db import MIGRATIONS_DIR; print("\n".join(sorted(p.relative_to(MIGRATIONS_DIR).as_posix() for p in MIGRATIONS_DIR.glob("**/*.sql"))))')
 [ "$shipped" = "$expected" ] || fail "the image misses migration files: expected $expected, found ${shipped:-none}"
 echo "ok: the image holds every migration file"
 

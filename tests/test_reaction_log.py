@@ -10,6 +10,7 @@ import pytest
 
 from fablabot import db
 from fablabot.cogs import formation_management, message_management
+from fablabot.helpers import constants
 from fablabot.helpers.constants import PARIS_TZ
 from fablabot.helpers.reaction_log import ReactionLogManager, ReactionScope
 from fablabot.models import ReactionAction, ReactionEvent
@@ -160,5 +161,5 @@ def test_an_id_too_large_for_the_database_has_no_history() -> None:
 
 def test_the_bot_keeps_the_history_for_three_years() -> None:
     """Both histories keep what the association decided, so a shorter value cannot slip in unseen."""
-    assert timedelta(days=3 * 365) == formation_management.REACTION_LOG_RETENTION
-    assert timedelta(days=3 * 365) == message_management.REACTION_LOG_RETENTION
+    assert timedelta(days=3 * 365) == constants.RETENTION
+    assert formation_management.RETENTION is message_management.RETENTION is constants.RETENTION

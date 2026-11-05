@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import shutil
 import sqlite3
 from typing import TYPE_CHECKING
 
@@ -40,14 +41,23 @@ def _tables() -> set[str]:
     return {row["name"] for row in db.connection().execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
 
 
+def _first_release(tmp_path: Path) -> Path:
+    """Return a folder holding the shipped first migration alone, as the previous release had."""
+    folder = tmp_path / "first-release"
+    folder.mkdir()
+    shutil.copy(db.MIGRATIONS_DIR / "0001_initial.sql", folder)
+    return folder
+
+
 def test_an_empty_folder_gets_the_whole_schema() -> None:
     """A fresh start creates the folder and the database at the latest version."""
     db.open_database(DB_FILE)
 
     assert DB_FILE.exists()
-    assert _version(DB_FILE) == 1
+    assert _version(DB_FILE) == 2
     assert {"guild_settings", "fm_message", "formation", "registration", "tracked_message", "reaction_event"} <= _tables()
     assert {"op_expiry", "state_import", "legacy_log_channel", "tracked_reaction"} <= _tables()
+    assert {"appel", "appel_present", "appel_alert", "training_summary"} <= _tables()
 
 
 def test_the_connection_keeps_its_settings() -> None:
@@ -632,3 +642,45 @@ def test_a_release_file_that_cannot_be_written_does_not_stop_the_start(monkeypat
     _open_as("0.7.1", monkeypatch)
 
     assert [copy.name.split("-")[1] for copy in DB_FILE.parent.glob("backups/test-*.db")] == ["unknown"]
+
+
+def test_the_attendance_step_keeps_every_row_and_copies_the_first_version(tmp_path: Path) -> None:
+    """Moving a database of the first release to the attendance schema keeps its rows and a copy of the old file."""
+    db.open_database(DB_FILE, migrations=_first_release(tmp_path))
+    with db.transaction() as conn:
+        conn.execute("INSERT INTO op_expiry VALUES (1, 2, '2026-11-05T10:00:00+01:00', 3)")
+        conn.execute("INSERT INTO guild_settings (guild_id, log_channel_id) VALUES (1, 5)")
+    db.close_database()
+
+    db.open_database(DB_FILE)
+
+    assert _version(DB_FILE) == 2
+    assert [tuple(r) for r in db.connection().execute("SELECT guild_id, member_id, channel_id FROM op_expiry")] == [(1, 2, 3)]
+    assert [tuple(r) for r in db.connection().execute("SELECT log_channel_id FROM guild_settings")] == [(5,)]
+    [copy] = DB_FILE.parent.glob("backups/test-v1-*.db")
+    assert _version(copy) == 1
+    old = sqlite3.connect(copy)
+    try:
+        assert old.execute("SELECT COUNT(*) FROM op_expiry").fetchone()[0] == 1
+        assert "appel" not in {row[0] for row in old.execute("SELECT name FROM sqlite_master")}
+    finally:
+        old.close()
+
+
+def test_a_refused_attendance_step_stops_the_start_and_keeps_the_first_version(tmp_path: Path) -> None:
+    """A step that fails leaves the file at version 1 with its rows, one copy, and the previous release can open it."""
+    first = _first_release(tmp_path)
+    db.open_database(DB_FILE, migrations=first)
+    with db.transaction() as conn:
+        conn.execute("CREATE TABLE appel (a)")
+        conn.execute("INSERT INTO op_expiry VALUES (1, 2, '2026-11-05T10:00:00+01:00', 3)")
+    db.close_database()
+
+    for _ in range(2):
+        with pytest.raises(db.StorageError, match="cannot be used: table appel already exists"):
+            db.open_database(DB_FILE)
+
+    assert _version(DB_FILE) == 1
+    assert len(list(DB_FILE.parent.glob("backups/test-v1-*.db"))) == 1
+    db.open_database(DB_FILE, migrations=first)
+    assert db.connection().execute("SELECT COUNT(*) FROM op_expiry").fetchone()[0] == 1

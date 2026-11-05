@@ -117,6 +117,18 @@ def replaced_messages() -> int:
     return row[0]
 
 
+def unexported_attendance() -> tuple[int, int]:
+    """Count the attendance checks and training counts the JSON shape cannot hold.
+
+    Returns:
+        tuple[int, int]: The attendance checks, then the anonymous training counts.
+    """
+    conn = db.connection()
+    checks = conn.execute("SELECT count(*) FROM appel").fetchone()[0]
+    counts = conn.execute("SELECT count(*) FROM training_summary").fetchone()[0]
+    return checks, counts
+
+
 def _open_filled() -> None:
     """Open the database, refusing a file that is missing or empty, which is what a wrong volume looks like.
 
@@ -170,6 +182,7 @@ def main(argv: list[str] | None = None) -> None:
         _open_filled()
         export_to(folder)
         replaced = replaced_messages()
+        checks, counts = unexported_attendance()
     except (db.StorageError, OSError, sqlite3.Error) as error:
         sys.exit(f"Cannot export: {error}")
     finally:
@@ -177,6 +190,10 @@ def main(argv: list[str] | None = None) -> None:
     print(f"Exported to {folder.as_posix()}.")
     if replaced:
         print(f"{replaced} replaced message(s) have no place in these files; they stay in the database.")
+    if checks or counts:
+        noun = "attendance check" if checks == 1 else "attendance checks"
+        what = "training count" if counts == 1 else "training counts"
+        print(f"{checks} {noun} and {counts} {what} have no place in these files; they stay in the database.")
 
 
 if __name__ == "__main__":

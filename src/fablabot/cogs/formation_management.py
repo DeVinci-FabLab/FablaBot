@@ -26,8 +26,15 @@ from discord import (
 from discord.ext import commands, tasks
 
 from fablabot.helpers.access import AnyRole, access
+from fablabot.helpers.constants import (
+    APPEL_COMMAND_ROLES,
+    APPEL_EDIT_WINDOW,
+    PARIS_TZ,
+    RETENTION,
+    ErrorMessages,
+    staff_default_permissions,
+)
 from fablabot.helpers.constants import FORMATION_ROLES as ALLOWED_ROLES
-from fablabot.helpers.constants import PARIS_TZ, ErrorMessages, staff_default_permissions
 from fablabot.helpers.formation import (
     format_current_registrations,
     format_respo_contacts,
@@ -37,19 +44,25 @@ from fablabot.helpers.formation import (
     notify_trainer_before_formation,
     parse_date_time,
     render_message,
+    send_due_alerts,
     send_promotion_dm,
     send_registration_dm,
     send_waitlist_dm,
+    start_appel,
 )
+from fablabot.helpers.formation.attendance import appel_message
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.safe_discord_operations import retract_unsaved_post
 from fablabot.helpers.utils import counted, ensure_command_context, is_valid_emoji
 from fablabot.logging_handlers import guild_log_context
 from fablabot.models import FmCommand, FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
-from fablabot.services import formations
+from fablabot.services import attendance, formations
 from fablabot.ui import fmui
+from fablabot.ui.attendance import DYNAMIC_ITEMS, OpenAppelPicker
 
 if TYPE_CHECKING:
+    from discord import Guild
+
     from fablabot.main import Fablabot
 
 logger = logging.getLogger(__name__)
@@ -57,7 +70,6 @@ logger = logging.getLogger(__name__)
 
 _ACCESS = AnyRole(ALLOWED_ROLES)
 TRAINER_NOTIFICATION_ADVANCE = timedelta(hours=1)
-REACTION_LOG_RETENTION = timedelta(days=3 * 365)
 REGISTRATION_WINDOW = timedelta(minutes=20)
 
 
@@ -99,7 +111,7 @@ class FormationManagement(commands.Cog):
         self.bot = bot
         self._reaction_logs = ReactionLogManager(
             "formation",
-            retention=REACTION_LOG_RETENTION,
+            retention=RETENTION,
             logger=logger,
         )
         self._reaction_lock = asyncio.Lock()
@@ -115,6 +127,7 @@ class FormationManagement(commands.Cog):
         # are logged and wait for the next reminder tick to run it again. Same ceiling: a restart forgets them.
         self._retry_guilds: set[int] = set()
         self._reaction_logs.purge_all()
+        self.bot.add_dynamic_items(*DYNAMIC_ITEMS)
         self._check_upcoming_formations.start()
         logger.info("FormationManagement initialized")
 
@@ -122,6 +135,7 @@ class FormationManagement(commands.Cog):
     async def cog_unload(self) -> None:
         """Clean up when the cog is unloaded."""
         self._check_upcoming_formations.cancel()
+        self.bot.remove_dynamic_items(*DYNAMIC_ITEMS)
         for task in list(self._pending_update_tasks.values()):
             try:
                 task.cancel()
@@ -345,6 +359,33 @@ class FormationManagement(commands.Cog):
             embed=Embed(title="Aperçu brouillon", description=render_message(draft)),
             ephemeral=True,
         )
+
+    @fm_group.command(
+        name="appel",
+        description="Faire ou corriger l'appel d'une formation des 7 derniers jours.",
+        extras=access(AnyRole(APPEL_COMMAND_ROLES)),
+    )
+    async def fm_appel(self, interaction: Interaction) -> None:
+        """Open the attendance check of a training of the last seven days, picked from a menu when several are open.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+        """
+        if not await ensure_command_context(logger, "fm.appel", interaction, required_roles=APPEL_COMMAND_ROLES):
+            return
+
+        assert interaction.guild is not None
+        now = datetime.now(PARIS_TZ)
+        # A menu holds 25 options: the newest 25 checks, which are the ones a trainer is likely to fix.
+        appels = attendance.open_in(interaction.guild.id, now)[:25]
+        if not appels:
+            await interaction.response.send_message("Aucun appel ouvert sur ce serveur.", ephemeral=True)
+            return
+        if len(appels) == 1:
+            content, view = appel_message(interaction.guild, appels[0], now)
+            await interaction.response.send_message(content, view=view, ephemeral=True)
+            return
+        await interaction.response.send_message("Choisis une formation", view=OpenAppelPicker(appels), ephemeral=True)
 
     @fm_group.command(name="remove", description="Retirer une formation du brouillon.", extras=access(_ACCESS))
     async def fm_remove(self, interaction: Interaction) -> None:
@@ -668,6 +709,10 @@ class FormationManagement(commands.Cog):
                     await self._send_due_reminders(guild_id, now)
                 except sqlite3.Error:
                     logger.exception(f"Reminders of guild {guild_id} stopped by a storage failure; next tick tries again.")
+        try:
+            await send_due_alerts(self.bot, now)
+        except sqlite3.Error:
+            logger.exception("Alerts stopped by a storage failure; next tick tries again.")
 
     async def _send_due_reminders(self, guild_id: int, now: datetime) -> None:
         """Notify the people of one guild's formations that are due, and record that they were.
@@ -676,11 +721,7 @@ class FormationManagement(commands.Cog):
             guild_id (int): The ID of the guild.
             now (datetime): The time of this tick.
         """
-        window_tolerance = timedelta(minutes=5)
-        notification_window_start = now + TRAINER_NOTIFICATION_ADVANCE - window_tolerance
-        notification_window_end = now + TRAINER_NOTIFICATION_ADVANCE + window_tolerance
-        start_window_start = now - window_tolerance
-        start_window_end = now + window_tolerance
+        start_window_end = now + timedelta(minutes=5)
 
         guild = self.bot.get_guild(guild_id)
         if not guild:
@@ -688,50 +729,82 @@ class FormationManagement(commands.Cog):
 
         # One writer at a time: load, await and write back must not interleave with the registration update.
         async with self._published_lock(guild_id):
-            pub = self._get_last_published_in_guild(guild_id)
-            if not pub:
+            newest = self._get_last_published_in_guild(guild_id)
+            if not newest:
                 return
-
-            fms = list(pub.message.fms)
-            if not fms:
-                return
-
+            # A start missed while the bot was down, or hidden behind a newer announcement, is caught up until its check closes.
+            behind = formations.published_awaiting_start(guild_id, now - APPEL_EDIT_WINDOW, start_window_end)
             send_contacts: str = format_respo_contacts(guild)
+            for pub in sorted({p.message_id: p for p in [*behind, newest]}.values(), key=lambda p: p.message_id):
+                await self._remind_message(guild, pub, now, send_contacts, catch_up=pub.message_id != newest.message_id)
 
-            for fm in fms:
-                if fm.notified_at_start:
-                    continue
+    async def _remind_message(
+        self, guild: Guild, pub: PublishedMessage, now: datetime, send_contacts: str, *, catch_up: bool
+    ) -> None:
+        """Notify for the trainings of one published message that are due, and store that they were.
 
-                if not fm.notified_hour_before and notification_window_start <= fm.start_dt <= notification_window_end:
-                    await notify_trainer_before_formation(guild, fm, send_contacts, moment="hour_before")
-                    await notify_responsible_before_formation(guild, fm, moment="hour_before")
-                    await notify_participants_before_formation(guild, fm, send_contacts)
+        An older message is only caught up on starts: it gets no hour-before reminder. A training published in two
+        messages gets one check: a message leaves the training to the other when that one already has its check, and an
+        older message also leaves it to a newer one that holds it again.
 
-                    fm.notified_hour_before = True
-                    continue
+        Args:
+            guild (Guild): The guild.
+            pub (PublishedMessage): The message, as stored.
+            now (datetime): The time of this tick.
+            send_contacts (str): The Respo contacts to write in the participants' reminder.
+            catch_up (bool): True for a message that is not the newest.
+        """
+        window_tolerance = timedelta(minutes=5)
+        notification_window_start = now + TRAINER_NOTIFICATION_ADVANCE - window_tolerance
+        notification_window_end = now + TRAINER_NOTIFICATION_ADVANCE + window_tolerance
+        start_window_end = now + window_tolerance
 
-                if start_window_start <= fm.start_dt <= start_window_end:
-                    await notify_trainer_before_formation(guild, fm, send_contacts, moment="start")
+        fms = list(pub.message.fms)
+        held = attendance.checked_elsewhere(guild.id, pub.message_id)
+        if catch_up:
+            held |= formations.reissued_positions(guild.id, pub.message_id)
+        for position, fm in enumerate(fms):
+            if fm.notified_at_start:
+                continue
+
+            if position in held:
+                fm.notified_at_start = True
+                continue
+
+            if (
+                not catch_up
+                and not fm.notified_hour_before
+                and notification_window_start <= fm.start_dt <= notification_window_end
+            ):
+                await notify_trainer_before_formation(guild, fm, send_contacts)
+                await notify_responsible_before_formation(guild, fm, moment="hour_before")
+                await notify_participants_before_formation(guild, fm, send_contacts)
+
+                fm.notified_hour_before = True
+                continue
+
+            if now - APPEL_EDIT_WINDOW < fm.start_dt <= start_window_end and await start_appel(guild, pub, position):
+                if fm.start_dt >= now - window_tolerance:  # "starts now" is only true in the window
                     await notify_responsible_before_formation(guild, fm, moment="start")
 
-                    fm.notified_at_start = True
+                fm.notified_at_start = True  # only once the check exists: a failed opening is tried again at the next tick
 
-            updated_pub_msg = FmMessageDraft(
-                header=pub.message.header,
-                role_id=pub.message.role_id,
-                intro=pub.message.intro,
-                fms=fms,
-                end=pub.message.end,
-                request_forms_url=pub.message.request_forms_url,
-            )
-            self._set_last_published_in_guild(
-                guild_id,
-                PublishedMessage(
-                    message_id=pub.message_id,
-                    channel_id=pub.channel_id,
-                    message=updated_pub_msg,
-                ),
-            )
+        updated_pub_msg = FmMessageDraft(
+            header=pub.message.header,
+            role_id=pub.message.role_id,
+            intro=pub.message.intro,
+            fms=fms,
+            end=pub.message.end,
+            request_forms_url=pub.message.request_forms_url,
+        )
+        self._set_last_published_in_guild(
+            guild.id,
+            PublishedMessage(
+                message_id=pub.message_id,
+                channel_id=pub.channel_id,
+                message=updated_pub_msg,
+            ),
+        )
 
     @_check_upcoming_formations.before_loop
     async def _before_check_upcoming_formations(self) -> None:

@@ -144,14 +144,16 @@ def test_a_refused_start_leaves_a_pending_migration_alone(tmp_path: Path) -> Non
     (DATA / "formations_state.json").write_text('{"changed": true}', encoding="utf-8")
     newer = tmp_path / "newer"
     shutil.copytree(db.MIGRATIONS_DIR, newer)
-    (newer / "0002_later.sql").write_text("CREATE TABLE later (a);\n", encoding="utf-8")
+    shipped = len(list(newer.glob("*.sql")))
+    later = shipped + 1
+    (newer / f"{later:04d}_later.sql").write_text("CREATE TABLE later (a);\n", encoding="utf-8")
     before = _content()
 
     with pytest.raises(db.StorageError, match="changed since"):
         db.open_database(migrations=newer)
 
     assert _content() == before
-    assert sqlite3.connect(DATABASE).execute("PRAGMA user_version").fetchone()[0] == 1
+    assert sqlite3.connect(DATABASE).execute("PRAGMA user_version").fetchone()[0] == shipped
 
 
 def test_an_empty_database_file_holds_no_import_and_stays_empty() -> None:

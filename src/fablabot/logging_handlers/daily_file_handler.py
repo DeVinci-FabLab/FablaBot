@@ -20,7 +20,7 @@ class DailyFileHandler(logging.FileHandler):
     The log files are named using the pattern: YYYY-MM-DD.log
     The handler automatically switches to a new file when the date changes.
     Lines tied to a server are also appended to ``guilds/<server id>/YYYY-MM-DD.log``.
-    No log file is ever deleted by the bot.
+    The retention deletes the files of a day more than three years back (``helpers/retention.py``), and no other.
     """
 
     def __init__(

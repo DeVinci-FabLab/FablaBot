@@ -268,3 +268,9 @@ def test_markdown_timestamp_reads_as_discord_shows_it_in_paris() -> None:
     """A full timestamp becomes French text in Paris time, on both sides of a clock change."""
     assert "samedi 30 mars 2030 à 14:30" in markdown("**<t:1901107800:F>**")
     assert "lundi 1 avril 2030 à 14:30" in markdown("<t:1901277000:F>")
+
+
+def test_markdown_short_timestamps_read_as_time_and_date() -> None:
+    """The time-of-day and date styles show only that part, in Paris time."""
+    assert '<span class="timestamp">14:30</span>' in markdown("<t:1901277000:t>")
+    assert '<span class="timestamp">1 avril 2030</span>' in markdown("<t:1901277000:D>")

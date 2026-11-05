@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import logging
-import re
 from typing import TYPE_CHECKING, Literal
 
 from fablabot.helpers.constants import RoleNames
+from fablabot.helpers.formation.attendance import trainer_id
 from fablabot.helpers.formation.rendering import discord_timestamp, format_formation_export
 from fablabot.helpers.utils import get_members_by_role, get_or_fetch_member, send_dm_to_member
 
@@ -116,53 +116,36 @@ async def send_promotion_dm(
     await send_dm_to_member(logger, guild, member, message, dm_type=f"promotion for formation {formation.name}")
 
 
-async def notify_trainer_before_formation(
-    guild: Guild,
-    formation: Formation,
-    contacts: str,
-    moment: Literal["hour_before", "start"] = "hour_before",
-) -> None:
-    """Send a DM to the trainer with the list of registered attendees.
+async def notify_trainer_before_formation(guild: Guild, formation: Formation, contacts: str) -> None:
+    """Send a DM to the trainer an hour before, with the list of registered attendees.
 
     Args:
         guild (Guild): The guild where the formation is taking place.
         formation (Formation): The formation starting soon.
         contacts (str): The contact string for formation managers.
-        moment (Literal["hour_before", "start"]): When the notification is sent.
     """
     trainer_mention = formation.trainer_mention
-    trainer_id_match = re.search(r"<@!?(\d+)>", trainer_mention)
-    if not trainer_id_match:
+    trainer_user_id = trainer_id(trainer_mention)
+    if trainer_user_id is None:
         logger.warning(f"Could not extract trainer ID from mention {trainer_mention!r} for formation {formation.name!r}.")
         return
-    trainer_id = int(trainer_id_match.group(1))
 
-    trainer = await get_or_fetch_member(guild, trainer_id)
+    trainer = await get_or_fetch_member(guild, trainer_user_id)
     if trainer is None:
-        logger.error(f"Failed to fetch trainer {trainer_id} for formation {formation.name!r}.")
+        logger.error(f"Failed to fetch trainer {trainer_user_id} for formation {formation.name!r}.")
         return
 
     datetime_text = discord_timestamp(formation.start_dt)
     formation_export = format_formation_export(formation)
 
-    if moment == "hour_before":
-        timing_line = f"Ta formation **{formation.name}** commence bientôt (le {datetime_text})."
-        subject = f"reminder for formation {formation.name}"
-    else:
-        timing_line = f"Ta formation **{formation.name}** commence maintenant (le {datetime_text})."
-        subject = f"start alert for formation {formation.name}"
-
-    excusable_line = "Merci de transmettre au **CoDir** la liste des participants à excuser si besoin.\n\n"
-
     message = (
         f"Salut {trainer.display_name} !\n"
-        f"{timing_line}\n\n"
+        f"Ta formation **{formation.name}** commence bientôt (le {datetime_text}).\n\n"
         f"{formation_export}\n\n"
-        f"{excusable_line if formation.excusable and moment == 'start' else ''}"
         f"*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
     )
 
-    await send_dm_to_member(logger, guild, trainer, message, dm_type=subject)
+    await send_dm_to_member(logger, guild, trainer, message, dm_type=f"reminder for formation {formation.name}")
 
 
 async def notify_responsible_before_formation(

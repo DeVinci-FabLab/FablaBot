@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from discord import Permissions
 
 PARIS_TZ = ZoneInfo("Europe/Paris")
 MAX_MSG_CHARS = 1900
+RETENTION = timedelta(days=3 * 365)
+"""How long the bot keeps personal data: registrations, attendance, reaction history, log files and database copies."""
+APPEL_EDIT_WINDOW = timedelta(days=7)
+"""How long after its start an attendance check can still be made or corrected."""
 MAX_TRACKED_OPTIONS = 25
 EMBED_PREVIEW_MAX_CHARS = 900
 EMBED_TOTAL_FIELD_CHAR_BUDGET = 5800
@@ -82,6 +87,11 @@ ADMIN_ROLES = {
 # Who may run each family of staff commands. The cogs check them on the command, the views and modals again on each click.
 MESSAGE_ROLES = ADMIN_ROLES | {RoleNames.BUREAU}
 MESSAGE_DM_ROLES = {RoleNames.BUREAU}
+# Who may take any attendance check besides its trainer. Unlike /fm, the temporary role stays out: five minutes of admin
+# rights do not rewrite a training's attendance.
+APPEL_ROLES = ADMIN_ROLES | {RoleNames.TRAININGS_MANAGER}
+# The roles that already see `/fm`, since Integrations work per command.
+APPEL_COMMAND_ROLES = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN}
 FORMATION_ROLES = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN_TEMP, RoleNames.ADMIN, RoleNames.CODIR}
 
 

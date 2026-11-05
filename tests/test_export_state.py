@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 import json
 from pathlib import Path
 import stat
@@ -12,10 +13,12 @@ import pytest
 from state_shapes import FIRST_GUILD, MESSAGE_ID, state_files
 
 from fablabot import db, export_state
+from fablabot.helpers.constants import PARIS_TZ
 from fablabot.models import FmMessageDraft, PublishedMessage, TrackedMessage
-from fablabot.services import formations, messages, op_expiries
+from fablabot.services import attendance, formations, messages, op_expiries
 
 EXPORT = Path("data/exports/one")
+START = datetime(2026, 11, 5, 14, 0, tzinfo=PARIS_TZ)
 
 
 def _load(folder: Path) -> dict[str, Any]:
@@ -126,6 +129,36 @@ def test_the_export_says_what_has_no_place_in_the_files(capsys: pytest.CaptureFi
 
     assert "1 replaced message(s)" in capsys.readouterr().out
     assert _load(EXPORT)["formations_state.json"][str(FIRST_GUILD)]["published"]["message_id"] == MESSAGE_ID + 5
+
+
+@pytest.mark.usefixtures("filled")
+def test_the_export_counts_the_attendance_data_that_stays_in_the_database(capsys: pytest.CaptureFixture[str]) -> None:
+    """Attendance checks and training counts have no JSON file: the operator is told how many stay behind."""
+    db.open_database()
+    attendance.open_appel(FIRST_GUILD, MESSAGE_ID, 0, trainer_id=None, starts_at=START, ends_at=START + timedelta(hours=2))
+    with db.transaction() as conn:
+        conn.executemany(
+            "INSERT INTO training_summary (guild_id, message_id, position, name, starts_at, registered, waitlisted, withdrawn, "
+            "present, absent, outcome) VALUES (?, ?, ?, 'Laser', ?, 3, 0, 0, 2, 1, 'done')",
+            [(FIRST_GUILD, 1, 0, START.isoformat()), (FIRST_GUILD, 1, 1, START.isoformat())],
+        )
+    db.close_database()
+
+    export_state.main([str(EXPORT)])
+
+    out = capsys.readouterr().out
+    assert "1 attendance check and 2 training counts have no place in these files" in out
+    assert "stay in the database" in out
+    assert "replaced" not in out
+    assert "attendance" not in json.dumps(_load(EXPORT))
+
+
+@pytest.mark.usefixtures("filled")
+def test_the_export_stays_silent_when_there_is_no_attendance_data(capsys: pytest.CaptureFixture[str]) -> None:
+    """With no check and no count, the export prints no word about attendance."""
+    export_state.main([str(EXPORT)])
+
+    assert "attendance" not in capsys.readouterr().out
 
 
 @pytest.mark.usefixtures("filled")

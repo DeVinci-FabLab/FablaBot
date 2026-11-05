@@ -179,6 +179,7 @@ def make_interaction(
     interaction.response.send_modal = AsyncMock()
     interaction.response.edit_message = AsyncMock()
     interaction.response.defer = AsyncMock()
+    interaction.edit_original_response = AsyncMock()
     interaction.followup.send = AsyncMock()
     return interaction
 

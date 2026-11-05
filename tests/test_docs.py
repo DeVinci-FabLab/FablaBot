@@ -15,7 +15,8 @@ import pytest
 
 from fablabot.cogs import user_management
 from fablabot.helpers.access import EVERYONE, AnyRole, rule_of
-from fablabot.helpers.constants import ADMIN_ROLES, RoleNames
+from fablabot.helpers.constants import ADMIN_ROLES, APPEL_EDIT_WINDOW, APPEL_ROLES, RoleNames
+from fablabot.helpers.formation.attendance import MAX_BUTTONS, MAX_MENUS, MENU_SIZE
 from fablabot.helpers.help_page import leaf_commands
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -611,3 +612,181 @@ def test_every_relative_link_and_anchor_in_the_docs_resolves() -> None:
             if not found.exists() or (anchor and has_anchors and anchor not in _anchors(found.read_text(encoding="utf-8"))):
                 broken.append(f"{source.name}: {target}")
     assert not broken, "\n".join(broken)
+
+
+def test_operator_guide_says_a_rollback_past_the_attendance_schema_needs_the_v1_copy() -> None:
+    """The guide names the attendance data, the two copies of a schema change, and the way back through the v1 copy."""
+    stored = _section(_read("docs/OPERATIONS.md"), "## Stored data")
+    for detail in ("attendance", "anonymous counts", "two copies", "`v1`"):
+        assert detail in stored, detail
+    rolling = _section(_read("docs/OPERATIONS.md"), "### Rolling back")
+    for detail in ("newer than this release", "fablabot-v1-*.db", "data/fablabot.db", "stop", "archive"):
+        assert detail in rolling, detail
+    troubleshooting = _section(_read("docs/OPERATIONS.md"), "## Troubleshooting")
+    row = next(line for line in troubleshooting.splitlines() if "first start of a release" in line)
+    assert "Cannot start: data/fablabot.db cannot be used: <cause>." in row
+    assert "previous image" in row
+
+
+def test_operator_guide_goes_back_past_the_attendance_schema_without_losing_data() -> None:
+    """The way back takes the schema down with a command and keeps the v1 copy for a damaged file."""
+    rolling = _section(_read("docs/OPERATIONS.md"), "### Rolling back")
+    schema = rolling.split("#### Back to a release before the database")[0]
+    for detail in ("fablabot.downgrade_schema", "`Cannot go back`", "temporary admins", "in one transaction", "damaged"):
+        assert detail in schema, detail
+    assert schema.index("fablabot.downgrade_schema") < schema.index("fablabot-v1-*.db")
+    assert "def main" in (ROOT / "src" / "fablabot" / "downgrade_schema.py").read_text(encoding="utf-8")
+
+
+def test_operator_guide_says_the_export_leaves_the_attendance_data_in_the_database() -> None:
+    """The export step and the way forward both name the attendance checks and counts the JSON files cannot hold."""
+    rolling = _section(_read("docs/OPERATIONS.md"), "### Rolling back")
+    export_step = rolling.split("2. Export,")[1].split("3. Look at the export")[0]
+    assert "attendance checks and training counts" in export_step
+    forward = rolling.split("To move forward again")[1]
+    assert "attendance checks" in forward
+    assert "training counts" in forward
+
+
+def test_user_guide_says_who_may_take_the_attendance_check_and_for_how_long() -> None:
+    """The trainings section names every role that may take a check, says the trainer is whoever /fm names, and the window."""
+    section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
+    for role in APPEL_ROLES:
+        assert role in section, role
+    assert f"`{RoleNames.ADMIN_TEMP}` and {RoleNames.CODIR} only as the trainer" in section
+    assert f"{APPEL_EDIT_WINDOW.days} days after the start" in section
+    assert f"{MAX_BUTTONS} registered members" in section
+    assert f"{MENU_SIZE * MAX_MENUS} members" in section
+
+
+def test_user_guide_says_what_respo_formation_receive_and_that_the_log_channel_holds_counts_only() -> None:
+    """The trainings section says each validation and update reaches every Respo Formation, and the log line has counts only."""
+    section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
+    assert "every Respo Formation a private message" in section
+    assert "a été mis à jour par" in section
+    assert "the counts only" in section
+    assert "names no registered member and pings nobody" in section
+
+
+def test_user_guide_says_the_lists_are_those_saved_and_a_restart_loses_the_sending() -> None:
+    """The trainings section says the lists are the saved ones, and that a restart before the sending needs an update click."""
+    section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
+    assert "those saved at the click, whatever is marked afterwards" in section
+    assert "even when the trainer's message could not be refreshed" in section
+    assert "if the bot restarts between the save and the sending, nothing is sent again" in section
+    assert "presses `Mettre à jour l'appel` within the 7 days of the edit window to send the lists" in section
+
+
+def test_user_guide_says_a_replaced_validation_is_not_reported_and_the_newest_is_read_last() -> None:
+    """The trainings section says overlapping reports go out one at a time and one a newer validation replaced is not sent."""
+    section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
+    assert "validations of the same check overlap, the reports go out one after the other" in section
+    assert "a report that a newer validation already replaced is not sent" in section
+    assert "leaves no line in the log channel either" in section
+    assert "the last one a Respo Formation reads is the newest" in section
+
+
+def test_user_guide_says_what_the_alert_offers_and_that_the_first_answer_decides() -> None:
+    """The trainings section says when the alert goes out, its three answers, and that the first answer decides."""
+    section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
+    assert "nobody saved the check, the bot sends every Respo Formation an alert, once" in section
+    assert "three hours after the start when the duration cannot be read" in section
+    for button in ("**Relancer le formateur**", "**Ignorer**", "**Annuler la formation**"):
+        assert button in section
+    assert "the training counts as not held. Nothing is sent to the registered members" in section
+    assert "The first answer decides" in section
+    assert "`Déjà traité : …`" in section
+    assert "`Appel fait par` the trainer" in section
+
+
+def test_user_guide_says_a_click_during_a_relaunch_is_told_it_is_in_progress() -> None:
+    """The trainings section says a click mid-relaunch is told so and stores nothing, and can be repeated after it."""
+    section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
+    assert (
+        "While a relaunch is in progress, a click from another Respo Formation is told `Relance en cours …` and stores nothing"
+        in section
+    )
+    assert "is taken if the relaunch failed" in section
+
+
+def test_user_guide_says_a_relaunch_that_cannot_go_is_told_and_leaves_the_alert_open() -> None:
+    """The trainings section says a relaunch with no trainer named, no way to reach them or an error is told, alert kept."""
+    section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
+    assert "if the training names no trainer, or if the sending failed, you are told which and the alert stays open" in section
+
+
+def test_user_guide_says_only_staff_answer_the_alert() -> None:
+    """The trainings section says the alert answers to the Respo Formation holders and the admin roles, not the trainer."""
+    section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
+    assert "Only the Respo Formation holders and the admin roles can answer" in section
+
+
+def test_user_guide_says_a_missed_start_still_sends_the_attendance_check() -> None:
+    """The trainings section says a check missed at the start is sent at the next five-minute check, within the window."""
+    section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
+    assert "bot was off at the start" in section
+    assert "next five-minute check" in section
+
+
+def test_user_guide_says_a_training_published_twice_gets_one_attendance_check() -> None:
+    """The trainings section says a training published again in a newer announcement gets one check, the open one staying."""
+    section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
+    assert "published again in a newer announcement gets one check" in section
+    assert "a check already open stays where it is" in section
+
+
+def test_operator_guide_gives_the_invite_integer_with_the_thread_permissions() -> None:
+    """The invite link holds the integer with the thread permissions, the list names both, and a step fixes an installed bot."""
+    guide = _read("docs/OPERATIONS.md")
+    section = _section(guide, "## Add a server")
+    assert "permissions=343865945297&" in section
+    assert "`343865945297`" in section
+    assert "Create Private Threads" in section
+    assert "Send Messages in Threads" in section
+    assert "permissions=268561617" not in section
+    assert "already installed" in section
+    assert "Create Private Threads and Send Messages in Threads" in section
+    assert "Server Settings, Roles" in section
+    assert "`permissions_missing` line" in section
+
+
+def test_operator_guide_describes_the_whole_retention() -> None:
+    """The retention section says what goes, when, what stays and what the bot never deletes, and the first start's sweep."""
+    section = _section(_read("docs/OPERATIONS.md"), "### Retention")
+    for detail in (
+        "Training registrations",
+        "waitlists",
+        "attendance",
+        "The reaction history",
+        "per-server log files",
+        "`data/backups/`",
+        "3 years",
+        "Run at start",
+        "every 24 hours",
+        "7 days after the start",
+        "anonymous counts",
+        "one row per training",
+        "published again is counted once",
+        "or on the earlier one if it was counted before",
+        "monthly view",
+        "older than itself",
+        "first start",
+    ):
+        assert detail in section, detail
+    never = section.split("never deletes", 1)[1]
+    for detail in (
+        "old JSON files",
+        "`data/exports/`",
+        "`json-before-*`",
+        "`~/fablabot-archive`",
+        "messages already on Discord",
+    ):
+        assert detail in never, detail
+
+
+def test_operator_guide_no_longer_says_the_bot_deletes_no_log_file() -> None:
+    """No sentence says the bot never purges or deletes logs or copies; the exception past 3 years is the one rule."""
+    guide = _read("docs/OPERATIONS.md")
+    for stale in ("Never purge logs", "The bot deletes no log file", "The bot never removes these copies", "no time limit"):
+        assert stale not in guide, stale
+    assert "past 3 years" in guide

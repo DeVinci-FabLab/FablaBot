@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 import sqlite3
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -164,6 +164,57 @@ def test_only_guilds_with_a_publish_are_listed() -> None:
     formations.save_published(GUILD_B, PublishedMessage(message_id=FIRST, channel_id=7, message=message()))
 
     assert formations.guilds_with_published() == [GUILD_B]
+
+
+def test_published_messages_awaiting_their_start_are_listed_by_start_time() -> None:
+    """Only a message with a training that started inside the range and was not handled is listed, whatever its age."""
+    now = datetime(2026, 12, 1, 12, 0, tzinfo=PARIS_TZ)
+
+    def training(start: datetime, *, handled: bool = False) -> Formation:
+        return Formation(
+            emoji="🔧", name="Laser", trainer_mention="<@1>", start_iso=start.isoformat(), duration="2h", seats=2,
+            notified_at_start=handled,
+        )  # fmt: skip
+
+    for message_id, fm in (
+        (FIRST, training(now - timedelta(minutes=30))),
+        (FIRST + 1, training(now - timedelta(minutes=30), handled=True)),
+        (FIRST + 2, training(now - timedelta(days=8))),
+        (FIRST + 3, training(now + timedelta(hours=2))),
+        (FIRST + 4, training(now + timedelta(minutes=5))),
+    ):
+        formations.save_published(GUILD_A, PublishedMessage(message_id=message_id, channel_id=7, message=message(fm)))
+    formations.save_published(GUILD_B, PublishedMessage(message_id=FIRST + 5, channel_id=7, message=message(training(now))))
+
+    found = formations.published_awaiting_start(GUILD_A, now - timedelta(days=7), now + timedelta(minutes=5))
+
+    assert [pub.message_id for pub in found] == [FIRST, FIRST + 4]
+
+
+def test_trainings_a_newer_message_holds_again_are_listed_by_place() -> None:
+    """A training is held again when a newer message of the same server has its name, trainer and start instant."""
+    start = datetime(2026, 12, 1, 18, 30, tzinfo=PARIS_TZ)
+
+    def training(*, name: str = "Laser", trainer: str = "<@1>", at: datetime = start) -> Formation:
+        return Formation(
+            emoji="🔧", name=name, trainer_mention=trainer, start_iso=at.isoformat(), duration="2h", seats=2
+        )  # fmt: skip
+
+    older = message(
+        training(),
+        training(name="Soudure"),
+        training(trainer="<@2>"),
+        training(at=start + timedelta(days=1)),
+        training(name="Impression", trainer="<@3>"),
+    )
+    newer = message(training(at=start.astimezone(UTC)), training(name="Soudure", trainer="<@9>"), training(trainer="<@3>"))
+    formations.save_published(GUILD_A, PublishedMessage(message_id=FIRST, channel_id=7, message=older))
+    formations.save_published(GUILD_A, PublishedMessage(message_id=FIRST + 1, channel_id=7, message=newer))
+    formations.save_published(GUILD_B, PublishedMessage(message_id=FIRST + 2, channel_id=7, message=message(training())))
+
+    assert formations.reissued_positions(GUILD_A, FIRST) == {0}
+    assert formations.reissued_positions(GUILD_A, FIRST + 1) == set()
+    assert formations.reissued_positions(GUILD_B, FIRST + 2) == set()
 
 
 def test_a_failed_save_keeps_the_previous_message() -> None:

@@ -117,18 +117,17 @@ def sent(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
 @pytest.mark.parametrize(("start", "unix"), [(WINTER, WINTER_UNIX), (SUMMER, SUMMER_UNIX)])
 async def test_every_dm_carries_the_timestamp(sent: list[str], start: datetime, unix: int) -> None:
-    """Registration, promotion, participant, trainer and responsible DMs read "le <timestamp>"."""
+    """Registration, promotion, participant, hour-before trainer and responsible DMs read "le <timestamp>"."""
     fm = _fm(start)
     guild = MagicMock()
     stamp = f"<t:{unix}:F>"
     await notifications.send_registration_dm(guild, 7, fm, "x")
     await notifications.send_promotion_dm(guild, 7, fm, "x")
     await notifications.notify_participants_before_formation(guild, fm, "x")
-    await notifications.notify_trainer_before_formation(guild, fm, "x", "hour_before")
-    await notifications.notify_trainer_before_formation(guild, fm, "x", "start")
+    await notifications.notify_trainer_before_formation(guild, fm, "x")
     await notifications.notify_responsible_before_formation(guild, fm, moment="hour_before")
     await notifications.notify_responsible_before_formation(guild, fm, moment="start")
-    assert len(sent) == 7
+    assert len(sent) == 6
     for message in sent:
         assert f"le {stamp}" in message
         assert "h30" not in message.split("\n\n")[0]

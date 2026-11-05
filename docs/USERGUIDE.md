@@ -52,6 +52,38 @@ In the tables below, "admin roles" means Administrateur, Président, Vice-Prési
 | `/fm preview` | Preview the draft in the channel | Same |
 | `/fm publish` | Post the draft in a channel | Same |
 | `/fm export` | List sign-ups and drop-outs | Same |
+| `/fm appel` | Take or fix the attendance of a training of the last 7 days | Respo Formation, Administrateur |
+
+### Attendance check
+
+When a training starts, the bot sends its trainer a private message: that message is the attendance check (the "appel"). The trainer touches the pseudo of each member who came, and touches it again to take the mark back. A green tick shows who is marked, and the counter under the text follows. Pressing **Valider l'appel** saves the counts of present and absent members; the button then reads **Mettre à jour l'appel**.
+
+`/fm appel` opens the same message, privately, for a training of the last 7 days on the server where it runs: right away when only one is open, otherwise through a menu of up to 25 trainings (newest first). It leaves out a cancelled training and one past its 7 days. Only Respo Formation and Administrateur run it; it does not widen who may take a check, and Admin -temp- and CoDir stay out of it.
+
+If the trainer's private messages are closed, the check goes to a private thread instead, with the same buttons. The bot makes it in the channel of the announcement when that is a text channel, otherwise in the commands channel, and adds the trainer and every Respo Formation to it: nobody else can join, and each of them can take the check there. The message in the thread says so and mentions the trainer. Each later sending of the check uses the same thread. If no thread can be made, the check stays open and the log says so.
+
+If the bot was off at the start, or a newer announcement came out since, the message arrives at its next five-minute check, up to 7 days after the start. A training published again in a newer announcement gets one check: a check already open stays where it is, and otherwise the newer announcement opens it. The trainer can keep correcting for 7 days after the start. A correction made after the validation shows a counter marked "pas encore enregistré" until the update button is pressed. The check lives in the database, so its buttons keep working after the bot restarts.
+
+Up to 20 registered members get a button each. Past that, the message holds menus of 25 members, and it lists 100 members at most: the others count as absent, and the message says so. The waitlist is never listed.
+
+Each validation, and each update after it, sends every Respo Formation a private message: who validated, then the members present and the members absent, each as a mention, `aucun` when a list is empty. A long list goes out in several messages, and an update says "a été mis à jour par". The log channel gets one line per validation with the training, who validated and the counts only; it names no registered member and pings nobody. A Respo Formation whose private messages are closed is skipped, and the others still get theirs. The lists and the counts are those saved at the click, whatever is marked afterwards, and they go out even when the trainer's message could not be refreshed. They are not kept for later: if the bot restarts between the save and the sending, nothing is sent again, and the trainer presses `Mettre à jour l'appel` within the 7 days of the edit window to send the lists (worded as an update). When validations of the same check overlap, the reports go out one after the other, and a report that a newer validation already replaced is not sent, and leaves no line in the log channel either, so the last one a Respo Formation reads is the newest.
+
+When the training's slot is over and nobody saved the check, the bot sends every Respo Formation an alert, once, at its next five-minute check. The slot ends at the start plus the duration of the announcement, or three hours after the start when the duration cannot be read. Nothing is sent once the trainer has saved the check, nor after the 7 days of the edit window. The alert names the trainer (or says "Le formateur" when the announcement names none) and offers three buttons:
+
+- **Relancer le formateur** sends the trainer the check again, in private or in the thread when their private messages are closed. If nobody could be reached, if the training names no trainer, or if the sending failed, you are told which and the alert stays open for another answer. While a relaunch is in progress, a click from another Respo Formation is told `Relance en cours …` and stores nothing: once the relaunch is over, the click can be repeated, and is taken if the relaunch failed.
+- **Ignorer** changes nothing else: the check stays open and the trainer can still take it.
+- **Annuler la formation** closes the check: nobody can mark or save it any more, and the training counts as not held. Nothing is sent to the registered members.
+
+The first answer decides. Every Respo Formation's copy then shows who answered and when, with the buttons off, and a later click is told the first answer (`Déjà traité : …`) and changes nothing. If the trainer saves the check after the alert, every copy shows `Appel fait par` the trainer, and the alert is closed. Only the Respo Formation holders and the admin roles can answer: someone who lost the role since the alert was sent is refused.
+
+Who can take or correct a check:
+
+- The trainer named in the announcement, while still on the server.
+- The Respo Formation holders and the admin roles: Administrateur, Président, Vice-Président, Secrétaire Général.
+- `Admin -temp-` and CoDir only as the trainer: whoever `/fm` names as trainer takes the check. Each validation
+  is posted in the log channel and sent to Respo Formation, so a check taken by someone else shows at once.
+
+Anyone else, and anyone after the 7 days or once the training is cancelled, gets a private refusal that says nothing was changed. If the announcement names no member as trainer, the check is opened but no message is sent: Respo Formation or Administrateur takes it with `/fm appel`.
 
 ## Bot messages
 

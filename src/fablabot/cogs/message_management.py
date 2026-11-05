@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 from copy import copy
 import csv
-from datetime import datetime, timedelta
+from datetime import datetime
 import io
 import logging
 import random
@@ -41,7 +41,7 @@ from discord.ext import commands
 from fablabot.helpers.access import EVERYONE, AnyRole, ServerPermission, access
 from fablabot.helpers.constants import MESSAGE_DM_ROLES as _DM_ROLES
 from fablabot.helpers.constants import MESSAGE_ROLES as ALLOWED_ROLES
-from fablabot.helpers.constants import PARIS_TZ, ErrorMessages, staff_default_permissions
+from fablabot.helpers.constants import PARIS_TZ, RETENTION, ErrorMessages, staff_default_permissions
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.safe_discord_operations import retract_unsaved_post
 from fablabot.helpers.utils import (
@@ -62,7 +62,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-REACTION_LOG_RETENTION = timedelta(days=3 * 365)
 _ACCESS = AnyRole(ALLOWED_ROLES)
 _DM_ACCESS = AnyRole(_DM_ROLES)
 
@@ -102,7 +101,7 @@ class MessageManagement(commands.Cog):
         self.bot = bot
         self._reaction_logs = ReactionLogManager(
             "message",
-            retention=REACTION_LOG_RETENTION,
+            retention=RETENTION,
             logger=logger,
         )
         self._reaction_logs.purge_all()

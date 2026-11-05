@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from http import HTTPStatus
 import logging
 import os
+from pathlib import Path
+import sqlite3
 import sys
 from typing import TYPE_CHECKING, override
 
@@ -32,15 +35,15 @@ from fablabot.helpers.command_sync import (
     parse_dev_guild_id,
     sync_commands_if_changed,
 )
+from fablabot.helpers.constants import PARIS_TZ
 from fablabot.helpers.guild_access import GuildAccessPolicy, GuildAccessTree
 from fablabot.helpers.i18n import CatalogTranslator, catalog
 from fablabot.helpers.logging_setup import configure_logging
+from fablabot.helpers.retention import apply_retention
 from fablabot.helpers.startup_checks import TOKEN_FILE_ENV, StartupError, check_runtime_access
 from fablabot.helpers.state_store import JsonStateStore
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from fablabot.logging_handlers import DailyFileHandler, DiscordLogHandler
 
 logger = logging.getLogger(__name__)
@@ -152,6 +155,25 @@ class Fablabot(commands.Bot):
             application_id=self.application_id,
             dev_guild_id=self.dev_guild_id,
         )
+        self.retention.start()
+
+    @tasks.loop(hours=24)
+    async def retention(self) -> None:
+        """Apply the data retention at start, then once a day; a refused step waits for the next run."""
+        log_dir = self.file_log_handler.log_dir if self.file_log_handler else Path("logs")
+        try:
+            apply_retention(datetime.now(PARIS_TZ), log_dir=log_dir, backups=db.DATABASE_FILE.parent / "backups")
+        except sqlite3.Error:
+            logger.exception("Retention stopped by a storage failure; the next run tries again.")
+        except Exception:
+            # A loop that raises ends for good: any other failure waits for the next run too.
+            logger.exception("Retention stopped by an unexpected failure; the next run tries again.")
+
+    @override
+    async def close(self) -> None:
+        """Stop the retention loop, then close the connection."""
+        self.retention.cancel()
+        await super().close()
 
     def write_heartbeat(self) -> bool:
         """Touch the heartbeat file while the gateway session is up.
