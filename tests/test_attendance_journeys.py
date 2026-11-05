@@ -885,3 +885,29 @@ async def test_the_lists_name_who_validated_not_who_validated_meanwhile(hall: Ha
     assert f"a été fait par <@{hall.trainer.id}>." in message.content
     (line,) = [m.content for m in hall.logs.history()]  # pyright: ignore[reportAttributeAccessIssue]
     assert f"validé par <@{hall.trainer.id}>" in line
+
+
+async def test_a_saved_validation_goes_out_even_when_editing_the_message_fails(
+    hall: Hall, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the edit of the clicked message fails after the save, the Respo lists and the log line still go out."""
+    first, _second = hall.register(2)
+    hall.publish()
+    await hall.tick()
+    (message,) = hall.dm()
+    await hall.click(hall.trainer, message, hall.toggle_id(first))
+
+    async def show(*_: Any) -> None:
+        raise discord.NotFound(MagicMock(status=404), "expired")
+
+    monkeypatch.setattr(ui_attendance, "_show", show)
+
+    with pytest.raises(discord.NotFound):
+        await hall.forged_click(hall.trainer, f"appel:{hall.appel_id}:ok")
+
+    stored = attendance.get(hall.appel_id)
+    assert stored is not None
+    assert stored.validated_at is not None
+    (lists,) = _lists(hall, hall.respo)
+    assert f"**Présents (1)** : <@{first.id}>" in lists.content
+    assert len(hall.logs.history()) == 1  # pyright: ignore[reportAttributeAccessIssue]

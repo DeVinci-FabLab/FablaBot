@@ -668,6 +668,15 @@ def test_user_guide_says_what_respo_formation_receive_and_that_the_log_channel_h
     assert "names no registered member and pings nobody" in section
 
 
+def test_user_guide_says_the_lists_are_those_saved_and_a_restart_loses_the_sending() -> None:
+    """The trainings section says the lists are the saved ones, and that a restart before the sending needs an update click."""
+    section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
+    assert "those saved at the click, whatever is marked afterwards" in section
+    assert "even when the trainer's message could not be refreshed" in section
+    assert "if the bot restarts between the save and the sending, nothing is sent again" in section
+    assert "presses `Mettre à jour l'appel` to send the lists" in section
+
+
 def test_user_guide_says_a_missed_start_still_sends_the_attendance_check() -> None:
     """The trainings section says a check missed at the start is sent at the next five-minute check, within the window."""
     section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")

@@ -285,10 +285,13 @@ class AppelValidate(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<app
             f"[appel] validated appel_id={self.appel_id} user_id={interaction.user.id} "
             f"present={len(saved.here)} absent={len(saved.away)}"
         )
-        await _show(interaction, self.appel_id)
-        guild = interaction.client.get_guild(saved.appel.guild_id)
-        if guild is not None:
-            await notify_validation(guild, saved)
+        try:
+            await _show(interaction, self.appel_id)
+        finally:
+            # The save stands whatever became of the edit: the Respo hear of it either way.
+            guild = interaction.client.get_guild(saved.appel.guild_id)
+            if guild is not None:
+                await notify_validation(guild, saved)
 
 
 DYNAMIC_ITEMS: Final = (AppelToggle, AppelMenu, AppelValidate)
