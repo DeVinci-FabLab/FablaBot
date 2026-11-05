@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.2](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.12.1...v0.12.2) (2026-11-05)
+
+
+### Bug Fixes
+
+* **logs:** name members by ID only in every log line ([#162](https://github.com/DeVinci-FabLab/FablaBot/issues/162)) ([fbd5107](https://github.com/DeVinci-FabLab/FablaBot/commit/fbd510730295479d7cb45f6bfdd16bc0cb906a78))
+
 ## [0.12.1](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.12.0...v0.12.1) (2026-11-04)
 
 
