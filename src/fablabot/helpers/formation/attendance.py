@@ -556,17 +556,23 @@ async def notify_validation(guild: Guild, saved: Validation) -> None:
 
 
 def alert_answer(appel: Appel) -> str | None:
-    """Write how an alert was answered, who did it and when; None while it waits for an answer."""
-    if appel.handled_action is None or appel.handled_by is None or appel.handled_at is None:
+    """Write how an alert was answered, who did it and when; None while it waits for an answer.
+
+    A saved check counts as answered done by whoever saved it, whether or not the answer was recorded.
+    """
+    action, who, when = appel.handled_action, appel.handled_by, appel.handled_at
+    if action is None and appel.validated_by is not None and appel.validated_at is not None:
+        action, who, when = AlertAction.DONE, appel.validated_by, appel.validated_at
+    if action is None or who is None or when is None:
         return None
-    by = f"<@{appel.handled_by}>"
-    at = discord_timestamp(appel.handled_at, "t")
+    by = f"<@{who}>"
+    at = discord_timestamp(when, "t")
     return {
         AlertAction.RELAUNCH: f"🔁 **Formateur relancé par {by}** à {at}.",
         AlertAction.IGNORE: f"➖ **Ignoré par {by}** à {at}.",  # noqa: RUF001 - the sign the copy asks for
         AlertAction.CANCEL: f"❌ **Formation annulée par {by}** à {at} : elle compte comme non tenue.",
         AlertAction.DONE: f"✅ **Appel fait par {by}** à {at}.",
-    }[appel.handled_action]
+    }[action]
 
 
 def alert_message(appel: Appel) -> tuple[str, ui.View]:
@@ -582,13 +588,14 @@ def alert_message(appel: Appel) -> tuple[str, ui.View]:
     from fablabot.ui.attendance import AppelAlertAction
 
     who = f"<@{appel.trainer_id}>" if appel.trainer_id is not None else "Le formateur"
-    answer = alert_answer(appel) or "Relance le formateur, ignore, ou annule la formation si elle n'a pas eu lieu."
+    answered = alert_answer(appel)
+    answer = answered or "Relance le formateur, ignore, ou annule la formation si elle n'a pas eu lieu."
     content = (
         f"Salut !\n{who} n'a pas fait l'appel de **{appel.name}** ({_slot(appel)}), et le créneau est terminé.\n\n{answer}"
     )
     view = ui.View(timeout=None)
     for action in AppelAlertAction.ORDER:
-        view.add_item(AppelAlertAction(appel.id, action, disabled=appel.handled_action is not None))
+        view.add_item(AppelAlertAction(appel.id, action, disabled=answered is not None))
     return content, view
 
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime
 import logging
-import sqlite3
 from typing import TYPE_CHECKING, Any, Final, override
 
 from discord import ButtonStyle, SelectOption, Thread, ui
@@ -19,7 +18,6 @@ from fablabot.helpers.formation.attendance import (
     may_take,
     notify_validation,
     refresh_alerts,
-    settle_alert,
 )
 from fablabot.helpers.formation.rendering import discord_timestamp
 from fablabot.helpers.utils import RefusalKind, get_or_fetch_member, log_refusal
@@ -65,7 +63,7 @@ async def _refusal(bot: Fablabot, appel: Appel, user_id: int, *, alert: bool) ->
         return RefusalKind.MISSING_RIGHT, _GONE
     if not may_take(appel, member):
         return RefusalKind.MISSING_RIGHT, _NO_RIGHT
-    if alert and appel.handled_action is not None:
+    if alert and alert_answer(appel) is not None:
         return None
     return _closed_refusal(appel)
 
@@ -313,10 +311,8 @@ class AppelValidate(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<app
             await _show(interaction, self.appel_id)
         finally:
             # The save stands whatever became of the edit: the Respo hear of it either way.
-            try:
-                await settle_alert(interaction.client, saved.appel)
-            except sqlite3.Error:
-                logger.exception(f"Could not close the alert of appel {self.appel_id}; the save stands.")
+            if saved.alert_closed:
+                await refresh_alerts(interaction.client, saved.appel)
             guild = interaction.client.get_guild(saved.appel.guild_id)
             if guild is not None:
                 await notify_validation(guild, saved)

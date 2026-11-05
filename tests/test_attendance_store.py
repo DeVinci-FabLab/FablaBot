@@ -239,6 +239,51 @@ def test_the_first_answer_to_an_alert_wins() -> None:
     assert appel.cancelled is False
 
 
+def test_a_save_closes_the_alert_in_its_own_transaction() -> None:
+    """Saving a check whose alert nobody answered records the answer done with the save, and says it closed the alert."""
+    _publish()
+    appel_id = _open()
+    attendance.record_alert(appel_id, [(10, 100)])
+    at = END + timedelta(minutes=5)
+
+    saved = attendance.validate(appel_id, 7, at)
+
+    assert saved.alert_closed is True
+    assert (saved.appel.handled_by, saved.appel.handled_at, saved.appel.handled_action) == (7, at, AlertAction.DONE)
+
+
+@pytest.mark.parametrize("alerted", [False, True])
+def test_a_save_leaves_an_answer_or_a_missing_alert_alone(alerted: bool) -> None:
+    """A save records no answer when no alert went out, and keeps the answer an alert already got."""
+    _publish()
+    appel_id = _open()
+    if alerted:
+        attendance.record_alert(appel_id, [(10, 100)])
+        attendance.handle(appel_id, 5, AlertAction.IGNORE, END)
+
+    saved = attendance.validate(appel_id, 7, END + timedelta(minutes=5))
+
+    assert saved.alert_closed is False
+    expected = (5, AlertAction.IGNORE) if alerted else (None, None)
+    assert (saved.appel.handled_by, saved.appel.handled_action) == expected
+
+
+@pytest.mark.parametrize("answer", [AlertAction.RELAUNCH, AlertAction.IGNORE, AlertAction.CANCEL])
+def test_a_saved_check_takes_no_answer_but_done(answer: AlertAction) -> None:
+    """Once the check was saved, no relaunch, ignore or cancel is recorded; only the answer done can be."""
+    _publish()
+    appel_id = _open()
+    attendance.validate(appel_id, 7, END)
+
+    assert attendance.handle(appel_id, 5, answer, END + timedelta(minutes=1)) is False
+
+    appel = attendance.get(appel_id)
+    assert appel is not None
+    assert appel.handled_action is None
+    assert appel.cancelled is False
+    assert attendance.handle(appel_id, 7, AlertAction.DONE, END) is True
+
+
 def test_a_cancelled_training_closes_its_check() -> None:
     """Cancelling the training closes the check, takes it out of the open list and out of the alerts."""
     _publish()

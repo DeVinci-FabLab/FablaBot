@@ -201,7 +201,8 @@ def validate(appel_id: int, user_id: int, at: datetime) -> Validation:
 
     Returns:
         Validation: The check and the members saved present and absent, read with the save so that nothing marked
-            afterwards is reported as saved.
+            afterwards is reported as saved. An alert sent and not answered is answered done by the same transaction, so
+            a saved check never keeps an alert that can still cancel it.
 
     Raises:
         LookupError: If the check does not exist.
@@ -220,8 +221,13 @@ def validate(appel_id: int, user_id: int, at: datetime) -> Validation:
             "UPDATE appel SET validated_by = ?, validated_at = ?, present_count = ?, absent_count = ? WHERE id = ?",
             (user_id, at.isoformat(), len(here), len(away), appel_id),
         )
+        closed = conn.execute(
+            "UPDATE appel SET handled_by = ?, handled_at = ?, handled_action = ? "
+            "WHERE id = ? AND alert_sent = 1 AND handled_action IS NULL",
+            (user_id, at.isoformat(), AlertAction.DONE.value, appel_id),
+        ).rowcount
         saved = conn.execute(_SELECT + "WHERE a.id = ?", (appel_id,)).fetchone()
-    return Validation(appel=_appel(saved), here=here, away=away, first=before["validated_at"] is None)
+    return Validation(appel=_appel(saved), here=here, away=away, first=before["validated_at"] is None, alert_closed=closed == 1)
 
 
 def set_thread(appel_id: int, thread_id: int) -> bool:
@@ -300,7 +306,7 @@ def alert_messages(appel_id: int) -> list[tuple[int, int]]:
 
 
 def handle(appel_id: int, user_id: int, action: AlertAction, at: datetime) -> bool:
-    """Record the answer to an alert; only the first answer counts.
+    """Record the answer to an alert; only the first answer counts, and once the check was saved only ``DONE`` can.
 
     Args:
         appel_id (int): The check's ID.
@@ -309,12 +315,13 @@ def handle(appel_id: int, user_id: int, action: AlertAction, at: datetime) -> bo
         at (datetime): When.
 
     Returns:
-        bool: True if this answer was recorded, False if the alert was already answered.
+        bool: True if this answer was recorded, False if the alert was already answered or the check already saved.
     """
     with db.transaction() as conn:
         changed = conn.execute(
-            "UPDATE appel SET handled_by = ?, handled_at = ?, handled_action = ? WHERE id = ? AND handled_action IS NULL",
-            (user_id, at.isoformat(), action.value, appel_id),
+            "UPDATE appel SET handled_by = ?, handled_at = ?, handled_action = ? "
+            "WHERE id = ? AND handled_action IS NULL AND (validated_at IS NULL OR ? = ?)",
+            (user_id, at.isoformat(), action.value, appel_id, action.value, AlertAction.DONE.value),
         ).rowcount
     return changed == 1
 

@@ -1688,6 +1688,52 @@ async def test_a_validation_after_the_alert_closes_it_in_every_inbox(hall: Hall)
         assert all(b.get("disabled") for b in _buttons(alert).values())
 
 
+async def test_a_cancel_landing_while_the_save_is_shown_is_refused_with_the_done_line(
+    hall: Hall, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Respo cancelling between the trainer's save and the end of its handling is told the appel was made."""
+    await _overdue(hall)
+    alert = _alert(hall, hall.respo)
+    real_show = ui_attendance._show
+    answers: list[tuple[bool, MagicMock]] = []
+
+    async def show(interaction: Any, appel_id: int) -> None:
+        answers.append(await hall.forged_click(hall.respo, _alert_id(hall, "c"), shown=alert))
+        await real_show(interaction, appel_id)
+
+    monkeypatch.setattr(ui_attendance, "_show", show)
+
+    await hall.validate()
+
+    ((allowed, interaction),) = answers
+    assert allowed
+    appel = attendance.get(hall.appel_id)
+    assert appel is not None
+    assert _refused(interaction) == "Déjà traité : " + _answer(hall, f"✅ **Appel fait par <@{hall.trainer.id}>** à {{at}}.")
+    assert (appel.handled_by, appel.handled_action) == (hall.trainer.id, attendance.AlertAction.DONE)
+    assert not appel.cancelled
+    assert appel.validated_at is not None
+    assert appel.is_open(datetime.now(PARIS_TZ))
+
+
+async def test_a_saved_check_whose_alert_is_still_open_cannot_be_cancelled(hall: Hall) -> None:
+    """An alert left open on a saved check (the answer was never recorded) is told appel fait and cancels nothing."""
+    await _overdue(hall)
+    await hall.validate()
+    db.connection().execute("UPDATE appel SET handled_by = NULL, handled_at = NULL, handled_action = NULL")
+    before = _stored(hall.appel_id)
+
+    allowed, interaction = await hall.forged_click(hall.respo, _alert_id(hall, "c"), shown=_alert(hall, hall.respo))
+
+    assert allowed
+    assert _refused(interaction).startswith(f"Déjà traité : ✅ **Appel fait par <@{hall.trainer.id}>** à ")
+    appel = attendance.get(hall.appel_id)
+    assert appel is not None
+    assert not appel.cancelled
+    assert appel.handled_action is None
+    assert _stored(hall.appel_id) == before
+
+
 async def test_a_validation_that_beats_the_alert_record_still_closes_it(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
     """A validation landing while the alerts are being sent closes them as soon as they are recorded."""
     hall.register(1)

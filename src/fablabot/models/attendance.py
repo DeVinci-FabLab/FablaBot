@@ -108,9 +108,11 @@ class Validation:
         here (list[int]): The registered members saved present, in their order.
         away (list[int]): The registered members saved absent, in their order.
         first (bool): Whether the check was never validated before.
+        alert_closed (bool): Whether this save answered an open alert done, in the same transaction.
     """
 
     appel: Appel
     here: list[int]
     away: list[int]
     first: bool
+    alert_closed: bool = False
