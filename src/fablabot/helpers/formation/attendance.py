@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 import logging
 import re
 import sqlite3
 from typing import TYPE_CHECKING, Final
+from weakref import WeakValueDictionary
 
 from discord import AllowedMentions, HTTPException, SelectOption, TextChannel, ui
 
@@ -52,6 +54,8 @@ _MENTION = re.compile(r"<@!?(\d+)>")
 _LIST_CHARS = MAX_MSG_CHARS - 400
 """The most a line of mentions holds, so that a header and a label fit around it."""
 _CODIR_LINE = "Merci de transmettre au **CoDir** la liste des participants à excuser si besoin."
+_reporting: WeakValueDictionary[int, asyncio.Lock] = WeakValueDictionary()
+"""The lock of each check being reported, alive only while a report holds or awaits it: one report of a check at a time."""
 
 
 def read_duration(duration: str) -> timedelta | None:
@@ -333,8 +337,9 @@ async def notify_validation(guild: Guild, saved: Validation) -> None:
     """Tell each Respo Formation who came, then leave the counts in the log channel.
 
     Everything comes from what the validation saved, never from a later read, so a mark made afterwards or a second
-    validation is not reported as this one. A Respo who cannot be reached does not stop the others, and a missing or
-    refusing log channel stops nothing.
+    validation is not reported as this one. The reports of one check go out one after the other, and a report whose
+    save a newer validation replaced is dropped, so the last one the Respo read is the newest. A Respo who cannot be
+    reached does not stop the others, and a missing or refusing log channel stops nothing.
 
     Args:
         guild (Guild): The check's server.
@@ -343,17 +348,22 @@ async def notify_validation(guild: Guild, saved: Validation) -> None:
     appel = saved.appel
     if appel.validated_by is None:
         return
-    messages = respo_messages(appel, saved.here, saved.away, first=saved.first)
-    for respo in sorted(get_members_by_role(logger, guild, role=RoleNames.TRAININGS_MANAGER), key=lambda m: m.id):
-        for text in messages:
-            if await send_dm_to_member(logger, guild, respo, text, dm_type=f"attendance lists {appel.id}") is None:
-                break
-    line = log_line(appel, len(saved.here), len(saved.away), first=saved.first)
-    try:
-        channel = guild.get_channel(get_log_channel_id(guild.id) or 0)
-        if not isinstance(channel, TextChannel):
-            logger.warning(f"No log channel for the counts of appel {appel.id} in guild {guild.id}.")
+    async with _reporting.setdefault(appel.id, asyncio.Lock()):
+        stored = attendance.get(appel.id)
+        if stored is not None and stored.validated_at != appel.validated_at:
+            logger.info(f"Dropped the report of appel {appel.id} in guild {guild.id}: a newer validation replaced it.")
             return
-        await channel.send(line, allowed_mentions=AllowedMentions.none())
-    except (HTTPException, sqlite3.Error):
-        logger.exception(f"Could not post the counts of appel {appel.id} in guild {guild.id}.")
+        messages = respo_messages(appel, saved.here, saved.away, first=saved.first)
+        for respo in sorted(get_members_by_role(logger, guild, role=RoleNames.TRAININGS_MANAGER), key=lambda m: m.id):
+            for text in messages:
+                if await send_dm_to_member(logger, guild, respo, text, dm_type=f"attendance lists {appel.id}") is None:
+                    break
+        line = log_line(appel, len(saved.here), len(saved.away), first=saved.first)
+        try:
+            channel = guild.get_channel(get_log_channel_id(guild.id) or 0)
+            if not isinstance(channel, TextChannel):
+                logger.warning(f"No log channel for the counts of appel {appel.id} in guild {guild.id}.")
+                return
+            await channel.send(line, allowed_mentions=AllowedMentions.none())
+        except (HTTPException, sqlite3.Error):
+            logger.exception(f"Could not post the counts of appel {appel.id} in guild {guild.id}.")

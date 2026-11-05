@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 import logging
 import sqlite3
@@ -864,29 +865,6 @@ async def test_the_lists_report_what_was_saved_not_what_a_toggle_changed_meanwhi
     assert "1 présent, 1 absent." in line
 
 
-async def test_the_lists_name_who_validated_not_who_validated_meanwhile(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Someone else validating while the message is being edited does not take the credit for the first save."""
-    hall.register(1)
-    hall.publish()
-    await hall.tick()
-    real_show = ui_attendance._show
-
-    async def show(interaction: Any, appel_id: int) -> None:
-        stored = attendance.get(appel_id)
-        if stored is not None and stored.validated_at is not None:
-            attendance.validate(appel_id, hall.plain.id, datetime.now(PARIS_TZ))
-        await real_show(interaction, appel_id)
-
-    monkeypatch.setattr(ui_attendance, "_show", show)
-
-    await hall.validate()
-
-    (message,) = _lists(hall, hall.respo)
-    assert f"a été fait par <@{hall.trainer.id}>." in message.content
-    (line,) = [m.content for m in hall.logs.history()]  # pyright: ignore[reportAttributeAccessIssue]
-    assert f"validé par <@{hall.trainer.id}>" in line
-
-
 async def test_a_saved_validation_goes_out_even_when_editing_the_message_fails(
     hall: Hall, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -911,3 +889,132 @@ async def test_a_saved_validation_goes_out_even_when_editing_the_message_fails(
     (lists,) = _lists(hall, hall.respo)
     assert f"**Présents (1)** : <@{first.id}>" in lists.content
     assert len(hall.logs.history()) == 1  # pyright: ignore[reportAttributeAccessIssue]
+
+
+async def _until(condition: Any) -> None:
+    """Let the other tasks run until the condition holds, failing the test rather than waiting forever."""
+
+    async def spin() -> None:
+        while not condition():
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(spin(), timeout=5)
+
+
+async def test_a_report_a_newer_save_replaced_is_not_sent(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A validation whose message edit is slow sends nothing once a newer one is saved: the last report is the newest."""
+    first, second = hall.register(2)
+    hall.publish()
+    await hall.tick()
+    await hall.validate(first)
+    real_show = ui_attendance._show
+    held = asyncio.Event()
+    release = asyncio.Event()
+    slow: list[int] = []
+
+    async def show(interaction: Any, appel_id: int) -> None:
+        if not slow:
+            slow.append(appel_id)
+            held.set()
+            await release.wait()
+        await real_show(interaction, appel_id)
+
+    monkeypatch.setattr(ui_attendance, "_show", show)
+    # SimCord runs one click at a time, so the slow validation is a callback of its own, as discord.py would run it.
+    slow_save = asyncio.create_task(hall.forged_click(hall.trainer, f"appel:{hall.appel_id}:ok"))
+    await asyncio.wait_for(held.wait(), timeout=5)
+
+    await hall.validate(second)
+    release.set()
+    await slow_save
+
+    stored = attendance.get(hall.appel_id)
+    assert stored is not None
+    assert (stored.present_count, stored.absent_count) == (2, 0)
+    texts = [m.content for m in _lists(hall, hall.respo)]
+    assert len(texts) == 2
+    assert "a été fait par" in texts[0]
+    assert "**Présents (2)**" in texts[1]
+    lines = [m.content for m in hall.logs.history()]  # pyright: ignore[reportAttributeAccessIssue]
+    assert len(lines) == 2
+    assert lines[-1].endswith(": 2 présents, 0 absent.")
+
+
+async def test_reports_of_one_check_go_out_in_the_order_of_the_saves(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A report still being sent finishes before the next one of the check starts: each names who saved it, the newest last."""
+    first, second = hall.register(2)
+    other_respo = hall.member("respo2", RoleNames.TRAININGS_MANAGER)
+    hall.publish()
+    await hall.tick()
+    real_send = discord.Member.send
+    stuck = asyncio.Event()
+    release = asyncio.Event()
+    sending: list[str] = []
+
+    async def send(member: Any, *args: Any, **kwargs: Any) -> Any:
+        if member.id == hall.respo.id and args and not sending:
+            sending.append(args[0])
+            stuck.set()
+            await release.wait()
+        return await real_send(member, *args, **kwargs)
+
+    monkeypatch.setattr(discord.Member, "send", send)
+    real_notify = ui_attendance.notify_validation
+    reporting: list[int] = []
+
+    async def notify(guild: Any, saved: Any) -> None:
+        reporting.append(saved.appel.present_count)
+        await real_notify(guild, saved)
+
+    monkeypatch.setattr(ui_attendance, "notify_validation", notify)
+    attendance.mark(hall.appel_id, [first.id], [first.id])
+    older = asyncio.create_task(hall.forged_click(hall.trainer, f"appel:{hall.appel_id}:ok"))
+    await asyncio.wait_for(stuck.wait(), timeout=5)
+    attendance.mark(hall.appel_id, [second.id], [second.id])
+    newer = asyncio.create_task(hall.forged_click(other_respo, f"appel:{hall.appel_id}:ok"))
+    await _until(lambda: len(reporting) == 2)
+
+    release.set()
+    await asyncio.gather(older, newer)
+
+    texts = [m.content for m in _lists(hall, hall.respo)]
+    assert len(texts) == 2
+    assert "**Présents (1)**" in texts[0]
+    assert f"fait par <@{hall.trainer.id}>." in texts[0]
+    assert "**Présents (2)**" in texts[1]
+    assert f"mis à jour par <@{other_respo.id}>." in texts[1]
+
+
+async def test_a_report_in_flight_does_not_hold_back_the_report_of_another_check(
+    hall: Hall, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A report stuck in sending holds back the later reports of its own check only, not those of another check."""
+    hall.register(1)
+    now = datetime.now(PARIS_TZ)
+    hall.store([hall.training(start=now), hall.training(start=now, name="Soudure")])
+    await hall.tick()
+    slow, other = [row["id"] for row in db.connection().execute("SELECT id FROM appel ORDER BY position")]
+    real_send = discord.Member.send
+    stuck = asyncio.Event()
+    release = asyncio.Event()
+
+    async def send(member: Any, *args: Any, **kwargs: Any) -> Any:
+        if member.id == hall.respo.id and args and "Découpe laser" in args[0] and not stuck.is_set():
+            stuck.set()
+            await release.wait()
+        return await real_send(member, *args, **kwargs)
+
+    monkeypatch.setattr(discord.Member, "send", send)
+    slow_report = asyncio.create_task(hall.forged_click(hall.trainer, f"appel:{slow}:ok"))
+    await asyncio.wait_for(stuck.wait(), timeout=5)
+
+    try:
+        await asyncio.wait_for(hall.forged_click(hall.trainer, f"appel:{other}:ok"), timeout=5)
+    finally:
+        release.set()
+    await slow_report
+
+    texts = [m.content for m in _lists(hall, hall.respo)]
+    assert len(texts) == 2
+    assert "Soudure" in texts[0]
+    assert "Découpe laser" in texts[1]

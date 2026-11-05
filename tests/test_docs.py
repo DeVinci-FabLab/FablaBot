@@ -677,6 +677,14 @@ def test_user_guide_says_the_lists_are_those_saved_and_a_restart_loses_the_sendi
     assert "presses `Mettre à jour l'appel` to send the lists" in section
 
 
+def test_user_guide_says_a_replaced_validation_is_not_reported_and_the_newest_is_read_last() -> None:
+    """The trainings section says overlapping reports go out one at a time and one a newer validation replaced is not sent."""
+    section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
+    assert "validations of the same check overlap, the reports go out one after the other" in section
+    assert "a report that a newer validation already replaced is not sent" in section
+    assert "the last one a Respo Formation reads is the newest" in section
+
+
 def test_user_guide_says_a_missed_start_still_sends_the_attendance_check() -> None:
     """The trainings section says a check missed at the start is sent at the next five-minute check, within the window."""
     section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
