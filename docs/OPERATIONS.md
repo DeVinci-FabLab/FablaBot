@@ -644,7 +644,7 @@ The bot deletes personal data after 3 years and keeps anonymous counts. Nothing 
 
 | What | How long | When | What stays |
 | --- | --- | --- | --- |
-| Training registrations, waitlists, attendance and its alerts, with the training message that holds them | 3 years from the training's start; a message waits for its youngest training | Run at start, then every 24 hours | The anonymous counts of each training: registered, waitlisted, withdrawn, present, absent and the outcome (done, not done, cancelled, not asked), one row per training, and a monthly view of them |
+| Training registrations, waitlists, attendance and its alerts, with the training message that holds them | 3 years from the training's start; a message waits for its youngest training | Run at start, then every 24 hours | The anonymous counts of each training: registered, waitlisted, withdrawn, present, absent and the outcome (done, not done, cancelled, not asked), one row per training (a training published again is counted once, on its newest message), and a monthly view of them |
 | The reaction history, both histories | 3 years from the reaction | Run at start, then every 24 hours | Nothing |
 | Shared and per-server log files | 3 years from the file's day (the day in its name) | Run at start, then every 24 hours | Nothing |
 | Copies in `data/backups/` | 3 years from the time in the copy's name | Run at start, then every 24 hours | Nothing |

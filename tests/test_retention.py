@@ -97,6 +97,46 @@ def test_a_closed_check_gives_one_anonymous_summary() -> None:
     assert _summaries() == [(1, 0, "Training 0", start.isoformat(), 3, 1, 1, 2, 1, "done")]
 
 
+def test_a_training_published_again_is_counted_once_on_its_newest_copy() -> None:
+    """The older copy is skipped: one real training gives one row, with the newest copy's registrations and the check."""
+    start = NOW - timedelta(days=7)
+    _publish(1, start)
+    _publish(2, start, registered=(3, 4, 5, 6))
+    appel_id = attendance.open_appel(GUILD, 2, 0, trainer_id=2222, starts_at=start, ends_at=start + timedelta(hours=2))
+    attendance.mark(appel_id, [3, 4, 5, 6], [3, 4])
+    attendance.validate(appel_id, 2222, start)
+
+    assert retention.summarise(NOW) == 1
+
+    assert _summaries() == [(2, 0, "Training 0", start.isoformat(), 4, 1, 0, 2, 2, "done")]
+
+
+def test_the_check_held_by_the_older_copy_is_kept_on_the_newest_row() -> None:
+    """The start check was opened on the first message: the one row of the training still says done."""
+    start = NOW - timedelta(days=7)
+    _publish(1, start)
+    _publish(2, start, registered=(3, 4))
+    appel_id = attendance.open_appel(GUILD, 1, 0, trainer_id=2222, starts_at=start, ends_at=start + timedelta(hours=2))
+    attendance.mark(appel_id, [1, 2, 3], [1, 2])
+    attendance.validate(appel_id, 2222, start)
+
+    retention.summarise(NOW)
+
+    assert _summaries() == [(2, 0, "Training 0", start.isoformat(), 2, 1, 0, 2, 1, "done")]
+
+
+def test_both_copies_of_a_training_published_again_go_after_three_years() -> None:
+    """The older copy has no row of its own, and its registrations still go with the newest copy's."""
+    old = NOW - RETENTION - timedelta(days=1)
+    _publish(1, old)
+    _publish(2, old)
+
+    retention.summarise(NOW)
+
+    assert retention.forget(NOW - RETENTION) == 2
+    assert _count("registration") == 0
+
+
 def test_a_message_whose_trainings_close_on_different_days_is_summarised_in_two_runs() -> None:
     """The later training gets its counts when its own check closes, so the message can go in the end."""
     _publish(1, NOW - RETENTION - timedelta(days=20), NOW - RETENTION - timedelta(days=5))
