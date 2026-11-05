@@ -78,9 +78,10 @@ def _configure(conn: sqlite3.Connection) -> None:
 
 
 def _backup(conn: sqlite3.Connection, path: Path, label: str) -> None:
-    """Copy the database next to it before a change of schema or of release; copies are never removed.
+    """Copy the database next to it before a change of schema or of release.
 
-    A failed upgrade restarts in a loop, so a copy newer than the database stands for it: one copy per data.
+    A failed upgrade restarts in a loop, so a copy newer than the database stands for it: one copy per data. Copies
+    older than the retention are deleted (see ``helpers/retention.py``).
 
     Args:
         conn (sqlite3.Connection): The open connection.
