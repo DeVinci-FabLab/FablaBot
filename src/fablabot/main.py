@@ -169,6 +169,12 @@ class Fablabot(commands.Bot):
             # A loop that raises ends for good: any other failure waits for the next run too.
             logger.exception("Retention stopped by an unexpected failure; the next run tries again.")
 
+    @override
+    async def close(self) -> None:
+        """Stop the retention loop, then close the connection."""
+        self.retention.cancel()
+        await super().close()
+
     def write_heartbeat(self) -> bool:
         """Touch the heartbeat file while the gateway session is up.
 

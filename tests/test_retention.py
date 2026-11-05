@@ -487,14 +487,11 @@ async def test_the_bot_applies_the_retention_at_start_then_daily(simcord_bot: An
     async with simcord_bot:
         await simcord_bot.setup_hook()
         await asyncio.sleep(0.05)
-        try:
-            assert not old.exists()
-            assert simcord_bot.retention.is_running()
-            assert simcord_bot.retention.hours == 24
-        finally:
-            simcord_bot.retention.cancel()
-            for name in list(simcord_bot.cogs):
-                await simcord_bot.remove_cog(name)
+        assert not old.exists()
+        assert simcord_bot.retention.is_running()
+        assert simcord_bot.retention.hours == 24
+        for name in list(simcord_bot.cogs):
+            await simcord_bot.remove_cog(name)
 
 
 async def test_a_storage_failure_in_a_run_is_logged_and_the_loop_goes_on(
@@ -507,13 +504,10 @@ async def test_a_storage_failure_in_a_run_is_logged_and_the_loop_goes_on(
     async with simcord_bot:
         await simcord_bot.setup_hook()
         await asyncio.sleep(0.05)
-        try:
-            assert simcord_bot.retention.is_running()
-            assert "Retention stopped by a storage failure" in caplog.text
-        finally:
-            simcord_bot.retention.cancel()
-            for name in list(simcord_bot.cogs):
-                await simcord_bot.remove_cog(name)
+        assert simcord_bot.retention.is_running()
+        assert "Retention stopped by a storage failure" in caplog.text
+        for name in list(simcord_bot.cogs):
+            await simcord_bot.remove_cog(name)
 
 
 async def test_any_other_failure_in_a_run_is_logged_and_the_loop_goes_on(
@@ -526,10 +520,21 @@ async def test_any_other_failure_in_a_run_is_logged_and_the_loop_goes_on(
     async with simcord_bot:
         await simcord_bot.setup_hook()
         await asyncio.sleep(0.05)
-        try:
-            assert simcord_bot.retention.is_running()
-            assert "Retention stopped by an unexpected failure" in caplog.text
-        finally:
-            simcord_bot.retention.cancel()
-            for name in list(simcord_bot.cogs):
-                await simcord_bot.remove_cog(name)
+        assert simcord_bot.retention.is_running()
+        assert "Retention stopped by an unexpected failure" in caplog.text
+        for name in list(simcord_bot.cogs):
+            await simcord_bot.remove_cog(name)
+
+
+async def test_closing_the_bot_cancels_the_retention_loop(simcord_bot: Any) -> None:
+    """The daily loop does not outlive the bot."""
+    simcord_bot.tree.sync = AsyncMock(return_value=[])
+
+    async with simcord_bot:
+        await simcord_bot.setup_hook()
+        await asyncio.sleep(0.05)
+        assert simcord_bot.retention.is_running()
+        for name in list(simcord_bot.cogs):
+            await simcord_bot.remove_cog(name)
+
+    assert not simcord_bot.retention.is_running()
