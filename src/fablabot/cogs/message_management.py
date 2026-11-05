@@ -223,7 +223,6 @@ class MessageManagement(commands.Cog):
             count=count,
             channel=channel,
             all_channels=all_channels,
-            reason=reason,
         )
 
         if not interaction.permissions.administrator:
@@ -364,7 +363,7 @@ class MessageManagement(commands.Cog):
 
             logger.info(
                 f"Purged {total_deleted} messages from target_id={user.id} in {len(target_channels)} channel(s) "
-                f"(guild: {interaction.guild.id}) by user_id={interaction.user.id}: {reason}"
+                f"(guild: {interaction.guild.id}) by user_id={interaction.user.id}"
             )
 
         except Exception as e:

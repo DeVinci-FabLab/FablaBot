@@ -237,7 +237,7 @@ class UserManagement(commands.Cog):
             logger,
             "user.op",
             interaction,
-            log_details={"target": member, "reason": reason, "duration": time},
+            log_details={"target": member, "duration": time},
         ):
             return
 

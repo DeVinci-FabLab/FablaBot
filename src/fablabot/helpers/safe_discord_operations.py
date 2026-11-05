@@ -130,7 +130,7 @@ async def safe_create_text_channel(
             **options,
         )
     except HTTPException:
-        logger.exception(f"HTTP error while creating text channel {name!r} in category {category}")
+        logger.exception(f"HTTP error while creating a text channel in category_id={category.id}")
         return None, ErrorMessages.CHANNEL_CREATE_FAILED.format(channel_type=f"salon textuel {name!r}")
     return channel, None
 
@@ -164,7 +164,7 @@ async def safe_create_voice_channel(
             **options,
         )
     except HTTPException:
-        logger.exception(f"HTTP error while creating voice channel {name!r} in category {category}")
+        logger.exception(f"HTTP error while creating voice channel in category_id={category.id}")
         return None, ErrorMessages.CHANNEL_CREATE_FAILED.format(channel_type=f"salon vocal {name!r}")
     return channel, None
 
@@ -188,7 +188,7 @@ async def safe_delete_channel(
     try:
         await channel.delete(reason=reason)
     except HTTPException:
-        logger.exception(f"HTTP error while deleting channel {channel}")
+        logger.exception(f"HTTP error while deleting channel_id={channel.id}")
         return False, ErrorMessages.CHANNEL_DELETE_FAILED.format(channel_type=channel_type)
     return True, None
 

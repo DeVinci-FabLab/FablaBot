@@ -83,8 +83,8 @@ class StartFmModal(ui.Modal, title="Commencer une annonce de formation"):
             "fm.start",
             interaction,
             role_id=self.role_id,
-            intro_input=self.intro_input.value,
-            end_input=self.end_input.value,
+            intro_chars=len(self.intro_input.value),
+            end_chars=len(self.end_input.value),
         )
         assert interaction.guild is not None
         emoji_set = {emoji for emoji in interaction.guild.emojis if emoji.name == "dvfl"}
@@ -182,8 +182,8 @@ class EditTextModal(ui.Modal, title="Modifier le texte de l'annonce de formation
             "fm.edit_text",
             interaction,
             role_id=self.role_id,
-            intro_input=self.intro_input.value,
-            end_input=self.end_input.value,
+            intro_chars=len(self.intro_input.value),
+            end_chars=len(self.end_input.value),
         )
         assert interaction.guild is not None
         draft = self.cog.get_guild_draft(interaction.guild.id)
@@ -289,7 +289,7 @@ class AddFmModal(ui.Modal, title="Ajouter une formation"):
             "fm.add",
             interaction,
             name=name,
-            description=description,
+            description_chars=len(description),
         )
 
         self.fm.name = name
@@ -894,7 +894,7 @@ class _EditFormationView(ui.View):
             return
         original = fms[position]
 
-        log_request(logger, "fm.edit", interaction, index=self.formation_index, updated_formation=self.updated_formation)
+        log_request(logger, "fm.edit", interaction, index=self.formation_index)
 
         fms[position] = self.updated_formation
         fms.sort(key=lambda x: x.start_dt)
