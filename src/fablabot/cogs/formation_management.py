@@ -30,6 +30,7 @@ from fablabot.helpers.constants import (
     APPEL_COMMAND_ROLES,
     APPEL_EDIT_WINDOW,
     PARIS_TZ,
+    RETENTION,
     ErrorMessages,
     staff_default_permissions,
 )
@@ -69,7 +70,6 @@ logger = logging.getLogger(__name__)
 
 _ACCESS = AnyRole(ALLOWED_ROLES)
 TRAINER_NOTIFICATION_ADVANCE = timedelta(hours=1)
-REACTION_LOG_RETENTION = timedelta(days=3 * 365)
 REGISTRATION_WINDOW = timedelta(minutes=20)
 
 
@@ -111,7 +111,7 @@ class FormationManagement(commands.Cog):
         self.bot = bot
         self._reaction_logs = ReactionLogManager(
             "formation",
-            retention=REACTION_LOG_RETENTION,
+            retention=RETENTION,
             logger=logger,
         )
         self._reaction_lock = asyncio.Lock()

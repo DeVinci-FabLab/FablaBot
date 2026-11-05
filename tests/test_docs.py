@@ -748,3 +748,43 @@ def test_operator_guide_gives_the_invite_integer_with_the_thread_permissions() -
     assert "Create Private Threads and Send Messages in Threads" in section
     assert "Server Settings, Roles" in section
     assert "`permissions_missing` line" in section
+
+
+def test_operator_guide_describes_the_whole_retention() -> None:
+    """The retention section says what goes, when, what stays and what the bot never deletes, and the first start's sweep."""
+    section = _section(_read("docs/OPERATIONS.md"), "### Retention")
+    for detail in (
+        "Training registrations",
+        "waitlists",
+        "attendance",
+        "The reaction history",
+        "per-server log files",
+        "`data/backups/`",
+        "3 years",
+        "Run at start",
+        "every 24 hours",
+        "7 days after the start",
+        "anonymous counts",
+        "one row per training",
+        "monthly view",
+        "older than itself",
+        "first start",
+    ):
+        assert detail in section, detail
+    never = section.split("never deletes", 1)[1]
+    for detail in (
+        "old JSON files",
+        "`data/exports/`",
+        "`json-before-*`",
+        "`~/fablabot-archive`",
+        "messages already on Discord",
+    ):
+        assert detail in never, detail
+
+
+def test_operator_guide_no_longer_says_the_bot_deletes_no_log_file() -> None:
+    """No sentence says the bot never purges or deletes logs or copies; the exception past 3 years is the one rule."""
+    guide = _read("docs/OPERATIONS.md")
+    for stale in ("Never purge logs", "The bot deletes no log file", "The bot never removes these copies", "no time limit"):
+        assert stale not in guide, stale
+    assert "past 3 years" in guide

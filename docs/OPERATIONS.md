@@ -117,8 +117,8 @@ Stop the stack, then archive `logs/` and `data/`: an archive of a running databa
 
 5. Redeploy the stack.
 
-Never purge logs. Since the per-server log change, the bot deletes no log file. How long to keep them
-is a decision for the association (GDPR), not for the bot.
+The bot deletes log files and database copies past 3 years only (see "Retention"); before that, how long to keep
+them is a decision for the association (GDPR), not for the bot.
 
 ### Releasing and redeploying
 
@@ -258,7 +258,7 @@ Log files live in `logs/`:
 - Log lines name members by Discord ID (`user_id=`, `member_id=`), never by name, nickname or display name, and
   leave out free text such as an op's reason; `tests/test_id_only_logs.py` fails on a log call that would. A welcome
   channel is named after its member: its name can still appear where a line names a channel.
-- The bot deletes no log file. See "Before every redeploy" for archiving before a redeploy.
+- The bot deletes a log file once its day is more than 3 years back (see "Retention"), and no other. See "Before every redeploy" for archiving before a redeploy.
 
 ### Watched accounts
 
@@ -612,9 +612,7 @@ expiries, the attendance checks of the trainings (who was marked present, who va
 and the anonymous counts of each training (registered, waitlisted, withdrawn, present, absent, outcome), which hold no
 member ID or name. `data/command_sync_state.json` stays a separate file: it is a cache you may delete.
 
-The reaction history is kept for 3 years, then deleted at the next write. The registrations of a replaced training
-message stay with no time limit, so member IDs and names stay in the file and in `data/backups/` until the planned
-step that keeps only anonymous statistics after 3 years.
+Personal data is kept for 3 years, then deleted; the anonymous counts stay. See "Retention" below.
 
 - The file is one database at rest: no `-wal` or `-shm` file. A `data/fablabot.db-journal` file only exists while a write is
   in progress, or after a crash, and the next start finishes the recovery from it. Never delete it.
@@ -625,8 +623,8 @@ step that keeps only anonymous statistics after 3 years.
 - When a release changes the schema, the bot also copies the database to `data/backups/fablabot-v<schema>-<time>.db`, then
   moves the schema at start. A release that moves the schema therefore leaves two copies of the same data: one under
   the release label and one under `v1`.
-- The bot never removes these copies, and they count in the archive of "Before every redeploy". They sit on the same
-  volume as the database, so they do not replace that archive if the volume is lost.
+- The bot removes a copy past 3 years only (see "Retention"). Copies count in the archive of "Before every redeploy". They
+  sit on the same volume as the database, so they do not replace that archive if the volume is lost.
 - A release never goes back: a database from a newer release stops an older one.
 - JSON state files left by an older release (`guild_config.json`, `formations_state.json`, `messages_state.json`,
   `temp_admin_state.json`) stop the bot until they are imported (see "Moving to the database"). The bot never reads,
@@ -639,6 +637,30 @@ step that keeps only anonymous statistics after 3 years.
   archive, and are never removed by the bot. Each is private to the image's user: read it with `sudo`, and archive it
   with `sudo` too, or `tar` skips it without an error. Step 4 of "Before every redeploy" checks that the archive holds
   them.
+
+### Retention
+
+The bot deletes personal data after 3 years and keeps anonymous counts. Nothing here is a command: the bot does it.
+
+| What | How long | When | What stays |
+| --- | --- | --- | --- |
+| Training registrations, waitlists, attendance and its alerts, with the training message that holds them | 3 years from the training's start; a message waits for its youngest training | Run at start, then every 24 hours | The anonymous counts of each training: registered, waitlisted, withdrawn, present, absent and the outcome (done, not done, cancelled, not asked), one row per training, and a monthly view of them |
+| The reaction history, both histories | 3 years from the reaction | Run at start, then every 24 hours | Nothing |
+| Shared and per-server log files | 3 years from the file's day (the day in its name) | Run at start, then every 24 hours | Nothing |
+| Copies in `data/backups/` | 3 years from the time in the copy's name | Run at start, then every 24 hours | Nothing |
+
+- The counts of a training are written once its check closes, 7 days after the start, and always before its registrations
+  go. A training whose date cannot be read, and a draft, are never deleted. A training with no attendance check counts
+  as not asked.
+- The counts hold no member ID, name or pseudo. Nothing in the retention's log line names anybody: it gives counts.
+- The first start of this release deletes any log file older than 3 years, and any copy older than 3 years. The archive
+  of "Before every redeploy" still holds them; `~/fablabot-archive` is yours to purge.
+- A copy kept 3 years holds data up to 3 years older than itself, so data can outlive its 3 years by that much in a copy.
+- A failed deletion of a file is logged and tried again at the next run.
+
+What the bot never deletes: the old JSON files of an earlier release, `data/exports/`, the `json-before-*` folders,
+`~/fablabot-archive`, and messages already on Discord. Deleting those after 3 years is yours to decide. The bot's only
+deletions are the ones above: logs and copies past 3 years, and the rows of the table.
 
 ## Moving to the database
 
