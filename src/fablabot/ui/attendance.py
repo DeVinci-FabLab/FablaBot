@@ -503,8 +503,14 @@ class OpenAppelPicker(ui.View):
             appels (Iterable[Appel]): The open checks of the server, at most 25 (Discord's limit for one menu).
         """
         super().__init__(timeout=None)
+        # A check whose training row is gone has no name, and Discord rejects an empty label.
         self.choose.options = [
-            SelectOption(label=appel.name, value=str(appel.id), description=humanize_dt(appel.starts_at)) for appel in appels
+            SelectOption(
+                label=appel.name or f"Formation du {appel.starts_at:%d/%m %Hh%M}",
+                value=str(appel.id),
+                description=humanize_dt(appel.starts_at),
+            )
+            for appel in appels
         ]
 
     @ui.select(placeholder="Choisis une formation")

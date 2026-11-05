@@ -2311,6 +2311,19 @@ async def test_fm_appel_lists_the_open_appels_of_this_server_only(hall: Hall) ->
     assert _picker_names(result) == ["Découpe laser", "Impression 3D"]
 
 
+async def test_fm_appel_names_a_check_whose_training_is_gone_by_its_start(hall: Hall) -> None:
+    """A check whose training row is gone has no name; the picker labels it with the start, never an empty label."""
+    start = datetime(2026, 11, 6, 18, 0, tzinfo=PARIS_TZ)
+    hall.open_appel("Gone", start, 5001)
+    hall.open_appel("Découpe laser", start + timedelta(days=1), 5002)
+    with db.transaction() as conn:
+        conn.execute("DELETE FROM formation WHERE name = 'Gone'")
+
+    result = await _appel(hall, hall.respo)
+
+    assert _picker_names(result) == ["Découpe laser", "Formation du 06/11 18h00"]
+
+
 async def test_fm_appel_opens_the_only_open_appel_directly(hall: Hall) -> None:
     """With one open check the command shows it at once, privately, with its buttons."""
     first, *_ = hall.register(2)
