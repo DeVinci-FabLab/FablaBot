@@ -150,6 +150,62 @@ def test_both_copies_of_a_training_published_again_go_after_three_years() -> Non
     assert _count("registration") == 0
 
 
+def test_a_training_published_again_after_its_counts_were_written_is_not_counted_twice() -> None:
+    """The row written for the first copy stays the only one, though a later announcement holds the training again."""
+    start = NOW - timedelta(days=10)
+    _publish(1, start)
+    appel_id = attendance.open_appel(GUILD, 1, 0, trainer_id=2222, starts_at=start, ends_at=start + timedelta(hours=2))
+    attendance.mark(appel_id, [1, 2, 3], [1, 2])
+    attendance.validate(appel_id, 2222, start)
+    assert retention.summarise(NOW) == 1
+
+    _publish(2, start, registered=())
+
+    assert retention.summarise(NOW + timedelta(days=1)) == 0
+    assert _summaries() == [(1, 0, "Training 0", start.isoformat(), 3, 1, 0, 2, 1, "done")]
+    month = db.connection().execute("SELECT trainings, present, absent FROM training_month").fetchall()
+    assert [tuple(row) for row in month] == [(1, 2, 1)]
+
+
+def test_the_later_copy_of_a_counted_training_goes_with_the_first_after_three_years() -> None:
+    """A copy published after the counts were written needs no row of its own to be deleted."""
+    old = NOW - RETENTION - timedelta(days=1)
+    _publish(1, old)
+    retention.summarise(NOW)
+    _publish(2, old, registered=())
+
+    assert retention.summarise(NOW) == 0
+    assert retention.forget(NOW - RETENTION) == 2
+
+
+def test_a_training_counted_before_its_other_copy_goes_is_not_counted_again() -> None:
+    """The newest copy goes first, its older copy stays for a younger training, and the next run adds no second row."""
+    a_start, b_start = NOW - RETENTION - timedelta(days=30), NOW - timedelta(days=30)
+    _publish(1, a_start, b_start)
+    _publish(2, a_start)
+
+    assert retention.summarise(NOW) == 2
+    assert retention.forget(NOW - RETENTION) == 1
+
+    assert retention.summarise(NOW) == 0
+    assert [row[:3] for row in _summaries()] == [(1, 1, "Training 1"), (2, 0, "Training 0")]
+    assert retention.forget(NOW) == 1
+    assert _count("registration") == 0
+    assert _count("training_summary") == 2
+
+
+def test_a_training_renamed_after_its_counts_were_written_is_not_counted_again() -> None:
+    """The row is found by the training's place in its message too, so an edit of the name leaves one row."""
+    _publish(1, NOW - timedelta(days=30))
+    retention.summarise(NOW)
+    with db.transaction() as conn:
+        conn.execute("UPDATE formation SET name = 'Renamed'")
+
+    assert retention.summarise(NOW) == 0
+    assert _count("training_summary") == 1
+    assert retention.forget(NOW) == 1
+
+
 def test_a_training_of_another_server_is_not_a_copy_of_this_one() -> None:
     """The same training published on a second server still gets its own row on each."""
     start = NOW - timedelta(days=30)
@@ -158,6 +214,19 @@ def test_a_training_of_another_server_is_not_a_copy_of_this_one() -> None:
 
     assert retention.summarise(NOW) == 2
 
+    assert _guild_rows() == {GUILD: (1, 3, 0, 0, "not_asked"), OTHER_GUILD: (2, 3, 0, 0, "not_asked")}
+
+
+def test_the_counts_of_another_server_do_not_stand_for_this_one() -> None:
+    """A row written for one server never covers the same training of another: no skip, no deletion without counts."""
+    old = NOW - RETENTION - timedelta(days=1)
+    _publish(1, old)
+    retention.summarise(NOW)
+    _publish(2, old, guild=OTHER_GUILD)
+
+    assert retention.forget(NOW - RETENTION) == 1
+
+    assert retention.summarise(NOW) == 1
     assert _guild_rows() == {GUILD: (1, 3, 0, 0, "not_asked"), OTHER_GUILD: (2, 3, 0, 0, "not_asked")}
 
 

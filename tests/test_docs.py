@@ -766,6 +766,8 @@ def test_operator_guide_describes_the_whole_retention() -> None:
         "7 days after the start",
         "anonymous counts",
         "one row per training",
+        "published again is counted once",
+        "or on the earlier one if it was counted before",
         "monthly view",
         "older than itself",
         "first start",

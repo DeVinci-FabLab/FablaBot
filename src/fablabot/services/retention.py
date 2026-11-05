@@ -19,15 +19,22 @@ _REISSUED = (
     "EXISTS (SELECT 1 FROM formation g JOIN fm_message n ON n.id = g.fm_message_id "
     "WHERE n.guild_id = {m}.guild_id AND n.message_id > {m}.message_id AND " + _SAME_TRAINING + ")"
 )
+# The counts of a training sit under whichever copy was summarised first, and that copy may be gone since. The summary keeps
+# no trainer, so a copy is known by its own place in its message, or by its server, name and start.
+_COUNTED = (
+    "EXISTS (SELECT 1 FROM training_summary AS s WHERE s.guild_id = {m}.guild_id AND "
+    "((s.message_id = {m}.message_id AND s.position = {f}.position) OR "
+    "(s.name = {f}.name AND unixepoch(s.starts_at) = unixepoch({f}.start_iso))))"
+)
+# A training that still needs its counts: no newer copy carries it and no summary holds it.
+_UNCOUNTED = "NOT " + _REISSUED + " AND NOT " + _COUNTED
 _CLOSED = (
     "SELECT fm_message.id AS message_row, fm_message.guild_id, fm_message.message_id, formation.id AS formation_id, "
     "formation.position, formation.name, formation.trainer_mention, formation.emoji, formation.start_iso FROM formation "
     "JOIN fm_message ON fm_message.id = formation.fm_message_id "
-    "WHERE fm_message.message_id IS NOT NULL AND unixepoch(formation.start_iso) <= ? AND NOT "
-    + _REISSUED.format(m="fm_message", f="formation")
-    + " AND NOT EXISTS ("
-    "SELECT 1 FROM training_summary AS s WHERE s.guild_id = fm_message.guild_id AND s.message_id = fm_message.message_id "
-    "AND s.position = formation.position) ORDER BY formation.id"
+    "WHERE fm_message.message_id IS NOT NULL AND unixepoch(formation.start_iso) <= ? AND "
+    + _UNCOUNTED.format(m="fm_message", f="formation")
+    + " ORDER BY formation.id"
 )
 
 
@@ -104,7 +111,8 @@ def forget(cutoff: datetime) -> int:
 
     The training rows, their registrations, waitlists and checks go with the message. Only a published training whose
     start can be read gets counts, so a draft, or a training with such a start, keeps its message. A training
-    published again is counted on its newest copy, so the older copy needs no counts of its own.
+    published again is counted once, on its newest copy or on the copy summarised first, so its other copies need no
+    counts of their own, even when the copy that carries them was deleted before.
 
     Args:
         cutoff (datetime): The oldest start kept, timezone-aware.
@@ -116,11 +124,7 @@ def forget(cutoff: datetime) -> int:
         return conn.execute(
             "DELETE FROM fm_message WHERE EXISTS (SELECT 1 FROM formation AS f WHERE f.fm_message_id = fm_message.id) "
             "AND NOT EXISTS (SELECT 1 FROM formation AS f WHERE f.fm_message_id = fm_message.id "
-            "AND (unixepoch(f.start_iso) >= ? OR (NOT EXISTS ("
-            "SELECT 1 FROM training_summary AS s WHERE s.guild_id = fm_message.guild_id "
-            "AND s.message_id = fm_message.message_id AND s.position = f.position) AND NOT "
-            + _REISSUED.format(m="fm_message", f="f")
-            + ")))",
+            "AND (unixepoch(f.start_iso) >= ? OR (" + _UNCOUNTED.format(m="fm_message", f="f") + ")))",
             (int(cutoff.timestamp()),),
         ).rowcount
 

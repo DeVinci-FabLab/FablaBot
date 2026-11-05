@@ -644,7 +644,7 @@ The bot deletes personal data after 3 years and keeps anonymous counts. Nothing 
 
 | What | How long | When | What stays |
 | --- | --- | --- | --- |
-| Training registrations, waitlists, attendance and its alerts, with the training message that holds them | 3 years from the training's start; a message waits for its youngest training | Run at start, then every 24 hours | The anonymous counts of each training: registered, waitlisted, withdrawn, present, absent and the outcome (done, not done, cancelled, not asked), one row per training (a training published again is counted once, on its newest message), and a monthly view of them |
+| Training registrations, waitlists, attendance and its alerts, with the training message that holds them | 3 years from the training's start; a message waits for its youngest training | Run at start, then every 24 hours | The anonymous counts of each training: registered, waitlisted, withdrawn, present, absent and the outcome (done, not done, cancelled, not asked), one row per training (a training published again is counted once, on its newest message, or on the earlier one if it was counted before), and a monthly view of them |
 | The reaction history, both histories | 3 years from the reaction | Run at start, then every 24 hours | Nothing |
 | Shared and per-server log files | 3 years from the file's day (the day in its name) | Run at start, then every 24 hours | Nothing |
 | Copies in `data/backups/` | 3 years from the time in the copy's name | Run at start, then every 24 hours | Nothing |
@@ -652,6 +652,9 @@ The bot deletes personal data after 3 years and keeps anonymous counts. Nothing 
 - The counts of a training are written once its check closes, 7 days after the start, and always before its registrations
   go. A training whose date cannot be read, and a draft, are never deleted. A training with no attendance check counts
   as not asked.
+- A training counted before is recognised by its server, name and start, since the counts keep no trainer. Two
+  trainings of the same name and start on one server count as one when the second is published after the first was
+  counted.
 - The counts hold no member ID, name or pseudo. Nothing in the retention's log line names anybody: it gives counts.
 - The first start of this release deletes any log file older than 3 years, and any copy older than 3 years. The archive
   of "Before every redeploy" still holds them; `~/fablabot-archive` is yours to purge.
