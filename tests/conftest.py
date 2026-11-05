@@ -28,10 +28,6 @@ def _isolated_cwd(tmp_path, monkeypatch) -> Iterator[None]:
     db.open_database(tmp_path / "test-database" / "fablabot.db")
     yield
     db.close_database()
-    # The last reports sent are keyed by appel ID, and each test's database numbers its appels again from 1.
-    from fablabot.helpers.formation import attendance
-
-    attendance._reported.clear()
 
 
 @pytest.fixture

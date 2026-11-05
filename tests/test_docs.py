@@ -668,13 +668,6 @@ def test_user_guide_says_what_respo_formation_receive_and_that_the_log_channel_h
     assert "names no registered member and pings nobody" in section
 
 
-def test_user_guide_says_an_update_with_nobody_changed_sends_nothing_new() -> None:
-    """The trainings section says an update that leaves the present and absent members as reported sends nothing new."""
-    section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
-    assert "are the same as in the last report sent sends nothing new" in section
-    assert "neither to the Respo Formation nor to the log channel" in section
-
-
 def test_user_guide_says_the_lists_are_those_saved_and_a_restart_loses_the_sending() -> None:
     """The trainings section says the lists are the saved ones, and that a restart before the sending needs an update click."""
     section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
