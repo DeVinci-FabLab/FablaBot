@@ -1884,6 +1884,40 @@ async def test_a_cancel_landing_while_the_save_is_shown_is_refused_with_the_done
     assert appel.is_open(datetime.now(PARIS_TZ))
 
 
+async def test_a_save_landing_after_a_cancel_is_refused_and_stores_nothing(
+    hall: Hall, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A Respo cancelling while the trainer's click is checked is not overwritten: the save is refused as cancelled."""
+    await _overdue(hall)
+    caplog.set_level(logging.INFO)
+    alert = _alert(hall, hall.respo)
+    real_fetch = ui_attendance.get_or_fetch_member
+    cancels: list[tuple[bool, MagicMock]] = []
+
+    async def fetch(guild: Any, user_id: int) -> Any:
+        # The trainer's click has read the check, still open; the Cancel commits while the clicker is looked up.
+        if user_id == hall.trainer.id and not cancels:
+            cancels.append(await hall.forged_click(hall.respo, _alert_id(hall, "c"), shown=alert))
+        return await real_fetch(guild, user_id)
+
+    monkeypatch.setattr(ui_attendance, "get_or_fetch_member", fetch)
+    before = _stored(hall.appel_id)
+
+    allowed, interaction = await hall.forged_click(hall.trainer, f"appel:{hall.appel_id}:ok")
+
+    assert cancels
+    assert allowed
+    assert _refused(interaction) == "La formation **Découpe laser** a été annulée : l'appel est fermé. Rien n'a été modifié."
+    appel = attendance.get(hall.appel_id)
+    assert appel is not None
+    assert (appel.handled_by, appel.handled_action) == (hall.respo.id, attendance.AlertAction.CANCEL)
+    assert (appel.validated_by, appel.validated_at) == (None, None)
+    assert _stored(hall.appel_id) == before
+    assert f"[appel] refused kind=appel_cancelled guild_id=None user_id={hall.trainer.id}" in caplog.text
+    assert not [m for m in _dms(hall.respo) if "a été fait par" in m.content]
+    assert hall.logs.history() == []  # pyright: ignore[reportAttributeAccessIssue]
+
+
 async def test_a_saved_check_whose_alert_is_still_open_cannot_be_cancelled(hall: Hall) -> None:
     """An alert left open on a saved check (the answer was never recorded) is told appel fait and cancels nothing."""
     await _overdue(hall)

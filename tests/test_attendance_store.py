@@ -300,6 +300,23 @@ def test_a_cancelled_training_closes_its_check() -> None:
     assert attendance.due_alerts(END) == []
 
 
+def test_a_cancelled_check_takes_no_save() -> None:
+    """A save landing on a cancelled check is refused and stores nothing: no validator, no counts, the answer kept."""
+    _publish()
+    appel_id = _open()
+    attendance.mark(appel_id, [1, 2, 3], [1, 2])
+    attendance.handle(appel_id, 5, AlertAction.CANCEL, END)
+
+    with pytest.raises(attendance.AppelCancelledError) as refused:
+        attendance.validate(appel_id, 7, END + timedelta(minutes=1))
+
+    assert refused.value.appel.id == appel_id
+    appel = attendance.get(appel_id)
+    assert appel is not None
+    assert (appel.validated_by, appel.validated_at, appel.present_count, appel.absent_count) == (None, None, None, None)
+    assert (appel.handled_by, appel.handled_at, appel.handled_action) == (5, END, AlertAction.CANCEL)
+
+
 def test_a_check_is_open_until_seven_days_after_the_start() -> None:
     """The check can be corrected for seven days, listed newest start first, per server."""
     assert timedelta(days=7) == APPEL_EDIT_WINDOW

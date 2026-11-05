@@ -74,10 +74,15 @@ async def _refusal(bot: Fablabot, appel: Appel, user_id: int, *, alert: bool) ->
     return _closed_refusal(appel)
 
 
+def _cancelled_refusal(appel: Appel) -> tuple[RefusalKind, str]:
+    """Write the refusal of a check whose training was cancelled."""
+    return RefusalKind.APPEL_CANCELLED, f"La formation **{appel.name}** a été annulée : l'appel est fermé."
+
+
 def _closed_refusal(appel: Appel) -> tuple[RefusalKind, str] | None:
     """Find why a check no longer takes changes, if it does not."""
     if appel.cancelled:
-        return RefusalKind.APPEL_CANCELLED, f"La formation **{appel.name}** a été annulée : l'appel est fermé."
+        return _cancelled_refusal(appel)
     if not appel.is_open(datetime.now(PARIS_TZ)):
         return (
             RefusalKind.APPEL_CLOSED,
@@ -308,6 +313,11 @@ class AppelValidate(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<app
             saved = attendance.validate(self.appel_id, interaction.user.id, datetime.now(PARIS_TZ))
         except LookupError:
             await interaction.response.send_message(f"{_GONE} {_UNCHANGED}", ephemeral=True)
+            return
+        except attendance.AppelCancelledError as cancelled:
+            # The cancel landed after the click was checked: the same refusal as a click made after it.
+            with guild_log_context(cancelled.appel.guild_id):
+                await _refuse(interaction, *_cancelled_refusal(cancelled.appel), logger=logger)
             return
         logger.info(
             f"[appel] validated appel_id={self.appel_id} user_id={interaction.user.id} "

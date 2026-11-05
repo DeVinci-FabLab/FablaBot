@@ -25,6 +25,19 @@ _SELECT = (
 )
 
 
+class AppelCancelledError(Exception):
+    """A save reached a check whose training was cancelled."""
+
+    def __init__(self, appel: Appel) -> None:
+        """Keep the cancelled check, so that the refusal can name its training.
+
+        Args:
+            appel (Appel): The check as it stands, cancelled.
+        """
+        super().__init__(f"Check {appel.id} was cancelled.")
+        self.appel = appel
+
+
 def _time(value: str | None) -> datetime | None:
     """Read a stored time."""
     return datetime.fromisoformat(value) if value else None
@@ -206,6 +219,7 @@ def validate(appel_id: int, user_id: int, at: datetime) -> Validation:
 
     Raises:
         LookupError: If the check does not exist.
+        AppelCancelledError: If the training was cancelled, however late the cancel landed: nothing is stored then.
     """
     with db.transaction() as conn:
         before = conn.execute(_SELECT + "WHERE a.id = ?", (appel_id,)).fetchone()
@@ -217,10 +231,14 @@ def validate(appel_id: int, user_id: int, at: datetime) -> Validation:
         marked = present(appel_id)
         here = [user for user in registered if user in marked]
         away = [user for user in registered if user not in marked]
-        conn.execute(
-            "UPDATE appel SET validated_by = ?, validated_at = ?, present_count = ?, absent_count = ? WHERE id = ?",
-            (user_id, at.isoformat(), len(here), len(away), appel_id),
-        )
+        # The click that led here read the check before it awaited: a cancel may have committed since, and it wins.
+        saved_rows = conn.execute(
+            "UPDATE appel SET validated_by = ?, validated_at = ?, present_count = ?, absent_count = ? "
+            "WHERE id = ? AND handled_action IS NOT ?",
+            (user_id, at.isoformat(), len(here), len(away), appel_id, AlertAction.CANCEL.value),
+        ).rowcount
+        if saved_rows == 0:
+            raise AppelCancelledError(_appel(before))
         closed = conn.execute(
             "UPDATE appel SET handled_by = ?, handled_at = ?, handled_action = ? "
             "WHERE id = ? AND alert_sent = 1 AND handled_action IS NULL",
