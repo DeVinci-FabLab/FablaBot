@@ -237,7 +237,7 @@ class UserManagement(commands.Cog):
             logger,
             "user.op",
             interaction,
-            log_details={"target": member, "reason": reason, "duration": time},
+            log_details={"target": member, "duration": time},
         ):
             return
 
@@ -276,7 +276,7 @@ class UserManagement(commands.Cog):
             await interaction.response.send_message(error, ephemeral=True)
             return
 
-        logger.info(f"Granted {member} temporary admin for {time} minutes for reason: {reason}")
+        logger.info(f"Granted temporary admin member_id={member.id} for {time} minutes")
         await interaction.response.send_message(
             f"{codir_role.mention} Droits admin donnés à {format_member_mention(member)} pour {time} minutes. "
             f"Raison: {escape_md(reason)}",
@@ -331,7 +331,7 @@ class UserManagement(commands.Cog):
             self._cancel_deop(*key)
             self._clear_op_after_removal(*key)
 
-        logger.info(f"Revoked temporary admin from {member}")
+        logger.info(f"Revoked temporary admin member_id={member.id}")
         await interaction.response.defer(thinking=True)
         report = await report_op(interaction.guild, member, admin_role)
         await interaction.followup.send(content=f"Droits admin retirés de {format_member_mention(member)}. {report}")
@@ -369,7 +369,7 @@ class UserManagement(commands.Cog):
             await interaction.response.send_message(error, ephemeral=True)
             return
 
-        logger.info(f"Added role {role} to {member}")
+        logger.info(f"Added role {role} to member_id={member.id}")
         await interaction.response.defer(thinking=True)
         await interaction.followup.send(
             content=f"Le rôle {format_role_mention(role)} a été ajouté à {format_member_mention(member)}.",
@@ -416,7 +416,7 @@ class UserManagement(commands.Cog):
             await interaction.response.send_message(error, ephemeral=True)
             return
 
-        logger.info(f"Removed role {role} from {member}")
+        logger.info(f"Removed role {role} from member_id={member.id}")
         await interaction.response.defer(thinking=True)
         await interaction.followup.send(
             content=f"Le rôle {format_role_mention(role)} a été retiré à {format_member_mention(member)}.",

@@ -93,7 +93,10 @@ class _BulkDMView(ui.View):
             await interaction.response.send_message("Aucun membre sélectionné.", ephemeral=True)
             return
 
-        logger.info(f"Bulk DM recipients chosen user={interaction.user} guild_id={interaction.guild.id} members={members}")
+        logger.info(
+            f"Bulk DM recipients chosen user_id={interaction.user.id} guild_id={interaction.guild.id} "
+            f"member_ids={[m.id for m in members]}"
+        )
         for child in self.children:
             if isinstance(child, ui.Button | ui.UserSelect):
                 child.disabled = True
@@ -108,7 +111,9 @@ class _BulkDMView(ui.View):
             else:
                 failed.append(m)
 
-        logger.info(f"Bulk DM by user={self.sender} delivered={delivered} failed={failed}")
+        logger.info(
+            f"Bulk DM by user_id={self.sender.id} delivered_ids={[m.id for m in delivered]} failed_ids={[m.id for m in failed]}"
+        )
 
         lines: list[str] = ["Envoi des messages terminé."]
         if delivered:
@@ -158,7 +163,7 @@ class BulkDMModal(ui.Modal, title="Envoyer un MP à plusieurs utilisateurs"):
 
         guild_id = interaction.guild.id if interaction.guild else None
         logger.info(
-            f"BulkDMModal submitted user={interaction.user} guild_id={guild_id}",
+            f"BulkDMModal submitted user_id={interaction.user.id} guild_id={guild_id}",
         )
         await interaction.response.defer(thinking=True)
         followup_mes = await interaction.followup.send("Sélection des membres en cours...", wait=True)
@@ -221,7 +226,7 @@ class StartMessageModal(ui.Modal, title="Préparer un message"):
         """
         assert interaction.guild is not None
         logger.info(
-            f"StartMessageModal submitted user={interaction.user} guild_id={interaction.guild.id}",
+            f"StartMessageModal submitted user_id={interaction.user.id} guild_id={interaction.guild.id}",
         )
         draft = MessageDraft(content=self.content_input.value.strip(), reactions=[])
         self.cog.set_draft(interaction.guild.id, draft)
@@ -326,7 +331,7 @@ class _ReactionMessageInputModal(ui.Modal, title="Message à envoyer"):
         """
         message_content = self.message_input.value.strip()
         logger.info(
-            f"Reaction modal submitted user={interaction.user} guild_id={self.guild_id} emoji={self.reaction.emoji} "
+            f"Reaction modal submitted user_id={interaction.user.id} guild_id={self.guild_id} emoji={self.reaction.emoji} "
             f"action={self.reaction.action_type} target_id={self.reaction.target_id} target_name={self.reaction.target_name}",
         )
         self.reaction.message_content = message_content
@@ -374,7 +379,8 @@ class _ReactionTargetView(ui.View):
                     target_value = self.role_select.values[0].name
 
             logger.info(
-                f"Reaction target selected user={interaction.user} guild_id={self.guild_id} action_type={self.action_type} "
+                f"Reaction target selected user_id={interaction.user.id} guild_id={self.guild_id} "
+                f"action_type={self.action_type} "
                 f"target_id={target_id} target_name={target_value} emoji={self.emoji}",
             )
             await interaction.response.send_modal(
@@ -441,7 +447,8 @@ class _ReactionActionTypeSelectView(ui.View):
             _button (ui.Button): The button that was clicked.
         """
         logger.info(
-            f"Reaction action type selected user={interaction.user} guild_id={self.guild_id} message_id={self.message_id} "
+            f"Reaction action type selected user_id={interaction.user.id} guild_id={self.guild_id} "
+            f"message_id={self.message_id} "
             f"emoji={self.emoji} action_type=channel",
         )
         target_view = _ReactionTargetView(self.cog, self.guild_id, self.message_id, self.emoji, "channel")
@@ -459,7 +466,8 @@ class _ReactionActionTypeSelectView(ui.View):
             _button (ui.Button): The button that was clicked.
         """
         logger.info(
-            f"Reaction action type selected user={interaction.user} guild_id={self.guild_id} message_id={self.message_id} "
+            f"Reaction action type selected user_id={interaction.user.id} guild_id={self.guild_id} "
+            f"message_id={self.message_id} "
             f"emoji={self.emoji} action_type=user_dm",
         )
         await interaction.response.send_modal(
@@ -486,7 +494,8 @@ class _ReactionActionTypeSelectView(ui.View):
             _button (ui.Button): The button that was clicked.
         """
         logger.info(
-            f"Reaction action type selected user={interaction.user} guild_id={self.guild_id} message_id={self.message_id} "
+            f"Reaction action type selected user_id={interaction.user.id} guild_id={self.guild_id} "
+            f"message_id={self.message_id} "
             f"emoji={self.emoji} action_type=role_dm",
         )
         target_view = _ReactionTargetView(self.cog, self.guild_id, self.message_id, self.emoji, "role_dm")
@@ -532,7 +541,8 @@ class _TrackedMessageSelectButton(ui.Button["TrackedMessageSelectView"]):
             return
 
         logger.info(
-            f"Tracked message selected user={interaction.user} command={self.view.cmd} message_id={self.tracked.message_id}",
+            f"Tracked message selected user_id={interaction.user.id} command={self.view.cmd} "
+            f"message_id={self.tracked.message_id}",
         )
         match self.view.cmd:
             case MsgCommand.LINK:
@@ -567,7 +577,7 @@ class _DraftSelectButton(ui.Button["TrackedMessageSelectView"]):
             await interaction.response.send_message(ErrorMessages.MSG_NO_DRAFT, ephemeral=True)
             return
 
-        logger.info(f"Draft selected user={interaction.user} command={self.view.cmd}")
+        logger.info(f"Draft selected user_id={interaction.user.id} command={self.view.cmd}")
         match self.view.cmd:
             case MsgCommand.LINK:
                 await self.view.open_link_selector(interaction, None)
@@ -669,7 +679,8 @@ class TrackedMessageSelectView(ui.View):
             return
 
         logger.info(
-            f"Open link selector user={interaction.user} guild_id={interaction.guild.id} target_message_id={target_message_id} "
+            f"Open link selector user_id={interaction.user.id} guild_id={interaction.guild.id} "
+            f"target_message_id={target_message_id} "
             f"emoji={self.emoji}",
         )
         target_label = "le brouillon" if target_message_id is None else f"le message `{target_message_id}`"
@@ -787,7 +798,8 @@ class _UnlinkReactionButton(ui.Button["_UnlinkReactionSelectView"]):
 
         target_label = self.view.target.message_id if isinstance(self.view.target, TrackedMessage) else "draft"
         logger.info(
-            f"Unlink reaction selected user={interaction.user} target={target_label} reaction_index={self.reaction_index}",
+            f"Unlink reaction selected user_id={interaction.user.id} target={target_label} "
+            f"reaction_index={self.reaction_index}",
         )
         await self.view.remove_link(interaction, self.reaction_index)
 

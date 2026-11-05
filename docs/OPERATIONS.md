@@ -236,6 +236,9 @@ Log files live in `logs/`:
 
 - `logs/<date>.log` holds every line, stays on the host and is never sent.
 - `logs/guilds/<server ID>/<date>.log` holds one server's lines. `/log export` sends that file to that server only.
+- Log lines name members by Discord ID (`user_id=`, `member_id=`), never by name, nickname or display name, and
+  leave out free text such as an op's reason; `tests/test_id_only_logs.py` fails on a log call that would. A welcome
+  channel is named after its member: its name can still appear where a line names a channel.
 - The bot deletes no log file. See "Before every redeploy" for archiving before a redeploy.
 
 ### Watched accounts

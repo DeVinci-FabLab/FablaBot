@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 import logging
+from pathlib import Path
 import re
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -186,3 +188,62 @@ async def test_msg_purge_refuses_anyone_but_a_server_administrator(monkeypatch: 
     interaction.response.send_message.assert_awaited_once()
     assert "administrateurs" in interaction.response.send_message.await_args.args[0]
     channel.purge.assert_not_awaited()
+
+
+_NAMED: frozenset[str] = frozenset(
+    {"user", "member", "author", "sender", "selected_user", "members", "delivered", "failed", "modified", "already"}
+)
+# Names that hold a member in this code base: a name read from any of them is a person's name.
+_MEMBERISH: frozenset[str] = _NAMED | {"m", "u", "target", "trainer", "participant", "responsible", "new_member"}
+_NAME_ATTRS: frozenset[str] = frozenset({"name", "display_name", "global_name", "nick"})
+_LOG_METHODS: frozenset[str] = frozenset({"debug", "info", "warning", "error", "exception", "critical"})
+# Free text a member types, which may hold anyone's name.
+_FREE_TEXT: frozenset[str] = frozenset({"reason"})
+
+
+def _base_name(node: ast.expr) -> str:
+    """Return the last name of an attribute chain's base: ``interaction.user`` gives ``user``."""
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return node.id if isinstance(node, ast.Name) else ""
+
+
+def _offence(node: ast.AST) -> bool:
+    """Tell whether a node inside a log call writes a member, a member list, a member's name or free text."""
+    if isinstance(node, ast.FormattedValue):
+        value = node.value
+        if isinstance(value, ast.Call) and _base_name(value.func) == "str" and value.args:
+            value = value.args[0]
+        return _base_name(value) in _NAMED
+    if isinstance(node, ast.Attribute) and node.attr in _NAME_ATTRS:
+        return _base_name(node.value) in _MEMBERISH
+    return False
+
+
+def _log_calls(tree: ast.AST) -> list[ast.Call]:
+    """List the logger calls, and the log_request calls with their details."""
+    calls: list[ast.Call] = []
+    for call in ast.walk(tree):
+        if not isinstance(call, ast.Call):
+            continue
+        func = call.func
+        logs = isinstance(func, ast.Attribute) and func.attr in _LOG_METHODS and _base_name(func.value) in {"logger", "logging"}
+        if logs or _base_name(func) in {"log_request", "ensure_command_context"}:
+            calls.append(call)
+    return calls
+
+
+def test_no_log_call_in_the_source_interpolates_a_member() -> None:
+    """Every log call writes members by ID: no member, member list, name, display name or typed reason."""
+    sources = sorted((Path(__file__).resolve().parents[1] / "src" / "fablabot").rglob("*.py"))
+    assert len(sources) > 30
+    offenders: list[str] = []
+    for path in sources:
+        for call in _log_calls(ast.parse(path.read_text(encoding="utf-8"))):
+            keys = {kw.arg for kw in call.keywords} | {
+                key.value for d in ast.walk(call) if isinstance(d, ast.Dict) for key in d.keys if isinstance(key, ast.Constant)
+            }
+            if keys & _FREE_TEXT:
+                offenders.append(f"{path.name}:{call.lineno} reason")
+            offenders += [f"{path.name}:{call.lineno} {ast.unparse(n)}" for n in ast.walk(call) if _offence(n)]
+    assert offenders == []
