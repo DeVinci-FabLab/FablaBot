@@ -57,7 +57,14 @@ class Hall:
         self.registered = [self.member(f"lab{i:03}") for i in range(count)]
         return self.registered
 
-    def publish(self, *, start: datetime | None = None, trainer_mention: str | None = None, duration: str = "2h") -> None:
+    def publish(
+        self,
+        *,
+        start: datetime | None = None,
+        trainer_mention: str | None = None,
+        duration: str = "2h",
+        message_id: int = MESSAGE_ID,
+    ) -> None:
         """Store the published announcement of one training that starts now unless told otherwise."""
         start = start or datetime.now(PARIS_TZ)
         users = [{"user_id": m.id, "username": m.name, "ts_iso": start.isoformat()} for m in self.registered]
@@ -72,7 +79,7 @@ class Hall:
             registered_users=users,
         )
         draft = FmMessageDraft(header="h", role_id=1, intro="i", fms=[training], end="e")
-        published = PublishedMessage(message_id=MESSAGE_ID, channel_id=self.general.id, message=draft)
+        published = PublishedMessage(message_id=message_id, channel_id=self.general.id, message=draft)
         formations.save_published(GUILD_ID, published)
 
     async def tick(self) -> None:
@@ -487,3 +494,42 @@ async def test_a_member_without_rights_never_learns_the_name_of_a_closed_appel(h
         assert _refused(interaction) == expected
         assert "Découpe laser" not in _refused(interaction)
     assert _stored(hall.appel_id) == before
+
+
+async def test_a_training_whose_start_window_was_missed_still_gets_its_appel(hall: Hall) -> None:
+    """After a restart past the five-minute window, the next tick opens the check once and sends it to the trainer."""
+    first, *_ = hall.register(2)
+    hall.publish(start=datetime.now(PARIS_TZ) - timedelta(minutes=12))
+
+    await hall.tick()
+    await hall.tick()
+
+    assert db.connection().execute("SELECT COUNT(*) FROM appel").fetchone()[0] == 1
+    (message,) = hall.dm()
+    assert "Découpe laser" in message.content
+    assert hall.toggle_id(first) in _buttons(message)
+    assert hall.dm(hall.respo) == []  # the Respo's "starts now" export is not sent late
+
+
+async def test_an_older_announcement_still_gets_its_appel(hall: Hall) -> None:
+    """A newer announcement does not hide the training of an older one that has started."""
+    hall.register(2)
+    hall.publish(start=datetime.now(PARIS_TZ) - timedelta(minutes=30), message_id=MESSAGE_ID)
+    hall.publish(start=datetime.now(PARIS_TZ) + timedelta(days=3), message_id=MESSAGE_ID + 1)
+
+    await hall.tick()
+
+    appel = db.connection().execute("SELECT fm_message_id FROM appel").fetchall()
+    assert len(appel) == 1
+    assert attendance.get(hall.appel_id).message_id == MESSAGE_ID  # pyright: ignore[reportOptionalMemberAccess]
+    assert len(hall.dm()) == 1
+
+
+async def test_a_training_past_the_correction_window_gets_no_appel(hall: Hall) -> None:
+    """Eight days after the start nobody can take the attendance any more, so no check is opened."""
+    hall.register(2)
+    hall.publish(start=datetime.now(PARIS_TZ) - timedelta(days=8))
+
+    await hall.tick()
+
+    assert db.connection().execute("SELECT COUNT(*) FROM appel").fetchone()[0] == 0

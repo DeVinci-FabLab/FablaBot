@@ -8,6 +8,7 @@ from fablabot import db
 from fablabot.models.formation import FmMessageDraft, Formation, PublishedMessage
 
 if TYPE_CHECKING:
+    from datetime import datetime
     import sqlite3
 
 
@@ -173,3 +174,27 @@ def guilds_with_published() -> list[int]:
     """
     rows = db.connection().execute("SELECT DISTINCT guild_id FROM fm_message WHERE message_id IS NOT NULL ORDER BY guild_id")
     return [row["guild_id"] for row in rows]
+
+
+def published_awaiting_start(guild_id: int, after: datetime, until: datetime) -> list[PublishedMessage]:
+    """List the published messages of a guild holding a training whose start has not been handled yet.
+
+    Args:
+        guild_id (int): The ID of the guild.
+        after (datetime): Trainings starting at or before this are left out, timezone-aware.
+        until (datetime): Trainings starting after this are left out, timezone-aware.
+
+    Returns:
+        list[PublishedMessage]: The messages, oldest first, each with all its trainings.
+    """
+    conn = db.connection()
+    rows = conn.execute(
+        "SELECT * FROM fm_message m WHERE m.guild_id = ? AND m.message_id IS NOT NULL AND EXISTS ("
+        "SELECT 1 FROM formation f WHERE f.fm_message_id = m.id AND f.notified_at_start = 0 "
+        "AND unixepoch(?) < unixepoch(f.start_iso) AND unixepoch(f.start_iso) <= unixepoch(?)) ORDER BY m.message_id",
+        (guild_id, after.isoformat(), until.isoformat()),
+    ).fetchall()
+    return [
+        PublishedMessage(message_id=row["message_id"], channel_id=row["channel_id"], message=_message(conn, row))
+        for row in rows
+    ]

@@ -658,3 +658,10 @@ def test_user_guide_says_who_may_take_the_attendance_check_and_for_how_long() ->
     assert f"{APPEL_EDIT_WINDOW.days} days after the start" in section
     assert f"{MAX_BUTTONS} registered members" in section
     assert f"{MENU_SIZE * MAX_MENUS} members" in section
+
+
+def test_user_guide_says_a_missed_start_still_sends_the_attendance_check() -> None:
+    """The trainings section says a check missed at the start is sent at the next five-minute check, within the window."""
+    section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
+    assert "bot was off at the start" in section
+    assert "next five-minute check" in section

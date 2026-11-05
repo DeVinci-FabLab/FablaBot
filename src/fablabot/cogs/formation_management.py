@@ -26,8 +26,8 @@ from discord import (
 from discord.ext import commands, tasks
 
 from fablabot.helpers.access import AnyRole, access
+from fablabot.helpers.constants import APPEL_EDIT_WINDOW, PARIS_TZ, ErrorMessages, staff_default_permissions
 from fablabot.helpers.constants import FORMATION_ROLES as ALLOWED_ROLES
-from fablabot.helpers.constants import PARIS_TZ, ErrorMessages, staff_default_permissions
 from fablabot.helpers.formation import (
     format_current_registrations,
     format_respo_contacts,
@@ -52,6 +52,8 @@ from fablabot.ui import fmui
 from fablabot.ui.attendance import DYNAMIC_ITEMS
 
 if TYPE_CHECKING:
+    from discord import Guild
+
     from fablabot.main import Fablabot
 
 logger = logging.getLogger(__name__)
@@ -680,11 +682,7 @@ class FormationManagement(commands.Cog):
             guild_id (int): The ID of the guild.
             now (datetime): The time of this tick.
         """
-        window_tolerance = timedelta(minutes=5)
-        notification_window_start = now + TRAINER_NOTIFICATION_ADVANCE - window_tolerance
-        notification_window_end = now + TRAINER_NOTIFICATION_ADVANCE + window_tolerance
-        start_window_start = now - window_tolerance
-        start_window_end = now + window_tolerance
+        start_window_end = now + timedelta(minutes=5)
 
         guild = self.bot.get_guild(guild_id)
         if not guild:
@@ -692,50 +690,65 @@ class FormationManagement(commands.Cog):
 
         # One writer at a time: load, await and write back must not interleave with the registration update.
         async with self._published_lock(guild_id):
-            pub = self._get_last_published_in_guild(guild_id)
-            if not pub:
+            newest = self._get_last_published_in_guild(guild_id)
+            if not newest:
                 return
-
-            fms = list(pub.message.fms)
-            if not fms:
-                return
-
+            # A start missed while the bot was down, or hidden behind a newer announcement, is caught up until its check closes.
+            behind = formations.published_awaiting_start(guild_id, now - APPEL_EDIT_WINDOW, start_window_end)
             send_contacts: str = format_respo_contacts(guild)
+            for pub in sorted({p.message_id: p for p in [*behind, newest]}.values(), key=lambda p: p.message_id):
+                await self._remind_message(guild, pub, now, send_contacts)
 
-            for position, fm in enumerate(fms):
-                if fm.notified_at_start:
-                    continue
+    async def _remind_message(self, guild: Guild, pub: PublishedMessage, now: datetime, send_contacts: str) -> None:
+        """Notify for the trainings of one published message that are due, and store that they were.
 
-                if not fm.notified_hour_before and notification_window_start <= fm.start_dt <= notification_window_end:
-                    await notify_trainer_before_formation(guild, fm, send_contacts)
-                    await notify_responsible_before_formation(guild, fm, moment="hour_before")
-                    await notify_participants_before_formation(guild, fm, send_contacts)
+        Args:
+            guild (Guild): The guild.
+            pub (PublishedMessage): The message, as stored.
+            now (datetime): The time of this tick.
+            send_contacts (str): The Respo contacts to write in the participants' reminder.
+        """
+        window_tolerance = timedelta(minutes=5)
+        notification_window_start = now + TRAINER_NOTIFICATION_ADVANCE - window_tolerance
+        notification_window_end = now + TRAINER_NOTIFICATION_ADVANCE + window_tolerance
+        start_window_end = now + window_tolerance
 
-                    fm.notified_hour_before = True
-                    continue
+        fms = list(pub.message.fms)
+        for position, fm in enumerate(fms):
+            if fm.notified_at_start:
+                continue
 
-                if start_window_start <= fm.start_dt <= start_window_end:
-                    await start_appel(guild, pub, position)
+            if not fm.notified_hour_before and notification_window_start <= fm.start_dt <= notification_window_end:
+                await notify_trainer_before_formation(guild, fm, send_contacts)
+                await notify_responsible_before_formation(guild, fm, moment="hour_before")
+                await notify_participants_before_formation(guild, fm, send_contacts)
+
+                fm.notified_hour_before = True
+                continue
+
+            if now - APPEL_EDIT_WINDOW < fm.start_dt <= start_window_end:
+                await start_appel(guild, pub, position)
+                if fm.start_dt >= now - window_tolerance:  # "starts now" is only true in the window
                     await notify_responsible_before_formation(guild, fm, moment="start")
 
-                    fm.notified_at_start = True
+                fm.notified_at_start = True
 
-            updated_pub_msg = FmMessageDraft(
-                header=pub.message.header,
-                role_id=pub.message.role_id,
-                intro=pub.message.intro,
-                fms=fms,
-                end=pub.message.end,
-                request_forms_url=pub.message.request_forms_url,
-            )
-            self._set_last_published_in_guild(
-                guild_id,
-                PublishedMessage(
-                    message_id=pub.message_id,
-                    channel_id=pub.channel_id,
-                    message=updated_pub_msg,
-                ),
-            )
+        updated_pub_msg = FmMessageDraft(
+            header=pub.message.header,
+            role_id=pub.message.role_id,
+            intro=pub.message.intro,
+            fms=fms,
+            end=pub.message.end,
+            request_forms_url=pub.message.request_forms_url,
+        )
+        self._set_last_published_in_guild(
+            guild.id,
+            PublishedMessage(
+                message_id=pub.message_id,
+                channel_id=pub.channel_id,
+                message=updated_pub_msg,
+            ),
+        )
 
     @_check_upcoming_formations.before_loop
     async def _before_check_upcoming_formations(self) -> None:
