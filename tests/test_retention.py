@@ -299,17 +299,16 @@ def test_a_check_still_open_is_not_summarised() -> None:
 
 
 @pytest.mark.parametrize(
-    ("answer", "saved", "outcome"),
-    [(None, False, "not_done"), (AlertAction.IGNORE, False, "not_done"), (AlertAction.CANCEL, False, "cancelled")],
+    ("answer", "outcome"),
+    [(None, "not_done"), (AlertAction.IGNORE, "not_done"), (AlertAction.CANCEL, "cancelled")],
 )
-def test_a_check_never_saved_counts_as_not_done_or_cancelled(answer: AlertAction | None, saved: bool, outcome: str) -> None:
+def test_a_check_never_saved_counts_as_not_done_or_cancelled(answer: AlertAction | None, outcome: str) -> None:
     """No saved attendance gives no present or absent count, and the outcome says why."""
     start = NOW - timedelta(days=8)
     _publish(1, start)
     appel_id = attendance.open_appel(GUILD, 1, 0, trainer_id=2222, starts_at=start, ends_at=start + timedelta(hours=2))
     if answer:
         attendance.handle(appel_id, 4444, answer, start)
-    assert not saved
 
     retention.summarise(NOW)
 
