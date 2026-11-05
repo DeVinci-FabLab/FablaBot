@@ -627,6 +627,16 @@ def test_operator_guide_says_a_rollback_past_the_attendance_schema_needs_the_v1_
     assert "previous image" in row
 
 
+def test_operator_guide_goes_back_past_the_attendance_schema_without_losing_data() -> None:
+    """The way back takes the schema down with a command and keeps the v1 copy for a damaged file."""
+    rolling = _section(_read("docs/OPERATIONS.md"), "### Rolling back")
+    schema = rolling.split("#### Back to a release before the database")[0]
+    for detail in ("fablabot.downgrade_schema", "`Cannot go back`", "temporary admins", "in one transaction", "damaged"):
+        assert detail in schema, detail
+    assert schema.index("fablabot.downgrade_schema") < schema.index("fablabot-v1-*.db")
+    assert "def main" in (ROOT / "src" / "fablabot" / "downgrade_schema.py").read_text(encoding="utf-8")
+
+
 def test_operator_guide_says_the_export_leaves_the_attendance_data_in_the_database() -> None:
     """The export step and the way forward both name the attendance checks and counts the JSON files cannot hold."""
     rolling = _section(_read("docs/OPERATIONS.md"), "### Rolling back")

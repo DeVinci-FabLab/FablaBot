@@ -144,9 +144,22 @@ To go back past the release that brought the non-root image, take the hardening 
 or write what belongs to 10001.
 
 From the release that brought the attendance tables (schema 2), an older image stops with
-`newer than this release` and changes nothing. Going back means stopping the stack, archiving as in "Before every
-redeploy", then putting the newest `data/backups/fablabot-v1-*.db` in place of `data/fablabot.db` and starting the older
-image. Whatever was written since that copy is lost.
+`newer than this release` and changes nothing. To go back and keep what was written since, take the schema back one
+version first, with the stack stopped and archived as in "Before every redeploy", the image that was running and the
+`fablabot_state` helper of "Moving to the database":
+
+```bash
+IMAGE=ghcr.io/devinci-fablab/fablabot:X.Y.Z   # the release that was running
+fablabot_state "$VOLUMES_PATH/fablabot/data" fablabot.downgrade_schema
+```
+
+The command drops the attendance checks and the anonymous counts, in one transaction, and nothing else: sign-ups,
+reaction history, tracked messages and temporary admins stay. The dropped data stays in the archive and in the `v1`
+copy. If it fails, it says `Cannot go back` and changes nothing. Then set the stack's image to the older release and
+deploy. The next start of the release with the attendance tables adds them again, empty.
+
+Only when the file itself is damaged, put the newest `data/backups/fablabot-v1-*.db` in place of `data/fablabot.db`
+instead: whatever was written since that copy is lost.
 
 After a rollback, delete `data/command_sync_state.json` before upgrading again (see "This command is
 outdated").
