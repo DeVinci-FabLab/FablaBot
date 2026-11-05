@@ -18,6 +18,7 @@ from fablabot.helpers.formation.attendance import (
     may_take,
     notify_validation,
     refresh_alerts,
+    settle_alert,
 )
 from fablabot.helpers.formation.rendering import discord_timestamp
 from fablabot.helpers.utils import RefusalKind, get_or_fetch_member, log_refusal
@@ -363,7 +364,7 @@ class AppelAlertAction(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<
         """Record the answer if it is the first, and show it in every copy; else tell the first answer, privately.
 
         The answer is recorded before the trainer is relaunched, so that two clicks send one relaunch. A relaunch that
-        reaches nobody takes its answer back: it settled nothing.
+        reaches nobody, or fails, takes its answer back: it settled nothing.
         """
         answer = self._ANSWERS[self.action]
         user_id = interaction.user.id
@@ -371,7 +372,6 @@ class AppelAlertAction(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<
             await self._already(interaction)
             return
         if answer is AlertAction.RELAUNCH and not await self._relaunch(interaction):
-            attendance.release(self.appel_id, user_id, answer)
             await interaction.response.send_message(
                 "Le formateur n'a pas pu être relancé : ses MP sont fermés et aucun fil n'a pu être créé.", ephemeral=True
             )
@@ -394,10 +394,23 @@ class AppelAlertAction(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<
         await interaction.response.send_message(f"Déjà traité : {answer or _GONE}", ephemeral=True)
 
     async def _relaunch(self, interaction: Interaction[Any]) -> bool:
-        """Send the trainer the check again; False when nobody could be reached."""
-        appel = attendance.get(self.appel_id)
-        guild = interaction.client.get_guild(appel.guild_id) if appel else None
-        return appel is not None and guild is not None and await deliver(guild, appel)
+        """Send the trainer the check again; False when nobody could be reached.
+
+        When nobody was reached, or sending failed, the claim is taken back. The trainer may have saved meanwhile, and the
+        save found the alert answered, so it is closed done here rather than left open on a saved check.
+        """
+        reached = False
+        try:
+            appel = attendance.get(self.appel_id)
+            guild = interaction.client.get_guild(appel.guild_id) if appel else None
+            reached = appel is not None and guild is not None and await deliver(guild, appel)
+        finally:
+            if not reached:
+                attendance.release(self.appel_id, interaction.user.id, AlertAction.RELAUNCH)
+                released = attendance.get(self.appel_id)
+                if released is not None:
+                    await settle_alert(interaction.client, released)
+        return reached
 
 
 DYNAMIC_ITEMS: Final = (AppelToggle, AppelMenu, AppelValidate, AppelAlertAction)

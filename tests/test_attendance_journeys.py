@@ -1612,6 +1612,52 @@ async def test_an_alert_that_reaches_nobody_is_recorded_and_not_sent_again(
     assert _dms(hall.respo) == []
 
 
+async def test_a_save_during_a_failed_relaunch_closes_the_alert_done(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
+    """If the trainer saves while a relaunch is in flight and it reaches nobody, the released alert ends done, not open."""
+    other_respo = hall.member("respo2", RoleNames.TRAININGS_MANAGER)
+    await _overdue(hall)
+    shown = _alert(hall, other_respo)
+    meanwhile: list[tuple[bool, MagicMock]] = []
+
+    async def deliver_nobody(_guild: Any, _appel: Any) -> bool:
+        await hall.validate()
+        meanwhile.append(await hall.forged_click(other_respo, _alert_id(hall, "i"), shown=shown))
+        return False
+
+    monkeypatch.setattr(ui_attendance, "deliver", deliver_nobody)
+
+    await hall.forged_click(hall.respo, _alert_id(hall, "r"), shown=_alert(hall, hall.respo))
+
+    ((allowed, interaction),) = meanwhile
+    assert allowed
+    assert _refused(interaction).startswith(f"Déjà traité : 🔁 **Formateur relancé par <@{hall.respo.id}>**")
+    assert _stored_answer(hall)[:2] == (hall.trainer.id, attendance.AlertAction.DONE)
+    for respo in (hall.respo, other_respo):
+        assert _alert(hall, respo).content.endswith(_answer(hall, f"✅ **Appel fait par <@{hall.trainer.id}>** à {{at}}."))
+    allowed, interaction = await hall.forged_click(other_respo, _alert_id(hall, "c"), shown=shown)
+    assert allowed
+    assert _refused(interaction).startswith("Déjà traité : ✅ **Appel fait par")
+    appel = attendance.get(hall.appel_id)
+    assert appel is not None
+    assert not appel.cancelled
+
+
+async def test_a_relaunch_that_fails_with_an_error_releases_its_claim(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
+    """If sending the relaunch raises, the answer is taken back, so nobody is recorded as relaunched who was not reached."""
+    await _overdue(hall)
+
+    async def broken(_guild: Any, _appel: Any) -> bool:
+        raise RuntimeError
+
+    monkeypatch.setattr(ui_attendance, "deliver", broken)
+
+    with pytest.raises(RuntimeError):
+        await hall.forged_click(hall.respo, _alert_id(hall, "r"), shown=_alert(hall, hall.respo))
+
+    assert _stored_answer(hall) == (None, None, None)
+    assert not any(b.get("disabled") for b in _buttons(_alert(hall, hall.respo)).values())
+
+
 async def test_cancel_closes_the_appel_and_tells_no_registrant(hall: Hall) -> None:
     """Cancelling closes the appel, shows it counts as not held, and sends nothing to the registered members."""
     await _overdue(hall)
