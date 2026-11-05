@@ -165,6 +165,9 @@ class Fablabot(commands.Bot):
             apply_retention(datetime.now(PARIS_TZ), log_dir=log_dir, backups=db.DATABASE_FILE.parent / "backups")
         except sqlite3.Error:
             logger.exception("Retention stopped by a storage failure; the next run tries again.")
+        except Exception:
+            # A loop that raises ends for good: any other failure waits for the next run too.
+            logger.exception("Retention stopped by an unexpected failure; the next run tries again.")
 
     def write_heartbeat(self) -> bool:
         """Touch the heartbeat file while the gateway session is up.

@@ -514,3 +514,22 @@ async def test_a_storage_failure_in_a_run_is_logged_and_the_loop_goes_on(
             simcord_bot.retention.cancel()
             for name in list(simcord_bot.cogs):
                 await simcord_bot.remove_cog(name)
+
+
+async def test_any_other_failure_in_a_run_is_logged_and_the_loop_goes_on(
+    simcord_bot: Any, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An error that is not the database's does not end the daily loop either."""
+    monkeypatch.setattr("fablabot.main.apply_retention", Mock(side_effect=RuntimeError("unexpected")))
+    simcord_bot.tree.sync = AsyncMock(return_value=[])
+
+    async with simcord_bot:
+        await simcord_bot.setup_hook()
+        await asyncio.sleep(0.05)
+        try:
+            assert simcord_bot.retention.is_running()
+            assert "Retention stopped by an unexpected failure" in caplog.text
+        finally:
+            simcord_bot.retention.cancel()
+            for name in list(simcord_bot.cogs):
+                await simcord_bot.remove_cog(name)
