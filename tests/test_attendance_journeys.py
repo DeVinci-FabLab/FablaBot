@@ -1304,3 +1304,28 @@ async def test_a_thread_made_while_another_won_the_race_is_dropped(hall: Hall, m
     assert threads == [winner.id]
     assert len(backend.messages[winner.id]) == 1
     assert attendance.get(hall.appel_id).thread_id == winner.id  # pyright: ignore[reportOptionalMemberAccess]
+
+
+async def test_a_refusal_in_the_announcement_channel_falls_back_to_the_commands_channel(
+    hall: Hall, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When Discord refuses the thread in the announcement's channel only, the commands channel holds it."""
+    commands = hall.guild.create_text_channel("commandes_bot")
+    hall.register(1)
+    hall.publish()
+    _close_dms(monkeypatch)
+    real_create = discord.TextChannel.create_thread
+
+    async def create_thread(channel: Any, **kwargs: Any) -> Any:
+        if channel.id == hall.general.id:
+            raise discord.Forbidden(MagicMock(status=403), "Missing Permissions")
+        return await real_create(channel, **kwargs)
+
+    monkeypatch.setattr(discord.TextChannel, "create_thread", create_thread)
+
+    await hall.tick()
+
+    assert _threads(hall.general) == []
+    (thread,) = _threads(commands)
+    assert len(thread.history()) == 1
+    assert attendance.get(hall.appel_id).thread_id == thread.id  # pyright: ignore[reportOptionalMemberAccess]
