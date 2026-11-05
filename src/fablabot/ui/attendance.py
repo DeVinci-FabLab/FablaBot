@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Final, override
 from discord import ButtonStyle, HTTPException, SelectOption, Thread, ui
 from discord.components import Button, SelectMenu
 
-from fablabot.helpers.constants import PARIS_TZ, ErrorMessages
+from fablabot.helpers.constants import APPEL_COMMAND_ROLES, PARIS_TZ, ErrorMessages
 from fablabot.helpers.formation.attendance import (
     alert_answer,
     alert_message,
@@ -22,8 +22,8 @@ from fablabot.helpers.formation.attendance import (
     refresh_alerts,
     settle_alert,
 )
-from fablabot.helpers.formation.rendering import discord_timestamp
-from fablabot.helpers.utils import RefusalKind, get_or_fetch_member, log_refusal
+from fablabot.helpers.formation.rendering import discord_timestamp, humanize_dt
+from fablabot.helpers.utils import RefusalKind, get_or_fetch_member, log_refusal, right_check
 from fablabot.logging_handlers import guild_log_context
 from fablabot.models import AlertAction
 from fablabot.services import attendance
@@ -489,6 +489,36 @@ class AppelAlertAction(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<
                 if released is not None:
                     await settle_alert(interaction.client, released)
         return None if reached else failed
+
+
+class OpenAppelPicker(ui.View):
+    """The menu `/fm appel` offers when several checks are open: choosing one shows it in place of the menu."""
+
+    interaction_check = right_check(logger, "fm.appel", APPEL_COMMAND_ROLES)
+
+    def __init__(self, appels: Iterable[Appel]) -> None:
+        """Build the menu.
+
+        Args:
+            appels (Iterable[Appel]): The open checks of the server, at most 25 (Discord's limit for one menu).
+        """
+        super().__init__(timeout=None)
+        self.choose.options = [
+            SelectOption(label=appel.name, value=str(appel.id), description=humanize_dt(appel.starts_at)) for appel in appels
+        ]
+
+    @ui.select(placeholder="Choisis une formation")
+    async def choose(self, interaction: Interaction[Fablabot], select: ui.Select[OpenAppelPicker]) -> None:
+        """Check the chosen check again, then edit the reply into its message and controls."""
+        appel = await check_click(interaction, int(select.values[0]), logger=logger)
+        if appel is None:
+            return
+        guild = interaction.client.get_guild(appel.guild_id)
+        if guild is None or interaction.guild_id != appel.guild_id:
+            await _refuse(interaction, RefusalKind.APPEL_UNKNOWN, _GONE, logger=logger)
+            return
+        content, view = appel_message(guild, appel, datetime.now(PARIS_TZ))
+        await interaction.response.edit_message(content=content, view=view)
 
 
 DYNAMIC_ITEMS: Final = (AppelToggle, AppelMenu, AppelValidate, AppelAlertAction)

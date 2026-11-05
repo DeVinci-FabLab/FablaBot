@@ -59,6 +59,7 @@ clear = "entfernt alle Schulungen"
 preview = "zeigt hier die Vorschau des Entwurfs"
 publish = "postet den Entwurf in einem Kanal"
 export = "listet An- und Abmeldungen auf"
+appel = "führt oder korrigiert die Anwesenheit einer Schulung"
 
 [help.cmd.msg]
 start = "beginnt einen Entwurf"

@@ -88,6 +88,8 @@ MESSAGE_DM_ROLES = {RoleNames.BUREAU}
 # Who may take any attendance check besides its trainer. Unlike /fm, the temporary role stays out: five minutes of admin
 # rights do not rewrite a training's attendance.
 APPEL_ROLES = ADMIN_ROLES | {RoleNames.TRAININGS_MANAGER}
+# The roles that already see `/fm`, since Integrations work per command.
+APPEL_COMMAND_ROLES = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN}
 FORMATION_ROLES = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN_TEMP, RoleNames.ADMIN, RoleNames.CODIR}
 
 

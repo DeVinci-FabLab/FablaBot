@@ -26,7 +26,13 @@ from discord import (
 from discord.ext import commands, tasks
 
 from fablabot.helpers.access import AnyRole, access
-from fablabot.helpers.constants import APPEL_EDIT_WINDOW, PARIS_TZ, ErrorMessages, staff_default_permissions
+from fablabot.helpers.constants import (
+    APPEL_COMMAND_ROLES,
+    APPEL_EDIT_WINDOW,
+    PARIS_TZ,
+    ErrorMessages,
+    staff_default_permissions,
+)
 from fablabot.helpers.constants import FORMATION_ROLES as ALLOWED_ROLES
 from fablabot.helpers.formation import (
     format_current_registrations,
@@ -43,6 +49,7 @@ from fablabot.helpers.formation import (
     send_waitlist_dm,
     start_appel,
 )
+from fablabot.helpers.formation.attendance import appel_message
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.safe_discord_operations import retract_unsaved_post
 from fablabot.helpers.utils import counted, ensure_command_context, is_valid_emoji
@@ -50,7 +57,7 @@ from fablabot.logging_handlers import guild_log_context
 from fablabot.models import FmCommand, FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
 from fablabot.services import attendance, formations
 from fablabot.ui import fmui
-from fablabot.ui.attendance import DYNAMIC_ITEMS
+from fablabot.ui.attendance import DYNAMIC_ITEMS, OpenAppelPicker
 
 if TYPE_CHECKING:
     from discord import Guild
@@ -352,6 +359,33 @@ class FormationManagement(commands.Cog):
             embed=Embed(title="Aperçu brouillon", description=render_message(draft)),
             ephemeral=True,
         )
+
+    @fm_group.command(
+        name="appel",
+        description="Faire ou corriger l'appel d'une formation des 7 derniers jours.",
+        extras=access(AnyRole(APPEL_COMMAND_ROLES)),
+    )
+    async def fm_appel(self, interaction: Interaction) -> None:
+        """Open the attendance check of a training of the last seven days, picked from a menu when several are open.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+        """
+        if not await ensure_command_context(logger, "fm.appel", interaction, required_roles=APPEL_COMMAND_ROLES):
+            return
+
+        assert interaction.guild is not None
+        now = datetime.now(PARIS_TZ)
+        # A menu holds 25 options: the newest 25 checks, which are the ones a trainer is likely to fix.
+        appels = attendance.open_in(interaction.guild.id, now)[:25]
+        if not appels:
+            await interaction.response.send_message("Aucun appel ouvert sur ce serveur.", ephemeral=True)
+            return
+        if len(appels) == 1:
+            content, view = appel_message(interaction.guild, appels[0], now)
+            await interaction.response.send_message(content, view=view, ephemeral=True)
+            return
+        await interaction.response.send_message("Choisis une formation", view=OpenAppelPicker(appels), ephemeral=True)
 
     @fm_group.command(name="remove", description="Retirer une formation du brouillon.", extras=access(_ACCESS))
     async def fm_remove(self, interaction: Interaction) -> None:

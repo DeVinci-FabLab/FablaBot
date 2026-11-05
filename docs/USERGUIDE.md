@@ -52,10 +52,13 @@ In the tables below, "admin roles" means Administrateur, Président, Vice-Prési
 | `/fm preview` | Preview the draft in the channel | Same |
 | `/fm publish` | Post the draft in a channel | Same |
 | `/fm export` | List sign-ups and drop-outs | Same |
+| `/fm appel` | Take or fix the attendance of a training of the last 7 days | Respo Formation, Administrateur |
 
 ### Attendance check
 
 When a training starts, the bot sends its trainer a private message: that message is the attendance check (the "appel"). The trainer touches the pseudo of each member who came, and touches it again to take the mark back. A green tick shows who is marked, and the counter under the text follows. Pressing **Valider l'appel** saves the counts of present and absent members; the button then reads **Mettre à jour l'appel**.
+
+`/fm appel` opens the same message, privately, for a training of the last 7 days on the server where it runs: right away when only one is open, otherwise through a menu of up to 25 trainings (newest first). It leaves out a cancelled training and one past its 7 days. Only Respo Formation and Administrateur run it; it does not widen who may take a check, and Admin -temp- and CoDir stay out of it.
 
 If the trainer's private messages are closed, the check goes to a private thread instead, with the same buttons. The bot makes it in the channel of the announcement when that is a text channel, otherwise in the commands channel, and adds the trainer and every Respo Formation to it: nobody else can join, and each of them can take the check there. The message in the thread says so and mentions the trainer. Each later sending of the check uses the same thread. If no thread can be made, the check stays open and the log says so.
 

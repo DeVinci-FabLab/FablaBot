@@ -17,7 +17,8 @@ import pytest
 
 from fablabot import db
 from fablabot.guild_config import set_log_channel_id
-from fablabot.helpers.constants import MAX_MSG_CHARS, PARIS_TZ, RoleNames
+from fablabot.helpers.access import AnyRole, Caller, rule_of
+from fablabot.helpers.constants import APPEL_COMMAND_ROLES, MAX_MSG_CHARS, PARIS_TZ, ErrorMessages, RoleNames
 from fablabot.helpers.formation import attendance as formation_attendance
 from fablabot.helpers.formation.attendance import deliver
 from fablabot.helpers.formation.rendering import discord_timestamp
@@ -102,6 +103,21 @@ class Hall:
         """Store the published announcement of one training that starts now unless told otherwise."""
         training = self.training(start=start or datetime.now(PARIS_TZ), trainer_mention=trainer_mention, duration=duration)
         self.store([training], message_id)
+
+    async def show(self, *roles: str) -> None:
+        """Allow roles on `/fm`, as a server administrator does in Integrations."""
+        bot: Any = self.env.bot
+        command = next(c for c in await bot.tree.fetch_commands() if c.name == "fm")
+        self.guild.set_command_permissions(command, {self.roles[r]: True for r in roles})
+
+    def open_appel(self, name: str, start: datetime, message_id: int, guild_id: int = GUILD_ID) -> int:
+        """Store a published training of this name, with its check open, on a server; return the check's ID."""
+        training = self.training(start=start, name=name)
+        draft = FmMessageDraft(header="h", role_id=1, intro="i", fms=[training], end="e")
+        formations.save_published(guild_id, PublishedMessage(message_id=message_id, channel_id=self.general.id, message=draft))
+        return attendance.open_appel(
+            guild_id, message_id, 0, trainer_id=self.trainer.id, starts_at=start, ends_at=start + timedelta(hours=2)
+        )
 
     async def tick(self) -> None:
         """Run the formation cog's reminder tick, the way the five-minute loop does."""
@@ -2265,3 +2281,110 @@ async def test_a_deleted_thread_is_forgotten_and_a_new_one_is_made(hall: Hall, m
     assert new.id != old.id
     assert attendance.get(hall.appel_id).thread_id == new.id  # pyright: ignore[reportOptionalMemberAccess]
     assert len(new.history()) == 1
+
+
+async def _appel(hall: Hall, who: Any) -> Any:
+    """Run `/fm appel` as a member, from the commands channel, after showing `/fm` to every role."""
+    commands = hall.guild.create_text_channel("commandes_bot")
+    await hall.show(RoleNames.TRAININGS_MANAGER, RoleNames.CODIR, RoleNames.ADMIN_TEMP)
+    return await who.slash(commands, "fm appel")
+
+
+def _picker_names(result: Any) -> list[str]:
+    """List the training names a `/fm appel` picker offers, in its order."""
+    (row,) = result.response.components
+    return [option["label"] for option in row["components"][0]["options"]]
+
+
+async def test_fm_appel_lists_the_open_appels_of_this_server_only(hall: Hall) -> None:
+    """The picker offers the open checks of the server where the command ran, newest first, and none of another server."""
+    now = datetime.now(PARIS_TZ)
+    hall.open_appel("Impression 3D", now - timedelta(days=1), 5001)
+    hall.open_appel("Découpe laser", now - timedelta(hours=2), 5002)
+    hall.open_appel("Autre serveur", now - timedelta(hours=1), 5003, guild_id=int(OTHER_LISTED_GUILD))
+
+    result = await _appel(hall, hall.respo)
+
+    assert result.ephemeral
+    assert result.response.content == "Choisis une formation"
+    assert _picker_names(result) == ["Découpe laser", "Impression 3D"]
+
+
+async def test_fm_appel_opens_the_only_open_appel_directly(hall: Hall) -> None:
+    """With one open check the command shows it at once, privately, with its buttons."""
+    first, *_ = hall.register(2)
+    hall.open_appel("Découpe laser", datetime.now(PARIS_TZ) - timedelta(hours=1), 5001)
+
+    result = await _appel(hall, hall.respo)
+
+    assert result.ephemeral
+    assert "**Découpe laser**" in result.response.content
+    assert hall.toggle_id(first) in {c["custom_id"] for row in result.response.components for c in row["components"]}
+
+
+async def test_fm_appel_with_no_open_appel_says_so(hall: Hall) -> None:
+    """With no open check on the server the command says so, privately."""
+    result = await _appel(hall, hall.respo)
+
+    assert result.ephemeral
+    assert result.response.content == "Aucun appel ouvert sur ce serveur."
+
+
+async def test_fm_appel_leaves_out_a_cancelled_or_closed_appel(hall: Hall) -> None:
+    """A cancelled check and one past its seven days are not offered; the one left opens directly."""
+    now = datetime.now(PARIS_TZ)
+    cancelled = hall.open_appel("Annulée", now - timedelta(hours=3), 5001)
+    hall.open_appel("Trop vieille", now - timedelta(days=8), 5002)
+    hall.open_appel("Découpe laser", now - timedelta(hours=1), 5003)
+    attendance.handle(cancelled, hall.respo.id, attendance.AlertAction.CANCEL, now)
+
+    result = await _appel(hall, hall.respo)
+
+    assert "**Découpe laser**" in result.response.content
+    assert "Annulée" not in result.response.content
+
+
+@pytest.mark.parametrize("who", ["admin_temp", "codir"])
+async def test_fm_appel_is_refused_to_admin_temp_and_codir(hall: Hall, who: str) -> None:
+    """The temporary admin and CoDir are turned away by the command's own check, with nothing shown."""
+    hall.open_appel("Découpe laser", datetime.now(PARIS_TZ) - timedelta(hours=1), 5001)
+
+    result = await _appel(hall, getattr(hall, who))
+
+    assert result.ephemeral
+    assert result.response.content.startswith(ErrorMessages.ROLE_REQUIRED.split("{")[0])
+    assert not result.response.components
+
+
+async def test_fm_appel_is_listed_for_respo_formation_and_administrateur_only(hall: Hall) -> None:
+    """The help rule of the command admits Respo Formation and Administrateur and no other role the bot knows."""
+    bot: Any = hall.env.bot
+    command = bot.tree.get_command("fm").get_command("appel")
+    rule = rule_of(command)
+    assert isinstance(rule, AnyRole)
+    caller = Caller(roles=(), permissions=Permissions.none(), server_roles=())
+    known = [value for key, value in vars(RoleNames).items() if key.isupper()]
+
+    admitted = {role for role in known if rule.admits(caller.only(role))}
+
+    assert admitted == {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN} == APPEL_COMMAND_ROLES
+
+
+async def test_a_respo_formation_takes_the_appel_through_fm_appel(hall: Hall) -> None:
+    """From the picker a Respo Formation opens a check, ticks a member and saves the counts as themselves."""
+    first, *_ = hall.register(2)
+    now = datetime.now(PARIS_TZ)
+    hall.open_appel("Impression 3D", now - timedelta(days=1), 5001)
+    appel_id = hall.open_appel("Découpe laser", now - timedelta(hours=1), 5002)
+    result = await _appel(hall, hall.respo)
+    picker = result.response.components[0]["components"][0]
+    option = next(o for o in picker["options"] if o["label"] == "Découpe laser")
+
+    chosen = await hall.respo.select(result.response, [option["value"]], custom_id=picker["custom_id"])
+    for custom_id in (f"appel:{appel_id}:m:{first.id}", f"appel:{appel_id}:ok"):
+        chosen = await hall.respo.click(chosen.response, custom_id=custom_id)
+
+    assert attendance.present(appel_id) == {first.id}
+    stored = attendance.get(appel_id)
+    assert stored is not None
+    assert (stored.validated_by, stored.present_count, stored.absent_count) == (hall.respo.id, 1, 1)

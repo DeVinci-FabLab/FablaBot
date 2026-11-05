@@ -145,6 +145,18 @@ async def fm_edit() -> Screen:
     return Screen(capture.sent)
 
 
+async def fm_appel() -> Screen:
+    """``/fm appel`` on a server with two open checks: the menu of trainings, each with its start."""
+    capture = Capture()
+    older = _appel(id=6, name="Impression 3D", starts_at=APPEL_START - timedelta(days=2))
+    with (
+        patch.object(formation_management, "ensure_command_context", _allowed()),
+        patch.object(formation_management.attendance, "open_in", return_value=[_appel(), older]),
+    ):
+        await _invoke(formation_management.FormationManagement.fm_appel, MagicMock(), capture.interaction())
+    return Screen(capture.sent)
+
+
 async def suggest() -> Screen:
     """``/suggest``: the recipient menu, the anonymity button and the button that opens the modal."""
     capture = Capture()
@@ -323,6 +335,7 @@ SCREENS: dict[str, Callable[[], Coroutine[Any, Any, Screen]]] = {
     "help-trainer": help_trainer,
     "help-admin": help_admin,
     "fm-edit": fm_edit,
+    "fm-appel": fm_appel,
     "suggest": suggest,
     "suggest-modal": suggest_modal,
     "fm-start-modal": fm_start_modal,
