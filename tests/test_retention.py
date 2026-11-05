@@ -6,8 +6,9 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 import logging
 from pathlib import Path
+import sqlite3
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -58,6 +59,16 @@ def _react(message_id: int, emoji: str, user_id: int, action: str, at: datetime)
         )
 
 
+def _react_in_message(at: datetime) -> None:
+    """Log one reaction of the other scope, the message management one."""
+    with db.transaction() as conn:
+        conn.execute(
+            "INSERT INTO reaction_event (scope, guild_id, message_id, user_id, user_name, emoji, action, ts_iso) "
+            "VALUES ('message', ?, 7, 1, ?, '👍', 'add', ?)",
+            (GUILD, NAME, at.isoformat()),
+        )
+
+
 def _summaries() -> list[tuple[object, ...]]:
     """Read every summary row, without the server."""
     rows = db.connection().execute("SELECT * FROM training_summary ORDER BY message_id, position").fetchall()
@@ -84,6 +95,16 @@ def test_a_closed_check_gives_one_anonymous_summary() -> None:
     assert retention.summarise(NOW) == 1
     assert retention.summarise(NOW) == 0
     assert _summaries() == [(1, 0, "Training 0", start.isoformat(), 3, 1, 1, 2, 1, "done")]
+
+
+def test_a_message_whose_trainings_close_on_different_days_is_summarised_in_two_runs() -> None:
+    """The later training gets its counts when its own check closes, so the message can go in the end."""
+    _publish(1, NOW - RETENTION - timedelta(days=20), NOW - RETENTION - timedelta(days=5))
+
+    assert retention.summarise(NOW - RETENTION - timedelta(days=10)) == 1
+    assert retention.summarise(NOW) == 1
+    assert [row[1] for row in _summaries()] == [0, 1]
+    assert retention.forget(NOW - RETENTION) == 1
 
 
 def test_a_check_still_open_is_not_summarised() -> None:
@@ -172,6 +193,15 @@ def test_a_draft_is_never_deleted() -> None:
     assert formations.get_draft(GUILD) is not None
 
 
+def test_an_empty_draft_is_never_deleted() -> None:
+    """A draft with no training yet stays too."""
+    formations.save_draft(GUILD, FmMessageDraft("", 0, "", [], ""))
+
+    assert retention.forget(NOW) == 0
+
+    assert formations.get_draft(GUILD) is not None
+
+
 def test_a_training_without_its_counts_keeps_its_message() -> None:
     """Nothing personal goes before its anonymous counts are written."""
     _publish(1, NOW - RETENTION - timedelta(days=10))
@@ -212,6 +242,9 @@ def test_a_run_does_everything_and_names_nobody(caplog: pytest.LogCaptureFixture
     old = NOW - RETENTION - timedelta(days=1)
     _publish(1, old)
     _react(1, "🔧", 1, "add", old - timedelta(days=1))
+    _react_in_message(old - timedelta(days=1))
+    old_draft = Formation(emoji="🔧", name="x", trainer_mention="<@2222>", start_iso=old.isoformat(), duration="1h", seats=1)
+    formations.save_draft(GUILD, FmMessageDraft("", 0, "", [old_draft], ""))
     logs, backups = Path("logs"), Path("backups")
     (logs / "guilds" / "111").mkdir(parents=True)
     (logs / "guilds" / "111" / f"{old.date()}.log").write_text(NAME, encoding="utf-8")
@@ -221,7 +254,8 @@ def test_a_run_does_everything_and_names_nobody(caplog: pytest.LogCaptureFixture
     report = apply_retention(NOW, log_dir=logs, backups=backups)
 
     assert (report.summarised, report.messages, report.log_files, report.copies) == (1, 1, 1, 1)
-    assert [_count(t) for t in ("registration", "reaction_event", "fm_message")] == [0, 0, 0]
+    assert [_count(t) for t in ("registration", "reaction_event", "fm_message")] == [0, 0, 1]
+    assert formations.get_draft(GUILD) is not None
     assert list(logs.rglob("*.log")) == []
     assert list(backups.iterdir()) == []
     assert NAME not in caplog.text
@@ -242,6 +276,25 @@ async def test_the_bot_applies_the_retention_at_start_then_daily(simcord_bot: An
             assert not old.exists()
             assert simcord_bot.retention.is_running()
             assert simcord_bot.retention.hours == 24
+        finally:
+            simcord_bot.retention.cancel()
+            for name in list(simcord_bot.cogs):
+                await simcord_bot.remove_cog(name)
+
+
+async def test_a_storage_failure_in_a_run_is_logged_and_the_loop_goes_on(
+    simcord_bot: Any, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A step the database refuses does not end the daily loop: it is logged and the next run tries again."""
+    monkeypatch.setattr("fablabot.main.apply_retention", Mock(side_effect=sqlite3.OperationalError("disk full")))
+    simcord_bot.tree.sync = AsyncMock(return_value=[])
+
+    async with simcord_bot:
+        await simcord_bot.setup_hook()
+        await asyncio.sleep(0.05)
+        try:
+            assert simcord_bot.retention.is_running()
+            assert "Retention stopped by a storage failure" in caplog.text
         finally:
             simcord_bot.retention.cancel()
             for name in list(simcord_bot.cogs):
