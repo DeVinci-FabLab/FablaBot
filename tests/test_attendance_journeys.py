@@ -23,6 +23,7 @@ from fablabot.helpers.formation import attendance as formation_attendance
 from fablabot.helpers.formation.attendance import deliver
 from fablabot.helpers.formation.rendering import discord_timestamp
 from fablabot.helpers.guild_access import GuildAccessPolicy
+from fablabot.helpers.utils import RIGHT_LOST_MESSAGE
 from fablabot.logging_handlers.guild_context import current_guild_id
 from fablabot.models.formation import FmMessageDraft, Formation, PublishedMessage
 from fablabot.services import attendance, formations
@@ -2388,3 +2389,81 @@ async def test_a_respo_formation_takes_the_appel_through_fm_appel(hall: Hall) ->
     stored = attendance.get(appel_id)
     assert stored is not None
     assert (stored.validated_by, stored.present_count, stored.absent_count) == (hall.respo.id, 1, 1)
+
+
+async def _picker(hall: Hall, who: Any) -> tuple[Any, dict[str, Any], dict[str, int], dict[str, str]]:
+    """Show `/fm appel` with two open checks to a member.
+
+    Returns:
+        tuple: What the command showed, its menu, the ID of each check by name and the menu value of each by name.
+    """
+    now = datetime.now(PARIS_TZ)
+    hall.register(2)
+    ids = {
+        "Impression 3D": hall.open_appel("Impression 3D", now - timedelta(days=1), 5001),
+        "Découpe laser": hall.open_appel("Découpe laser", now - timedelta(hours=1), 5002),
+    }
+    shown = await _appel(hall, who)
+    menu = shown.response.components[0]["components"][0]
+    return shown, menu, ids, {o["label"]: o["value"] for o in menu["options"]}
+
+
+def _kept_out(result: Any, shown: Any, text: str, stored: tuple[Any, ...]) -> None:
+    """Assert a choice was answered by this private refusal, left the menu as it was and stored nothing."""
+    assert result.ephemeral
+    assert result.response.content == text
+    assert not result.response.components
+    assert shown.response.content == "Choisis une formation"
+    assert stored[0] == set()
+    assert stored[1] == (None, None, None)
+
+
+@pytest.mark.parametrize("closing", ["cancelled", "closed"])
+async def test_a_choice_in_the_picker_after_the_appel_ended_is_refused_and_stores_nothing(hall: Hall, closing: str) -> None:
+    """A check cancelled or past its seven days after the menu was shown is refused when chosen, not opened."""
+    shown, menu, ids, values = await _picker(hall, hall.respo)
+    appel_id = ids["Découpe laser"]
+    if closing == "cancelled":
+        attendance.handle(appel_id, hall.respo.id, attendance.AlertAction.CANCEL, datetime.now(PARIS_TZ))
+        text = "La formation **Découpe laser** a été annulée : l'appel est fermé. Rien n'a été modifié."
+    else:
+        past = datetime.now(PARIS_TZ) - timedelta(days=1)
+        db.connection().execute("UPDATE appel SET closes_at = ? WHERE id = ?", (past.isoformat(), appel_id))
+        text = f"L'appel de **Découpe laser** est fermé depuis le <t:{int(past.timestamp())}:D>. Rien n'a été modifié."
+    before = _stored(appel_id)
+
+    result = await hall.respo.select(shown.response, [values["Découpe laser"]], custom_id=menu["custom_id"])
+
+    _kept_out(result, shown, text, before)
+    assert _stored(appel_id) == before
+
+
+async def test_a_choice_in_the_picker_by_a_member_who_lost_the_role_is_refused_and_stores_nothing(hall: Hall) -> None:
+    """A Respo Formation who lost the role after the menu was shown is refused when choosing, and sees no registrant."""
+    shown, menu, ids, values = await _picker(hall, hall.respo)
+    hall.env.backend.edit_member(GUILD_ID, hall.respo.id, {"role_ids": []})
+    await asyncio.sleep(0)
+    before = _stored(ids["Découpe laser"])
+
+    result = await hall.respo.select(shown.response, [values["Découpe laser"]], custom_id=menu["custom_id"])
+
+    _kept_out(result, shown, RIGHT_LOST_MESSAGE, before)
+    assert _stored(ids["Découpe laser"]) == before
+
+
+async def test_a_choice_in_the_picker_from_another_server_is_refused_and_shows_nothing(hall: Hall) -> None:
+    """A choice made from a server other than the check's is answered as for a check that does not exist."""
+    _shown, _menu, ids, _values = await _picker(hall, hall.respo)
+    picker = ui_attendance.OpenAppelPicker([])
+    interaction = make_interaction(user_id=hall.respo.id, guild_id=int(OTHER_LISTED_GUILD))
+    bot: Any = hall.env.bot
+    interaction.client = bot
+    interaction.user = bot.get_guild(GUILD_ID).get_member(hall.respo.id)
+    select: Any = picker.choose
+    select._values = [str(ids["Découpe laser"])]
+
+    await picker.choose.callback(interaction)
+
+    assert _refused(interaction) == GONE
+    interaction.response.edit_message.assert_not_awaited()
+    assert _stored(ids["Découpe laser"]) == (set(), (None, None, None))
