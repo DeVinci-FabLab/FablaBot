@@ -65,7 +65,9 @@ def old_log_files(log_dir: Path, cutoff: date) -> list[Path]:
 
 
 def old_copies(folder: Path, cutoff: datetime) -> list[Path]:
-    """List the database copies made before ``cutoff``, by the time in their name; other files are not listed.
+    """List the database copies made before ``cutoff``, by the time in their name.
+
+    Other files, and a name whose time does not exist, are not listed.
 
     Args:
         folder (Path): The copies' folder.
@@ -77,7 +79,14 @@ def old_copies(folder: Path, cutoff: datetime) -> list[Path]:
     old: list[Path] = []
     for path in folder.glob("*.db"):
         match = _COPY_STAMP.search(path.name)
-        if match and datetime.strptime(match[1], "%Y%m%dT%H%M%S%fZ").replace(tzinfo=UTC) < cutoff:
+        if match is None:
+            continue
+        try:
+            made = datetime.strptime(match[1], "%Y%m%dT%H%M%S%fZ").replace(tzinfo=UTC)
+        except ValueError:
+            logger.warning(f"Retention keeps {path.name}: the date in its name does not exist.")
+            continue
+        if made < cutoff:
             old.append(path)
     return sorted(old)
 

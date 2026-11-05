@@ -436,6 +436,21 @@ def test_database_copies_older_than_three_years_go() -> None:
     assert old_copies(folder, cutoff) == sorted(old)
 
 
+def test_a_copy_with_an_impossible_date_is_kept_and_named_in_the_log(caplog: pytest.LogCaptureFixture) -> None:
+    """A name shaped like a copy but holding a date that does not exist is left alone, and the run goes on."""
+    folder = Path("backups")
+    folder.mkdir()
+    cutoff = NOW - RETENTION
+    stamp = (cutoff - timedelta(seconds=1)).astimezone(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    odd = folder / "fablabot-v1-20261399T000000000000Z.db"
+    old = folder / f"fablabot-v1-{stamp}.db"
+    for path in (odd, old):
+        path.write_bytes(b"")
+
+    assert old_copies(folder, cutoff) == [old]
+    assert odd.name in caplog.text
+
+
 def test_a_run_does_everything_and_names_nobody(caplog: pytest.LogCaptureFixture) -> None:
     """One run summarises, deletes rows, history, logs and copies, and logs counts only."""
     caplog.set_level(logging.DEBUG)
