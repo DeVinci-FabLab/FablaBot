@@ -144,8 +144,8 @@ To go back past the release that brought the non-root image, take the hardening 
 or write what belongs to 10001.
 
 From the release that brought the attendance tables (schema 2), an older image stops with
-`newer than this release` and changes nothing. To go back and keep what was written since, take the schema back one
-version first, with the stack stopped and archived as in "Before every redeploy", the image that was running and the
+`newer than this release` and changes nothing. To go back and keep what was written since, take the schema back
+first, one version per run and once for each version the image is ahead of, with the stack stopped and archived as in "Before every redeploy", the image that was running and the
 `fablabot_state` helper of "Moving to the database":
 
 ```bash
@@ -153,13 +153,15 @@ IMAGE=ghcr.io/devinci-fablab/fablabot:X.Y.Z   # the release that was running
 fablabot_state "$VOLUMES_PATH/fablabot/data" fablabot.downgrade_schema
 ```
 
-The command drops the attendance checks and the anonymous counts, in one transaction, and nothing else: sign-ups,
-reaction history, tracked messages and temporary admins stay. The dropped data stays in the archive only: the `v1`
-copy was taken before the attendance tables existed. If it fails, it says `Cannot go back` and changes nothing. Then set the stack's image to the older release and
+The first run, from the release that keeps no present and absent counts for small trainings (schema 3), keeps every
+count and gives 0 to a present or absent count that was not kept: the older schema needs a value, so a 0 there
+reads 0 and means "not kept", not zero people. The run that follows drops the attendance checks and the anonymous counts, in one transaction, and
+nothing else: sign-ups, reaction history, tracked messages and temporary admins stay. The dropped data stays in the
+archive only: the `v1` copy was taken before the attendance tables existed. If it fails, it says `Cannot go back` and changes nothing. Then set the stack's image to the older release and
 deploy. The next start of the release with the attendance tables adds them again, empty.
 
 Only when the file itself is damaged, put the newest `data/backups/fablabot-v1-*.db` in place of `data/fablabot.db`
-instead: whatever was written since that copy is lost.
+instead (`fablabot-v2-*.db` to go back to the attendance release only): whatever was written since that copy is lost.
 
 After a rollback, delete `data/command_sync_state.json` before upgrading again (see "This command is
 outdated").
@@ -610,7 +612,8 @@ Everything the bot keeps lives in one SQLite file, `data/fablabot.db`: per-serve
 published messages and their registrations, tracked messages, the reaction history, the temporary-admin
 expiries, the attendance checks of the trainings (who was marked present, who validated, how the alert was answered)
 and the anonymous counts of each training (registered, waitlisted, withdrawn, present, absent, outcome), which hold no
-member ID or name. `data/command_sync_state.json` stays a separate file: it is a cache you may delete.
+member ID or name. A training with fewer than 3 registered members keeps no present and absent counts: with the
+reactions public, they could point at a person. `data/command_sync_state.json` stays a separate file: it is a cache you may delete.
 
 Personal data is kept for 3 years, then deleted; the anonymous counts stay. See "Retention" below.
 
@@ -622,7 +625,7 @@ Personal data is kept for 3 years, then deleted; the anonymous counts stay. See 
   that file, so the next upgrade names its copy after the last release that did.
 - When a release changes the schema, the bot also copies the database to `data/backups/fablabot-v<schema>-<time>.db`, then
   moves the schema at start. A release that moves the schema therefore leaves two copies of the same data: one under
-  the release label and one under `v1`.
+  the release label and one under `v<schema>` (`v1` before the attendance tables, `v2` before the counts threshold).
 - The bot removes a copy past 3 years only (see "Retention"). Copies count in the archive of "Before every redeploy". They
   sit on the same volume as the database, so they do not replace that archive if the volume is lost.
 - A release never goes back: a database from a newer release stops an older one.
@@ -644,17 +647,24 @@ The bot deletes personal data after 3 years and keeps anonymous counts. Nothing 
 
 | What | How long | When | What stays |
 | --- | --- | --- | --- |
-| Training registrations, waitlists, attendance and its alerts, with the training message that holds them | 3 years from the training's start; a message waits for its youngest training | Run at start, then every 24 hours | The anonymous counts of each training: registered, waitlisted, withdrawn, present, absent and the outcome (done, not done, cancelled, not asked), one row per training (a training published again is counted once, on its newest message, or on the earlier one if it was counted before), and a monthly view of them |
+| Training registrations, waitlists, attendance and its alerts, with the training message that holds them | 3 years from the training's start; a message waits for its youngest training | Run at start, then every 24 hours | The anonymous counts of each training: registered, waitlisted, withdrawn, present, absent and the outcome (done, not done, cancelled, not asked), one row per training (a training published again is counted once, on its newest message, or on the earlier one if it was counted before), and a monthly view of them; a training with fewer than 3 registered members keeps no present and absent counts |
 | The reaction history, both histories | 3 years from the reaction | Run at start, then every 24 hours | Nothing |
 | Shared and per-server log files | 3 years from the file's day (the day in its name) | Run at start, then every 24 hours | Nothing |
 | Copies in `data/backups/` | 3 years from the time in the copy's name | Run at start, then every 24 hours | Nothing |
 
+- 3 years means 3 calendar years: at a run, the bot deletes what is older than the same moment 3 years earlier, so
+  what dates from 20 November 2026 goes at the first run after 20 November 2029 at that time. A run on 29 February
+  counts from 28 February.
 - The counts of a training are written once its check closes, 7 days after the start, and always before its registrations
   go. A training whose date cannot be read, and a draft, are never deleted. A training with no attendance check counts
   as not asked.
 - A training counted before is recognised by its server, name and start, since the counts keep no trainer. Two
   trainings of the same name and start on one server count as one when the second is published after the first was
   counted.
+- A training with fewer than 3 registered members keeps its registered, waitlisted and withdrawn counts and its outcome,
+  but not its present and absent counts: the reactions stay public, so with so few members they could point at a
+  person. The monthly view adds the counts that were kept and shows nothing for a month where none was.
+  The first start of this release empties the counts already kept for such trainings.
 - The counts hold no member ID, name or pseudo. Nothing in the retention's log line names anybody: it gives counts.
 - The first start of this release deletes any log file older than 3 years, and any copy older than 3 years. The archive
   of "Before every redeploy" still holds them; `~/fablabot-archive` is yours to purge.

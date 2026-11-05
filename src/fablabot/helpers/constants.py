@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from discord import Permissions
 
 PARIS_TZ = ZoneInfo("Europe/Paris")
 MAX_MSG_CHARS = 1900
-RETENTION = timedelta(days=3 * 365)
-"""How long the bot keeps personal data: registrations, attendance, reaction history, log files and database copies."""
+RETENTION_YEARS = 3
+"""How many calendar years the bot keeps personal data: registrations, attendance, reaction history, log files and copies."""
+
+
+ANONYMOUS_MIN_REGISTERED = 3
+"""The fewest registered members for which a training keeps its present and absent counts; below, they could name a person."""
 APPEL_EDIT_WINDOW = timedelta(days=7)
 """How long after its start an attendance check can still be made or corrected."""
 MAX_TRACKED_OPTIONS = 25
@@ -19,6 +23,19 @@ EMBED_TOTAL_FIELD_CHAR_BUDGET = 5800
 EMBED_PREVIEW_MIN_CHARS = 80
 BRAND_COLOUR = 0xEA5B25
 """Accent colour of the bot's embeds, the FabLab orange, the shipped default."""
+
+
+def retention_cutoff(now: datetime) -> datetime:
+    """Return the oldest instant personal data is kept: the same instant ``RETENTION_YEARS`` years earlier.
+
+    Args:
+        now (datetime): The current time, timezone-aware.
+
+    Returns:
+        datetime: ``now`` in the same zone, three calendar years back; 29 February reads 28 February.
+    """
+    day = 28 if (now.month, now.day) == (2, 29) else now.day
+    return now.replace(year=now.year - RETENTION_YEARS, day=day)
 
 
 class RoleNames:

@@ -433,3 +433,18 @@ def test_a_second_thread_for_one_check_is_refused() -> None:
     stored = attendance.get(appel_id)
     assert stored is not None
     assert stored.thread_id == 901
+
+
+def test_the_monthly_view_ignores_counts_that_were_not_kept() -> None:
+    """A training below the threshold has no present and absent counts: the month sums the others, or says nothing."""
+    rows = [
+        (GUILD, 1, 0, "Laser", "2026-11-05T14:00:00+01:00", 5, 0, 0, 3, 2, "done"),
+        (GUILD, 2, 0, "Laser", "2026-11-25T10:00:00+01:00", 2, 1, 0, None, None, "done"),
+        (GUILD, 3, 0, "Laser", "2026-12-02T10:00:00+01:00", 1, 0, 0, None, None, "done"),
+    ]
+    with db.transaction() as conn:
+        conn.executemany("INSERT INTO training_summary VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+
+    view = db.connection().execute("SELECT month, trainings, registered, present, absent FROM training_month ORDER BY month")
+
+    assert [tuple(r) for r in view] == [("2026-11", 2, 7, 3, 2), ("2026-12", 1, 1, None, None)]

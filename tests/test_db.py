@@ -54,7 +54,7 @@ def test_an_empty_folder_gets_the_whole_schema() -> None:
     db.open_database(DB_FILE)
 
     assert DB_FILE.exists()
-    assert _version(DB_FILE) == 2
+    assert _version(DB_FILE) == 3
     assert {"guild_settings", "fm_message", "formation", "registration", "tracked_message", "reaction_event"} <= _tables()
     assert {"op_expiry", "state_import", "legacy_log_channel", "tracked_reaction"} <= _tables()
     assert {"appel", "appel_present", "appel_alert", "training_summary"} <= _tables()
@@ -654,7 +654,7 @@ def test_the_attendance_step_keeps_every_row_and_copies_the_first_version(tmp_pa
 
     db.open_database(DB_FILE)
 
-    assert _version(DB_FILE) == 2
+    assert _version(DB_FILE) == 3
     assert [tuple(r) for r in db.connection().execute("SELECT guild_id, member_id, channel_id FROM op_expiry")] == [(1, 2, 3)]
     assert [tuple(r) for r in db.connection().execute("SELECT log_channel_id FROM guild_settings")] == [(5,)]
     [copy] = DB_FILE.parent.glob("backups/test-v1-*.db")
@@ -684,3 +684,29 @@ def test_a_refused_attendance_step_stops_the_start_and_keeps_the_first_version(t
     assert len(list(DB_FILE.parent.glob("backups/test-v1-*.db"))) == 1
     db.open_database(DB_FILE, migrations=first)
     assert db.connection().execute("SELECT COUNT(*) FROM op_expiry").fetchone()[0] == 1
+
+
+def test_the_threshold_step_empties_the_counts_of_small_trainings_and_keeps_the_rest(tmp_path: Path) -> None:
+    """A file at schema 2 keeps every row; the counts of a training of 2 members go, those of 3 stay, the view still sums."""
+    second = tmp_path / "second-release"
+    second.mkdir()
+    for name in ("0001_initial.sql", "0002_attendance.sql"):
+        shutil.copy(db.MIGRATIONS_DIR / name, second)
+    db.open_database(DB_FILE, migrations=second)
+    with db.transaction() as conn:
+        conn.execute("INSERT INTO training_summary VALUES (1, 10, 0, 'Small', '2026-11-05T14:00+01:00', 2, 1, 1, 1, 1, 'done')")
+        conn.execute("INSERT INTO training_summary VALUES (1, 11, 0, 'Big', '2026-11-12T14:00+01:00', 3, 0, 0, 2, 1, 'done')")
+    db.close_database()
+
+    db.open_database(DB_FILE)
+
+    assert _version(DB_FILE) == 3
+    rows = db.connection().execute(
+        "SELECT name, registered, waitlisted, withdrawn, present, absent, outcome FROM training_summary"
+    )
+    assert sorted(tuple(r) for r in rows) == [("Big", 3, 0, 0, 2, 1, "done"), ("Small", 2, 1, 1, None, None, "done")]
+    month = db.connection().execute("SELECT trainings, registered, present, absent FROM training_month")
+    assert [tuple(r) for r in month] == [(2, 5, 2, 1)]
+    assert db.connection().execute("PRAGMA foreign_key_check").fetchall() == []
+    [copy] = DB_FILE.parent.glob("backups/test-v2-*.db")
+    assert copy.exists()

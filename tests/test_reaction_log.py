@@ -23,9 +23,14 @@ RETENTION = timedelta(days=30)
 logger = logging.getLogger(__name__)
 
 
+def _cutoff(now: datetime) -> datetime:
+    """Return the oldest instant kept, 30 days back."""
+    return now - RETENTION
+
+
 def _log(scope: ReactionScope = "formation") -> ReactionLogManager:
     """Build the manager of one scope."""
-    return ReactionLogManager(scope, retention=RETENTION, logger=logger)
+    return ReactionLogManager(scope, retention=_cutoff, logger=logger)
 
 
 def _event(
@@ -75,7 +80,9 @@ def test_history_follows_time_then_arrival() -> None:
 
 def test_history_follows_the_instant_when_the_clock_goes_back() -> None:
     """The hour from 02:00 to 03:00 on the last Sunday of October happens twice: 02:05+01:00 is 15 minutes after 02:50+02:00."""
-    log = ReactionLogManager("formation", retention=timedelta(days=36500), logger=logger)  # fixed dates must not expire
+    log = ReactionLogManager(
+        "formation", retention=lambda now: now - timedelta(days=36500), logger=logger
+    )  # fixed dates must not expire
     log.append(GUILD_A, _event("2026-10-25T02:50:00+02:00", action=ReactionAction.REMOVE))
     log.append(GUILD_A, _event("2026-10-25T02:05:00+01:00"))
     log.append(GUILD_A, _event("2026-10-24T20:00:00+02:00"))
@@ -159,7 +166,20 @@ def test_an_id_too_large_for_the_database_has_no_history() -> None:
     assert _log().history(GUILD_A, -(10**30)) == []
 
 
-def test_the_bot_keeps_the_history_for_three_years() -> None:
-    """Both histories keep what the association decided, so a shorter value cannot slip in unseen."""
-    assert timedelta(days=3 * 365) == constants.RETENTION
-    assert formation_management.RETENTION is message_management.RETENTION is constants.RETENTION
+def test_a_purge_asks_for_the_cutoff_at_the_current_time_in_paris() -> None:
+    """The manager keeps no duration: it is given the cutoff and calls it with now."""
+    seen: list[datetime] = []
+
+    def cutoff(now: datetime) -> datetime:
+        seen.append(now)
+        return now
+
+    ReactionLogManager("message", retention=cutoff, logger=logger).purge_all()
+
+    assert [moment.tzinfo for moment in seen] == [PARIS_TZ]
+
+
+def test_the_bot_keeps_both_histories_by_the_one_three_year_cutoff() -> None:
+    """Both cogs use the shared cutoff, so a shorter value cannot slip in unseen."""
+    assert formation_management.retention_cutoff is message_management.retention_cutoff is constants.retention_cutoff
+    assert constants.retention_cutoff(datetime(2031, 5, 4, 10, tzinfo=PARIS_TZ)) == datetime(2028, 5, 4, 10, tzinfo=PARIS_TZ)

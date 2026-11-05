@@ -10,7 +10,7 @@ from fablabot.helpers.constants import PARIS_TZ
 from fablabot.models.common import ReactionEvent
 
 if TYPE_CHECKING:
-    from datetime import timedelta
+    from collections.abc import Callable
     from logging import Logger
 
 type ReactionScope = Literal["formation", "message"]
@@ -25,14 +25,14 @@ class ReactionLogManager:
     def __init__(
         self,
         scope: ReactionScope,
-        retention: timedelta,
+        retention: Callable[[datetime], datetime],
         logger: Logger,
     ) -> None:
         """Initialize the manager.
 
         Args:
             scope (ReactionScope): Which history this manager keeps.
-            retention (timedelta): Duration to retain reaction events.
+            retention (Callable[[datetime], datetime]): Gives the oldest instant kept, from the current time.
             logger (Logger): Logger used for diagnostics.
         """
         self._scope = scope
@@ -107,7 +107,7 @@ class ReactionLogManager:
         Returns:
             int: The number of events removed.
         """
-        cutoff = int((datetime.now(PARIS_TZ) - self._retention).timestamp())
+        cutoff = int(self._retention(datetime.now(PARIS_TZ)).timestamp())
         return (
             db.connection()
             .execute("DELETE FROM reaction_event WHERE scope = ? AND unixepoch(ts_iso) < ?", (self._scope, cutoff))
