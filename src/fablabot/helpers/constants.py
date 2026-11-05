@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from discord import Permissions
 
 PARIS_TZ = ZoneInfo("Europe/Paris")
 MAX_MSG_CHARS = 1900
+APPEL_EDIT_WINDOW = timedelta(days=7)
+"""How long after its start an attendance check can still be made or corrected."""
 MAX_TRACKED_OPTIONS = 25
 EMBED_PREVIEW_MAX_CHARS = 900
 EMBED_TOTAL_FIELD_CHAR_BUDGET = 5800

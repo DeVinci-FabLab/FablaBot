@@ -611,3 +611,17 @@ def test_every_relative_link_and_anchor_in_the_docs_resolves() -> None:
             if not found.exists() or (anchor and has_anchors and anchor not in _anchors(found.read_text(encoding="utf-8"))):
                 broken.append(f"{source.name}: {target}")
     assert not broken, "\n".join(broken)
+
+
+def test_operator_guide_says_a_rollback_past_the_attendance_schema_needs_the_v1_copy() -> None:
+    """The guide names the attendance data, the two copies of a schema change, and the way back through the v1 copy."""
+    stored = _section(_read("docs/OPERATIONS.md"), "## Stored data")
+    for detail in ("attendance", "anonymous counts", "two copies", "`v1`"):
+        assert detail in stored, detail
+    rolling = _section(_read("docs/OPERATIONS.md"), "### Rolling back")
+    for detail in ("newer than this release", "fablabot-v1-*.db", "data/fablabot.db", "stop", "archive"):
+        assert detail in rolling, detail
+    troubleshooting = _section(_read("docs/OPERATIONS.md"), "## Troubleshooting")
+    row = next(line for line in troubleshooting.splitlines() if "first start of a release" in line)
+    assert "Cannot start: data/fablabot.db cannot be used: <cause>." in row
+    assert "previous image" in row

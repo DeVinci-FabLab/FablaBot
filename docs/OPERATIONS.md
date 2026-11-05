@@ -143,6 +143,11 @@ To go back past the release that brought the non-root image, take the hardening 
 [Moving a host to the non-root image](DEPLOYMENT.md#moving-a-host-to-the-non-root-image) says: the older image runs as root, and with every capability dropped root cannot read
 or write what belongs to 10001.
 
+From the release that brought the attendance tables (schema 2), an older image stops with
+`newer than this release` and changes nothing. Going back means stopping the stack, archiving as in "Before every
+redeploy", then putting the newest `data/backups/fablabot-v1-*.db` in place of `data/fablabot.db` and starting the older
+image. Whatever was written since that copy is lost.
+
 After a rollback, delete `data/command_sync_state.json` before upgrading again (see "This command is
 outdated").
 
@@ -571,8 +576,10 @@ nothing is removed. A failure is logged as a warning with the error type, and th
 ## Stored data
 
 Everything the bot keeps lives in one SQLite file, `data/fablabot.db`: per-server settings, training drafts,
-published messages and their registrations, tracked messages, the reaction history and the temporary-admin
-expiries. `data/command_sync_state.json` stays a separate file: it is a cache you may delete.
+published messages and their registrations, tracked messages, the reaction history, the temporary-admin
+expiries, the attendance checks of the trainings (who was marked present, who validated, how the alert was answered)
+and the anonymous counts of each training (registered, waitlisted, withdrawn, present, absent, outcome), which hold no
+member ID or name. `data/command_sync_state.json` stays a separate file: it is a cache you may delete.
 
 The reaction history is kept for 3 years, then deleted at the next write. The registrations of a replaced training
 message stay with no time limit, so member IDs and names stay in the file and in `data/backups/` until the planned
@@ -585,7 +592,8 @@ step that keeps only anonymous statistics after 3 years.
   named `unknown`. A rollback to an older release is copied the same way, from 0.8.0 on: older releases do not write
   that file, so the next upgrade names its copy after the last release that did.
 - When a release changes the schema, the bot also copies the database to `data/backups/fablabot-v<schema>-<time>.db`, then
-  moves the schema at start.
+  moves the schema at start. A release that moves the schema therefore leaves two copies of the same data: one under
+  the release label and one under `v1`.
 - The bot never removes these copies, and they count in the archive of "Before every redeploy". They sit on the same
   volume as the database, so they do not replace that archive if the volume is lost.
 - A release never goes back: a database from a newer release stops an older one.
@@ -790,5 +798,6 @@ The log tells which case applies: `Commands synced (9, global).` after a sync, a
 | `Cannot start: data/... changed since it was imported` | An older image ran after the import, so the file holds what the database lacks | Nothing was changed. Do not start this release before you know which side holds the latest data: see "Back to a release before the database". |
 | `Cannot import: ...` | The JSON state holds something this release does not know, the database holds other data, or a file changed since the import | Nothing was written, and the line says where. See "If a step fails". |
 | `Cannot start: data/fablabot.db is at schema version ...` | The database comes from a newer release | Run that release or a later one. |
+| `Cannot start: data/fablabot.db cannot be used: <cause>.` at the first start of a release | The step that moves the schema failed | Nothing changed: the file is still at its old version, with a copy in `data/backups/`. Start the previous image on the same file, and report the line. |
 | `Cannot start: data/fablabot.db cannot be used: ...` | The disk is full, `data/` is not writable, the file is damaged, or a migration left orphan rows | Check the disk and the folder's owner first. Restore the file from an archive or from `data/backups/` only if it is damaged. |
 | A release's image build failed | The tag exists but `:latest` did not move | Re-run the failed jobs of that run (re-running all jobs publishes `:edge` only). |
