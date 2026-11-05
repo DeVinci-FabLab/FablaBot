@@ -652,6 +652,9 @@ The bot deletes personal data after 3 years and keeps anonymous counts. Nothing 
 | Shared and per-server log files | 3 years from the file's day (the day in its name) | Run at start, then every 24 hours | Nothing |
 | Copies in `data/backups/` | 3 years from the time in the copy's name | Run at start, then every 24 hours | Nothing |
 
+- 3 years means 3 calendar years: at a run, the bot deletes what is older than the same moment 3 years earlier, so
+  what dates from 20 November 2026 goes at the first run after 20 November 2029 at that time. A run on 29 February
+  counts from 28 February.
 - The counts of a training are written once its check closes, 7 days after the start, and always before its registrations
   go. A training whose date cannot be read, and a draft, are never deleted. A training with no attendance check counts
   as not asked.

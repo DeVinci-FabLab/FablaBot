@@ -8,7 +8,7 @@ import logging
 import re
 from typing import TYPE_CHECKING, Final
 
-from fablabot.helpers.constants import PARIS_TZ, RETENTION
+from fablabot.helpers.constants import PARIS_TZ, retention_cutoff
 from fablabot.services import retention
 
 if TYPE_CHECKING:
@@ -118,7 +118,7 @@ def apply_retention(now: datetime, *, log_dir: Path, backups: Path) -> Retention
     Raises:
         sqlite3.Error: The database refused a step; the files are left for the next run.
     """
-    cutoff = now - RETENTION
+    cutoff = retention_cutoff(now)
     summarised = retention.summarise(now)
     messages = retention.forget(cutoff)
     reactions = retention.forget_reactions(cutoff)

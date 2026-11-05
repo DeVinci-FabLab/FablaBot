@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from fablabot import db
-from fablabot.helpers.constants import ANONYMOUS_MIN_REGISTERED, PARIS_TZ, RETENTION
+from fablabot.helpers.constants import ANONYMOUS_MIN_REGISTERED, PARIS_TZ, retention_cutoff
 from fablabot.helpers.retention import apply_retention, old_copies, old_log_files
 from fablabot.models import FmMessageDraft, Formation, PublishedMessage
 from fablabot.models.attendance import AlertAction
@@ -22,6 +22,7 @@ from fablabot.services import attendance, formations, retention
 GUILD = 111
 OTHER_GUILD = 222
 NOW = datetime(2029, 11, 20, 4, 0, tzinfo=PARIS_TZ)
+CUTOFF = retention_cutoff(NOW)
 NAME = "member_secret_name"
 
 
@@ -172,13 +173,13 @@ def test_the_check_held_by_the_older_copy_is_kept_on_the_newest_row() -> None:
 
 def test_both_copies_of_a_training_published_again_go_after_three_years() -> None:
     """The older copy has no row of its own, and its registrations still go with the newest copy's."""
-    old = NOW - RETENTION - timedelta(days=1)
+    old = CUTOFF - timedelta(days=1)
     _publish(1, old)
     _publish(2, old)
 
     retention.summarise(NOW)
 
-    assert retention.forget(NOW - RETENTION) == 2
+    assert retention.forget(CUTOFF) == 2
     assert _count("registration") == 0
 
 
@@ -201,23 +202,23 @@ def test_a_training_published_again_after_its_counts_were_written_is_not_counted
 
 def test_the_later_copy_of_a_counted_training_goes_with_the_first_after_three_years() -> None:
     """A copy published after the counts were written needs no row of its own to be deleted."""
-    old = NOW - RETENTION - timedelta(days=1)
+    old = CUTOFF - timedelta(days=1)
     _publish(1, old)
     retention.summarise(NOW)
     _publish(2, old, registered=())
 
     assert retention.summarise(NOW) == 0
-    assert retention.forget(NOW - RETENTION) == 2
+    assert retention.forget(CUTOFF) == 2
 
 
 def test_a_training_counted_before_its_other_copy_goes_is_not_counted_again() -> None:
     """The newest copy goes first, its older copy stays for a younger training, and the next run adds no second row."""
-    a_start, b_start = NOW - RETENTION - timedelta(days=30), NOW - timedelta(days=30)
+    a_start, b_start = CUTOFF - timedelta(days=30), NOW - timedelta(days=30)
     _publish(1, a_start, b_start)
     _publish(2, a_start)
 
     assert retention.summarise(NOW) == 2
-    assert retention.forget(NOW - RETENTION) == 1
+    assert retention.forget(CUTOFF) == 1
 
     assert retention.summarise(NOW) == 0
     assert [row[:3] for row in _summaries()] == [(1, 1, "Training 1"), (2, 0, "Training 0")]
@@ -251,16 +252,16 @@ def test_a_later_session_of_a_recurring_training_gets_its_own_row() -> None:
 
 def test_a_later_session_keeps_its_message_until_it_has_its_own_row() -> None:
     """The first session's counts do not stand for the next one of the same name: its registrations stay."""
-    first, second = NOW - RETENTION - timedelta(days=30), NOW - RETENTION - timedelta(days=20)
+    first, second = CUTOFF - timedelta(days=30), CUTOFF - timedelta(days=20)
     _publish(1, first)
     assert retention.summarise(NOW) == 1
     _publish(2, second)
 
-    assert retention.forget(NOW - RETENTION) == 1
+    assert retention.forget(CUTOFF) == 1
 
     assert _count("registration") == 4
     assert retention.summarise(NOW) == 1
-    assert retention.forget(NOW - RETENTION) == 1
+    assert retention.forget(CUTOFF) == 1
     assert _count("registration") == 0
 
 
@@ -277,12 +278,12 @@ def test_a_training_of_another_server_is_not_a_copy_of_this_one() -> None:
 
 def test_the_counts_of_another_server_do_not_stand_for_this_one() -> None:
     """A row written for one server never covers the same training of another: no skip, no deletion without counts."""
-    old = NOW - RETENTION - timedelta(days=1)
+    old = CUTOFF - timedelta(days=1)
     _publish(1, old)
     retention.summarise(NOW)
     _publish(2, old, guild=OTHER_GUILD)
 
-    assert retention.forget(NOW - RETENTION) == 1
+    assert retention.forget(CUTOFF) == 1
 
     assert retention.summarise(NOW) == 1
     assert _guild_rows() == {GUILD: (1, 3, 0, 0, "not_asked"), OTHER_GUILD: (2, 3, 0, 0, "not_asked")}
@@ -290,11 +291,11 @@ def test_the_counts_of_another_server_do_not_stand_for_this_one() -> None:
 
 def test_a_message_is_not_deleted_for_a_copy_on_another_server() -> None:
     """Without its own counts, a training is kept, though another server published the same one later."""
-    old = NOW - RETENTION - timedelta(days=1)
+    old = CUTOFF - timedelta(days=1)
     _publish(1, old)
     _publish(2, old, guild=OTHER_GUILD)
 
-    assert retention.forget(NOW - RETENTION) == 0
+    assert retention.forget(CUTOFF) == 0
 
 
 def test_each_server_summary_takes_the_outcome_of_its_own_check() -> None:
@@ -315,12 +316,12 @@ def test_each_server_summary_takes_the_outcome_of_its_own_check() -> None:
 
 def test_a_message_whose_trainings_close_on_different_days_is_summarised_in_two_runs() -> None:
     """The later training gets its counts when its own check closes, so the message can go in the end."""
-    _publish(1, NOW - RETENTION - timedelta(days=20), NOW - RETENTION - timedelta(days=5))
+    _publish(1, CUTOFF - timedelta(days=20), CUTOFF - timedelta(days=5))
 
-    assert retention.summarise(NOW - RETENTION - timedelta(days=10)) == 1
+    assert retention.summarise(CUTOFF - timedelta(days=10)) == 1
     assert retention.summarise(NOW) == 1
     assert [row[1] for row in _summaries()] == [0, 1]
-    assert retention.forget(NOW - RETENTION) == 1
+    assert retention.forget(CUTOFF) == 1
 
 
 def test_a_check_still_open_is_not_summarised() -> None:
@@ -358,14 +359,14 @@ def test_a_training_without_check_counts_as_not_asked() -> None:
 
 def test_three_years_after_the_start_the_personal_rows_go_and_the_counts_stay() -> None:
     """Registrations, waitlist, check and marks go with their message; the summary has no member or trainer."""
-    old = NOW - RETENTION - timedelta(days=1)
+    old = CUTOFF - timedelta(days=1)
     _publish(1, old)
     appel_id = attendance.open_appel(GUILD, 1, 0, trainer_id=2222, starts_at=old, ends_at=old + timedelta(hours=2))
     attendance.mark(appel_id, [1], [1])
     _publish(2, NOW - timedelta(days=30))
 
     retention.summarise(NOW)
-    assert retention.forget(NOW - RETENTION) == 1
+    assert retention.forget(CUTOFF) == 1
 
     assert [row[0] for row in _summaries()] == [1, 2]
     assert [_count(t) for t in ("appel", "appel_present")] == [0, 0]
@@ -379,21 +380,21 @@ def test_three_years_after_the_start_the_personal_rows_go_and_the_counts_stay() 
 
 def test_a_message_waits_for_its_youngest_training() -> None:
     """A message is kept while one of its trainings is younger than three years."""
-    _publish(1, NOW - RETENTION - timedelta(days=10), NOW - RETENTION + timedelta(days=1))
+    _publish(1, CUTOFF - timedelta(days=10), CUTOFF + timedelta(days=1))
 
     retention.summarise(NOW)
 
-    assert retention.forget(NOW - RETENTION) == 0
+    assert retention.forget(CUTOFF) == 0
 
 
 def test_a_training_whose_start_cannot_be_read_keeps_its_message() -> None:
     """Nothing is deleted on a date SQLite cannot read, and nothing is summarised from it."""
-    _publish(1, NOW - RETENTION - timedelta(days=10))
+    _publish(1, CUTOFF - timedelta(days=10))
     with db.transaction() as conn:
         conn.execute("UPDATE formation SET start_iso = 'soon'")
 
     assert retention.summarise(NOW) == 0
-    assert retention.forget(NOW - RETENTION) == 0
+    assert retention.forget(CUTOFF) == 0
 
 
 def test_a_draft_is_never_deleted() -> None:
@@ -410,7 +411,7 @@ def test_a_draft_is_never_deleted() -> None:
 
 def test_a_draft_holding_a_published_training_is_never_deleted() -> None:
     """Publishing leaves the draft as it was: its training matches the counted one, and the draft still stays."""
-    old = NOW - RETENTION - timedelta(days=1)
+    old = CUTOFF - timedelta(days=1)
     _publish(1, old)
     draft_training = Formation(
         emoji="🔧", name="Training 0", trainer_mention="<@2222>", start_iso=old.isoformat(), duration="2h", seats=3
@@ -418,7 +419,7 @@ def test_a_draft_holding_a_published_training_is_never_deleted() -> None:
     formations.save_draft(GUILD, FmMessageDraft("My header", 0, "My intro", [draft_training], "My end"))
     assert retention.summarise(NOW) == 1
 
-    assert retention.forget(NOW - RETENTION) == 1
+    assert retention.forget(CUTOFF) == 1
 
     draft = formations.get_draft(GUILD)
     assert draft is not None
@@ -436,14 +437,14 @@ def test_an_empty_draft_is_never_deleted() -> None:
 
 def test_a_training_without_its_counts_keeps_its_message() -> None:
     """Nothing personal goes before its anonymous counts are written."""
-    _publish(1, NOW - RETENTION - timedelta(days=10))
+    _publish(1, CUTOFF - timedelta(days=10))
 
-    assert retention.forget(NOW - RETENTION) == 0
+    assert retention.forget(CUTOFF) == 0
 
 
 def test_log_files_of_a_day_older_than_three_years_go() -> None:
     """Shared and per-server files go by the day in their name; other files stay."""
-    cutoff = (NOW - RETENTION).date()
+    cutoff = (CUTOFF).date()
     logs = Path("logs")
     old = [logs / f"{cutoff - timedelta(days=1)}.log", logs / "guilds" / "111" / f"{cutoff - timedelta(days=1)}.log"]
     kept = [logs / f"{cutoff}.log", logs / "guilds" / "111" / f"{cutoff}.log", logs / "notes.txt", logs / "2019-13-45.log"]
@@ -458,7 +459,7 @@ def test_database_copies_older_than_three_years_go() -> None:
     """A copy goes by the time in its name, whatever its label; other files stay."""
     folder = Path("backups")
     folder.mkdir()
-    cutoff = NOW - RETENTION
+    cutoff = CUTOFF
     stamp = (cutoff - timedelta(seconds=1)).astimezone(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     young = cutoff.astimezone(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     old = [folder / f"fablabot-v1-{stamp}.db", folder / f"fablabot-0.12.2-{stamp}.db"]
@@ -472,7 +473,7 @@ def test_a_copy_with_an_impossible_date_is_kept_and_named_in_the_log(caplog: pyt
     """A name shaped like a copy but holding a date that does not exist is left alone, and the run goes on."""
     folder = Path("backups")
     folder.mkdir()
-    cutoff = NOW - RETENTION
+    cutoff = CUTOFF
     stamp = (cutoff - timedelta(seconds=1)).astimezone(UTC).strftime("%Y%m%dT%H%M%S%fZ")
     odd = folder / "fablabot-v1-20261399T000000000000Z.db"
     old = folder / f"fablabot-v1-{stamp}.db"
@@ -483,10 +484,53 @@ def test_a_copy_with_an_impossible_date_is_kept_and_named_in_the_log(caplog: pyt
     assert odd.name in caplog.text
 
 
+@pytest.mark.parametrize(
+    ("now", "cutoff"),
+    [
+        (datetime(2029, 11, 20, 4, 0, tzinfo=PARIS_TZ), datetime(2026, 11, 20, 4, 0, tzinfo=PARIS_TZ)),
+        (datetime(2031, 3, 1, 9, 30, tzinfo=PARIS_TZ), datetime(2028, 3, 1, 9, 30, tzinfo=PARIS_TZ)),
+        (datetime(2031, 2, 28, 9, 30, tzinfo=PARIS_TZ), datetime(2028, 2, 28, 9, 30, tzinfo=PARIS_TZ)),
+        (datetime(2028, 2, 29, 23, 59, tzinfo=PARIS_TZ), datetime(2025, 2, 28, 23, 59, tzinfo=PARIS_TZ)),
+        (datetime(2032, 2, 29, 0, 0, tzinfo=UTC), datetime(2029, 2, 28, 0, 0, tzinfo=UTC)),
+    ],
+    ids=["plain", "into-a-leap-year", "28-february", "29-february", "29-february-utc"],
+)
+def test_the_cutoff_is_the_same_instant_three_calendar_years_back(now: datetime, cutoff: datetime) -> None:
+    """Three years by the calendar, not 1095 days; 29 February reads 28 February; the time and the zone stay."""
+    assert retention_cutoff(now) == cutoff
+    assert retention_cutoff(now).tzinfo is now.tzinfo
+
+
+def test_every_purge_goes_by_the_calendar_cutoff() -> None:
+    """A training, a reaction, a log file and a copy 12 hours inside three years stay, and 12 hours outside go.
+
+    NOW is 20 November 2029 at 04:00; 1095 days back lands on 21 November 2026, since 2028 has a 29 February.
+    """
+    inside, outside = datetime(2026, 11, 20, 16, 0, tzinfo=PARIS_TZ), datetime(2026, 11, 19, 16, 0, tzinfo=PARIS_TZ)
+    _publish(1, inside)
+    _publish(2, outside)
+    _react(1, "🔧", 1, "add", inside)
+    _react(2, "🔧", 1, "add", outside)
+    logs, backups = Path("logs"), Path("backups")
+    logs.mkdir()
+    backups.mkdir()
+    for moment in (inside, outside):
+        (logs / f"{moment.date()}.log").write_text("x", encoding="utf-8")
+        (backups / f"fablabot-v1-{moment.astimezone(UTC):%Y%m%dT%H%M%S%fZ}.db").write_bytes(b"")
+
+    report = apply_retention(NOW, log_dir=logs, backups=backups)
+
+    assert (report.messages, report.reactions, report.log_files, report.copies) == (1, 1, 1, 1)
+    assert [row["message_id"] for row in db.connection().execute("SELECT message_id FROM fm_message")] == [1]
+    assert [row["message_id"] for row in db.connection().execute("SELECT message_id FROM reaction_event")] == [1]
+    assert [path.name for path in logs.iterdir()] == [f"{inside.date()}.log"]
+    assert len(list(backups.iterdir())) == 1
+
+
 def test_a_run_does_everything_and_names_nobody(caplog: pytest.LogCaptureFixture) -> None:
     """One run summarises, deletes rows, history, logs and copies, and logs counts only."""
     caplog.set_level(logging.DEBUG)
-    old = NOW - RETENTION - timedelta(days=1)
+    old = CUTOFF - timedelta(days=1)
     _publish(1, old)
     _react(1, "🔧", 1, "add", old - timedelta(days=1))
     _react_in_message(old - timedelta(days=1))

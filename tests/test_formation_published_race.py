@@ -708,7 +708,9 @@ async def test_a_member_who_left_and_came_back_in_the_hour_the_clock_repeats_kee
 ) -> None:
     """The re-add at 02:05+01:00 comes 15 minutes after the removal at 02:50+02:00, though its text sorts before."""
     env = _Env(started_bot.get_cog("FormationManagement"), monkeypatch)
-    monkeypatch.setattr(env.cog._reaction_logs, "_retention", timedelta(days=36500))  # fixed dates must not expire
+    monkeypatch.setattr(
+        env.cog._reaction_logs, "_retention", lambda now: now - timedelta(days=36500)
+    )  # fixed dates must not expire
     _forget_logged_reactions()
     for action, ts_iso in (
         (ReactionAction.ADD, "2026-10-24T20:00:00+02:00"),

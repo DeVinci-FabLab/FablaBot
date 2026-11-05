@@ -30,8 +30,8 @@ from fablabot.helpers.constants import (
     APPEL_COMMAND_ROLES,
     APPEL_EDIT_WINDOW,
     PARIS_TZ,
-    RETENTION,
     ErrorMessages,
+    retention_cutoff,
     staff_default_permissions,
 )
 from fablabot.helpers.constants import FORMATION_ROLES as ALLOWED_ROLES
@@ -111,7 +111,7 @@ class FormationManagement(commands.Cog):
         self.bot = bot
         self._reaction_logs = ReactionLogManager(
             "formation",
-            retention=RETENTION,
+            retention=retention_cutoff,
             logger=logger,
         )
         self._reaction_lock = asyncio.Lock()

@@ -41,7 +41,7 @@ from discord.ext import commands
 from fablabot.helpers.access import EVERYONE, AnyRole, ServerPermission, access
 from fablabot.helpers.constants import MESSAGE_DM_ROLES as _DM_ROLES
 from fablabot.helpers.constants import MESSAGE_ROLES as ALLOWED_ROLES
-from fablabot.helpers.constants import PARIS_TZ, RETENTION, ErrorMessages, staff_default_permissions
+from fablabot.helpers.constants import PARIS_TZ, ErrorMessages, retention_cutoff, staff_default_permissions
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.safe_discord_operations import retract_unsaved_post
 from fablabot.helpers.utils import (
@@ -101,7 +101,7 @@ class MessageManagement(commands.Cog):
         self.bot = bot
         self._reaction_logs = ReactionLogManager(
             "message",
-            retention=RETENTION,
+            retention=retention_cutoff,
             logger=logger,
         )
         self._reaction_logs.purge_all()

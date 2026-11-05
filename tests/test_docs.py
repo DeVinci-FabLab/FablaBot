@@ -799,6 +799,18 @@ def test_operator_guide_says_small_trainings_keep_no_present_and_absent_counts()
     assert "fablabot-v2-*.db" in rolling
 
 
+def test_operator_guide_counts_the_three_years_by_the_calendar() -> None:
+    """The retention says what 3 years means on the calendar, with 29 February, and no page counts it in days."""
+    section = _section(_read("docs/OPERATIONS.md"), "### Retention")
+    for detail in ("3 calendar years", "29 February", "28 February"):
+        assert detail in section, detail
+    for name in ("README.md", "docs/OPERATIONS.md", "docs/DEPLOYMENT.md", "docs/USERGUIDE.md"):
+        text = _read(name)
+        assert "1095" not in text
+        assert "3 * 365" not in text
+        assert "three years" not in text, name
+
+
 def test_operator_guide_no_longer_says_the_bot_deletes_no_log_file() -> None:
     """No sentence says the bot never purges or deletes logs or copies; the exception past 3 years is the one rule."""
     guide = _read("docs/OPERATIONS.md")
