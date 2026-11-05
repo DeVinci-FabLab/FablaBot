@@ -681,7 +681,7 @@ def test_user_guide_says_the_lists_are_those_saved_and_a_restart_loses_the_sendi
     assert "those saved at the click, whatever is marked afterwards" in section
     assert "even when the trainer's message could not be refreshed" in section
     assert "if the bot restarts between the save and the sending, nothing is sent again" in section
-    assert "presses `Mettre à jour l'appel` to send the lists" in section
+    assert "presses `Mettre à jour l'appel` within the 7 days of the edit window to send the lists" in section
 
 
 def test_user_guide_says_a_replaced_validation_is_not_reported_and_the_newest_is_read_last() -> None:
@@ -689,6 +689,7 @@ def test_user_guide_says_a_replaced_validation_is_not_reported_and_the_newest_is
     section = _section(_read("docs/USERGUIDE.md"), "### Attendance check")
     assert "validations of the same check overlap, the reports go out one after the other" in section
     assert "a report that a newer validation already replaced is not sent" in section
+    assert "leaves no line in the log channel either" in section
     assert "the last one a Respo Formation reads is the newest" in section
 
 
