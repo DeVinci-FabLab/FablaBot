@@ -1728,8 +1728,10 @@ async def test_a_save_during_a_failed_relaunch_closes_the_alert_done(hall: Hall,
     assert not appel.cancelled
 
 
-async def test_a_relaunch_that_fails_with_an_error_releases_its_claim(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
-    """If sending the relaunch raises, the answer is taken back, so nobody is recorded as relaunched who was not reached."""
+async def test_a_relaunch_that_fails_with_an_error_releases_its_claim(
+    hall: Hall, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """If sending the relaunch raises, the answer is taken back, the failure is logged with IDs and the clicker is told."""
     await _overdue(hall)
 
     async def broken(_guild: Any, _appel: Any) -> bool:
@@ -1737,11 +1739,34 @@ async def test_a_relaunch_that_fails_with_an_error_releases_its_claim(hall: Hall
 
     monkeypatch.setattr(ui_attendance, "deliver", broken)
 
-    with pytest.raises(RuntimeError):
-        await hall.forged_click(hall.respo, _alert_id(hall, "r"), shown=_alert(hall, hall.respo))
+    allowed, interaction = await hall.forged_click(hall.respo, _alert_id(hall, "r"), shown=_alert(hall, hall.respo))
 
+    assert allowed
+    assert _followed(interaction) == "Le formateur n'a pas pu être relancé : une erreur est survenue. L'alerte reste ouverte."
     assert _stored_answer(hall) == (None, None, None)
     assert not any(b.get("disabled") for b in _buttons(_alert(hall, hall.respo)).values())
+    assert f"Relaunch of appel {hall.appel_id} by user {hall.respo.id} failed" in caplog.text
+    allowed, _ = await hall.forged_click(hall.respo, _alert_id(hall, "i"), shown=_alert(hall, hall.respo))
+    assert allowed
+    assert _stored_answer(hall)[:2] == (hall.respo.id, attendance.AlertAction.IGNORE)
+
+
+async def test_a_slow_relaunch_still_answers_the_deferred_click(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A delivery that takes a while is answered through the deferred click, never through a second first response."""
+    await _overdue(hall)
+
+    async def slow(_guild: Any, _appel: Any) -> bool:
+        await asyncio.sleep(0.05)
+        return True
+
+    monkeypatch.setattr(ui_attendance, "deliver", slow)
+
+    _, interaction = await hall.forged_click(hall.respo, _alert_id(hall, "r"))
+
+    interaction.response.defer.assert_awaited_once()
+    interaction.response.edit_message.assert_not_awaited()
+    interaction.edit_original_response.assert_awaited_once()
+    assert _stored_answer(hall)[:2] == (hall.respo.id, attendance.AlertAction.RELAUNCH)
 
 
 async def test_a_relaunch_answers_the_click_before_it_sends_anything(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1781,12 +1806,7 @@ async def test_a_click_during_a_failed_relaunch_is_told_to_try_again_and_can(
 
     monkeypatch.setattr(ui_attendance, "deliver", deliver_then_fail)
 
-    relaunch = hall.forged_click(hall.respo, _alert_id(hall, "r"), shown=_alert(hall, hall.respo))
-    if failure == "raises":
-        with pytest.raises(RuntimeError):
-            await relaunch
-    else:
-        await relaunch
+    await hall.forged_click(hall.respo, _alert_id(hall, "r"), shown=_alert(hall, hall.respo))
 
     ((allowed, interaction),) = meanwhile
     assert allowed

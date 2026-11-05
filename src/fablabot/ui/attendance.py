@@ -43,6 +43,8 @@ _UNCHANGED = "Rien n'a été modifié."
 _GONE = "Cet appel n'existe plus."
 _NO_RIGHT = "Seuls le formateur, les Respo Formation et les admins peuvent faire cet appel."
 _COMMAND = "appel"
+_RELAUNCH_UNREACHED = "Le formateur n'a pas pu être relancé : ses MP sont fermés et aucun fil n'a pu être créé."
+_RELAUNCH_ERROR = "Le formateur n'a pas pu être relancé : une erreur est survenue. L'alerte reste ouverte."
 
 # The checks whose relaunch is in flight: the claim is stored before the trainer is reached, so until it settles a stored
 # "relaunch" does not yet mean the trainer was. Held in this process only: a restart mid-relaunch leaves the claim stored,
@@ -387,10 +389,8 @@ class AppelAlertAction(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<
             await self._already(interaction)
             return
         relaunch = answer is AlertAction.RELAUNCH
-        if relaunch and not await self._relaunch(interaction):
-            await interaction.followup.send(
-                "Le formateur n'a pas pu être relancé : ses MP sont fermés et aucun fil n'a pu être créé.", ephemeral=True
-            )
+        if relaunch and (failure := await self._relaunch(interaction)) is not None:
+            await interaction.followup.send(failure, ephemeral=True)
             return
         logger.info(f"[appel] alert appel_id={self.appel_id} user_id={user_id} action={answer}")
         appel = attendance.get(self.appel_id)
@@ -429,23 +429,28 @@ class AppelAlertAction(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<
         logger.info(f"[appel] alert appel_id={self.appel_id} user_id={user_id} already answered")
         await interaction.response.send_message(f"Déjà traité : {answer or _GONE}", ephemeral=True)
 
-    async def _relaunch(self, interaction: Interaction[Any]) -> bool:
-        """Defer the click, then send the trainer the check again; False when nobody could be reached.
+    async def _relaunch(self, interaction: Interaction[Any]) -> str | None:
+        """Defer the click, then send the trainer the check again; None when it went, else what to tell the clicker.
 
         The click is deferred first: reaching the trainer may fetch the member and open a thread, which can outlast the
         three seconds Discord gives a response.
 
-        When nobody was reached, or sending failed, the claim is taken back. The trainer may have saved meanwhile, and the
-        save found the alert answered, so it is closed done here rather than left open on a saved check. Until then the
-        check is listed as relaunching, so that another Respo's click is told to try again rather than that it is done.
+        When nobody was reached, or sending failed (the failure is logged, not raised), the claim is taken back. The
+        trainer may have saved meanwhile, and the save found the alert answered, so it is closed done here rather than
+        left open on a saved check. Until then the check is listed as relaunching, so that another Respo's click is told
+        to try again rather than that it is done.
         """
         reached = False
+        failed = _RELAUNCH_UNREACHED
         _relaunching.add(self.appel_id)
         try:
             await interaction.response.defer()
             appel = attendance.get(self.appel_id)
             guild = interaction.client.get_guild(appel.guild_id) if appel else None
             reached = appel is not None and guild is not None and await deliver(guild, appel)
+        except Exception:  # the click is answered below; raised, it would leave the clicker with a deferred "thinking"
+            logger.exception(f"Relaunch of appel {self.appel_id} by user {interaction.user.id} failed.")
+            failed = _RELAUNCH_ERROR
         finally:
             try:
                 if not reached:
@@ -457,7 +462,7 @@ class AppelAlertAction(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<
                 released = attendance.get(self.appel_id)
                 if released is not None:
                     await settle_alert(interaction.client, released)
-        return reached
+        return None if reached else failed
 
 
 DYNAMIC_ITEMS: Final = (AppelToggle, AppelMenu, AppelValidate, AppelAlertAction)
