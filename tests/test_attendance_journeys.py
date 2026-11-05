@@ -1579,6 +1579,39 @@ async def test_a_relaunch_that_reaches_nobody_says_so_and_leaves_the_alert_open(
     assert not any(b.get("disabled") for b in _buttons(_alert(hall, hall.respo)).values())
 
 
+@pytest.mark.parametrize("case", ["closed_dms", "no_respo"])
+async def test_an_alert_that_reaches_nobody_is_recorded_and_not_sent_again(
+    hall: Hall, monkeypatch: pytest.MonkeyPatch, case: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """With no Respo Formation reached, the alert is logged and recorded anyway, so a later tick sends nothing."""
+    role = hall.roles[RoleNames.TRAININGS_MANAGER]
+    closed = {hall.respo.id} if case == "closed_dms" else set()
+
+    async def can_dm(member: Any) -> bool:
+        return member.id not in closed
+
+    monkeypatch.setattr("fablabot.helpers.utils._can_dm_user", can_dm)
+    if case == "no_respo":
+        hall.env.backend.edit_member(GUILD_ID, hall.respo.id, {"role_ids": []})
+        await asyncio.sleep(0)
+    with caplog.at_level(logging.WARNING):
+        await _overdue(hall)
+
+    appel = attendance.get(hall.appel_id)
+    assert appel is not None
+    assert appel.alert_sent
+    assert attendance.alert_messages(hall.appel_id) == []
+    assert f"Alert of appel {hall.appel_id} in guild {GUILD_ID} reached no Respo Formation." in caplog.text
+
+    # The Respo can be reached from now on: the check is not read again, so nothing goes out late.
+    closed.clear()
+    hall.env.backend.edit_member(GUILD_ID, hall.respo.id, {"role_ids": [role.id]})
+    await asyncio.sleep(0)
+    await hall.tick()
+
+    assert _dms(hall.respo) == []
+
+
 async def test_cancel_closes_the_appel_and_tells_no_registrant(hall: Hall) -> None:
     """Cancelling closes the appel, shows it counts as not held, and sends nothing to the registered members."""
     await _overdue(hall)
