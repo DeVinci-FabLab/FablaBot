@@ -1,7 +1,8 @@
 -- The trainings a server gives again and again, typed once: adding a session copies them, so editing or deleting a
 -- template never changes a session already in a draft or published. No member is stored here.
+-- AUTOINCREMENT: a deleted template's ID is never given again, so a button kept in a message cannot reach another one.
 CREATE TABLE training_template (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     guild_id INTEGER NOT NULL,
     name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 100),
     duration TEXT NOT NULL CHECK (length(duration) BETWEEN 1 AND 50),

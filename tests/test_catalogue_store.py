@@ -92,6 +92,19 @@ def test_an_update_replaces_every_field() -> None:
     assert catalogue.get_template(GUILD_A, srg.id) == TrainingTemplate(srg.id, GUILD_A, changed)
 
 
+def test_a_deleted_templates_id_is_never_given_to_a_new_template() -> None:
+    """A button holding a deleted template's ID cannot reach the template created after it."""
+    _srg(name="Soudure")
+    gone = _srg()
+    catalogue.delete_template(GUILD_A, gone.id)
+
+    later = _srg(name="Laser")
+
+    assert later.id != gone.id
+    assert catalogue.delete_template(GUILD_A, gone.id) is False
+    assert catalogue.get_template(GUILD_A, later.id) == later
+
+
 def test_a_deleted_template_is_gone_and_a_second_delete_says_so() -> None:
     """Delete answers True once, then False."""
     srg = _srg()
