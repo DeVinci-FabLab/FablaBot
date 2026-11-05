@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.13.0...v0.13.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* **storage:** keep no small-group counts and keep data for 3 calendar years ([#167](https://github.com/DeVinci-FabLab/FablaBot/issues/167)) ([09774d5](https://github.com/DeVinci-FabLab/FablaBot/commit/09774d53baf7e011f3b79d3ae073d9ffcd20c54f))
+
 ## [0.13.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.12.2...v0.13.0) (2026-11-05)
 
 
