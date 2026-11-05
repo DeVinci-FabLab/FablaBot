@@ -22,13 +22,14 @@ from fablabot.helpers.formation import attendance as formation_attendance
 from fablabot.helpers.formation.attendance import deliver
 from fablabot.helpers.formation.rendering import discord_timestamp
 from fablabot.helpers.guild_access import GuildAccessPolicy
+from fablabot.logging_handlers.guild_context import current_guild_id
 from fablabot.models.formation import FmMessageDraft, Formation, PublishedMessage
 from fablabot.services import attendance, formations
 from fablabot.ui import attendance as ui_attendance
 from fablabot.ui.attendance import DYNAMIC_ITEMS
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
     import simcord
 
@@ -2065,6 +2066,71 @@ async def test_an_alert_click_from_a_member_who_lost_respo_formation_is_refused(
     assert not allowed
     assert _refused(interaction) == ALERT_NO_RIGHT
     assert _stored_answer(hall) == (None, None, None)
+
+
+@pytest.fixture
+def click_logs(caplog: pytest.LogCaptureFixture) -> Iterator[list[tuple[str, int | None]]]:
+    """Collect each line the click handlers log, with the server the log context held when it was written."""
+    caplog.set_level(logging.INFO)
+    lines: list[tuple[str, int | None]] = []
+
+    class Tap(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            lines.append((record.getMessage(), current_guild_id.get()))
+            return True
+
+    tap = Tap()
+    ui_attendance.logger.addFilter(tap)
+    yield lines
+    ui_attendance.logger.removeFilter(tap)
+
+
+async def test_the_alert_callback_logs_under_the_appels_server(hall: Hall, click_logs: list[tuple[str, int | None]]) -> None:
+    """Every line of an alert click, answered or already answered, is written under the check's server."""
+    other_respo = hall.member("respo2", RoleNames.TRAININGS_MANAGER)
+    await _overdue(hall)
+
+    await hall.forged_click(hall.respo, _alert_id(hall, "i"), shown=_alert(hall, hall.respo))
+    await hall.forged_click(other_respo, _alert_id(hall, "c"), shown=_alert(hall, other_respo))
+
+    lines = [(m, g) for m, g in click_logs if m.startswith("[appel] alert") or "kind=appel_answered" in m]
+    assert [m.split(" user_id=")[0] for m, _ in lines] == [
+        f"[appel] alert appel_id={hall.appel_id}",
+        "[appel] refused kind=appel_answered guild_id=None",
+    ]
+    assert {g for _, g in lines} == {GUILD_ID}
+    assert f"user_id={other_respo.id}" in lines[1][0]
+
+
+async def test_a_click_during_a_relaunch_is_logged_as_a_refusal_under_the_appels_server(
+    hall: Hall, monkeypatch: pytest.MonkeyPatch, click_logs: list[tuple[str, int | None]]
+) -> None:
+    """The click turned away mid-relaunch is logged by kind, with the user's ID, under the check's server."""
+    other_respo = hall.member("respo2", RoleNames.TRAININGS_MANAGER)
+    await _overdue(hall)
+
+    async def deliver_after_a_click(_guild: Any, _appel: Any) -> bool:
+        await hall.forged_click(other_respo, _alert_id(hall, "i"), shown=_alert(hall, other_respo))
+        return True
+
+    monkeypatch.setattr(ui_attendance, "deliver", deliver_after_a_click)
+
+    await hall.forged_click(hall.respo, _alert_id(hall, "r"), shown=_alert(hall, hall.respo))
+
+    ((line, guild_id),) = [(m, g) for m, g in click_logs if "kind=appel_relaunching" in m]
+    assert line == f"[appel] refused kind=appel_relaunching guild_id=None user_id={other_respo.id}"
+    assert guild_id == GUILD_ID
+
+
+async def test_the_validate_callback_logs_under_the_appels_server(hall: Hall, click_logs: list[tuple[str, int | None]]) -> None:
+    """The line of a validation is written under the check's server."""
+    await _overdue(hall)
+
+    await hall.validate()
+
+    ((line, guild_id),) = [(m, g) for m, g in click_logs if m.startswith("[appel] validated")]
+    assert line.startswith(f"[appel] validated appel_id={hall.appel_id} user_id={hall.trainer.id}")
+    assert guild_id == GUILD_ID
 
 
 @pytest.mark.parametrize("answered", [False, True])

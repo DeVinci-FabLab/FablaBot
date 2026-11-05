@@ -51,6 +51,8 @@ class RefusalKind(StrEnum):
     SERVER_NOT_SERVED = "server_not_served"
     APPEL_CLOSED = "appel_closed"
     APPEL_CANCELLED = "appel_cancelled"
+    APPEL_ANSWERED = "appel_answered"
+    APPEL_RELAUNCHING = "appel_relaunching"
 
 
 def log_refusal(

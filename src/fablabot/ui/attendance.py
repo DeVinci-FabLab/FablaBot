@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime
 import logging
 from typing import TYPE_CHECKING, Any, Final, override
@@ -28,7 +29,7 @@ from fablabot.models import AlertAction
 from fablabot.services import attendance
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator
     from logging import Logger
     import re
 
@@ -53,6 +54,14 @@ _RELAUNCH_ERROR = "Le formateur n'a pas pu être relancé : une erreur est surve
 # "relaunch" does not yet mean the trainer was. Held in this process only: a restart mid-relaunch leaves the claim stored,
 # and it then reads as done. A stored pending flag would lift that limit, at the price of a migration.
 _relaunching: Final[set[int]] = set()
+
+
+@contextmanager
+def _appel_log_context(appel_id: int) -> Iterator[None]:
+    """Hold the check's server as the current one for the log lines of a click; none when the check is gone."""
+    appel = attendance.get(appel_id)
+    with guild_log_context(appel.guild_id if appel else None):
+        yield
 
 
 async def _refuse(interaction: Interaction[Fablabot], kind: RefusalKind, text: str, *, logger: Logger) -> None:
@@ -317,6 +326,11 @@ class AppelValidate(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<app
     @override
     async def callback(self, interaction: Interaction[Any]) -> None:
         """Save the counts for the registered members marked present and the others, then show the check."""
+        with _appel_log_context(self.appel_id):
+            await self._save(interaction)
+
+    async def _save(self, interaction: Interaction[Any]) -> None:
+        """Save the counts, refuse a check cancelled meanwhile, then show the check and report the save."""
         try:
             saved = attendance.validate(self.appel_id, interaction.user.id, datetime.now(PARIS_TZ))
         except LookupError:
@@ -324,8 +338,7 @@ class AppelValidate(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<app
             return
         except attendance.AppelCancelledError as cancelled:
             # The cancel landed after the click was checked: the same refusal as a click made after it.
-            with guild_log_context(cancelled.appel.guild_id):
-                await _refuse(interaction, *_cancelled_refusal(cancelled.appel), logger=logger)
+            await _refuse(interaction, *_cancelled_refusal(cancelled.appel), logger=logger)
             return
         logger.info(
             f"[appel] validated appel_id={self.appel_id} user_id={interaction.user.id} "
@@ -389,6 +402,11 @@ class AppelAlertAction(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<
         The answer is recorded before the trainer is relaunched, so that two clicks send one relaunch. A relaunch that
         reaches nobody, or fails, takes its answer back: it settled nothing.
         """
+        with _appel_log_context(self.appel_id):
+            await self._answer(interaction)
+
+    async def _answer(self, interaction: Interaction[Any]) -> None:
+        """Record the answer, relaunch the trainer when asked, then show the answer in every copy."""
         answer = self._ANSWERS[self.action]
         user_id = interaction.user.id
         if not attendance.handle(self.appel_id, user_id, answer, datetime.now(PARIS_TZ)):
@@ -422,9 +440,8 @@ class AppelAlertAction(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<
         try again, and nothing was stored for them.
         """
         appel = attendance.get(self.appel_id)
-        user_id = interaction.user.id
         if appel is not None and appel.id in _relaunching:
-            logger.info(f"[appel] alert appel_id={self.appel_id} user_id={user_id} met a relaunch in progress")
+            log_refusal(logger, _COMMAND, interaction, RefusalKind.APPEL_RELAUNCHING)
             await interaction.response.send_message(
                 f"Relance en cours par <@{appel.handled_by}>. "
                 f"Réessaie dans un instant : si elle échoue, l'alerte redevient disponible. {_UNCHANGED}",
@@ -432,7 +449,7 @@ class AppelAlertAction(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<
             )
             return
         answer = alert_answer(appel) if appel else None
-        logger.info(f"[appel] alert appel_id={self.appel_id} user_id={user_id} already answered")
+        log_refusal(logger, _COMMAND, interaction, RefusalKind.APPEL_ANSWERED)
         await interaction.response.send_message(f"Déjà traité : {answer or _GONE}", ephemeral=True)
 
     async def _relaunch(self, interaction: Interaction[Any]) -> str | None:
