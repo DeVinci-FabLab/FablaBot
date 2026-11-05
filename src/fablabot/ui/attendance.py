@@ -7,7 +7,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Final, override
 
 from discord import ButtonStyle, SelectOption, ui
-from discord.components import SelectMenu
+from discord.components import Button, SelectMenu
 
 from fablabot.helpers.constants import PARIS_TZ, ErrorMessages
 from fablabot.helpers.formation.attendance import appel_message, may_take
@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     import re
 
     from discord import Interaction, Message
+    from discord.components import Component
 
     from fablabot.main import Fablabot
     from fablabot.models import Appel
@@ -97,13 +98,19 @@ async def _show(interaction: Interaction[Fablabot], appel_id: int) -> None:
     await interaction.response.edit_message(content=content, view=view)
 
 
-def _listed(message: Message | None, custom_id: str) -> list[int]:
-    """Read the members a menu of the clicked message lists: its own options, never the live list."""
+def _shown(message: Message | None, custom_id: str) -> Component | None:
+    """Find a control of the clicked message by its custom ID: the copy Discord holds, which the clicker saw."""
     for row in message.components if message else ():
         for component in getattr(row, "children", ()):
-            if isinstance(component, SelectMenu) and component.custom_id == custom_id:
-                return [int(option.value) for option in component.options]
-    return []
+            if getattr(component, "custom_id", None) == custom_id:
+                return component
+    return None
+
+
+def _listed(message: Message | None, custom_id: str) -> list[int]:
+    """Read the members a menu of the clicked message lists: its own options, never the live list."""
+    menu = _shown(message, custom_id)
+    return [int(option.value) for option in menu.options] if isinstance(menu, SelectMenu) else []
 
 
 class AppelToggle(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<appel>[0-9]+):m:(?P<member>[0-9]+)"):
@@ -154,9 +161,18 @@ class AppelToggle(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<appel
 
     @override
     async def callback(self, interaction: Interaction[Any]) -> None:
-        """Flip the member's mark, then show the check."""
+        """Set the opposite of the mark the clicked message shows, then show the check.
+
+        Setting rather than flipping what is stored makes a retried or doubled click, or one on an older copy, harmless.
+        """
         if self.member_id in {r.user_id for r in attendance.registrants(self.appel_id)}:
-            here = self.member_id in attendance.present(self.appel_id)
+            button = _shown(interaction.message, f"appel:{self.appel_id}:m:{self.member_id}")
+            # A click always carries its message; the stored mark only stands in when a caller has none.
+            here = (
+                button.style == ButtonStyle.success
+                if isinstance(button, Button)
+                else self.member_id in attendance.present(self.appel_id)
+            )
             attendance.mark(self.appel_id, [self.member_id], [] if here else [self.member_id])
             who = f"appel_id={self.appel_id} user_id={interaction.user.id} member_id={self.member_id}"
             logger.info(f"[appel] mark {who} present={not here}")

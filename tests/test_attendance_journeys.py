@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import logging
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
@@ -98,8 +99,13 @@ class Hall:
         """Write the custom ID of a member's button."""
         return f"appel:{self.appel_id}:m:{member.id}"
 
-    async def forged_click(self, who: Any, custom_id: str) -> tuple[bool, MagicMock]:
+    async def forged_click(self, who: Any, custom_id: str, *, shown: Any | None = None) -> tuple[bool, MagicMock]:
         """Send a click the way Discord does for a message the clicker cannot reach, and tell whether the bot let it run.
+
+        Args:
+            who: The clicker.
+            custom_id: The control clicked.
+            shown: The message the clicker saw, as Discord sends it with the click; a blank one when left out.
 
         Returns:
             tuple[bool, MagicMock]: Whether the item allowed the click, and the interaction the bot answered.
@@ -109,7 +115,7 @@ class Hall:
         interaction.client = bot
         interaction.guild = None
         interaction.guild_id = None
-        interaction.message = MagicMock()
+        interaction.message = shown or MagicMock()
         item_class = next(cls for cls in DYNAMIC_ITEMS if cls.__discord_ui_compiled_template__.fullmatch(custom_id))
         match = item_class.__discord_ui_compiled_template__.fullmatch(custom_id)
         item = await item_class.from_custom_id(interaction, MagicMock(), match)  # pyright: ignore[reportArgumentType]
@@ -189,6 +195,35 @@ async def test_the_trainer_marks_present_then_absent_again(hall: Hall) -> None:
     assert attendance.present(hall.appel_id) == set()
     assert message.content.endswith("_0 présent sur 2 inscrits._")
     assert not _buttons(message)[hall.toggle_id(first)]["label"].startswith("✓ ")
+
+
+async def test_a_retried_click_on_the_same_message_keeps_the_mark(hall: Hall) -> None:
+    """Touching a name twice on a message that still shows it unticked marks it once: the second touch changes nothing."""
+    first, *_ = hall.register(2)
+    hall.publish()
+    await hall.tick()
+    (message,) = hall.dm()
+    seen = SimpleNamespace(components=list(message.components))
+
+    await hall.forged_click(hall.trainer, hall.toggle_id(first), shown=seen)
+    await hall.forged_click(hall.trainer, hall.toggle_id(first), shown=seen)
+
+    assert attendance.present(hall.appel_id) == {first.id}
+
+
+async def test_a_click_on_a_ticked_name_unticks_it_whatever_is_stored(hall: Hall) -> None:
+    """A copy that shows a name ticked unticks it, whatever another copy did meanwhile."""
+    first, *_ = hall.register(2)
+    hall.publish()
+    await hall.tick()
+    await hall.click(hall.trainer, hall.dm()[0], hall.toggle_id(first))
+    (message,) = hall.dm()
+    seen = SimpleNamespace(components=list(message.components))
+    attendance.mark(hall.appel_id, [first.id], [])
+
+    await hall.forged_click(hall.trainer, hall.toggle_id(first), shown=seen)
+
+    assert attendance.present(hall.appel_id) == set()
 
 
 async def test_validation_saves_the_counts_and_renames_the_button(hall: Hall) -> None:
