@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.12.2...v0.13.0) (2026-11-05)
+
+
+### Features
+
+* **fm:** take attendance at each training and keep only anonymous counts after 3 years ([#164](https://github.com/DeVinci-FabLab/FablaBot/issues/164)) ([2b30930](https://github.com/DeVinci-FabLab/FablaBot/commit/2b3093035f80df5e0c07a2b0735dce81bbc04c5a))
+
 ## [0.12.2](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.12.1...v0.12.2) (2026-11-05)
 
 
