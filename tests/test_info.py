@@ -15,8 +15,9 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock
 
 from conftest import LISTED_GUILD, OTHER_LISTED_GUILD
+from discord import Permissions
 import pytest
-from test_server_check import ready_server
+from test_server_check import codes, global_command, problems, ready_server, role_entries, run
 
 from fablabot import db
 from fablabot.cogs import audit_watch, info_management
@@ -548,6 +549,42 @@ async def test_a_blocking_problem_is_red_and_told_in_french_with_its_fix(simcord
     assert value.startswith("❌ **Aucun salon de commandes** · bloquant\n→ Crée un salon textuel nommé `commandes_bot`")
     assert "commands_channel_missing" not in _text(embed)
     assert _fields(embed)["⚙️ Réglages de ce serveur"].startswith("Commandes : aucun salon\n")
+
+
+async def _close_info(env: simcord.Env) -> None:
+    """Take every role off ``/info`` in Integrations, the state of a server right after the release that brought it."""
+    command = await global_command(env, "info")
+    env.backend.set_command_permissions(GUILD, command.id, role_entries([]))
+
+
+async def test_info_not_allowed_in_integrations_is_reported_at_start_and_by_info(
+    simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Until /info is allowed in Integrations, the start logs it as blocking and /info itself shows red with the path to fix."""
+    caplog.set_level(logging.INFO)
+    await _world(simcord_env)
+    await _close_info(simcord_env)
+    # With nothing allowed on /info, only the Administrator permission still shows it, as for the person who sets it up.
+    simcord_env.guild.create_role("Direction", permissions=Permissions(administrator=True))
+    await simcord_env.settle()
+    who = _member(simcord_env, "someone", RoleNames.ADMIN, "Direction")
+
+    await run(simcord_env)
+    embed = _embed(await _info(simcord_env, who))
+
+    assert codes(caplog) == ["integrations_no_role"]
+    assert "severity=blocking" in problems(caplog)[0]
+    assert "detail=[/info]" in problems(caplog)[0]
+    assert embed.title == "🩺 FablaBot : 1 point bloquant sur ce serveur"
+    assert embed.colour is not None
+    assert embed.colour.value == RED
+    assert _fields(embed)["🔍 À corriger sur ce serveur"] == (
+        f"❌ **`/info` n'est ouvert à aucun des rôles qui l'utilisent** · bloquant\n"
+        f"→ {PATH} › `/info` : ajoute les rôles du staff concernés"
+    )
+    assert [r.getMessage() for r in caplog.records if r.getMessage().startswith("Info:")] == [
+        f"Info: guild_id={GUILD} blocking=1 warnings=0"
+    ]
 
 
 async def test_a_warning_alone_is_orange(simcord_env: simcord.Env) -> None:
