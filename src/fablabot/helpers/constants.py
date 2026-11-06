@@ -10,6 +10,8 @@ from discord import Permissions
 
 PARIS_TZ = ZoneInfo("Europe/Paris")
 MAX_MSG_CHARS = 1900
+ANNOUNCEMENT_MAX_CHARS: Final = 2000
+"""Discord's limit for one message; the announcement is one message because sign-ups read one."""
 RETENTION_YEARS = 3
 """How many calendar years the bot keeps personal data: registrations, attendance, reaction history, log files and copies."""
 

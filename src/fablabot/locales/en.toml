@@ -62,6 +62,7 @@ publish = "post the draft in a channel"
 export = "list sign-ups and drop-outs"
 appel = "take or fix a training's attendance"
 modeles = "manage the training templates"
+brouillon = "show and prepare the week's draft"
 
 [help.cmd.msg]
 start = "start a draft"

@@ -57,7 +57,7 @@ def page_count(total: int, size: int) -> int:
     return max(1, -(-total // size))
 
 
-def _cut(text: str, limit: int) -> str:
+def cut(text: str, limit: int) -> str:
     """Cut a text to Discord's limit, with an ellipsis where it stops."""
     return text if len(text) <= limit else f"{text[: limit - 1]}…"
 
@@ -70,7 +70,7 @@ def _digest(fields: TemplateFields) -> str:
     return sha256(text.encode()).hexdigest()[:12]
 
 
-def _plain(text: str) -> str:
+def plain(text: str) -> str:
     """Make a typed text harmless in a message: no markdown, no mention."""
     return escape_mentions(escape_markdown(text))
 
@@ -101,7 +101,7 @@ def page_row(  # noqa: PLR0913 - the three buttons of a page row are built from 
             row=row,
         )
     )
-    view.add_item(ui.Button(label=_cut(label, _BUTTON_CHARS), custom_id=f"{previous_id}:label", disabled=True, row=row))
+    view.add_item(ui.Button(label=cut(label, _BUTTON_CHARS), custom_id=f"{previous_id}:label", disabled=True, row=row))
     view.add_item(ui.Button(label="Suivant ▶", custom_id=f"{next_id}:last" if last else next_id, disabled=last, row=row))
 
 
@@ -141,7 +141,7 @@ def _places(template: TrainingTemplate, *, markdown: bool = True) -> str:
     """
     fields = template.fields
     excusable = " · excusable" if fields.excusable else ""
-    duration = _plain(fields.duration) if markdown else fields.duration
+    duration = plain(fields.duration) if markdown else fields.duration
     return f"{duration} · {counted(fields.seats, 'place', 'places')}{excusable}"
 
 
@@ -161,7 +161,7 @@ def templates_message(guild_id: int, page: int, *, note: str = "") -> tuple[str,
     page = min(max(page, 0), pages - 1)
     shown = templates[page * TEMPLATES_PER_PAGE : (page + 1) * TEMPLATES_PER_PAGE]
     if templates:
-        lines = [f"**{_plain(t.fields.name)}** — {_places(t)}" for t in shown]
+        lines = [f"**{plain(t.fields.name)}** — {_places(t)}" for t in shown]
         footer = f"-# Page {page + 1}/{pages} · {counted(len(templates), 'modèle', 'modèles')}"
         description = "\n".join([*lines, "", footer])
     else:
@@ -200,8 +200,8 @@ def pick_message(guild_id: int, action: Action, page: int) -> tuple[str, ui.View
     label = f"Modèles {page * OPTIONS_PER_PAGE + 1} à {page * OPTIONS_PER_PAGE + len(shown)} sur {len(templates)}"
     options = [
         SelectOption(
-            label=_cut(t.fields.name, _OPTION_CHARS),
-            description=_cut(_places(t, markdown=False), _OPTION_CHARS),
+            label=cut(t.fields.name, _OPTION_CHARS),
+            description=cut(_places(t, markdown=False), _OPTION_CHARS),
             value=str(t.id),
         )
         for t in shown
@@ -233,13 +233,13 @@ def deletion_message(template: TrainingTemplate) -> tuple[str, ui.View]:
     view.add_item(TemplateDelete(template.id, _digest(template.fields)))
     view.add_item(TemplateKeep())
     content = (
-        f"Supprimer le modèle **{_plain(template.fields.name)}** ? "
+        f"Supprimer le modèle **{plain(template.fields.name)}** ? "
         "Les sessions déjà ajoutées au brouillon ou publiées ne changent pas."
     )
     return content, view
 
 
-async def _show(interaction: Interaction, content: str, embed: Embed | None, view: ui.View) -> None:
+async def show(interaction: Interaction, content: str, embed: Embed | None, view: ui.View) -> None:
     """Show a screen in place of the message the click came from, or in a new private message when there is none."""
     mentions = AllowedMentions.none()
     if interaction.message is not None:
@@ -253,7 +253,7 @@ async def _show_list(interaction: Interaction, page: int = 0, *, note: str = "")
     """Show the list of the server's templates, one page of it."""
     assert interaction.guild is not None
     content, embed, view = templates_message(interaction.guild.id, page, note=note)
-    await _show(interaction, content, embed, view)
+    await show(interaction, content, embed, view)
 
 
 async def _refuse(interaction: Interaction, text: str, kind: RefusalKind | None = None) -> None:
@@ -337,7 +337,7 @@ class TemplateForm(ui.Modal):
         if refusal is not None:
             await _refuse(interaction, f"{refusal[0]} {_NOT_STORED}", refusal[1])
             return
-        await _show_list(interaction, note=f"✅ Modèle **{_plain(parsed.name)}** enregistré.")
+        await _show_list(interaction, note=f"✅ Modèle **{plain(parsed.name)}** enregistré.")
 
     def _store(self, guild_id: int, user_id: int, fields: TemplateFields) -> tuple[str, RefusalKind | None] | None:
         """Create or change the template; give the refusal text and its log kind, or None once it is stored."""
@@ -352,7 +352,7 @@ class TemplateForm(ui.Modal):
             else:
                 return _CHANGED, RefusalKind.TEMPLATE_CHANGED
         except TemplateNameTakenError:
-            return f"Un modèle s'appelle déjà **{_plain(fields.name)}** sur ce serveur.", None
+            return f"Un modèle s'appelle déjà **{plain(fields.name)}** sur ce serveur.", None
         return None
 
 
@@ -439,7 +439,7 @@ class TemplateAction(ui.DynamicItem[ui.Button[ui.View]], template=r"cat:(?P<acti
             await _show_list(interaction)
             return
         content, view = pick_message(interaction.guild.id, self.action, 0)
-        await _show(interaction, content, None, view)
+        await show(interaction, content, None, view)
 
 
 class TemplatePick(ui.DynamicItem[ui.Select[ui.View]], template=r"cat:pick:(?P<action>edit|del):(?P<page>[0-9]+)"):
@@ -487,7 +487,7 @@ class TemplatePick(ui.DynamicItem[ui.Select[ui.View]], template=r"cat:pick:(?P<a
             await interaction.response.send_modal(TemplateForm(template))
         else:
             content, view = deletion_message(template)
-            await _show(interaction, content, None, view)
+            await show(interaction, content, None, view)
 
 
 class TemplatePickPage(ui.DynamicItem[ui.Button[ui.View]], template=r"cat:pnav:(?P<action>edit|del):(?P<page>[0-9]+)"):
@@ -522,7 +522,7 @@ class TemplatePickPage(ui.DynamicItem[ui.Button[ui.View]], template=r"cat:pnav:(
             await _show_list(interaction)
             return
         content, view = pick_message(interaction.guild.id, self.action, self.page)
-        await _show(interaction, content, None, view)
+        await show(interaction, content, None, view)
 
 
 class TemplateDelete(ui.DynamicItem[ui.Button[ui.View]], template=r"cat:del-ok:(?P<template>[0-9]+):(?P<digest>[0-9a-f]{12})"):
@@ -569,7 +569,7 @@ class TemplateDelete(ui.DynamicItem[ui.Button[ui.View]], template=r"cat:del-ok:(
             await _refuse(interaction, f"{_CHANGED_DELETE} {_UNCHANGED}", RefusalKind.TEMPLATE_CHANGED)
             return
         logger.info(f"[{COMMAND}] delete guild_id={guild_id} user_id={interaction.user.id} template_id={self.template_id}")
-        await _show_list(interaction, note=f"Modèle **{_plain(template.fields.name)}** supprimé.")
+        await _show_list(interaction, note=f"Modèle **{plain(template.fields.name)}** supprimé.")
 
 
 class TemplateKeep(ui.DynamicItem[ui.Button[ui.View]], template=r"cat:del-no"):

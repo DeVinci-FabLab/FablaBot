@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from discord import Locale, Member, Permissions, Role
+from discord import Locale, Member, Permissions, Role, TextChannel
 
 import fablabot.cogs as cogs_package
 from fablabot.cogs import formation_management, help_management, message_management
@@ -17,6 +17,7 @@ from fablabot.helpers.help_page import leaf_commands
 from fablabot.models import AlertAction, Appel, Registrant, TemplateFields, TrainingTemplate
 from fablabot.models.formation import FmMessageDraft, Formation
 from fablabot.ui.catalogue import TemplateForm, deletion_message
+from fablabot.ui.draft import DraftTextForm, draft_message, publish_message
 from fablabot.ui.formation import StartFmModal
 from fablabot.ui.message import SuggestionView
 
@@ -237,6 +238,63 @@ async def catalogue_delete() -> Screen:
     return Screen(capture.sent)
 
 
+ANNOUNCE_CHANNEL = 5555
+_DRAFT_NAMES = {ROLE_FORMATIONS: "Formations", 2222: "lea.mkr", 3333: "hugo3d", 4444: "camille", ANNOUNCE_CHANNEL: "annonces"}
+_DRAFT_INTRO = "Oyé oyé habitants du DeVinci Fablab, voici les formations de la semaine !"
+_DRAFT_SESSIONS = [
+    ("🩷", "SRG + Imp 3D", 2222, "2026-10-12T10:00:00+02:00", 5),
+    ("❤️‍🔥", "SRG + Imp 3D", 2222, "2026-10-12T11:00:00+02:00", 5),
+    ("🧡", "SRG + Imp 3D", 2222, "2026-10-12T14:00:00+02:00", 5),
+    ("😼", "Formation GitHub", 3333, "2026-10-14T11:45:00+02:00", 10),
+    ("☣️", "Impression résine", 4444, "2026-10-15T13:45:00+02:00", 5),
+]
+
+
+def _sample_draft() -> FmMessageDraft:
+    """The draft of the validated mockup: five sessions, an intro and the role to notify."""
+    fms = [
+        Formation(emoji=emoji, name=name, trainer_mention=f"<@{trainer}>", start_iso=start, duration="45 min", seats=seats)
+        for emoji, name, trainer, start, seats in _DRAFT_SESSIONS
+    ]
+    return FmMessageDraft(header="# [FORMATIONS]", role_id=ROLE_FORMATIONS, intro=_DRAFT_INTRO, fms=fms, end="À très vite !")
+
+
+def _sample_guild() -> MagicMock:
+    """A server that knows the role to notify and the announcement channel."""
+    guild = MagicMock()
+    role = MagicMock(spec=Role)
+    role.id = ROLE_FORMATIONS
+    channel = MagicMock(spec=TextChannel)
+    channel.id = ANNOUNCE_CHANNEL
+    guild.get_role.return_value = role
+    guild.get_channel.return_value = channel
+    return guild
+
+
+async def draft() -> Screen:
+    """``/fm brouillon`` on a draft of five sessions sorted by start, with the buttons that exist so far."""
+    capture = Capture()
+    content, embed, view = draft_message(_sample_guild(), _sample_draft())
+    await capture.interaction().response.send_message(content or None, embed=embed, view=view, ephemeral=True)
+    return Screen(capture.sent, dict(_DRAFT_NAMES))
+
+
+async def draft_text_form() -> Screen:
+    """The Intro / conclusion form, filled with what the draft holds and the role to notify preset."""
+    capture = Capture()
+    await capture.interaction().response.send_modal(DraftTextForm(_sample_guild(), _sample_draft()))
+    return Screen(capture.sent, dict(_DRAFT_NAMES))
+
+
+async def draft_publish() -> Screen:
+    """The question that asks where to publish, the channel of the last announcement already chosen."""
+    capture = Capture()
+    guild = _sample_guild()
+    content, view = publish_message(guild.get_channel(ANNOUNCE_CHANNEL))
+    await capture.interaction().response.send_message(content, view=view, ephemeral=True)
+    return Screen(capture.sent, dict(_DRAFT_NAMES))
+
+
 APPEL_START = datetime(2026, 11, 5, 18, 0, tzinfo=PARIS_TZ)
 PSEUDOS = ["lea.mkr", "hugo3d", "ines_lab", "tom_r", "sarah.fab"]
 
@@ -395,6 +453,9 @@ SCREENS: dict[str, Callable[[], Coroutine[Any, Any, Screen]]] = {
     "catalogue-list": catalogue_list,
     "catalogue-form": catalogue_form,
     "catalogue-delete": catalogue_delete,
+    "draft": draft,
+    "draft-text-form": draft_text_form,
+    "draft-publish": draft_publish,
     "suggest": suggest,
     "suggest-modal": suggest_modal,
     "fm-start-modal": fm_start_modal,

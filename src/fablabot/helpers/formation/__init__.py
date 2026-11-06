@@ -11,6 +11,7 @@ from fablabot.helpers.formation.notifications import (
 )
 from fablabot.helpers.formation.rendering import (
     Emojis,
+    announcement_header,
     format_current_registrations,
     format_formation_export,
     format_respo_contacts,
@@ -23,6 +24,7 @@ from fablabot.helpers.formation.rendering import (
 
 __all__ = [
     "Emojis",
+    "announcement_header",
     "format_current_registrations",
     "format_formation_export",
     "format_respo_contacts",

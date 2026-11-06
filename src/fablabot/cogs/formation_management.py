@@ -62,6 +62,7 @@ from fablabot.services import attendance, formations
 from fablabot.ui import fmui
 from fablabot.ui.attendance import DYNAMIC_ITEMS, OpenAppelPicker
 from fablabot.ui.catalogue import CATALOGUE_ITEMS, templates_message
+from fablabot.ui.draft import DRAFT_ITEMS, draft_message
 
 if TYPE_CHECKING:
     from discord import Guild
@@ -98,6 +99,7 @@ class FormationManagement(commands.Cog):
         - /fm publish: Publish the draft to a channel.
         - /fm export: Export the draft as a message.
         - /fm modeles: Manage the training templates of the server.
+        - /fm brouillon: See the draft, set its text and role, preview it and publish it.
 
     Listeners:
         - on_raw_reaction_event: Log reactions (add/remove) on messages published by this cog.
@@ -131,7 +133,7 @@ class FormationManagement(commands.Cog):
         # are logged and wait for the next reminder tick to run it again. Same ceiling: a restart forgets them.
         self._retry_guilds: set[int] = set()
         self._reaction_logs.purge_all()
-        self.bot.add_dynamic_items(*DYNAMIC_ITEMS, *CATALOGUE_ITEMS)
+        self.bot.add_dynamic_items(*DYNAMIC_ITEMS, *CATALOGUE_ITEMS, *DRAFT_ITEMS)
         self._check_upcoming_formations.start()
         logger.info("FormationManagement initialized")
 
@@ -139,7 +141,7 @@ class FormationManagement(commands.Cog):
     async def cog_unload(self) -> None:
         """Clean up when the cog is unloaded."""
         self._check_upcoming_formations.cancel()
-        self.bot.remove_dynamic_items(*DYNAMIC_ITEMS, *CATALOGUE_ITEMS)
+        self.bot.remove_dynamic_items(*DYNAMIC_ITEMS, *CATALOGUE_ITEMS, *DRAFT_ITEMS)
         for task in list(self._pending_update_tasks.values()):
             try:
                 task.cancel()
@@ -411,6 +413,22 @@ class FormationManagement(commands.Cog):
             content or None, embed=embed, view=view, ephemeral=True, allowed_mentions=AllowedMentions.none()
         )
 
+    @fm_group.command(name="brouillon", description="Voir et préparer le brouillon de la semaine.", extras=access(_ACCESS))
+    async def fm_brouillon(self, interaction: Interaction) -> None:
+        """Show the draft with the buttons that set its text, preview it and publish it.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+        """
+        if not await ensure_command_context(logger, "fm.brouillon", interaction, required_roles=ALLOWED_ROLES):
+            return
+
+        assert interaction.guild is not None
+        content, embed, view = draft_message(interaction.guild, self.get_guild_draft(interaction.guild.id))
+        await interaction.response.send_message(
+            content or None, embed=embed, view=view, ephemeral=True, allowed_mentions=AllowedMentions.none()
+        )
+
     @fm_group.command(name="remove", description="Retirer une formation du brouillon.", extras=access(_ACCESS))
     async def fm_remove(self, interaction: Interaction) -> None:
         """Remove a formation from the draft, picked from a selector.
@@ -519,6 +537,19 @@ class FormationManagement(commands.Cog):
             await interaction.response.send_message(ErrorMessages.DRAFT_EMPTY, ephemeral=True)
             return
 
+        await self.publish_draft(interaction, channel)
+
+    async def publish_draft(self, interaction: Interaction, channel: TextChannel) -> None:
+        """Post the draft in a channel with its reactions, store it as the published message and announce it later.
+
+        The caller has checked the roles and that the draft can be posted.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            channel (TextChannel): The target announcement channel.
+        """
+        assert interaction.guild is not None
+        draft = self.get_guild_draft(interaction.guild.id)
         await interaction.response.defer(thinking=True)
 
         content = render_message(draft)

@@ -53,14 +53,14 @@ class Profile:
 
 PROFILES = {
     "member": Profile((RoleNames.MEMBER_VERIFIED,), Permissions.none(), 0),
-    "trainer": Profile((RoleNames.TRAININGS_MANAGER,), Permissions.none(), 11),
-    "trainer-with-F-roles": Profile((RoleNames.TRAININGS_MANAGER,), Permissions.none(), 15, f_roles=True),
-    "temp-admin": Profile((RoleNames.ADMIN_TEMP,), Permissions.none(), 9),
-    "codir": Profile((RoleNames.CODIR,), Permissions.none(), 10),
+    "trainer": Profile((RoleNames.TRAININGS_MANAGER,), Permissions.none(), 12),
+    "trainer-with-F-roles": Profile((RoleNames.TRAININGS_MANAGER,), Permissions.none(), 16, f_roles=True),
+    "temp-admin": Profile((RoleNames.ADMIN_TEMP,), Permissions.none(), 10),
+    "codir": Profile((RoleNames.CODIR,), Permissions.none(), 11),
     "bureau": Profile((RoleNames.BUREAU,), Permissions.none(), 17),
     "digital-manager": Profile((RoleNames.DIGITAL_MANAGER,), Permissions.none(), 7),
-    "admin-no-permission": Profile((RoleNames.ADMIN,), Permissions.none(), 39),
-    "admin-bureau-administrator": Profile((RoleNames.BUREAU, RoleNames.ADMIN), Permissions.all(), 42),
+    "admin-no-permission": Profile((RoleNames.ADMIN,), Permissions.none(), 40),
+    "admin-bureau-administrator": Profile((RoleNames.BUREAU, RoleNames.ADMIN), Permissions.all(), 43),
     "manage-messages-only": Profile((), Permissions(manage_messages=True), 1),
 }
 

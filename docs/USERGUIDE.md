@@ -54,6 +54,7 @@ In the tables below, "admin roles" means Administrateur, Président, Vice-Prési
 | `/fm export` | List sign-ups and drop-outs | Same |
 | `/fm appel` | Take or fix the attendance of a training of the last 7 days | Respo Formation, Administrateur |
 | `/fm modeles` | Manage the training templates of the server | Respo Formation, Administrateur |
+| `/fm brouillon` | See the week's draft, set its text and role, preview it and post it | Administrateur, CoDir, Respo Formation, Admin -temp- |
 
 ### Training templates
 
@@ -62,6 +63,18 @@ A template is a training the server gives again and again, typed once: its name,
 `/fm modeles` shows them, 10 to a page and in alphabetical order, in a private message. **Nouveau modèle** opens the form. **Modifier** and **Supprimer** each ask which template first; a long list is shown 25 at a time, with page buttons. Deleting asks for a confirmation. Only Respo Formation and Administrateur use it: Admin -temp- and CoDir, who may write the weekly announcement, may not change the templates. The roles are read again at every click, so a member who has lost the role is refused and nothing is saved.
 
 A session copies a template when it is added: the template fills in the form, and the session then lives on its own. Changing or deleting a template leaves the sessions already in the draft or published as they are.
+
+### The draft
+
+`/fm brouillon` shows the week's draft in a private message: the intro, then the sessions sorted by start, with the trainer and the seats, and a last line with the role that will be notified and the length of the announcement. Three buttons act on it:
+
+- **Intro / conclusion** opens a form for the intro, the closing, the link of the form where members propose a training (left empty, it keeps the usual one) and the role to notify, which is required. Saving it keeps the sessions and the header.
+- **Aperçu** shows the announcement exactly as it will be posted, in a private message that notifies nobody.
+- **Publier** asks in which channel to post, starting on the channel of the last announcement, then posts the draft like `/fm publish`. It is greyed out while the draft has no session. It refuses, and posts nothing, when there is no session, no role chosen, a session that has already started, or an announcement past 2 000 characters.
+
+The length line counts the announcement as posted. It stops at 2 000 because the announcement is one Discord message, and Discord accepts no more in one; sign-ups are read from that one message. Past the limit the draft shows a warning: remove a session or shorten a description.
+
+The same roles as `/fm add` use it, and they are read again at every click, so a member who has lost the role is refused and nothing is posted. The buttons keep working after the bot restarts; only an open form is lost, and it is opened again from the button.
 
 ### Attendance check
 

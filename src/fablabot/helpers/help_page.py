@@ -26,7 +26,23 @@ FIELD_VALUE_CHARS: Final = 1024
 DOMAINS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
     ("text", ("create", "rename", "delete")),
     ("vocal", ("create", "rename", "delete")),
-    ("fm", ("start", "edit_text", "add", "edit", "remove", "clear", "preview", "publish", "export", "appel", "modeles")),
+    (
+        "fm",
+        (
+            "start",
+            "edit_text",
+            "add",
+            "edit",
+            "remove",
+            "clear",
+            "preview",
+            "publish",
+            "export",
+            "appel",
+            "modeles",
+            "brouillon",
+        ),
+    ),
     (
         "msg",
         (

@@ -61,6 +61,7 @@ publish = "postet den Entwurf in einem Kanal"
 export = "listet An- und Abmeldungen auf"
 appel = "führt oder korrigiert die Anwesenheit einer Schulung"
 modeles = "verwaltet die Schulungsvorlagen"
+brouillon = "zeigt und bereitet den Wochenentwurf vor"
 
 [help.cmd.msg]
 start = "beginnt einen Entwurf"

@@ -10,7 +10,7 @@ from discord import ButtonStyle, Embed, Interaction, TextStyle, ui
 from emoji import emojize
 
 from fablabot.helpers.constants import FORMATION_ROLES, MAX_TRACKED_OPTIONS, PARIS_TZ, ErrorMessages
-from fablabot.helpers.formation import Emojis, is_past, parse_date_time, render_formation, render_message
+from fablabot.helpers.formation import announcement_header, is_past, parse_date_time, render_formation, render_message
 from fablabot.helpers.utils import counted, is_valid_emoji, log_request, right_check
 from fablabot.models.formation import FmCommand, FmMessageDraft, Formation
 
@@ -87,9 +87,7 @@ class StartFmModal(ui.Modal, title="Commencer une annonce de formation"):
             end_chars=len(self.end_input.value),
         )
         assert interaction.guild is not None
-        emoji_set = {emoji for emoji in interaction.guild.emojis if emoji.name == "dvfl"}
-        emoji = emoji_set.pop() if emoji_set else Emojis.LOUDSPEAKER
-        header = f"# [FORMATIONS] {emoji}"
+        header = announcement_header(interaction.guild)
 
         intro_body = self.intro_input.value.strip()
         end_body = self.end_input.value.strip()

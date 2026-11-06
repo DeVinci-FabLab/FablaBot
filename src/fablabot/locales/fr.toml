@@ -62,6 +62,7 @@ publish = "poste le brouillon dans un salon"
 export = "liste les inscriptions et désinscriptions"
 appel = "fait ou corrige l’appel d’une formation"
 modeles = "gère les modèles de formation"
+brouillon = "montre et prépare le brouillon de la semaine"
 
 [help.cmd.msg]
 start = "commence un brouillon"

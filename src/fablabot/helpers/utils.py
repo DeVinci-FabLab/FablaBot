@@ -51,6 +51,8 @@ class RefusalKind(StrEnum):
     SERVER_NOT_SERVED = "server_not_served"
     TEMPLATE_UNKNOWN = "template_unknown"
     TEMPLATE_CHANGED = "template_changed"
+    DRAFT_NOT_READY = "draft_not_ready"
+    CHANNEL_UNKNOWN = "channel_unknown"
     APPEL_CLOSED = "appel_closed"
     APPEL_CANCELLED = "appel_cancelled"
     APPEL_ANSWERED = "appel_answered"
