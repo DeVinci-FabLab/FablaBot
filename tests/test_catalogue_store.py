@@ -189,20 +189,47 @@ def test_find_by_name_ignores_case_and_surrounding_spaces() -> None:
     assert catalogue.find_by_name(GUILD_A, "  srg + imp 3d ") == srg
 
 
+_VALID_ROW = {
+    "guild_id": GUILD_A,
+    "name": "Laser",
+    "name_key": "laser",
+    "duration": "1h",
+    "seats": 5,
+    "description": "",
+    "excusable": 1,
+}
+_INSERT_ROW = (
+    "INSERT INTO training_template (guild_id, name, name_key, duration, seats, description, excusable) "
+    "VALUES (:guild_id, :name, :name_key, :duration, :seats, :description, :excusable)"
+)
+
+
 @pytest.mark.parametrize(
     ("column", "value"),
-    [("seats", 0), ("seats", 501), ("name", ""), ("name", "x" * 101), ("duration", ""), ("description", "x" * 501)],
+    [
+        ("seats", 0),
+        ("seats", 501),
+        ("name", ""),
+        ("name", "x" * 101),
+        ("name_key", ""),
+        ("duration", ""),
+        ("duration", "x" * 51),
+        ("description", "x" * 501),
+        ("excusable", 2),
+    ],
 )
 def test_the_schema_refuses_a_value_out_of_bounds(column: str, value: object) -> None:
-    """The bounds the forms check are held by the table too."""
-    row = {"guild_id": GUILD_A, "name": "Laser", "duration": "1h", "seats": 5, "description": "", "excusable": 1}
+    """The bounds the forms check are held by the table too, each by its own check."""
+    row = dict(_VALID_ROW)
     row[column] = value
-    with pytest.raises(sqlite3.IntegrityError), db.transaction() as conn:
-        conn.execute(
-            "INSERT INTO training_template (guild_id, name, duration, seats, description, excusable) "
-            "VALUES (:guild_id, :name, :duration, :seats, :description, :excusable)",
-            row,
-        )
+    with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"), db.transaction() as conn:
+        conn.execute(_INSERT_ROW, row)
+
+
+def test_the_bounds_test_starts_from_a_row_the_table_takes() -> None:
+    """The row the bounds test changes one value of is itself accepted."""
+    with db.transaction() as conn:
+        conn.execute(_INSERT_ROW, _VALID_ROW)
 
 
 def test_the_templates_are_counted_for_the_export() -> None:
