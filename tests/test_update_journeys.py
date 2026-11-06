@@ -676,6 +676,42 @@ async def test_a_change_since_the_summary_is_refused_and_nothing_changes(
     assert _snapshot(lab, posted) == before
 
 
+@pytest.mark.parametrize("meanwhile", ["draft", "newer"])
+async def test_a_change_while_the_message_is_fetched_is_refused_and_not_overwritten(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, meanwhile: str
+) -> None:
+    """A draft edit or a new announcement landing while the posted message is read survives: the update is refused."""
+    posted = await _announced(lab)
+    _change("🧡", start=24)
+    summary = await _summary(lab)
+    cog = _cog(lab)
+    real = cog._unreadable  # pyright: ignore[reportPrivateUsage]
+    newer = replace(_stored(), message_id=_stored().message_id + 1)
+
+    async def unreadable(*args: Any) -> Any:
+        if meanwhile == "draft":
+            _change("💚", description="Écrit pendant la lecture.")
+        else:
+            formations.save_published(GUILD_ID, newer)
+        return await real(*args)
+
+    monkeypatch.setattr(cog, "_unreadable", unreadable)
+    before = _snapshot(lab, posted)
+
+    refused = await _confirm(lab, summary)
+
+    assert refused.response.content == CHANGED
+    after = _snapshot(lab, posted)
+    if meanwhile == "draft":
+        assert after.published == before.published
+        assert after.draft is not None
+        assert next(fm for fm in after.draft.fms if fm.emoji == "💚").description == "Écrit pendant la lecture."
+    else:
+        assert after.published == newer
+        assert after.draft == before.draft
+    assert (after.content, after.reactions, after.dms) == (before.content, before.reactions, before.dms)
+
+
 async def test_a_deleted_announcement_is_refused_and_nothing_changes(lab: Lab) -> None:
     """Confirming once the posted message is gone says so and keeps the stored announcement and the draft."""
     posted = await _announced(lab)

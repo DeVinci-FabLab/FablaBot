@@ -683,8 +683,8 @@ class FormationManagement(commands.Cog):
         """Rewrite the published announcement in place from the draft, keeping its sign-ups, as the summary showed.
 
         The caller has checked the roles. The click is answered first; then, under the server's published lock, the
-        announcement and the draft are read again, the update planned and compared with the digest of the summary, the
-        posted message fetched, the announcement and the draft stored together and the message rebuilt from the
+        posted message is fetched, then the announcement and the draft are read again, the update planned and compared with
+        the digest of the summary, and both stored together, with no wait between; the message is then rebuilt from the
         reactions. A plan that differs from the one shown, or a message that is gone, changes nothing.
 
         Args:
@@ -738,7 +738,7 @@ class FormationManagement(commands.Cog):
             await interaction.response.send_message(text, ephemeral=True, allowed_mentions=AllowedMentions.none())
 
     async def _rewrite_announcement(self, guild: Guild, message_id: int, digest: str) -> UpdatePlan | tuple[str, RefusalKind]:
-        """Do the update under the published lock: read, plan, compare, fetch, store, rebuild.
+        """Do the update under the published lock: fetch, then read, plan, compare and store without waiting, rebuild.
 
         Args:
             guild (Guild): The server.
@@ -751,11 +751,16 @@ class FormationManagement(commands.Cog):
         last = formations.current_published(guild.id)
         if last is None or last.message_id != message_id:
             return CHANGED_REFUSAL, RefusalKind.ANNOUNCEMENT_CHANGED
+        if (refusal := await self._unreadable(guild, last)) is not None:
+            return refusal
+        # The draft is not under the lock, and the fetch above waits on Discord: read it and plan only now, with no await
+        # between the plan and the save, so an edit saved meanwhile is compared with the summary and never overwritten.
+        last = formations.current_published(guild.id)
+        if last is None or last.message_id != message_id:
+            return CHANGED_REFUSAL, RefusalKind.ANNOUNCEMENT_CHANGED
         plan = self._confirmed_plan(guild, last, digest)
         if not isinstance(plan, UpdatePlan):
             return plan
-        if (refusal := await self._unreadable(guild, last)) is not None:
-            return refusal
         try:
             formations.save_update(
                 guild.id, PublishedMessage(message_id, last.channel_id, plan.message), as_draft(plan.message)
