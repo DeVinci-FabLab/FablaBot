@@ -245,17 +245,44 @@ def test_sign_ups_and_flags_of_kept_sessions_are_in_the_planned_message() -> Non
 
 
 @pytest.mark.parametrize("field", ["start", "trainer", "description", "seats"])
-def test_a_new_start_or_trainer_clears_the_hour_before_flag_only(field: str) -> None:
-    """A new start or trainer gives the hour-before reminder back; no other change, and no other flag, moves."""
+def test_a_new_start_clears_the_hour_before_flag_only(field: str) -> None:
+    """A new start gives the hour-before reminder back to everyone; no other change, and no other flag, moves."""
     published = _message(_fm("🧡", signed=2, notified_hour_before=True), _fm("💛", hours=72, name="Brodeuse"))
     draft = as_draft(published)
     draft.fms[0] = replace(draft.fms[0], **CHANGES[field])
 
     kept = _plan(published, draft).message.fms[0]
 
-    assert kept.notified_hour_before is (field not in ("start", "trainer"))
+    assert kept.notified_hour_before is (field != "start")
     assert kept.notified_at_start is False
     assert kept.registered_users == published.fms[0].registered_users
+
+
+@pytest.mark.parametrize(
+    ("flagged", "changes", "owed"),
+    [
+        (True, ["trainer"], ("🧡",)),
+        (True, ["trainer", "seats"], ("🧡",)),
+        (True, ["trainer", "start"], ()),
+        (True, ["start"], ()),
+        (True, ["seats"], ()),
+        (False, ["trainer"], ()),
+    ],
+    ids=["trainer", "trainer-and-seats", "trainer-and-start", "start", "seats", "not-yet-reminded"],
+)
+def test_only_a_new_trainer_alone_is_owed_the_reminder_that_already_went_out(
+    flagged: bool, changes: list[str], owed: tuple[str, ...]
+) -> None:
+    """The reminder is owed directly to a new trainer when it went out and the start stays; otherwise the tick sends it."""
+    published = _message(_fm("🧡", signed=2, notified_hour_before=flagged), _fm("💛", hours=72, name="Brodeuse"))
+    draft = as_draft(published)
+    for field in changes:
+        draft.fms[0] = replace(draft.fms[0], **CHANGES[field])
+
+    plan = _plan(published, draft)
+
+    assert plan.trainers_to_remind == owed
+    assert plan.message.fms[0].notified_hour_before is (flagged and "start" not in changes)
 
 
 @pytest.mark.parametrize(

@@ -59,6 +59,27 @@ class UpdatePlan:
     text_changes: tuple[str, ...]
     moves: Mapping[int, int]
 
+    @property
+    def trainers_to_remind(self) -> tuple[str, ...]:
+        """Name the sessions whose new trainer is owed a reminder that already went out for the old one.
+
+        A new start gives the reminder back to everyone, and the tick sends it. A new trainer alone does not: the flag
+        stays set so that the participants and the Respo are not reminded twice, and the new trainer is sent theirs.
+
+        Returns:
+            tuple[str, ...]: The emojis of the kept sessions whose reminder was sent, trainer changed and start did not.
+        """
+        return tuple(
+            step.after.emoji
+            for step in self.steps
+            if step.kind == "changed"
+            and step.before is not None
+            and step.after is not None
+            and step.before.notified_hour_before
+            and _moment(step.before) == _moment(step.after)
+            and step.before.trainer_mention != step.after.trainer_mention
+        )
+
     def digest(self, message_id: int) -> str:
         """Summarise the plan in 12 hex digits, so that a confirmation can tell it from a plan that has changed since.
 
@@ -124,13 +145,17 @@ def _by_start(step: Step) -> tuple[int, str]:
 
 
 def _retouched(kept: Formation, wanted: Formation) -> Formation:
-    """Give a session the draft's values, keeping its sign-ups and flags; a new start or trainer re-arms the reminder."""
-    moved = _moment(kept) != _moment(wanted) or kept.trainer_mention != wanted.trainer_mention
+    """Give a session the draft's values, keeping its sign-ups and flags; a new start re-arms the reminder.
+
+    A new trainer alone does not: the reminder went out to everyone, and only the new trainer is owed it (see
+    ``UpdatePlan.trainers_to_remind``).
+    """
+    moved = _moment(kept) != _moment(wanted)
     return replace(
         kept,
         name=wanted.name,
         trainer_mention=wanted.trainer_mention,
-        start_iso=wanted.start_iso if _moment(kept) != _moment(wanted) else kept.start_iso,
+        start_iso=wanted.start_iso if moved else kept.start_iso,
         duration=wanted.duration,
         seats=wanted.seats,
         description=wanted.description,

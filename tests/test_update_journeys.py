@@ -602,19 +602,38 @@ async def test_a_new_start_gets_its_hour_before_reminder_once(lab: Lab, minutes_
     assert len(_reminders(lab.admin, "Soudure")) == 1
 
 
-async def test_a_new_trainer_inside_the_hour_gets_the_reminder_at_the_next_tick(lab: Lab) -> None:
-    """A trainer changed on a session already inside its hour is reminded at the next tick, and only once."""
+async def test_a_new_trainer_after_the_reminder_is_the_only_one_reminded_again(lab: Lab) -> None:
+    """A trainer changed once the reminder went out gets it alone: the participants and the Respo do not get it twice."""
     await _announced(lab)
-    _flag("🧡", notified_hour_before=True)
+    cog = _cog(lab)
+    await cog._send_due_reminders(GUILD_ID, _session_of("🧡").start_dt - timedelta(minutes=60))  # pyright: ignore[reportPrivateUsage]
+    told = {who: len(_reminders(who, "Soudure")) for who in (lab.plain, lab.codir, lab.admin, lab.respo, lab.president)}
+    assert list(told.values())[:3] == [1, 1, 1]
+    assert told[lab.respo] >= 1
+    assert told[lab.president] == 0
+    _change("🧡", trainer_mention=f"<@{lab.president.id}>")
+
+    await _updated(lab)
+    for minutes in (40, 20):
+        await cog._send_due_reminders(GUILD_ID, _session_of("🧡").start_dt - timedelta(minutes=minutes))  # pyright: ignore[reportPrivateUsage]
+
+    assert _session_of("🧡").notified_hour_before
+    assert {who: len(_reminders(who, "Soudure")) for who in told} == {**told, lab.president: 1}
+
+
+async def test_a_new_trainer_before_the_reminder_is_reminded_with_the_others_at_the_hour(lab: Lab) -> None:
+    """A trainer changed before the reminder went out is reminded with everyone at the hour, once, and not before."""
+    await _announced(lab)
     _change("🧡", trainer_mention=f"<@{lab.president.id}>")
 
     await _updated(lab)
 
-    tick = _session_of("🧡").start_dt - timedelta(minutes=40)
+    assert _reminders(lab.president, "Soudure") == []
+    tick = _session_of("🧡").start_dt - timedelta(minutes=60)
     await _cog(lab)._send_due_reminders(GUILD_ID, tick)  # pyright: ignore[reportPrivateUsage]
     await _cog(lab)._send_due_reminders(GUILD_ID, tick)  # pyright: ignore[reportPrivateUsage]
 
-    assert len([text for text in _dms(lab.president) if "Ta formation **Soudure** commence bientôt" in text]) == 1
+    assert [len(_reminders(who, "Soudure")) for who in (lab.president, lab.codir, lab.admin, lab.plain)] == [1, 1, 1, 0]
 
 
 async def test_other_sessions_get_no_reminder_twice(lab: Lab) -> None:

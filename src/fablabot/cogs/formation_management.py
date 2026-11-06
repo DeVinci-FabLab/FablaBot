@@ -712,6 +712,7 @@ class FormationManagement(commands.Cog):
         if not isinstance(outcome, UpdatePlan):
             await self._refuse_update(interaction, *outcome, answered=True)
             return
+        await self._remind_new_trainers(guild, message_id, outcome.trainers_to_remind)
         logger.info(
             f"[fm.brouillon] update guild_id={guild.id} user_id={interaction.user.id} message_id={message_id} "
             f"changed={sum(step.kind == 'changed' for step in outcome.steps)} "
@@ -720,6 +721,31 @@ class FormationManagement(commands.Cog):
         )
         content, view = done_message(outcome, last.channel_id, posted=not behind)
         await interaction.edit_original_response(content=content, view=view, allowed_mentions=AllowedMentions.none())
+
+    async def _remind_new_trainers(self, guild: Guild, message_id: int, emojis: tuple[str, ...]) -> None:
+        """Send the hour-before reminder to the new trainer alone of each session whose reminder already went out.
+
+        The sessions are read as stored once the message is rebuilt, so the list in the reminder is the one the update
+        left. Their flag stays set: the participants and the Respo are not reminded a second time.
+
+        Args:
+            guild (Guild): The server.
+            message_id (int): The published message the update was made on.
+            emojis (tuple[str, ...]): The sessions whose trainer changed alone after their reminder.
+        """
+        if not emojis:
+            return
+        try:
+            last = formations.current_published(guild.id)
+        except sqlite3.Error:
+            logger.exception(f"Guild {guild.id} updated message {message_id} but could not read it to remind new trainers.")
+            return
+        if last is None or last.message_id != message_id:
+            return
+        contacts = format_respo_contacts(guild)
+        for fm in last.message.fms:
+            if fm.emoji in emojis:
+                await notify_trainer_before_formation(guild, fm, contacts)
 
     async def _refuse_update(self, interaction: Interaction, text: str, kind: RefusalKind, *, answered: bool) -> None:
         """Tell the member privately why the update did nothing, and log the kind.
@@ -1095,8 +1121,8 @@ class FormationManagement(commands.Cog):
             if (
                 not catch_up
                 and not fm.notified_hour_before
-                # Until the check opens, not only around the hour: a start moved to under an hour away, or a trainer
-                # changed inside the hour, still gets its reminder at the next tick instead of none.
+                # Until the check opens, not only around the hour: a start moved to under an hour away still gets its
+                # reminder at the next tick instead of none.
                 and start_window_end < fm.start_dt <= notification_window_end
             ):
                 await notify_trainer_before_formation(guild, fm, send_contacts)
