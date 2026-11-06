@@ -2042,6 +2042,35 @@ async def test_the_twenty_first_session_is_refused(lab: Lab) -> None:
     assert formations.get_draft(GUILD_ID) == before
 
 
+ALREADY_THERE = "Cette session est déjà dans le brouillon. Rien n'a été ajouté."
+
+
+async def test_a_form_answered_twice_adds_the_session_once(lab: Lab) -> None:
+    """A form sent again with the same name, start and trainer, as when a reply was lost, is refused and the draft stays."""
+    template = _soudure()
+
+    first = await _add(lab, template)
+    before = formations.get_draft(GUILD_ID)
+    second = await _add(lab, template)
+
+    assert "ajoutée" in first.response.content
+    assert second.ephemeral
+    assert second.response.content == ALREADY_THERE
+    assert len(_drafted()) == 1
+    assert formations.get_draft(GUILD_ID) == before
+
+
+async def test_a_second_session_of_the_same_training_at_another_hour_is_added(lab: Lab) -> None:
+    """Another start is another session, even with the same name and trainer."""
+    template = _soudure()
+
+    await _add(lab, template)
+    second = await _add(lab, template, Heure="19:30")
+
+    assert "ajoutée" in second.response.content
+    assert len(_drafted()) == 2
+
+
 async def test_a_draft_that_holds_every_emoji_of_the_pool_refuses_too(lab: Lab) -> None:
     """Twenty sessions holding the pool's twenty emojis leave none to give: the next one is refused for the same reason."""
     template = _soudure()

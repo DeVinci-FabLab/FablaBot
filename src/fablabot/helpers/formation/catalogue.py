@@ -192,6 +192,23 @@ def template_description(draft: FmMessageDraft, fields: TemplateFields) -> str:
     return "" if any(session.name == fields.name for session in draft.fms) else fields.description
 
 
+def is_in_draft(guild_id: int, session: Formation) -> bool:
+    """Tell whether the server's draft holds a session with the same name, start and trainer.
+
+    Args:
+        guild_id (int): The server's ID.
+        session (Formation): The session about to be added.
+
+    Returns:
+        bool: True when one is there already, which a form answered twice would add a second time.
+    """
+    draft = formations.get_draft(guild_id)
+    return draft is not None and any(
+        fm.name == session.name and fm.start_dt == session.start_dt and fm.trainer_mention == session.trainer_mention
+        for fm in draft.fms
+    )
+
+
 def add_session(guild_id: int, session: Formation) -> tuple[Formation, int] | None:
     """Put a session in the server's draft with the next free emoji, the draft kept sorted by start.
 

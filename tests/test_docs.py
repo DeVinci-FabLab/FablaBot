@@ -147,6 +147,14 @@ def test_user_guide_says_the_check_is_sent_once_and_a_restarted_relaunch_is_give
     assert "If the bot restarts in the middle of a relaunch, the next five-minute check gives the answer back" in text
 
 
+def test_user_guide_says_a_form_answered_twice_adds_the_session_once() -> None:
+    """The session form's refusals include a session the draft holds already."""
+    text = " ".join(_read("docs/USERGUIDE.md").split())
+    assert (
+        "the draft already holds a session with the same name, start and trainer (a form answered twice adds it once)" in text
+    )
+
+
 def test_user_guide_holds_welcome_approve_to_the_role_rank() -> None:
     """The guide says /welcome approve gives the roles only below the caller's highest, owner exempt, like /user add_role."""
     text = " ".join(_read("docs/USERGUIDE.md").split())
