@@ -562,7 +562,7 @@ def test_a_run_does_everything_and_names_nobody(caplog: pytest.LogCaptureFixture
     assert list(logs.rglob("*.log")) == []
     assert list(backups.iterdir()) == []
     assert NAME not in caplog.text
-    assert "1 trainings summarised" in caplog.text
+    assert "1 training summarised" in caplog.text
 
 
 async def test_the_bot_applies_the_retention_at_start_then_daily(simcord_bot: Any) -> None:

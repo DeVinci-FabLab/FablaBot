@@ -9,6 +9,7 @@ import re
 from typing import TYPE_CHECKING, Final
 
 from fablabot.helpers.constants import PARIS_TZ, retention_cutoff
+from fablabot.helpers.utils import counted
 from fablabot.services import retention
 
 if TYPE_CHECKING:
@@ -130,7 +131,9 @@ def apply_retention(now: datetime, *, log_dir: Path, backups: Path) -> Retention
         copies=_delete(old_copies(backups, cutoff)),
     )
     logger.info(
-        f"Retention: {report.summarised} trainings summarised; deleted {report.messages} training messages, "
-        f"{report.reactions} reactions, {report.log_files} log files and {report.copies} database copies."
+        f"Retention: {counted(report.summarised, 'training', 'trainings')} summarised; deleted "
+        f"{counted(report.messages, 'training message', 'training messages')}, "
+        f"{counted(report.reactions, 'reaction', 'reactions')}, {counted(report.log_files, 'log file', 'log files')} "
+        f"and {counted(report.copies, 'database copy', 'database copies')}."
     )
     return report
