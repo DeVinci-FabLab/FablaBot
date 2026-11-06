@@ -33,6 +33,7 @@ from fablabot.models.formation import FmMessageDraft, Formation
 from fablabot.services import catalogue, formations
 from fablabot.ui.catalogue import OPTIONS_PER_PAGE, click_check, cut, page_count, page_row, plain, show, template_line
 from fablabot.ui.draft import _NOT_CHANGED, _SESSION_CHANGED, DraftButton, draft_message, stored_draft
+from fablabot.ui.draft import COMMAND as DRAFT_COMMAND
 
 if TYPE_CHECKING:
     import re
@@ -139,10 +140,12 @@ def added_message(session: Formation, count: int, template_id: int) -> tuple[str
     return content, view
 
 
-async def _refuse(interaction: Interaction, text: str, kind: RefusalKind | None = None, *, outcome: str = _NOT_ADDED) -> None:
+async def _refuse(
+    interaction: Interaction, text: str, kind: RefusalKind | None = None, *, outcome: str = _NOT_ADDED, command: str = COMMAND
+) -> None:
     """Tell the member privately why nothing was added (or changed), and log the kind when the refusal is not about the text."""
     if kind is not None:
-        log_refusal(logger, COMMAND, interaction, kind)
+        log_refusal(logger, command, interaction, kind)
     await interaction.response.send_message(f"{text} {outcome}", ephemeral=True, allowed_mentions=AllowedMentions.none())
 
 
@@ -289,9 +292,11 @@ class SessionForm(ui.Modal):
             description=self.description_input.value.strip(),
         )
         if changed is None:
-            await _refuse(interaction, _SESSION_CHANGED, RefusalKind.SESSION_CHANGED, outcome=_NOT_CHANGED)
+            await _refuse(
+                interaction, _SESSION_CHANGED, RefusalKind.SESSION_CHANGED, outcome=_NOT_CHANGED, command=DRAFT_COMMAND
+            )
             return
-        logger.info(f"[{COMMAND}] change guild_id={guild.id} user_id={interaction.user.id}")
+        logger.info(f"[{DRAFT_COMMAND}] change guild_id={guild.id} user_id={interaction.user.id}")
         content, embed, view = draft_message(guild, stored_draft(guild.id))
         await show(interaction, content, embed, view)
 

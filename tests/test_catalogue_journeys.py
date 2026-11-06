@@ -2751,6 +2751,27 @@ async def test_a_modifier_form_refuses_and_changes_nothing(lab: Lab, given: dict
     assert formations.get_draft(GUILD_ID) == before
 
 
+@pytest.mark.parametrize("stale", [False, True], ids=["changed", "refused"])
+async def test_a_change_through_modifier_logs_under_fm_brouillon(
+    lab: Lab, caplog: pytest.LogCaptureFixture, stale: bool
+) -> None:
+    """Modifier logs its change, and its refusal of a stale session, under fm.brouillon like the menu, never fm.ajouter."""
+    target = _planned("🧡", "Soudure", _at(3), trainer=lab.plain)
+    _stage(lab, [target, _planned("💛", "Brodeuse", _at(6), trainer=lab.plain)])
+    asked = await _sessions_menu(lab, "edit")
+    shown = await lab.respo.select(asked.response, [_value(target)], custom_id="fmd:ses:edit:0")
+    if stale:
+        await _elsewhere(lab, "removed")
+    caplog.set_level("DEBUG")
+
+    await lab.respo.submit_modal(shown, _filled(lab, shown, Places="9"))
+
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("[fm.")]
+    assert lines
+    assert all(line.startswith("[fm.brouillon]") for line in lines)
+    assert any(("refused" if stale else " change ") in line for line in lines)
+
+
 @pytest.mark.parametrize("later", [False, True], ids=["earlier", "later"])
 async def test_retirer_asks_first_then_removes_the_session(lab: Lab, later: bool) -> None:
     """Choosing the first or the second session in Retirer asks first and removes nothing; Retirer then removes that one."""
