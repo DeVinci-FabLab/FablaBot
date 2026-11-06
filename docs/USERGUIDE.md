@@ -148,6 +148,7 @@ Anyone else, and anyone after the 7 days or once the training is cancelled, gets
   it runs, and refuses bot channels, the log channel and the commands channel.
 - `/msg purge` needs the Administrator permission on the server. It works outside the commands channel, and
   with neither `channel` nor `all_channels` it targets the current channel.
+  The Confirm button checks the permission again when it is pressed: a member who lost it since the command deletes nothing.
 - `/msg link_reaction` takes one of three actions: `user_dm` (a DM to the member who reacts), `role_dm`
   (a DM to the members of a role) or `channel` (a message in a channel).
 

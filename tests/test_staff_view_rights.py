@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from conftest import cog_bot, make_interaction, make_member, make_role
-from discord import User
+from discord import TextChannel, User, ui
 import pytest
 
 from fablabot.cogs import formation_management, message_management
-from fablabot.helpers.constants import FORMATION_ROLES, MESSAGE_DM_ROLES, MESSAGE_ROLES, RoleNames
+from fablabot.helpers.constants import FORMATION_ROLES, MESSAGE_DM_ROLES, MESSAGE_ROLES, ErrorMessages, RoleNames
 from fablabot.helpers.utils import RIGHT_LOST_MESSAGE
 from fablabot.models import FmCommand, Formation
 from fablabot.models.message import MessageDraft, MsgCommand, MsgReactionEvent
@@ -165,3 +165,84 @@ async def test_a_public_flow_stays_open() -> None:
     assert await msg_ui.SuggestionView(cog_bot()).interaction_check(click) is True
     assert await msg_ui._SuggestionModal(cog_bot(), "communication", anonymous_flag=True).interaction_check(click) is True
     click.response.send_message.assert_not_awaited()
+
+
+async def _purge_confirmed_by(monkeypatch: pytest.MonkeyPatch, click: Any) -> tuple[MagicMock, MagicMock]:
+    """Run ``/msg purge`` as an administrator and let ``click`` press Confirmer; return the interaction and the channel."""
+
+    async def press_confirm(view: ui.View, _timeout: float | None = None) -> bool:
+        """Stand in for the wait: the clicker presses Confirmer at once."""
+        await view.confirm_button.callback(click)  # pyright: ignore[reportAttributeAccessIssue]
+        return False
+
+    async def no_history(**_kwargs: Any) -> Any:
+        """Yield no message."""
+        return
+        yield
+
+    monkeypatch.setattr(ui.View, "wait", press_confirm)
+    interaction = make_interaction(guild_id=GUILD_ID)
+    interaction.permissions.administrator = True
+    channel = MagicMock(spec=TextChannel)
+    channel.name = "salon"
+    channel.history = no_history
+    channel.purge = AsyncMock(return_value=[])
+    click.user = interaction.user
+    await message_management.MessageManagement.msg_purge.callback(
+        message_management.MessageManagement(MagicMock()),
+        interaction,  # pyright: ignore[reportCallIssue]  # cog bound away
+        user=make_member(5),
+        count=5,
+        channel=channel,
+    )
+    return interaction, channel
+
+
+def _purge_clicker(*, administrator: bool = True, served: bool = True, guild_id: int = GUILD_ID) -> Any:
+    """The administrator's click on Confirmer, with what Discord says of their rights at that moment."""
+    click = make_interaction(guild_id=guild_id)
+    click.permissions.administrator = administrator
+    click.client.guild_access.is_served = MagicMock(return_value=served)
+    return click
+
+
+async def test_the_purge_goes_on_when_the_clicker_is_still_an_administrator(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The confirmation of a caller who keeps the permission deletes."""
+    click = _purge_clicker()
+
+    _interaction, channel = await _purge_confirmed_by(monkeypatch, click)
+
+    channel.purge.assert_awaited_once()
+    click.response.send_message.assert_not_awaited()
+
+
+async def test_the_purge_stops_when_the_clicker_lost_the_permission_since_the_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A member who was an administrator when they ran the command and no longer is gets the shared refusal and no deletion."""
+    click = _purge_clicker(administrator=False)
+
+    interaction, channel = await _purge_confirmed_by(monkeypatch, click)
+
+    channel.purge.assert_not_awaited()
+    click.response.send_message.assert_awaited_once_with(RIGHT_LOST_MESSAGE, ephemeral=True)
+    interaction.followup.send.assert_awaited_with("Suppression annulée", ephemeral=True)
+
+
+async def test_the_purge_stops_when_the_server_is_no_longer_served(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A server removed from the allow-list since the command gets no deletion."""
+    click = _purge_clicker(served=False)
+
+    _interaction, channel = await _purge_confirmed_by(monkeypatch, click)
+
+    channel.purge.assert_not_awaited()
+    click.response.send_message.assert_awaited_once()
+    assert ErrorMessages.GUILD_NOT_ALLOWED in click.response.send_message.await_args.args[0]
+
+
+async def test_the_purge_stops_when_the_click_comes_from_another_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A confirmation that is not from the server of the command deletes nothing."""
+    click = _purge_clicker(guild_id=GUILD_ID + 1)
+
+    _interaction, channel = await _purge_confirmed_by(monkeypatch, click)
+
+    channel.purge.assert_not_awaited()
+    click.response.send_message.assert_awaited_once_with(RIGHT_LOST_MESSAGE, ephemeral=True)

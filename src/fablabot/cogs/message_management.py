@@ -45,10 +45,13 @@ from fablabot.helpers.constants import PARIS_TZ, ErrorMessages, retention_cutoff
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.safe_discord_operations import retract_unsaved_post
 from fablabot.helpers.utils import (
+    RIGHT_LOST_MESSAGE,
+    RefusalKind,
     counted,
     ensure_command_context,
     get_members_by_role,
     is_valid_emoji,
+    log_refusal,
     log_request,
     send_dm_to_member,
 )
@@ -299,6 +302,18 @@ class MessageManagement(commands.Cog):
             async def confirm_button(self, button_interaction: Interaction, _button: ui.Button) -> None:
                 if button_interaction.user != interaction.user:
                     await button_interaction.response.send_message("Vous n'êtes pas autorisé", ephemeral=True)
+                    return
+                # The caller may have lost the permission, or the server its place in the allow-list, since the command.
+                client: Fablabot = button_interaction.client  # pyright: ignore[reportAssignmentType]  # the only client
+                refusal = None
+                if not client.guild_access.is_served(button_interaction.guild_id):
+                    refusal = (RefusalKind.SERVER_NOT_SERVED, ErrorMessages.GUILD_NOT_ALLOWED)
+                elif button_interaction.guild_id != interaction.guild_id or not button_interaction.permissions.administrator:
+                    refusal = (RefusalKind.RIGHT_LOST, RIGHT_LOST_MESSAGE)
+                if refusal is not None:
+                    log_refusal(logger, "message.purge", button_interaction, refusal[0])
+                    await button_interaction.response.send_message(refusal[1], ephemeral=True)
+                    self.stop()
                     return
                 self.confirmed = True
                 await button_interaction.response.defer()

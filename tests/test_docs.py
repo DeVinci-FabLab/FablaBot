@@ -245,6 +245,7 @@ def test_user_guide_names_the_commands_outside_the_channel_rule() -> None:
     purge = " ".join(bullet.group().split())
     assert "works outside the commands channel" in purge
     assert "with neither `channel` nor `all_channels` it targets the current channel" in purge
+    assert "checks the permission again when it is pressed" in purge
 
 
 def test_operator_guide_describes_the_commands_channel_rule() -> None:
