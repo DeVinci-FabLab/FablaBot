@@ -514,6 +514,30 @@ async def test_confirmer_changes_the_announcement_in_place_and_keeps_its_reactio
     assert [(r.emoji, list(r.user_ids)) for r in sent.reactions] == reactions
 
 
+async def test_a_refused_edit_of_the_posted_message_is_said_and_retried(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When Discord refuses the edit after the update is stored, the answer says the post follows and the guild is retried."""
+    posted = await _announced(lab)
+    _change("🧡", start=24)
+    summary = await _summary(lab)
+    with monkeypatch.context() as refusing:
+        refusing.setattr(
+            discord.Message, "edit", AsyncMock(side_effect=discord.HTTPException(MagicMock(status=500, reason="boom"), "boom"))
+        )
+        done = await _confirm(lab, summary)
+
+    sent = lab.env.backend.get_message(lab.announce.id, posted.id)
+    assert sent.content != render_message(_stored().message)
+    assert done.response.content == _done(lab, "1 session modifiée").replace(
+        "\n-# Le brouillon",
+        "\n⚠️ Discord n'a pas accepté la modification du message : elle sera refaite d'ici 5 minutes.\n-# Le brouillon",
+    )
+    assert GUILD_ID in _cog(lab)._retry_guilds  # pyright: ignore[reportPrivateUsage]
+
+    await _cog(lab)._update_published_message(GUILD_ID)  # pyright: ignore[reportPrivateUsage]
+
+    assert lab.env.backend.get_message(lab.announce.id, posted.id).content == render_message(_stored().message)
+
+
 async def test_sign_ups_keep_their_place_and_order_through_an_update(lab: Lab, ticks: type[Ticks]) -> None:
     """Three members react in turn, the last to arrive having the smallest ID: a description change keeps that order."""
     await _signed_up(lab, ticks, [lab.temp, lab.codir, lab.admin])

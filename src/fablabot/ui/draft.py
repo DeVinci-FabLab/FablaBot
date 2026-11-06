@@ -361,12 +361,14 @@ def update_message(plan: UpdatePlan, channel_id: int, message_id: int) -> tuple[
     return embeds, view
 
 
-def done_message(plan: UpdatePlan, channel_id: int) -> tuple[str, ui.View]:
+def done_message(plan: UpdatePlan, channel_id: int, *, posted: bool = True) -> tuple[str, ui.View]:
     """Build the answer to a confirmed update: how much changed, and the way to the draft, which now says the same.
 
     Args:
         plan (UpdatePlan): The update that was done.
         channel_id (int): The channel of the announcement.
+        posted (bool): False when the announcement is stored but Discord has not taken the edit of its message yet,
+            which the next five-minute check retries.
 
     Returns:
         tuple[str, ui.View]: The text and the button that shows the draft.
@@ -382,9 +384,10 @@ def done_message(plan: UpdatePlan, channel_id: int) -> tuple[str, ui.View]:
     shown = ", ".join(part for part, count in zip(parts, wanted, strict=True) if count)
     view = ui.View()
     view.add_item(DraftButton("show"))
+    late = "" if posted else "⚠️ Discord n'a pas accepté la modification du message : elle sera refaite d'ici 5 minutes.\n"
     content = (
         f"✅ **Annonce mise à jour** dans <#{channel_id}> : {shown}.\n"
-        "-# Le brouillon reprend l'annonce telle qu'elle est maintenant."
+        f"{late}-# Le brouillon reprend l'annonce telle qu'elle est maintenant."
     )
     return content, view
 

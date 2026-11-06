@@ -708,6 +708,7 @@ class FormationManagement(commands.Cog):
         )
         async with self._published_lock(guild.id):
             outcome = await self._rewrite_announcement(guild, message_id, digest)
+            behind = guild.id in self._retry_guilds or guild.id in self._stale_guilds
         if not isinstance(outcome, UpdatePlan):
             await self._refuse_update(interaction, *outcome, answered=True)
             return
@@ -717,7 +718,7 @@ class FormationManagement(commands.Cog):
             f"added={sum(step.kind == 'added' for step in outcome.steps)} "
             f"removed={sum(step.kind == 'removed' for step in outcome.steps)} text_changes={len(outcome.text_changes)}"
         )
-        content, view = done_message(outcome, last.channel_id)
+        content, view = done_message(outcome, last.channel_id, posted=not behind)
         await interaction.edit_original_response(content=content, view=view, allowed_mentions=AllowedMentions.none())
 
     async def _refuse_update(self, interaction: Interaction, text: str, kind: RefusalKind, *, answered: bool) -> None:
@@ -768,6 +769,7 @@ class FormationManagement(commands.Cog):
         except sqlite3.Error:
             logger.exception(f"Guild {guild.id} could not store the update of message {message_id}.")
             return _UPDATE_RETRY, RefusalKind.DRAFT_NOT_READY
+        self._retry_guilds.discard(guild.id)  # as a scheduled update does: what is left after the rebuild is its own failure
         try:
             await self._update_published_message_locked(guild.id)
         except sqlite3.Error:
@@ -1450,6 +1452,7 @@ class FormationManagement(commands.Cog):
             await msg.edit(content=content, suppress=True)
         except Exception:
             logger.exception(f"Failed to edit message {msg.id} in channel {msg.channel.id}.")
+            self._retry_guilds.add(guild_id)  # the stored message is ahead of the posted one until an edit goes through
         else:
             logger.info(f"Updated published formations message {msg.id} in channel {channel_id} for guild {guild_id}.")
 
