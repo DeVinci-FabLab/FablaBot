@@ -133,6 +133,12 @@ def test_operator_guide_documents_info() -> None:
     assert "so does `/info`" in _section(text, "## Commands channel")
 
 
+def test_user_guide_holds_welcome_approve_to_the_role_rank() -> None:
+    """The guide says /welcome approve gives the roles only below the caller's highest, owner exempt, like /user add_role."""
+    text = " ".join(_read("docs/USERGUIDE.md").split())
+    assert "only when your highest role is above both, as for `/user add_role`; the server owner is exempt" in text
+
+
 def test_the_guides_say_where_the_last_cleanup_is_kept_and_what_a_rollback_does_to_it() -> None:
     """The user guide names the cleanup line, the operator guide the table, the `v4` copy and the way back that drops it."""
     assert '"Nettoyage"' in " ".join(_section(_read("docs/USERGUIDE.md"), "## Bot status").split())

@@ -42,6 +42,7 @@ from fablabot.helpers.utils import (
     format_member_mention,
     format_role_mention,
     log_refusal,
+    outranks,
 )
 from fablabot.logging_handlers import guild_log_context
 from fablabot.models.user import OpExpiry
@@ -919,8 +920,7 @@ class UserManagement(commands.Cog):
             actor's highest role, unless the actor owns the server. The temporary role does not count toward that rank.
         """
         kind = role_refusal(_role_names(actor), role.name, action=action)
-        rank = max((r.position for r in actor.roles if r.name != RoleNames.ADMIN_TEMP), default=0)
-        if kind is None and actor.id != actor.guild.owner_id and role.position >= rank:
+        if kind is None and not outranks(actor, role):
             return RefusalKind.TEMP_ROLE_OUTSIDE_DEOP if role.name == RoleNames.ADMIN_TEMP else RefusalKind.ROLE_NOT_BELOW
         if kind is None and action == "add" and target is not None and target.id == actor.id:
             return RefusalKind.SELF_TARGET

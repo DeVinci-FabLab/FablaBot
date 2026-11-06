@@ -200,7 +200,8 @@ Anyone else, and anyone after the 7 days or once the training is cancelled, gets
 | `/welcome approve <city>` | Approve a newcomer | Admin roles |
 
 `/welcome approve` takes a city (Paris, Nantes or Montpellier) and runs in a `welcome-…` channel, outside the
-commands channel.
+commands channel. It gives the city role and `Membre ✓`, and only when your highest
+role is above both, as for `/user add_role`; the server owner is exempt.
 
 ## Bot logs
 

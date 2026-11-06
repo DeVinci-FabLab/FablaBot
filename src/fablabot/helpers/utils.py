@@ -24,7 +24,7 @@ from discord.utils import get
 from emoji import EMOJI_DATA
 
 from fablabot.guild_config import get_commands_channel_id, set_commands_channel_id
-from fablabot.helpers.constants import ErrorMessages
+from fablabot.helpers.constants import ErrorMessages, RoleNames
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -108,6 +108,24 @@ def right_check(
         return False
 
     return check
+
+
+def outranks(actor: Member, role: Role) -> bool:
+    """Tell whether ``actor`` may hand ``role`` out by rank: their highest role sits strictly above it, or they own the server.
+
+    The temporary admin role does not count toward the actor's rank.
+
+    Args:
+        actor (Member): The member acting, with their current roles.
+        role (Role): The role to give or take, as the guild holds it now.
+
+    Returns:
+        bool: True when the rank allows it.
+    """
+    if actor.id == actor.guild.owner_id:
+        return True
+    rank = max((r.position for r in actor.roles if r.name != RoleNames.ADMIN_TEMP), default=0)
+    return role.position < rank
 
 
 def _log_value(key: str, value: Any) -> str:
