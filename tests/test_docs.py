@@ -118,13 +118,31 @@ def test_operator_guide_documents_info() -> None:
     """The operator guide names /info's log line and revision variable, and lists its roles with the staff commands."""
     text = _read("docs/OPERATIONS.md")
     section = " ".join(_section(text, "## Reading a server's state with /info").split())
-    for word in ("`Info: guild_id=<ID> blocking=<n> warnings=<n>`", f"`{REVISION_ENV}`", "any channel", "does not record it"):
+    for word in (
+        "`Info: guild_id=<ID> blocking=<n> warnings=<n>`",
+        f"`{REVISION_ENV}`",
+        "any channel",
+        "`Nettoyage`",
+        "`bot_state`",
+    ):
         assert word in section, word
     menu = _section(text, "## Staff commands in the slash menu")
     assert "`/info`)" in menu
     (row,) = [line for line in menu.splitlines() if line.startswith("| `/info` |")]
     assert set(row.strip("|").split("|")[1].strip().split(", ")) == INFO_ROLES
     assert "so does `/info`" in _section(text, "## Commands channel")
+
+
+def test_the_guides_say_where_the_last_cleanup_is_kept_and_what_a_rollback_does_to_it() -> None:
+    """The user guide names the cleanup line, the operator guide the table, the `v4` copy and the way back that drops it."""
+    assert '"Nettoyage"' in " ".join(_section(_read("docs/USERGUIDE.md"), "## Bot status").split())
+    text = _read("docs/OPERATIONS.md")
+    stored = _section(text, "## Stored data")
+    for detail in ("`bot_state`", "the end of its last retention run", "`v4` before the bot state"):
+        assert detail in stored, detail
+    schema = _section(text, "### Rolling back").split("#### Back to a release before the database")[0]
+    assert "(schema 5)" in schema
+    assert schema.index("drops the `bot_state` table and nothing") < schema.index("(schema 4)")
 
 
 INFO_LINE = (

@@ -168,7 +168,9 @@ IMAGE=ghcr.io/devinci-fablab/fablabot:X.Y.Z   # the release that was running
 fablabot_state "$VOLUMES_PATH/fablabot/data" fablabot.downgrade_schema
 ```
 
-The first run, from the release that brought the training templates (schema 4), drops the templates and nothing else;
+The first run, from the release that brought the bot's own memory (schema 5), drops the `bot_state` table and nothing
+else: `/info` shows no `Nettoyage` line until the next retention run, which records it again. The next run, from the
+release that brought the training templates (schema 4), drops the templates and nothing else;
 a server types them again after the next upgrade. The export does not hold them: `fablabot.export_state` only counts
 them, and only the archive taken before the rollback ("Before every redeploy") keeps them.
 
@@ -650,8 +652,10 @@ The embed also shows the bot's release, its uptime, the database schema version,
 number of copies in `data/backups/`, and how many servers, commands and watched accounts the instance has. These are counts: no
 other server and no account is named. The footer carries the short commit of the running image, read from the
 `FABLABOT_REVISION` variable, which the image build sets (see the [deployment guide](DEPLOYMENT.md#the-production-image));
-with none, or a value that is not a commit, the footer shows no revision. The date of
-the last retention run is not shown: the bot does not record it, only its log line.
+with none, or a value that is not a commit, the footer shows no revision. The database block ends with
+`Nettoyage` and the time since the last retention run ended, as a Discord relative time ("il y a 3 heures"). The bot records
+that instant in its `bot_state` table at the end of each complete run (see "Stored data"); a run that stops on a storage
+failure leaves the previous one, and until a first run has ended, or if the stored value cannot be read, the line is not shown.
 
 ## Stored data
 
@@ -662,7 +666,8 @@ and the anonymous counts of each training (registered, waitlisted, withdrawn, pr
 member ID or name. A training with fewer than 3 registered members keeps no present and absent counts: with the
 reactions public, they could point at a person. Each server's training templates (name, duration, seats, description,
 excusable) hold no member either; adding a session copies them, so a changed or deleted template leaves every session as
-it was, and the retention never deletes a template. `data/command_sync_state.json` stays a separate file: it is a cache you may delete.
+it was, and the retention never deletes a template. A small `bot_state` table holds what the bot remembers for itself, today
+the end of its last retention run: no member and no server. `data/command_sync_state.json` stays a separate file: it is a cache you may delete.
 
 Personal data is kept for 3 years, then deleted; the anonymous counts stay. See "Retention" below.
 
@@ -675,7 +680,7 @@ Personal data is kept for 3 years, then deleted; the anonymous counts stay. See 
 - When a release changes the schema, the bot also copies the database to `data/backups/fablabot-v<schema>-<time>.db`, then
   moves the schema at start. A release that moves the schema therefore leaves two copies of the same data: one under
   the release label and one under `v<schema>` (`v1` before the attendance tables, `v2` before the counts threshold, `v3` before the
-  training templates).
+  training templates, `v4` before the bot state).
 - The bot removes a copy past 3 years only (see "Retention"). Copies count in the archive of "Before every redeploy". They
   sit on the same volume as the database, so they do not replace that archive if the volume is lost.
 - A release never goes back: a database from a newer release stops an older one.

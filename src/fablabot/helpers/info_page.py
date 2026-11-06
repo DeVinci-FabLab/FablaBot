@@ -7,6 +7,7 @@ import re
 from typing import TYPE_CHECKING, Final
 
 from discord import Embed
+from discord.utils import format_dt
 
 from fablabot.helpers.help_page import FIELD_VALUE_CHARS
 from fablabot.helpers.problem_text import LANGUAGE_NAMES, describe
@@ -15,7 +16,7 @@ from fablabot.helpers.utils import counted
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from datetime import timedelta
+    from datetime import datetime, timedelta
 
     from fablabot.helpers.server_check import Problem
 
@@ -54,6 +55,7 @@ class Facts:
         log_channel_id (int | None): This server's log channel, None when it has none that exists.
         language (tuple[str, str]): The language this server declares and the one the bot's texts use.
         revision (str | None): The short commit of the running image, None when the image gives none.
+        last_cleanup (datetime | None): When the last retention run ended, None when none was recorded.
     """
 
     version: str
@@ -69,6 +71,7 @@ class Facts:
     log_channel_id: int | None
     language: tuple[str, str]
     revision: str | None
+    last_cleanup: datetime | None = None
 
 
 def short_revision(raw: str | None) -> str | None:
@@ -162,11 +165,13 @@ def build_info(facts: Facts, problems: Sequence[Problem]) -> Embed:
     if facts.latency_ms is not None:
         bot.append(f"Latence **{facts.latency_ms} ms**")
     embed.add_field(name="🤖 Bot", value="\n".join(bot))
-    embed.add_field(
-        name="🗃️ Base de données",
-        value=f"Version **{facts.schema_version}** · {_size(facts.database_bytes)}\n"
-        + _bold_count(facts.copies, "sauvegarde", "sauvegardes"),
-    )
+    database = [
+        f"Version **{facts.schema_version}** · {_size(facts.database_bytes)}",
+        _bold_count(facts.copies, "sauvegarde", "sauvegardes"),
+    ]
+    if facts.last_cleanup is not None:
+        database.append(f"Nettoyage {format_dt(facts.last_cleanup, 'R')}")
+    embed.add_field(name="🗃️ Base de données", value="\n".join(database))
     embed.add_field(
         name="🛰️ Instance",
         value="\n".join(

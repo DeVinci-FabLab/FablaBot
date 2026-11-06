@@ -11,13 +11,14 @@ from typing import TYPE_CHECKING, Final
 
 from fablabot.helpers.constants import PARIS_TZ, retention_cutoff
 from fablabot.helpers.utils import counted
-from fablabot.services import retention
+from fablabot.services import bot_state, retention
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+_LAST_RUN_KEY: Final = "retention_last_run"
 _LOG_NAME: Final = re.compile(r"^(\d{4}-\d{2}-\d{2})\.log$")
 _COPY_STAMP: Final = re.compile(r"-(\d{8}T\d{12}Z)\.db$")
 
@@ -106,6 +107,20 @@ def _delete(paths: list[Path]) -> int:
     return deleted
 
 
+def last_retention_run() -> datetime | None:
+    """Read when the last complete retention run ended.
+
+    Returns:
+        datetime | None: The instant, timezone-aware, or None when none was recorded or the value cannot be read.
+    """
+    raw = bot_state.get(_LAST_RUN_KEY)
+    try:
+        moment = datetime.fromisoformat(raw) if raw else None
+    except ValueError:
+        return None
+    return moment if moment is not None and moment.tzinfo is not None else None
+
+
 def apply_retention(now: datetime, *, log_dir: Path, backups: Path) -> RetentionReport:
     """Summarise the trainings whose check closed, then delete what is older than the retention.
 
@@ -115,7 +130,7 @@ def apply_retention(now: datetime, *, log_dir: Path, backups: Path) -> Retention
         backups (Path): The folder of the database copies.
 
     Returns:
-        RetentionReport: What was done.
+        RetentionReport: What was done; its end is recorded for ``/info``.
 
     Raises:
         sqlite3.Error: The database refused a step; the files are left for the next run.
@@ -131,6 +146,7 @@ def apply_retention(now: datetime, *, log_dir: Path, backups: Path) -> Retention
         log_files=_delete(old_log_files(log_dir, cutoff.astimezone(PARIS_TZ).date())),
         copies=_delete(old_copies(backups, cutoff)),
     )
+    bot_state.put(_LAST_RUN_KEY, now.isoformat())
     english = partial(counted, zero_singular=False)
     logger.info(
         f"Retention: {english(report.summarised, 'training', 'trainings')} summarised; deleted "

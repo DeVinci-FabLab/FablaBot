@@ -221,7 +221,7 @@ commands channel.
 The message holds:
 
 - A title and a colour that give the verdict: green for "tout va bien", orange when the points to fix are all warnings, red when at least one problem stops a function. The text says it too, so the colour is never the only sign.
-- Three blocks side by side: the bot (release, time since it started, Discord latency), the database (schema version, file size, number of copies kept in `data/backups/`) and the instance (how many servers it serves, how many commands it synced, how many accounts are watched).
+- Three blocks side by side: the bot (release, time since it started, Discord latency), the database (schema version, file size, number of copies kept in `data/backups/`, and "Nettoyage" with the time since the last cleanup of old data, once there has been one) and the instance (how many servers it serves, how many commands it synced, how many accounts are watched).
 - The settings of this server: commands channel, log channel and language.
 - What to fix on this server, each problem as a sentence followed by an arrow and the path to follow, blocking ones first. The list is cut at Discord's limit and ends with how many are left out. Run `/info` again after a fix to see it go.
 - A footer with the commit of the running image, when the image carries it.

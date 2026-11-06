@@ -75,6 +75,7 @@ def test_going_back_keeps_every_registration_and_temporary_admin() -> None:
     """The attendance objects go, the version is 1, and the sign-ups and the temporary admin stay."""
     _fill()
 
+    assert downgrade_schema.downgrade(FILE) == 4
     assert downgrade_schema.downgrade(FILE) == 3
     assert downgrade_schema.downgrade(FILE) == 2
     assert downgrade_schema.downgrade(FILE) == 1
@@ -91,6 +92,7 @@ def test_going_back_one_step_keeps_the_counts_and_fills_the_hidden_ones_with_zer
     _fill()
     _write("INSERT INTO training_summary VALUES (5, 51, 0, 'Small', ?, 2, 0, 0, NULL, NULL, 'done')")
     downgrade_schema.downgrade(FILE)
+    downgrade_schema.downgrade(FILE)
 
     assert downgrade_schema.downgrade(FILE) == 2
 
@@ -102,25 +104,41 @@ def test_going_back_one_step_keeps_the_counts_and_fills_the_hidden_ones_with_zer
 
 
 def test_the_previous_release_opens_the_file_and_the_next_start_moves_it_forward(tmp_path: Path) -> None:
-    """The first release's migrations accept the file as theirs, and the latest ones bring it back to 4."""
+    """The first release's migrations accept the file as theirs, and the latest ones bring it back to 5."""
     _fill()
-    for _ in range(3):
+    for _ in range(4):
         downgrade_schema.downgrade(FILE)
 
     db.open_database(FILE, migrations=_first_release(tmp_path))
     db.close_database()
     db.open_database(FILE)
 
-    assert _read("PRAGMA user_version") == [(4,)]
+    assert _read("PRAGMA user_version") == [(5,)]
     assert _read("SELECT user_id FROM registration") == [(1,)]
     assert _read("SELECT COUNT(*) FROM appel") == [(0,)]
     assert _read("PRAGMA foreign_key_check") == []
 
 
+def test_going_back_from_the_bot_state_drops_it_alone() -> None:
+    """The first run forgets the last retention run and leaves every sign-up, temporary admin, template, check and count."""
+    _fill()
+    _write("INSERT INTO bot_state VALUES ('retention_last_run', ?)")
+    _write("INSERT INTO training_template VALUES (NULL, 5, ?, 'key', '1h', 1, '', 1)")
+
+    assert downgrade_schema.downgrade(FILE) == 4
+
+    assert "bot_state" not in {row[0] for row in _read("SELECT name FROM sqlite_master")}
+    assert _read("SELECT COUNT(*) FROM training_template") == [(1,)]
+    assert _read("SELECT user_id FROM registration") == [(1,)]
+    assert _read("SELECT guild_id, member_id FROM op_expiry") == [(5, 2)]
+    assert _read("SELECT COUNT(*) FROM appel") == [(1,)]
+
+
 def test_going_back_from_the_catalogue_drops_the_templates_only() -> None:
-    """The first run takes the templates away and leaves every sign-up, temporary admin, check and count."""
+    """The templates run takes the templates away and leaves every sign-up, temporary admin, check and count."""
     _fill()
     _write("INSERT INTO training_template VALUES (NULL, 5, ?, 'key', '1h', 1, '', 1)")
+    downgrade_schema.downgrade(FILE)
 
     assert downgrade_schema.downgrade(FILE) == 3
 
@@ -134,7 +152,7 @@ def test_going_back_from_the_catalogue_drops_the_templates_only() -> None:
 def test_a_file_at_the_first_schema_has_nothing_to_go_back_to() -> None:
     """A fourth run refuses and changes nothing."""
     _fill()
-    for _ in range(3):
+    for _ in range(4):
         downgrade_schema.downgrade(FILE)
     before = FILE.read_bytes()
 
@@ -192,7 +210,7 @@ def test_the_command_says_what_it_did(monkeypatch: pytest.MonkeyPatch, capsys: p
 
     downgrade_schema.main([])
 
-    assert "from schema version 4 to 3" in capsys.readouterr().out
+    assert "from schema version 5 to 4" in capsys.readouterr().out
 
 
 def test_the_command_takes_no_argument_and_reports_a_refusal(capsys: pytest.CaptureFixture[str]) -> None:

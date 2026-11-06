@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 import importlib.metadata
 import json
 import logging
@@ -506,6 +506,41 @@ async def test_every_other_member_is_refused_and_nothing_is_read(
     spy.assert_not_awaited()
 
 
+CLEANED = datetime(2026, 11, 5, 4, 0, tzinfo=UTC)
+
+
+def test_the_last_cleanup_shows_as_a_relative_time_in_the_database_block() -> None:
+    """A known run gives a third line with Discord's relative timestamp, which the reader's client keeps up to date."""
+    embed = build_info(_facts(last_cleanup=CLEANED), [])
+
+    assert (
+        _fields(embed)["🗃️ Base de données"]
+        == f"Version **4** · 1,2 Mo\n**6** sauvegardes\nNettoyage <t:{int(CLEANED.timestamp())}:R>"
+    )
+
+
+def test_a_database_that_was_never_cleaned_shows_no_cleanup_line() -> None:
+    """Without a recorded run, the block keeps its two lines."""
+    embed = build_info(_facts(last_cleanup=None), [])
+
+    assert "Nettoyage" not in _fields(embed)["🗃️ Base de données"]
+
+
+async def test_info_reads_the_last_cleanup_from_the_database(simcord_env: simcord.Env) -> None:
+    """The command shows the run the retention recorded, and none before there is one."""
+    await _world(simcord_env)
+    who = _member(simcord_env, "someone", RoleNames.DIGITAL_MANAGER)
+    with db.transaction() as conn:
+        conn.execute("DELETE FROM bot_state")
+    assert "Nettoyage" not in _fields(_embed(await _info(simcord_env, who)))["🗃️ Base de données"]
+
+    with db.transaction() as conn:
+        conn.execute("INSERT INTO bot_state VALUES ('retention_last_run', ?)", (CLEANED.isoformat(),))
+
+    shown = _fields(_embed(await _info(simcord_env, who)))["🗃️ Base de données"]
+    assert shown.endswith(f"\nNettoyage <t:{int(CLEANED.timestamp())}:R>")
+
+
 async def test_a_ready_server_is_green_with_the_facts_of_the_instance(
     simcord_env: simcord.Env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -527,7 +562,8 @@ async def test_a_ready_server_is_green_with_the_facts_of_the_instance(
     fields = _fields(embed)
     version = importlib.metadata.version("fablabot")
     assert fields["🤖 Bot"].startswith(f"Version **{version}**\nEn ligne depuis **3 h 12 min**")
-    assert re.fullmatch(r"Version \*\*\d+\*\* · \d+,\d [KM]o\n\*\*0\*\* sauvegarde", fields["🗃️ Base de données"])
+    database = fields["🗃️ Base de données"]
+    assert re.fullmatch(r"Version \*\*\d+\*\* · \d+,\d [KM]o\n\*\*0\*\* sauvegarde(\nNettoyage <t:\d+:R>)?", database)
     assert fields["🛰️ Instance"] == "**1** serveur servi\n**10** commandes\n**3** comptes surveillés"
     assert (
         fields["⚙️ Réglages de ce serveur"]
