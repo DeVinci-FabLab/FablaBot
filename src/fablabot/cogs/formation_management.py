@@ -62,12 +62,12 @@ from fablabot.helpers.safe_discord_operations import retract_unsaved_post
 from fablabot.helpers.utils import RefusalKind, counted, ensure_command_context, is_valid_emoji, log_refusal
 from fablabot.logging_handlers import guild_log_context
 from fablabot.models import FmCommand, FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
-from fablabot.services import attendance, formations
+from fablabot.services import attendance, catalogue, formations
 from fablabot.ui import fmui
 from fablabot.ui.attendance import DYNAMIC_ITEMS, OpenAppelPicker
-from fablabot.ui.catalogue import CATALOGUE_ITEMS, templates_message
+from fablabot.ui.catalogue import CATALOGUE_ITEMS, cut, plain, templates_message
 from fablabot.ui.draft import DRAFT_ITEMS, draft_message
-from fablabot.ui.session import SESSION_ITEMS
+from fablabot.ui.session import SESSION_ITEMS, open_session_form
 
 if TYPE_CHECKING:
     from discord import Guild
@@ -78,6 +78,9 @@ logger = logging.getLogger(__name__)
 
 
 _ACCESS = AnyRole(ALLOWED_ROLES)
+_CHOICE_CHARS = 100
+_UNKNOWN_CHARS = 100
+_ID_DIGITS = 18
 TRAINER_NOTIFICATION_ADVANCE = timedelta(hours=1)
 REGISTRATION_WINDOW = timedelta(minutes=20)
 
@@ -436,6 +439,58 @@ class FormationManagement(commands.Cog):
         await interaction.response.send_message(
             content or None, embed=embed, view=view, ephemeral=True, allowed_mentions=AllowedMentions.none()
         )
+
+    @fm_group.command(name="ajouter", description="Ajouter au brouillon une session d'un modèle.", extras=access(_ACCESS))
+    @app_commands.describe(modele="Le modèle : tape les premières lettres")
+    async def fm_ajouter(self, interaction: Interaction, *, modele: str) -> None:
+        """Open the form of a session of a template, picked by the suggestions or typed in full.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            modele (str): The ID of a suggested template of this server, else the template's name.
+        """
+        if not await ensure_command_context(logger, "fm.ajouter", interaction, required_roles=ALLOWED_ROLES):
+            return
+
+        assert interaction.guild is not None
+        guild_id = interaction.guild.id
+        typed = modele.strip()
+        # A suggestion's value is an ID; a number too long to be one is a name.
+        by_id = typed.isascii() and typed.isdecimal() and len(typed) <= _ID_DIGITS
+        template = (catalogue.get_template(guild_id, int(typed)) if by_id else None) or catalogue.find_by_name(guild_id, typed)
+        if template is None:
+            log_refusal(logger, "fm.ajouter", interaction, RefusalKind.TEMPLATE_UNKNOWN)
+            await interaction.response.send_message(
+                f"Aucun modèle **{cut(plain(typed), _UNKNOWN_CHARS)}** sur ce serveur : choisis-en un dans les "
+                "suggestions, ou passe par /fm brouillon. Rien n'a été ajouté.",
+                ephemeral=True,
+                allowed_mentions=AllowedMentions.none(),
+            )
+            return
+        await open_session_form(interaction, template)
+
+    @fm_ajouter.autocomplete("modele")
+    async def _template_choices(self, interaction: Interaction, current: str) -> list[app_commands.Choice[str]]:
+        """Suggest the templates of this server whose name holds the letters typed, to a member who may add sessions.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            current (str): What was typed so far.
+
+        Returns:
+            list[app_commands.Choice[str]]: At most 25 choices named by template and valued by ID; none for a server that
+                is not served, or for a member without a formation role.
+        """
+        user = interaction.user
+        if (
+            interaction.guild is None
+            or not self.bot.guild_access.is_served(interaction.guild.id)
+            or not isinstance(user, Member)
+            or not {role.name for role in user.roles} & ALLOWED_ROLES
+        ):
+            return []
+        templates = catalogue.search_templates(interaction.guild.id, current)
+        return [app_commands.Choice(name=cut(t.fields.name, _CHOICE_CHARS), value=str(t.id)) for t in templates]
 
     @fm_group.command(name="remove", description="Retirer une formation du brouillon.", extras=access(_ACCESS))
     async def fm_remove(self, interaction: Interaction) -> None:

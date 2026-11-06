@@ -6,18 +6,22 @@ from datetime import date, datetime
 import logging
 from typing import TYPE_CHECKING, Any, Final, override
 
-from discord import AllowedMentions, ButtonStyle, Interaction, Object, SelectOption, TextStyle, ui
+from discord import AllowedMentions, ButtonStyle, Interaction, Member, Object, SelectOption, TextStyle, ui
 
 from fablabot.helpers.constants import FORMATION_ROLES, PARIS_TZ, ErrorMessages
 from fablabot.helpers.formation import is_past
 from fablabot.helpers.formation.attendance import trainer_id
 from fablabot.helpers.formation.catalogue import (
+    EXCUSABLE_YES,
     add_session,
+    day_text,
     read_date,
+    read_date_time,
     read_hour,
     read_seats,
     starts_at,
     template_description,
+    template_fields,
 )
 from fablabot.helpers.formation.rendering import discord_timestamp
 from fablabot.helpers.utils import RefusalKind, counted, log_refusal
@@ -40,6 +44,8 @@ PICKS_PER_PAGE: Final = OPTIONS_PER_PAGE - 1
 """Templates per page of the picker; the last option of a menu is kept for the free session."""
 _NOT_ADDED: Final = "Rien n'a été ajouté."
 _GONE: Final = "Ce modèle n'existe plus."
+_NAME_CHARS: Final = 100
+_DURATION_CHARS: Final = 50
 _BUTTON_CHARS: Final = 80
 _OPTION_CHARS: Final = 100
 _TITLE_CHARS: Final = 45
@@ -52,23 +58,25 @@ _BAD_TRAINER: Final = "Choisis un formateur parmi les membres du serveur."
 _BAD_DATE: Final = "Date illisible : écris JJ/MM, par exemple 12/10."
 _BAD_HOUR: Final = "Heure illisible : écris HH:MM, par exemple 18:30."
 _BAD_SEATS: Final = "Places : un nombre entier de 1 à 500."
+_BAD_DATE_TIME: Final = "Date et heure illisibles : écris JJ/MM HH:MM, par exemple 12/10 18:30."
+_FREE: Final = "free"
+"""The value of the menu's last option, which no template ID can equal."""
 _FULL: Final = "Le brouillon compte déjà 20 sessions : Discord n'accepte pas plus de 20 réactions sur un message."
 
 
 def picker_message(guild_id: int, page: int) -> tuple[str, ui.View]:
-    """Build the question that asks which training to add a session of, one page of the server's templates.
+    """Build the question that asks which training to add a session of, one page of the server's templates and the free session.
 
     Args:
         guild_id (int): The server's ID.
         page (int): The page of options, from 0; one past the end shows the last.
 
     Returns:
-        tuple[str, ui.View]: The question, and the menu with its page buttons when the server has templates.
+        tuple[str, ui.View]: The question, and the menu, which ends with the free session; the page buttons when the
+            server has templates.
     """
     templates = catalogue.list_templates(guild_id)
     view = ui.View()
-    if not templates:
-        return f"{_QUESTION}\n{_NO_TEMPLATE}", view
     pages = page_count(len(templates), PICKS_PER_PAGE)
     page = min(max(page, 0), pages - 1)
     shown = templates[page * PICKS_PER_PAGE : (page + 1) * PICKS_PER_PAGE]
@@ -80,7 +88,10 @@ def picker_message(guild_id: int, page: int) -> tuple[str, ui.View]:
         )
         for t in shown
     ]
+    options.append(SelectOption(label="Session libre", description="sans modèle, tout à remplir", value=_FREE))
     view.add_item(SessionPick(page, placeholder=f"Choisis un modèle ({page + 1}/{pages})…", options=options, row=0))
+    if not templates:
+        return f"{_QUESTION}\n{_NO_TEMPLATE}", view
     page_row(
         view,
         previous_id=f"ses:pnav:{max(page - 1, 0)}",
@@ -144,6 +155,31 @@ def _read_start(date_text: str, hour_text: str) -> datetime | str:
     return ErrorMessages.PAST_DATETIME if is_past(start) else start
 
 
+def _trainer_of(guild: Guild, select: ui.UserSelect) -> Member | None:
+    """Read the member a form's menu chose, or None when it chose nobody, a bot, or someone who left the server."""
+    chosen = select.values[0] if select.values else None
+    trainer = guild.get_member(chosen.id) if chosen else None
+    return None if trainer is None or trainer.bot else trainer
+
+
+async def _add(interaction: Interaction, session: Formation | str, template_id: int) -> None:
+    """Put a read session in the draft and show what was added, or say why not when the form gave a refusal text."""
+    assert interaction.guild is not None
+    guild = interaction.guild
+    if isinstance(session, str):
+        await _refuse(interaction, session)
+        return
+    # Nothing is awaited between reading the draft and saving it, so the emoji is free when it is taken.
+    added = add_session(guild.id, session)
+    if added is None:
+        await _refuse(interaction, _FULL, RefusalKind.DRAFT_NOT_READY)
+        return
+    stored, count = added
+    logger.info(f"[{COMMAND}] add guild_id={guild.id} user_id={interaction.user.id} template_id={template_id} sessions={count}")
+    content, view = added_message(stored, count, template_id)
+    await show(interaction, content, None, view)
+
+
 class SessionForm(ui.Modal):
     """The form of a session of a template: who trains, when, how many seats, and an optional description.
 
@@ -176,7 +212,10 @@ class SessionForm(ui.Modal):
             placeholder="Choisis le formateur", required=True, default_values=[Object(trainer_id)] if trainer_id else []
         )
         self.date_input = ui.TextInput(
-            label="Date", placeholder="JJ/MM", max_length=10, default=day.strftime("%d/%m") if day else None
+            label="Date",
+            placeholder="JJ/MM",
+            max_length=10,
+            default=day_text(day, datetime.now(PARIS_TZ).date()) if day else None,
         )
         self.hour_input = ui.TextInput(label="Heure", placeholder="HH:MM", max_length=8)
         self.seats_input = ui.TextInput(label="Places", max_length=20, default=str(template.fields.seats))
@@ -196,27 +235,12 @@ class SessionForm(ui.Modal):
         if template is None:
             await _refuse(interaction, _GONE, RefusalKind.TEMPLATE_UNKNOWN)
             return
-        refusal = self._session(guild, template)
-        if isinstance(refusal, str):
-            await _refuse(interaction, refusal)
-            return
-        # Nothing is awaited between reading the draft and saving it, so the emoji is free when it is taken.
-        added = add_session(guild.id, refusal)
-        if added is None:
-            await _refuse(interaction, _FULL, RefusalKind.DRAFT_NOT_READY)
-            return
-        stored, count = added
-        logger.info(
-            f"[{COMMAND}] add guild_id={guild.id} user_id={interaction.user.id} template_id={template.id} sessions={count}"
-        )
-        content, view = added_message(stored, count, template.id)
-        await show(interaction, content, None, view)
+        await _add(interaction, self._session(guild, template), template.id)
 
     def _session(self, guild: Guild, template: TrainingTemplate) -> Formation | str:
         """Read the form into a session of the template as it is now, or give the text of the first refusal."""
-        chosen = self.trainer_select.values[0] if self.trainer_select.values else None
-        trainer = guild.get_member(chosen.id) if chosen else None
-        if trainer is None or trainer.bot:
+        trainer = _trainer_of(guild, self.trainer_select)
+        if trainer is None:
             return _BAD_TRAINER
         start = _read_start(self.date_input.value, self.hour_input.value)
         if isinstance(start, str):
@@ -256,8 +280,116 @@ async def open_session_form(
     await interaction.response.send_modal(form)
 
 
+class FreeSessionForm(ui.Modal):
+    """The form of a one-off session, which no template fills in: its name, trainer, start, duration and seats.
+
+    The session is excusable and has no description; both are changed from the brouillon, with Modifier. Held in memory
+    only: a form left open across a restart cannot be sent. Upgrade path: dispatch modal submits by custom ID.
+
+    Attributes:
+        name_input (ui.TextInput): The name of the training.
+        trainer_select (ui.UserSelect): The trainer, preset when the form comes from "Encore une session".
+        when_input (ui.TextInput): The day and the hour, ``JJ/MM HH:MM``.
+        duration_input (ui.TextInput): The duration, displayed as typed.
+        seats_input (ui.TextInput): The seats.
+    """
+
+    interaction_check = click_check(COMMAND, FORMATION_ROLES)
+
+    def __init__(
+        self,
+        *,
+        name: str = "",
+        duration: str = "",
+        seats: int | None = None,
+        trainer_id: int | None = None,
+        day: date | None = None,
+    ) -> None:
+        """Build the form, empty or with what a session just added gives.
+
+        Args:
+            name (str): The name to start with, empty for none.
+            duration (str): The duration to start with, empty for none.
+            seats (int | None): The seats to start with, or None for none.
+            trainer_id (int | None): The member to preset as trainer, or None for none.
+            day (date | None): The day to preset, which leaves the hour to write, or None for an empty field.
+        """
+        super().__init__(title="Session libre")
+        self.name_input = ui.TextInput(label="Nom", max_length=_NAME_CHARS, default=name or None)
+        self.trainer_select = ui.UserSelect(
+            placeholder="Choisis le formateur", required=True, default_values=[Object(trainer_id)] if trainer_id else []
+        )
+        self.when_input = ui.TextInput(
+            label="Date et heure",
+            placeholder="JJ/MM HH:MM",
+            max_length=20,
+            default=f"{day_text(day, datetime.now(PARIS_TZ).date())} " if day else None,
+        )
+        self.duration_input = ui.TextInput(
+            label="Durée", placeholder="ex. 45 min, 1h30", max_length=_DURATION_CHARS, default=duration or None
+        )
+        self.seats_input = ui.TextInput(label="Places", max_length=20, default=str(seats) if seats else None)
+        self.add_item(self.name_input)
+        self.add_item(ui.Label(text="Formateur", component=self.trainer_select))
+        for item in (self.when_input, self.duration_input, self.seats_input):
+            self.add_item(item)
+
+    @override
+    async def on_submit(self, interaction: Interaction) -> None:
+        """Add the session to the draft when the form is valid, else say why not, and show what was added."""
+        assert interaction.guild is not None
+        await _add(interaction, self._session(interaction.guild), 0)
+
+    def _session(self, guild: Guild) -> Formation | str:
+        """Read the form into a session, or give the text of the first refusal."""
+        trainer = _trainer_of(guild, self.trainer_select)
+        if trainer is None:
+            return _BAD_TRAINER
+        start = read_date_time(self.when_input.value, datetime.now(PARIS_TZ).date())
+        if start is None:
+            return _BAD_DATE_TIME
+        if is_past(start):
+            return ErrorMessages.PAST_DATETIME
+        # The template's checks on a name, a duration and seats are the ones of a free session.
+        fields = template_fields(self.name_input.value, self.duration_input.value, self.seats_input.value, "", EXCUSABLE_YES)
+        if isinstance(fields, str):
+            return fields
+        return Formation(
+            emoji="",
+            name=fields.name,
+            trainer_mention=trainer.mention,
+            start_iso=start.isoformat(),
+            duration=fields.duration,
+            seats=fields.seats,
+            description="",
+            excusable=True,
+        )
+
+
+async def open_free_form(interaction: Interaction, session: Formation | None = None) -> None:
+    """Open the form of a one-off session, empty or with the name, duration, seats, day and trainer of a session.
+
+    Args:
+        interaction (Interaction): The click that asks for the form.
+        session (Formation | None): The session just added, whose values the form keeps, or None for an empty form.
+    """
+    if session is None:
+        await interaction.response.send_modal(FreeSessionForm())
+        return
+    day = session.start_dt.date()
+    # A day already gone would be refused as past, so it is not offered.
+    form = FreeSessionForm(
+        name=session.name,
+        duration=session.duration,
+        seats=session.seats,
+        trainer_id=trainer_id(session.trainer_mention),
+        day=day if day >= datetime.now(PARIS_TZ).date() else None,
+    )
+    await interaction.response.send_modal(form)
+
+
 class SessionPick(ui.DynamicItem[ui.Select[ui.View]], template=r"ses:pick:(?P<page>[0-9]+)"):
-    """The menu that picks the template to add a session of.
+    """The menu that picks the template to add a session of, or the free session.
 
     Attributes:
         page (int): The page of options it lists, from 0.
@@ -287,7 +419,10 @@ class SessionPick(ui.DynamicItem[ui.Select[ui.View]], template=r"ses:pick:(?P<pa
 
     @override
     async def callback(self, interaction: Interaction[Any]) -> None:
-        """Open the form of the chosen template, or say it is gone."""
+        """Open the form of the chosen template or the free form, or say the template is gone."""
+        if self.item.values[0] == _FREE:
+            await open_free_form(interaction)
+            return
         template = _template_of(interaction, self.item.values[0])
         if template is None:
             await _refuse(interaction, _GONE, RefusalKind.TEMPLATE_UNKNOWN)
@@ -359,15 +494,19 @@ class SessionAgain(ui.DynamicItem[ui.Button[ui.View]], template=r"ses:again:(?P<
 
     @override
     async def callback(self, interaction: Interaction[Any]) -> None:
-        """Open the form on the template, with the date and trainer of the session just added if it is still in the draft."""
+        """Open the form on the template, or the free form, with what the session just added gives if it is still there."""
         assert interaction.guild is not None
+        draft = formations.get_draft(interaction.guild.id)
+        session = next((fm for fm in draft.fms if fm.emoji == self.emoji), None) if draft else None
+        if self.template_id == 0:
+            await open_free_form(interaction, session)
+            return
         template = _template_of(interaction, str(self.template_id))
         if template is None:
             await _refuse(interaction, _GONE, RefusalKind.TEMPLATE_UNKNOWN)
             return
-        draft = formations.get_draft(interaction.guild.id)
-        session = next((fm for fm in draft.fms if fm.emoji == self.emoji), None) if draft else None
-        if session is None:
+        # The emoji may have passed to another training since; its date and trainer would then be someone else's.
+        if session is None or session.name != template.fields.name:
             await open_session_form(interaction, template)
             return
         day = session.start_dt.date()

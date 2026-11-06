@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, tzinfo
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -20,7 +20,7 @@ from fablabot.ui.catalogue import TemplateForm, deletion_message
 from fablabot.ui.draft import DraftTextForm, draft_message, publish_message
 from fablabot.ui.formation import StartFmModal
 from fablabot.ui.message import SuggestionView
-from fablabot.ui.session import SessionForm, added_message, picker_message
+from fablabot.ui.session import FreeSessionForm, SessionForm, added_message, picker_message
 
 from .preview import Capture, Sent
 
@@ -296,6 +296,14 @@ async def draft_publish() -> Screen:
     return Screen(capture.sent, dict(_DRAFT_NAMES))
 
 
+class _October(datetime):
+    """A datetime whose clock stands on 1 October 2026, so that ``JJ/MM`` days are written the same on every run."""
+
+    @classmethod
+    def now(cls, tz: tzinfo | None = None) -> _October:
+        return cls(2026, 10, 1, 12, 0, tzinfo=tz)
+
+
 async def session_pick() -> Screen:
     """The question that asks which training to add a session of, the 14 templates on its one page."""
     capture = Capture()
@@ -309,8 +317,16 @@ async def session_form() -> Screen:
     """The form of a session of the first template: the trainer still to choose, the day, the seats and the description."""
     capture = Capture()
     template = next(t for t in _templates() if t.fields.name == _TEMPLATES[0][0])
-    form = SessionForm(template=template, trainer_id=None, day=date(2026, 10, 12), description=template.fields.description)
+    with patch("fablabot.ui.session.datetime", _October):
+        form = SessionForm(template=template, trainer_id=None, day=date(2026, 10, 12), description=template.fields.description)
     await capture.interaction().response.send_modal(form)
+    return Screen(capture.sent)
+
+
+async def session_free_form() -> Screen:
+    """The form of a one-off session, as Session libre opens it: five empty fields and their hints."""
+    capture = Capture()
+    await capture.interaction().response.send_modal(FreeSessionForm())
     return Screen(capture.sent)
 
 
@@ -494,6 +510,7 @@ SCREENS: dict[str, Callable[[], Coroutine[Any, Any, Screen]]] = {
     "draft-publish": draft_publish,
     "session-pick": session_pick,
     "session-form": session_form,
+    "session-free-form": session_free_form,
     "session-added": session_added,
     "suggest": suggest,
     "suggest-modal": suggest_modal,

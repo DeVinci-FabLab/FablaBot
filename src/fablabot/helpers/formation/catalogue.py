@@ -125,6 +125,37 @@ def read_hour(text: str) -> time | None:
         return None
 
 
+def read_date_time(text: str, today: date) -> datetime | None:
+    """Read a session's start as typed in one field.
+
+    Args:
+        text (str): The day, then the hour, such as ``12/10 18:30`` or ``12/10/2026 18h``, spaces around them allowed.
+        today (date): The day it is, in Paris.
+
+    Returns:
+        datetime | None: The start in Paris time, or None when the text is not a day and an hour that exist.
+    """
+    parts = text.split()
+    if len(parts) != 2:  # noqa: PLR2004 - a day and an hour
+        return None
+    day, hour = read_date(parts[0], today), read_hour(parts[1])
+    return None if day is None or hour is None else starts_at(day, hour)
+
+
+def day_text(day: date, today: date) -> str:
+    """Write a day so that ``read_date`` gives it back: ``JJ/MM`` when that means this very day, else with the year.
+
+    Args:
+        day (date): The day to write.
+        today (date): The day it is, in Paris.
+
+    Returns:
+        str: ``JJ/MM``, or ``JJ/MM/AAAA`` when ``JJ/MM`` would be read as an earlier year.
+    """
+    short = day.strftime("%d/%m")
+    return short if read_date(short, today) == day else day.strftime("%d/%m/%Y")
+
+
 def starts_at(day: date, hour: time) -> datetime:
     """Join a day and an hour as Paris time."""
     return datetime.combine(day, hour, tzinfo=PARIS_TZ)

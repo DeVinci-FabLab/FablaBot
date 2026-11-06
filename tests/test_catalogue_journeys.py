@@ -1558,6 +1558,7 @@ PICKER = (
     "-# Plus rapide au clavier : `/fm ajouter modele:` puis les premières lettres."
 )
 NOT_ADDED = "Rien n'a été ajouté."
+FREE_OPTION = ("Session libre", "sans modèle, tout à remplir")
 
 
 def _day(days: int = 3) -> date:
@@ -1634,6 +1635,7 @@ async def test_ajouter_lists_the_templates_with_their_duration_and_seats(lab: La
     assert [(o["label"], o["description"]) for o in menu["options"]] == [
         ("Brodeuse", "1 h 30 · 1 place · excusable"),
         ("Soudure", "1 h · 5 places"),
+        FREE_OPTION,
     ]
     assert menu["custom_id"] == "ses:pick:0"
     assert _buttons(picker.response)["Modèles 1 à 2 sur 2"]["disabled"]
@@ -1647,7 +1649,7 @@ async def test_the_template_menu_pages_past_twenty_four(lab: Lab) -> None:
     first = await _picker(lab)
 
     assert PICKS_PER_PAGE == 24
-    assert [o["label"] for o in _options(first.response)] == [f"Formation {n:02}" for n in range(24)]
+    assert [o["label"] for o in _options(first.response)] == [f"Formation {n:02}" for n in range(24)] + ["Session libre"]
     (menu,) = (c for row in first.response.components for c in row["components"] if c["type"] == 3)
     assert menu["placeholder"] == "Choisis un modèle (1/2)…"
     buttons = _buttons(first.response)
@@ -1657,7 +1659,7 @@ async def test_the_template_menu_pages_past_twenty_four(lab: Lab) -> None:
 
     second = await lab.respo.click(first.response, custom_id=buttons["Suivant ▶"]["custom_id"])
 
-    assert [o["label"] for o in _options(second.response)] == [f"Formation {n:02}" for n in range(24, 30)]
+    assert [o["label"] for o in _options(second.response)] == [f"Formation {n:02}" for n in range(24, 30)] + ["Session libre"]
     (menu,) = (c for row in second.response.components for c in row["components"] if c["type"] == 3)
     assert menu["placeholder"] == "Choisis un modèle (2/2)…"
     buttons = _buttons(second.response)
@@ -1669,17 +1671,17 @@ async def test_the_template_menu_pages_past_twenty_four(lab: Lab) -> None:
 
     back = await lab.respo.click(second.response, custom_id=buttons["◀ Précédent"]["custom_id"])
 
-    assert len(_options(back.response)) == 24
+    assert len(_options(back.response)) == 25
 
 
 async def test_no_template_says_who_creates_them(lab: Lab) -> None:
-    """With no template the picker says who creates them and offers no menu to pick from."""
+    """With no template the picker says who creates them and its menu holds only the free session."""
     picker = await _picker(lab)
 
     assert picker.response.content == (
         f"{PICKER}\n-# Aucun modèle pour l'instant : un Respo Formation ou un Administrateur les crée avec /fm modeles."
     )
-    assert not [c for row in picker.response.components for c in row["components"] if c["type"] == 3]
+    assert [(o["label"], o["value"]) for o in _options(picker.response)] == [("Session libre", "free")]
 
 
 async def test_the_session_form_is_prefilled_from_the_template(lab: Lab) -> None:
@@ -2130,3 +2132,327 @@ async def test_encore_works_after_a_restart(started_bot: Any) -> None:
     assert [value.id for value in form.trainer_select.default_values] == [4242]
     await started_bot.remove_cog("FormationManagement")
     assert not set(SESSION_ITEMS) & set(store._dynamic_items.values())
+
+
+async def _suggest(lab: Lab, who: Any, typed: str) -> list[tuple[str, str]]:
+    """Type into the `modele` option of `/fm ajouter` and read the (name, value) choices Discord would show."""
+    await lab.show()
+    choices = await who.autocomplete(lab.commands, "fm ajouter", "modele", typed)
+    return [(c["name"], c["value"]) for c in choices]
+
+
+async def _ajouter(lab: Lab, modele: str, who: Any = None) -> Any:
+    """Run `/fm ajouter` with a value for `modele`, from the commands channel."""
+    await lab.show()
+    return await (who or lab.respo).slash(lab.commands, "fm ajouter", modele=modele)
+
+
+def _unknown(typed: str) -> str:
+    """The refusal `/fm ajouter` gives for a value no template of the server answers to."""
+    return (
+        f"Aucun modèle **{typed}** sur ce serveur : choisis-en un dans les suggestions, ou passe par /fm brouillon. {NOT_ADDED}"
+    )
+
+
+async def test_fm_ajouter_suggests_this_servers_templates_by_typed_letters(lab: Lab) -> None:
+    """The suggestions are this server's templates whose name holds the letters typed, case and accents ignored, by ID."""
+    soudure = _soudure()
+    resine = _template("Impression résine")
+    fusion = _template("Fusion 360")
+    _template("Soudure laser", guild_id=OTHER_GUILD_ID)
+
+    assert await _suggest(lab, lab.respo, "") == [
+        ("Fusion 360", str(fusion.id)),
+        ("Impression résine", str(resine.id)),
+        ("Soudure", str(soudure.id)),
+    ]
+    assert await _suggest(lab, lab.respo, "SOU") == [("Soudure", str(soudure.id))]
+    assert await _suggest(lab, lab.respo, "rés") == [("Impression résine", str(resine.id))]
+    assert await _suggest(lab, lab.admin, "360") == [("Fusion 360", str(fusion.id))]
+    assert await _suggest(lab, lab.respo, "laser") == []
+
+
+async def test_fm_ajouter_suggests_at_most_25_templates(lab: Lab) -> None:
+    """With thirty templates the suggestions stop at Discord's 25."""
+    for number in range(30):
+        _template(f"Formation {number:02}")
+
+    assert len(await _suggest(lab, lab.respo, "formation")) == 25
+
+
+@pytest.mark.parametrize("who", ["plain", "president"], ids=["plain-member", "president"])
+async def test_fm_ajouter_suggests_nothing_to_a_member_without_the_role(lab: Lab, who: str) -> None:
+    """A member who holds no formation role is suggested no template, whatever is typed."""
+    _soudure()
+
+    assert await _suggest(lab, getattr(lab, who), "sou") == []
+    assert await _suggest(lab, getattr(lab, who), "") == []
+
+
+async def test_fm_ajouter_opens_the_chosen_templates_form(lab: Lab) -> None:
+    """The ID a suggestion carries opens the form of that template, as the menu does."""
+    template = _soudure()
+    _template("Brodeuse")
+
+    opened = await _ajouter(lab, str(template.id))
+
+    assert opened.modal["title"] == "Soudure"
+    assert _values(opened) == {"Date": None, "Heure": None, "Places": "5", "Description": "Apportez vos lunettes."}
+    done = await lab.respo.submit_modal(opened, _filled(lab, opened))
+    assert "**Soudure** ajoutée" in done.response.content
+    assert [fm.name for fm in _drafted()] == ["Soudure"]
+
+
+async def test_fm_ajouter_finds_a_template_typed_in_full(lab: Lab) -> None:
+    """A name typed whole, whatever its case, and not picked from the suggestions still opens that template's form."""
+    _template("Brodeuse")
+    _soudure()
+
+    opened = await _ajouter(lab, " soudure ")
+
+    assert opened.modal["title"] == "Soudure"
+
+
+@pytest.mark.parametrize("typed", ["Tricot", "a_b*c"], ids=["unknown", "markdown"])
+async def test_fm_ajouter_refuses_a_name_no_template_has(lab: Lab, typed: str) -> None:
+    """A value that names no template is refused privately, shown without markdown, and nothing is added."""
+    template = _soudure()
+    before = formations.get_draft(GUILD_ID)
+
+    refused = await _ajouter(lab, typed)
+
+    assert refused.ephemeral
+    assert refused.modal is None
+    assert refused.response.content == _unknown(typed.replace("_", "\\_").replace("*", "\\*"))
+    assert formations.get_draft(GUILD_ID) == before
+    assert _stored() == [template]
+
+
+async def test_fm_ajouter_refuses_another_servers_template_id(lab: Lab) -> None:
+    """The ID of a template of another server reads as no template here, and opens no form."""
+    foreign = _template("Soudure laser", guild_id=OTHER_GUILD_ID)
+    template = _soudure()
+
+    refused = await _ajouter(lab, str(foreign.id))
+
+    assert refused.ephemeral
+    assert refused.modal is None
+    assert refused.response.content == _unknown(str(foreign.id))
+    assert _drafted() == []
+    assert _stored() == [template]
+    assert _stored(OTHER_GUILD_ID) == [foreign]
+
+
+async def test_fm_ajouter_is_refused_to_a_member_without_the_role(lab: Lab) -> None:
+    """A member without a formation role who runs `/fm ajouter` is refused and no form opens."""
+    template = _soudure()
+
+    refused = await _ajouter(lab, str(template.id), lab.plain)
+
+    assert refused.modal is None
+    assert (refused.response.content or "").startswith(ErrorMessages.ROLE_REQUIRED.split("{")[0])
+
+
+async def test_the_template_menu_ends_with_session_libre(lab: Lab) -> None:
+    """On every page the last option of the menu is Session libre, with its description and its own value."""
+    for number in range(30):
+        _template(f"Formation {number:02}")
+
+    first = await _picker(lab)
+    first_page = _options(first.response)
+    second = await lab.respo.click(first.response, custom_id=_buttons(first.response)["Suivant ▶"]["custom_id"])
+
+    for options in (first_page, _options(second.response)):
+        last = options[-1]
+        assert (last["label"], last["description"], last["value"]) == (*FREE_OPTION[:1], FREE_OPTION[1], "free")
+    assert [o["value"] for o in first_page[:-1]] == [str(t.id) for t in _stored()[:24]]
+
+
+async def _free_form(lab: Lab, who: Any = None) -> Any:
+    """Choose Session libre in the picker and return the form that opens."""
+    who = who or lab.respo
+    picker = await _picker(lab, who)
+    return await who.select(picker.response, ["free"], custom_id="ses:pick:0")
+
+
+def _free_filled(lab: Lab, shown: Any, **given: str | list[Any]) -> dict[str, str | list[str]]:
+    """Fill the free form: Tricot, the plain member, three days from now at 18:30, 2 h and 7 seats, ``given`` over it."""
+    usual: dict[str, Any] = {
+        "Nom": "Tricot",
+        "Formateur": [lab.plain],
+        "Date et heure": f"{_jjmm()} 18:30",
+        "Durée": "2 h",
+        "Places": "7",
+    }
+    return _form(shown, {**usual, **given})
+
+
+async def test_a_free_session_is_added_from_its_own_form(lab: Lab) -> None:
+    """Session libre asks name, trainer, date and hour, duration and seats; the session is excusable, with no description."""
+    shown = await _free_form(lab)
+
+    assert shown.modal["title"] == "Session libre"
+    labels = [i["label"] if i["type"] == 18 else i["components"][0]["label"] for i in shown.modal["components"]]
+    assert labels == ["Nom", "Formateur", "Date et heure", "Durée", "Places"]
+    fields = {c["label"]: c for item in shown.modal["components"] for c in item.get("components", [])}
+    assert fields["Date et heure"]["placeholder"] == "JJ/MM HH:MM"
+    assert fields["Durée"]["placeholder"] == "ex. 45 min, 1h30"
+    assert _values(shown) == {"Nom": None, "Date et heure": None, "Durée": None, "Places": None}
+
+    done = await lab.respo.submit_modal(shown, _free_filled(lab, shown))
+
+    (session,) = _drafted()
+    assert (session.emoji, session.name, session.trainer_mention) == (SESSION_EMOJIS[0], "Tricot", f"<@{lab.plain.id}>")
+    assert (session.duration, session.seats, session.description, session.excusable) == ("2 h", 7, "", True)
+    assert session.start_dt == _at()
+    assert done.response.content == (
+        f"✅ **Tricot** ajoutée : <t:{int(_at().timestamp())}:F> avec <@{lab.plain.id}>, 7 places, émoji 🧡.\n"
+        "-# Le brouillon compte maintenant 1 session."
+    )
+    assert _ids(done.response) == ["ses:again:0:🧡", "fmd:add", "fmd:show"]
+    assert next(iter(_buttons(done.response))) == "🔁 Encore une session de Tricot"
+    assert _stored() == []
+
+
+async def test_encore_after_a_free_session_keeps_its_name_duration_and_seats(lab: Lab) -> None:
+    """Encore une session after a free one reopens the free form with its name, duration, seats, date and trainer."""
+    shown = await _free_form(lab)
+    done = await lab.respo.submit_modal(shown, _free_filled(lab, shown))
+
+    again = await lab.respo.click(done.response, custom_id="ses:again:0:🧡")
+
+    assert again.modal["title"] == "Session libre"
+    assert _values(again) == {"Nom": "Tricot", "Date et heure": f"{_jjmm()} ", "Durée": "2 h", "Places": "7"}
+    (trainer,) = (i for i in again.modal["components"] if i["type"] == 18 and i["label"] == "Formateur")
+    assert trainer["component"]["default_values"] == [{"id": lab.plain.id, "type": "user"}]
+
+    sent = await lab.respo.submit_modal(again, _free_filled(lab, again, **{"Date et heure": f"{_jjmm()} 19:30"}))
+
+    assert [(fm.emoji, fm.name, fm.seats, fm.start_dt) for fm in _drafted()] == [
+        (SESSION_EMOJIS[0], "Tricot", 7, _at()),
+        (SESSION_EMOJIS[1], "Tricot", 7, _at(3, time(19, 30))),
+    ]
+    assert "2 sessions" in sent.response.content
+
+
+async def test_encore_after_a_free_session_gone_opens_an_empty_free_form(lab: Lab) -> None:
+    """When the free session Encore came from was removed, the free form opens empty."""
+    shown = await _free_form(lab)
+    done = await lab.respo.submit_modal(shown, _free_filled(lab, shown))
+    formations.save_draft(GUILD_ID, replace(formations.get_draft(GUILD_ID), fms=[]))  # pyright: ignore[reportArgumentType]
+
+    again = await lab.respo.click(done.response, custom_id="ses:again:0:🧡")
+
+    assert again.modal["title"] == "Session libre"
+    assert _values(again) == {"Nom": None, "Date et heure": None, "Durée": None, "Places": None}
+
+
+@pytest.mark.parametrize(
+    ("given", "refusal"),
+    [
+        ({"Date et heure": "31/02 18:30"}, "Date et heure illisibles : écris JJ/MM HH:MM, par exemple 12/10 18:30."),
+        ({"Date et heure": "{jjmm}"}, "Date et heure illisibles : écris JJ/MM HH:MM, par exemple 12/10 18:30."),
+        ({"Date et heure": "18:30"}, "Date et heure illisibles : écris JJ/MM HH:MM, par exemple 12/10 18:30."),
+        ({"Date et heure": "{jjmm} 25:00"}, "Date et heure illisibles : écris JJ/MM HH:MM, par exemple 12/10 18:30."),
+        ({"Date et heure": "{past}"}, ErrorMessages.PAST_DATETIME),
+        ({"Places": "0"}, "Places : un nombre entier de 1 à 500."),
+        ({"Nom": "   "}, "Nom : à remplir."),
+        ({"Durée": "   "}, "Durée : à remplir."),
+    ],
+    ids=["no-31-feb", "no-hour", "no-date", "hour-25", "past", "seats-0", "blank-name", "blank-duration"],
+)
+async def test_a_free_form_refuses_an_unreadable_date_and_time(lab: Lab, given: dict[str, str], refusal: str) -> None:
+    """A free form with a date and hour that do not read, a start gone, or a bad name, duration or seats adds nothing."""
+    _stage(lab, [_session("💛", "Brodeuse", days=2)])
+    before = formations.get_draft(GUILD_ID)
+    hour_ago = datetime.now(PARIS_TZ) - timedelta(hours=1)
+    given = {key: value.format(jjmm=_jjmm(), past=hour_ago.strftime("%d/%m/%Y %H:%M")) for key, value in given.items()}
+    shown = await _free_form(lab)
+
+    refused = await lab.respo.submit_modal(shown, _free_filled(lab, shown, **given))
+
+    assert refused.ephemeral
+    assert refused.response.content == f"{refusal} {NOT_ADDED}"
+    assert formations.get_draft(GUILD_ID) == before
+
+
+async def test_a_free_form_refuses_a_bot_or_a_stranger_as_trainer(lab: Lab) -> None:
+    """A bot or a user outside the server cannot be the trainer of a free session: nothing is added."""
+    robot = lab.guild.add_member(lab.env.create_user("robot", bot=True))
+    stranger = lab.env.create_user("passant")
+
+    for trainer in (robot, stranger):
+        shown = await _free_form(lab)
+        refused = await lab.respo.submit_modal(shown, _free_filled(lab, shown, Formateur=[trainer]))
+        assert refused.response.content == f"Choisis un formateur parmi les membres du serveur. {NOT_ADDED}"
+
+    assert _drafted() == []
+
+
+async def test_a_bot_picked_as_trainer_is_refused_with_nothing_added(lab: Lab) -> None:
+    """A bot chosen as trainer in a template's form is refused like an empty choice, and the draft is unchanged."""
+    template = _soudure()
+    robot = lab.guild.add_member(lab.env.create_user("robot", bot=True))
+    _stage(lab, [_session("💛", "Brodeuse", days=2)])
+    before = formations.get_draft(GUILD_ID)
+
+    refused = await _add(lab, template, Formateur=[robot])
+
+    assert refused.ephemeral
+    assert refused.response.content == f"Choisis un formateur parmi les membres du serveur. {NOT_ADDED}"
+    assert formations.get_draft(GUILD_ID) == before
+
+
+async def _again(lab: Lab, custom_id: str) -> Any:
+    """Click an Encore une session button as a Respo Formation and return the session form it opened."""
+    interaction = await _forged(lab, custom_id, roles=(RoleNames.TRAININGS_MANAGER,), items=SESSION_ITEMS)
+    return interaction.response.send_modal.await_args.args[0]
+
+
+async def test_encore_writes_the_full_date_when_the_short_one_would_mean_another_year(lab: Lab) -> None:
+    """A session more than a year ahead is offered as JJ/MM/AAAA, since JJ/MM would read as the earlier year."""
+    template = _soudure()
+    far = _session("🧡", "Soudure", days=800, trainer=lab.plain)
+    _stage(lab, [far])
+
+    form = await _again(lab, f"ses:again:{template.id}:🧡")
+
+    assert form.date_input.default == far.start_dt.strftime("%d/%m/%Y")
+
+
+async def test_encore_prefills_nothing_from_a_session_of_another_training(lab: Lab) -> None:
+    """When the session found by the emoji is of another training, the form opens with the template's values only."""
+    template = _soudure()
+    _stage(lab, [_session("🧡", "Brodeuse", days=2, trainer=lab.plain)])
+
+    form = await _again(lab, f"ses:again:{template.id}:🧡")
+
+    assert form.trainer_select.default_values == []
+    assert (form.date_input.default, form.seats_input.default, form.description_input.default) == (
+        None,
+        "5",
+        "Apportez vos lunettes.",
+    )
+
+
+async def test_a_free_form_of_a_member_who_lost_the_role_stores_nothing(lab: Lab) -> None:
+    """A free form sent by a member who lost the role is refused and the draft stays as it was."""
+    shown = await _free_form(lab)
+    lab.lose_roles(lab.respo)
+
+    refused = await lab.respo.submit_modal(shown, _free_filled(lab, shown))
+
+    assert refused.response.content == RIGHT_LOST_MESSAGE
+    assert _drafted() == []
+
+
+@pytest.mark.parametrize(
+    ("who", "listed"),
+    [("respo", True), ("admin", True), ("codir", True), ("temp", True), ("president", False), ("plain", False)],
+    ids=["respo-formation", "administrateur", "codir", "admin-temp", "president", "plain-member"],
+)
+async def test_fm_ajouter_is_listed_for_the_formation_roles(lab: Lab, who: str, listed: bool) -> None:
+    """The help lists `/fm ajouter` for the four roles that may run it and for nobody else."""
+    text = await _help_text(getattr(lab, who), lab)
+
+    assert ("/fm ajouter" in text) is listed

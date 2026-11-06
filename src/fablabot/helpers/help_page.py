@@ -41,6 +41,7 @@ DOMAINS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
             "appel",
             "modeles",
             "brouillon",
+            "ajouter",
         ),
     ),
     (

@@ -55,6 +55,7 @@ In the tables below, "admin roles" means Administrateur, Président, Vice-Prési
 | `/fm appel` | Take or fix the attendance of a training of the last 7 days | Respo Formation, Administrateur |
 | `/fm modeles` | Manage the training templates of the server | Respo Formation, Administrateur |
 | `/fm brouillon` | See the week's draft, set its text and role, preview it and post it | Administrateur, CoDir, Respo Formation, Admin -temp- |
+| `/fm ajouter` | Add a session of a template to the draft, typing the first letters of its name | Administrateur, CoDir, Respo Formation, Admin -temp- |
 
 ### Training templates
 
@@ -79,7 +80,11 @@ A session copies a template when it is added: the template fills in the form, an
 
 The bot picks the session's emoji when the form is sent, the first of its pool of 20 that no session of the draft holds, so two forms sent one after the other never get the same one, and an emoji set with `/fm add` is never taken again. The draft stays sorted by start. A form is refused, with the reason and nothing added, when the date or the hour cannot be read, when the start has already passed, when the seats are not a whole number from 1 to 500, when the trainer is not a member, or when the template has been deleted meanwhile.
 
-The answer names the session, its start, its trainer, its seats and its emoji, and offers three buttons. **Encore une session** reopens the form on the same training with the date and the trainer kept, to chain the sessions of a day; only the hour is left to write. **Autre formation** goes back to the templates, and **Voir le brouillon** to the draft.
+**Session libre**, the last option of the menu on every page, is for a training that has no template. It opens a form with five fields: the name, the trainer, the date and hour written together (`JJ/MM HH:MM`, for example `12/10 18:30`, or `JJ/MM/AAAA HH:MM`), the duration as it should be shown, and the seats. The session is added as excusable and with no description; change either with **Modifier** in the brouillon. The same refusals apply as for a template's form, and a name, duration or seats left empty or too long is refused too.
+
+`/fm ajouter modele:` is the keyboard shortcut to the same form. Type the first letters of a name, or any letters it holds, and Discord suggests up to 25 of the server's templates, whatever the case; pick one and the form of that template opens. A name typed in full without picking it also works. A name no template of the server has is refused, with a pointer to the suggestions, and nothing is added. Only the roles of `/fm add` are suggested anything, and only the templates of their own server.
+
+The answer names the session, its start, its trainer, its seats and its emoji, and offers three buttons. **Encore une session** reopens the form on the same training with the date and the trainer kept, to chain the sessions of a day; only the hour is left to write. After a free session it reopens the free form with its name, duration and seats as well, and the date followed by a space, to write the hour after it. A date more than a year ahead is written with its year. **Autre formation** goes back to the templates, and **Voir le brouillon** to the draft.
 
 The template's description comes with the first session of a training only. The announcement is one message of at most 2 000 characters, and the same description repeated on every session of a training would use it up; the later sessions start with an empty description, which can still be filled in by hand. The draft holds 20 sessions at most, since Discord takes no more than 20 reactions on a message and each session is announced by the reaction of its emoji; the twenty-first is refused with that reason.
 

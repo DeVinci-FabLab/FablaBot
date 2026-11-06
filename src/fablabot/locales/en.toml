@@ -63,6 +63,7 @@ export = "list sign-ups and drop-outs"
 appel = "take or fix a training's attendance"
 modeles = "manage the training templates"
 brouillon = "show and prepare the week's draft"
+ajouter = "add a session from a template"
 
 [help.cmd.msg]
 start = "start a draft"

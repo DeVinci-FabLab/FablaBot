@@ -10,8 +10,10 @@ from fablabot.helpers.constants import MAX_SESSIONS, PARIS_TZ, SESSION_EMOJIS
 from fablabot.helpers.formation.catalogue import (
     MAX_SEATS,
     MIN_SEATS,
+    day_text,
     pick_emoji,
     read_date,
+    read_date_time,
     read_hour,
     read_seats,
     starts_at,
@@ -123,6 +125,41 @@ def test_a_full_date_and_the_hours_read() -> None:
 def test_an_unreadable_date_or_hour_reads_none(text: str) -> None:
     """A date that does not exist or is not written `JJ/MM` or `JJ/MM/AAAA` reads as none."""
     assert read_date(text, date(2026, 11, 6)) is None
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("12/10 18:30", datetime(2027, 10, 12, 18, 30, tzinfo=PARIS_TZ)),
+        (" 06/11  9h ", datetime(2026, 11, 6, 9, 0, tzinfo=PARIS_TZ)),
+        ("12/10/2026 18:30", datetime(2026, 10, 12, 18, 30, tzinfo=PARIS_TZ)),
+        ("01/01/2030 00:00", datetime(2030, 1, 1, 0, 0, tzinfo=PARIS_TZ)),
+        ("12/10", None),
+        ("18:30", None),
+        ("31/02 18:30", None),
+        ("12/10 25:00", None),
+        ("12/10 18:30 soir", None),
+        ("", None),
+    ],
+)
+def test_a_date_and_time_read_in_one_field(text: str, expected: datetime | None) -> None:
+    """`JJ/MM HH:MM` and `JJ/MM/AAAA HH:MM` read as one Paris start, and a missing part or a bad one reads as none."""
+    assert read_date_time(text, date(2026, 11, 6)) == expected
+
+
+@pytest.mark.parametrize(
+    ("day", "expected"),
+    [
+        (date(2026, 11, 6), "06/11"),
+        (date(2027, 11, 5), "05/11"),
+        (date(2027, 11, 6), "06/11/2027"),
+        (date(2030, 1, 1), "01/01/2030"),
+    ],
+)
+def test_a_day_is_written_with_its_year_only_when_the_short_form_would_read_as_another(day: date, expected: str) -> None:
+    """`JJ/MM` is written when it reads back as that very day, else `JJ/MM/AAAA`."""
+    assert day_text(day, date(2026, 11, 6)) == expected
+    assert read_date(expected, date(2026, 11, 6)) == day
 
 
 @pytest.mark.parametrize("text", ["25:00", "18h70", "", "18", "18:5", "18:60", "h30", "6pm", "18h3", "1\u0668:00"])
