@@ -1490,3 +1490,61 @@ async def test_publier_logs_the_channel_and_the_sessions_by_id_only(
     assert all(fm.name not in caplog.text for fm in sessions)
     assert lab.announce.name not in caplog.text
     assert f"channel_id={lab.announce.id}" in caplog.text
+
+
+async def test_publier_in_a_channel_of_another_server_is_refused(lab: Lab) -> None:
+    """A Publier button forged with a channel of another server says the channel is gone and posts nothing."""
+    other = lab.env.create_guild(id=OTHER_GUILD_ID).create_text_channel("annonces")
+    _stage(lab, _three(lab))
+    interaction = make_interaction(user_id=lab.respo.id, guild_id=GUILD_ID)
+    interaction.client = lab.env.bot
+    interaction.guild = _guild(lab)
+    interaction.user.roles = [make_role(RoleNames.TRAININGS_MANAGER)]
+    interaction.message = MagicMock()
+    match = DRAFT_ITEMS[2].__discord_ui_compiled_template__.fullmatch(f"fmd:pub-go:{other.id}")
+    assert match is not None
+    item = await DRAFT_ITEMS[2].from_custom_id(interaction, MagicMock(), match)  # pyright: ignore[reportArgumentType]
+
+    await item.callback(interaction)
+
+    interaction.response.send_message.assert_awaited_once()
+    assert (
+        interaction.response.send_message.await_args.args[0]
+        == "Ce salon n'existe plus : choisis-en un autre. Rien n'a été publié."
+    )
+    assert other.last_message is None
+    assert formations.current_published(GUILD_ID) is None
+
+
+async def test_publier_on_a_draft_already_posted_is_refused_at_the_first_click(lab: Lab) -> None:
+    """Right after a post, Publier on the unchanged brouillon refuses before asking where, and posts nothing."""
+    _stage(lab, _three(lab))
+    await _published_via_publier(lab, lab.announce)
+
+    listing = await lab.brouillon(lab.respo)
+    asked = await lab.respo.click(listing.response, custom_id="fmd:publish")
+
+    assert asked.ephemeral
+    assert asked.response.content == (
+        f"Cette annonce est déjà publiée dans <#{lab.announce.id}> : change le brouillon pour en publier une autre. "
+        "Rien n'a été publié."
+    )
+    assert len(lab.announce.history()) == 1
+
+
+@pytest.mark.parametrize("change", ["seats", "start"])
+async def test_a_draft_changed_only_in_a_session_seats_or_start_is_a_new_announcement(lab: Lab, change: str) -> None:
+    """Changing a session's seats, or only its start, makes the draft new: Publier posts it again."""
+    draft = _stage(lab, _three(lab))
+    await _published_via_publier(lab, lab.announce)
+    first = draft.fms[0]
+    moved = (
+        replace(first, seats=first.seats + 1)
+        if change == "seats"
+        else replace(first, start_iso=(first.start_dt + timedelta(hours=1)).isoformat())
+    )
+    formations.save_draft(GUILD_ID, replace(draft, fms=[moved, *draft.fms[1:]]))
+
+    await _published_via_publier(lab, lab.announce)
+
+    assert len(lab.announce.history()) == 2
