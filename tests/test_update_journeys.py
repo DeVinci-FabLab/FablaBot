@@ -268,6 +268,7 @@ async def test_a_member_who_lost_the_role_is_refused_at_the_click_and_nothing_ch
     await asyncio.sleep(0)
 
     results = [
+        await lab.respo.click(shown.response, custom_id=_buttons(shown.response)[CONFIRM]["custom_id"]),
         await lab.respo.click(shown.response, custom_id="fmd:upd-no"),
         await lab.respo.click(warning.response, custom_id="fmd:update"),
         await lab.respo.click(warning.response, custom_id="fmd:pub-ok"),
@@ -292,6 +293,7 @@ async def test_a_server_no_longer_served_refuses_the_click(lab: Lab) -> None:
     bot.guild_access = GuildAccessPolicy(allowed=frozenset({OTHER_GUILD_ID}))
 
     results = [
+        await lab.respo.click(shown.response, custom_id=_buttons(shown.response)[CONFIRM]["custom_id"]),
         await lab.respo.click(shown.response, custom_id="fmd:upd-no"),
         await lab.respo.click(warning.response, custom_id="fmd:update"),
         await lab.respo.click(warning.response, custom_id="fmd:pub-ok"),
