@@ -2245,6 +2245,17 @@ async def test_fm_ajouter_finds_a_template_typed_in_full(lab: Lab) -> None:
     assert opened.modal["title"] == "Soudure"
 
 
+async def test_fm_ajouter_opens_the_template_named_with_digits_only(lab: Lab) -> None:
+    """A name made of digits opens the template of that name, even when the same digits are another template's ID."""
+    first = _template("Brodeuse")
+    digits = _template(str(first.id))
+
+    opened = await _ajouter(lab, str(first.id))
+
+    assert opened.modal["title"] == str(first.id)
+    assert (await _ajouter(lab, str(digits.id))).modal["title"] == str(first.id)
+
+
 @pytest.mark.parametrize("typed", ["Tricot", "a_b*c"], ids=["unknown", "markdown"])
 async def test_fm_ajouter_refuses_a_name_no_template_has(lab: Lab, typed: str) -> None:
     """A value that names no template is refused privately, shown without markdown, and nothing is added."""

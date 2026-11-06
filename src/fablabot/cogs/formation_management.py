@@ -447,7 +447,7 @@ class FormationManagement(commands.Cog):
 
         Args:
             interaction (Interaction): The Discord interaction context.
-            modele (str): The ID of a suggested template of this server, else the template's name.
+            modele (str): The template's name, else the ID of a suggested template of this server.
         """
         if not await ensure_command_context(logger, "fm.ajouter", interaction, required_roles=ALLOWED_ROLES):
             return
@@ -455,9 +455,10 @@ class FormationManagement(commands.Cog):
         assert interaction.guild is not None
         guild_id = interaction.guild.id
         typed = modele.strip()
-        # A suggestion's value is an ID; a number too long to be one is a name.
+        # A name typed in full comes first, so a name of digits opens its own template; else a suggestion's value is an ID,
+        # and a number too long to be one is only a name.
         by_id = typed.isascii() and typed.isdecimal() and len(typed) <= _ID_DIGITS
-        template = (catalogue.get_template(guild_id, int(typed)) if by_id else None) or catalogue.find_by_name(guild_id, typed)
+        template = catalogue.find_by_name(guild_id, typed) or (catalogue.get_template(guild_id, int(typed)) if by_id else None)
         if template is None:
             log_refusal(logger, "fm.ajouter", interaction, RefusalKind.TEMPLATE_UNKNOWN)
             await interaction.response.send_message(
