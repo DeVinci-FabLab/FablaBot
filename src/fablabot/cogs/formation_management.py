@@ -34,6 +34,7 @@ from fablabot.helpers.access import AnyRole, access
 from fablabot.helpers.constants import (
     APPEL_COMMAND_ROLES,
     APPEL_EDIT_WINDOW,
+    MAX_SESSIONS,
     PARIS_TZ,
     TEMPLATE_ROLES,
     ErrorMessages,
@@ -313,6 +314,11 @@ class FormationManagement(commands.Cog):
         draft = self.get_guild_draft(interaction.guild.id)
 
         emoji_clean = emoji.strip()
+
+        if len(draft.fms) >= MAX_SESSIONS:
+            logger.warning(f"Guild {interaction.guild.id} tried to add formation to a draft of {len(draft.fms)} sessions.")
+            await interaction.response.send_message(ErrorMessages.DRAFT_FULL, ephemeral=True)
+            return
 
         if not is_valid_emoji(emoji_clean):
             logger.warning(f"Guild {interaction.guild.id} tried to add formation with invalid emoji: {emoji_clean!r}.")

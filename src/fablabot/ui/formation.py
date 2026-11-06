@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, cast
 from discord import ButtonStyle, Embed, Interaction, TextStyle, ui
 from emoji import emojize
 
-from fablabot.helpers.constants import FORMATION_ROLES, MAX_TRACKED_OPTIONS, PARIS_TZ, ErrorMessages
+from fablabot.helpers.constants import FORMATION_ROLES, MAX_SESSIONS, MAX_TRACKED_OPTIONS, PARIS_TZ, ErrorMessages
 from fablabot.helpers.formation import announcement_header, is_past, parse_date_time, render_formation, render_message
 from fablabot.helpers.utils import counted, is_valid_emoji, log_request, right_check
 from fablabot.models.formation import FmCommand, FmMessageDraft, Formation
@@ -286,9 +286,16 @@ class AddFmModal(ui.Modal, title="Ajouter une formation"):
             logger,
             "fm.add",
             interaction,
-            name=name,
+            emoji=self.fm.emoji,
+            name_chars=len(name),
             description_chars=len(description),
         )
+
+        # The draft may have filled up while this form was open (a template adds sessions too).
+        if len(draft.fms) >= MAX_SESSIONS:
+            logger.warning(f"Guild {interaction.guild.id} sent an add form to a draft of {len(draft.fms)} sessions.")
+            await interaction.response.send_message(ErrorMessages.DRAFT_FULL, ephemeral=True)
+            return
 
         # The emoji was free when /fm add ran; a session added from a template may have taken it while this form was open.
         if any(existing.emoji == self.fm.emoji for existing in draft.fms):
@@ -314,7 +321,7 @@ class AddFmModal(ui.Modal, title="Ajouter une formation"):
         self.cog.set_guild_draft(interaction.guild.id, draft)
 
         preview = render_message(draft)
-        logger.info(f"Guild {interaction.guild.id} added formation {self.fm.name!r} ({self.fm.start_iso}) to draft.")
+        logger.info(f"Guild {interaction.guild.id} added formation {self.fm.emoji!r} to draft, now {len(fms)} sessions.")
         await interaction.response.send_message(
             "Formation ajoutée & brouillon mis à jour (trié). "
             "Utilise **/fm add** pour ajouter d'autres formations. **/fm preview** pour voir le rendu.",

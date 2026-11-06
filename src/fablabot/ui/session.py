@@ -70,7 +70,7 @@ _BAD_DATE_TIME: Final = "Date et heure illisibles : écris JJ/MM HH:MM, par exem
 _FREE: Final = "free"
 """The value of the menu's last option, which no template ID can equal."""
 _ALREADY_THERE: Final = "Cette session est déjà dans le brouillon."
-_FULL: Final = "Le brouillon compte déjà 20 sessions : Discord n'accepte pas plus de 20 réactions sur un message."
+_FULL: Final = ErrorMessages.DRAFT_FULL
 
 
 def picker_message(guild_id: int, page: int) -> tuple[str, ui.View]:

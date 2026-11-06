@@ -155,6 +155,12 @@ def test_user_guide_says_a_form_answered_twice_adds_the_session_once() -> None:
     )
 
 
+def test_user_guide_says_fm_add_holds_the_twenty_session_limit_too() -> None:
+    """The limit of 20 sessions is told for the legacy command as well."""
+    text = " ".join(_read("docs/USERGUIDE.md").split())
+    assert "by `/fm add` too (before its form opens, and again when the form is sent)" in text
+
+
 def test_user_guide_holds_welcome_approve_to_the_role_rank() -> None:
     """The guide says /welcome approve gives the roles only below the caller's highest, owner exempt, like /user add_role."""
     text = " ".join(_read("docs/USERGUIDE.md").split())

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import json
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -12,10 +13,10 @@ import pytest
 
 from fablabot import db, guild_config
 from fablabot.cogs import user_management
-from fablabot.helpers.constants import PARIS_TZ, RoleNames
+from fablabot.helpers.constants import PARIS_TZ, SESSION_EMOJIS, RoleNames
 from fablabot.helpers.utils import RIGHT_LOST_MESSAGE
 from fablabot.import_state import main as run_import
-from fablabot.models import MessageDraft, MsgReactionEvent, TrackedMessage
+from fablabot.models import FmMessageDraft, Formation, MessageDraft, MsgReactionEvent, TrackedMessage
 from fablabot.services import formations, messages, op_expiries
 
 if TYPE_CHECKING:
@@ -233,6 +234,70 @@ async def test_fm_add_refuses_a_past_date(server: Server) -> None:
     )
     assert result.modal is None
     assert result.ephemeral
+
+
+async def test_fm_add_logs_the_training_by_position_never_by_name(server: Server, caplog: pytest.LogCaptureFixture) -> None:
+    """A training typed in the form is not written to the logs: the lines carry IDs, the emoji and the draft's size."""
+    caplog.set_level(logging.DEBUG)
+
+    await _draft(server, later())
+
+    assert "Arduino" not in caplog.text
+    assert any("fm.add" in record.getMessage() and "name_chars=7" in record.getMessage() for record in caplog.records)
+
+
+def _full_draft(when: datetime) -> FmMessageDraft:
+    """A draft holding as many trainings as an announcement can carry, none with the emoji used by the tests."""
+    fms = [
+        Formation(
+            emoji=emoji,
+            name=f"Séance {number}",
+            trainer_mention="<@7>",
+            start_iso=(when + timedelta(hours=number)).isoformat(),
+            duration="1h",
+            seats=3,
+        )
+        for number, emoji in enumerate(SESSION_EMOJIS)
+    ]
+    return FmMessageDraft(header="", role_id=0, intro="Bonjour", fms=fms, end="A bientot")
+
+
+async def test_fm_add_refuses_a_draft_that_is_full_before_the_form_opens(server: Server) -> None:
+    """With 20 trainings in the draft, `/fm add` says why and opens nothing; the draft is left as it was."""
+    full = _full_draft(later())
+    formations.save_draft(GUILD_ID, full)
+
+    result = await server.admin.slash(
+        server.commands, "fm add", emoji="🔧", trainer=server.plain, date="01/01/2099", hour="10:00", duration="2h", seats=4
+    )
+
+    assert result.modal is None
+    assert result.ephemeral
+    assert "20 sessions" in (result.response.content or "")
+    assert formations.get_draft(GUILD_ID) == full
+
+
+async def test_fm_add_refuses_a_form_sent_after_the_draft_filled_up(server: Server) -> None:
+    """A form opened before the draft reached 20 trainings adds nothing when sent after."""
+    guild_id = GUILD_ID
+    await _draft(server, later())
+    added = await server.admin.slash(
+        server.commands,
+        "fm add",
+        emoji="🔩",
+        trainer=server.plain,
+        date="01/01/2099",
+        hour="10:00",
+        duration="2h",
+        seats=4,
+    )
+    full = _full_draft(later())
+    formations.save_draft(guild_id, full)
+
+    refused = await server.admin.submit_modal(added, fill(added, {"Nom de la formation": "Perceuse"}))
+
+    assert "20 sessions" in (refused.response.content or "")
+    assert formations.get_draft(guild_id) == full
 
 
 async def test_fm_preview_uses_a_discord_timestamp(server: Server) -> None:
