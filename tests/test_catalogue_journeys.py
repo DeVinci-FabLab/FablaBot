@@ -1059,6 +1059,9 @@ async def test_publier_posts_in_the_chosen_channel_like_fm_publish(lab: Lab) -> 
     assert stored is not None
     assert (stored.message_id, stored.channel_id) == (by_button.id, lab.elsewhere.id)
     await lab.show()
+    # `/fm publish` refuses to post over an announcement with sessions to come: start from none, as after a held week.
+    with db.transaction() as conn:
+        conn.execute("DELETE FROM fm_message WHERE message_id IS NOT NULL")
     await lab.respo.slash(lab.commands, "fm publish", channel=lab.announce)
     by_command = lab.announce.last_message
     assert by_command is not None
@@ -2020,7 +2023,7 @@ OUTSIDE_THE_POOL = (
     "🪵",
 )
 """Twenty emojis none of which the bot gives, as `/fm add` forms may have put in a draft."""
-FULL = "Le brouillon compte déjà 20 sessions : Discord n'accepte pas plus de 20 réactions sur un message."
+FULL = ErrorMessages.DRAFT_FULL
 
 
 async def test_the_twenty_first_session_is_refused(lab: Lab) -> None:
@@ -2040,6 +2043,38 @@ async def test_the_twenty_first_session_is_refused(lab: Lab) -> None:
     assert refused.ephemeral
     assert refused.response.content == f"{FULL} {NOT_ADDED}"
     assert formations.get_draft(GUILD_ID) == before
+
+
+ALREADY_THERE = (
+    "Cette session est déjà dans le brouillon (même formation, même date, même formateur) : "
+    "pour la changer, passe par `/fm brouillon` puis **Modifier**. Rien n'a été ajouté."
+)
+
+
+async def test_a_form_answered_twice_adds_the_session_once(lab: Lab) -> None:
+    """A form sent again with the same name, start and trainer, as when a reply was lost, is refused and the draft stays."""
+    template = _soudure()
+
+    first = await _add(lab, template)
+    before = formations.get_draft(GUILD_ID)
+    second = await _add(lab, template)
+
+    assert "ajoutée" in first.response.content
+    assert second.ephemeral
+    assert second.response.content == ALREADY_THERE
+    assert len(_drafted()) == 1
+    assert formations.get_draft(GUILD_ID) == before
+
+
+async def test_a_second_session_of_the_same_training_at_another_hour_is_added(lab: Lab) -> None:
+    """Another start is another session, even with the same name and trainer."""
+    template = _soudure()
+
+    await _add(lab, template)
+    second = await _add(lab, template, Heure="19:30")
+
+    assert "ajoutée" in second.response.content
+    assert len(_drafted()) == 2
 
 
 async def test_a_draft_that_holds_every_emoji_of_the_pool_refuses_too(lab: Lab) -> None:

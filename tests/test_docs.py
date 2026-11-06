@@ -118,13 +118,65 @@ def test_operator_guide_documents_info() -> None:
     """The operator guide names /info's log line and revision variable, and lists its roles with the staff commands."""
     text = _read("docs/OPERATIONS.md")
     section = " ".join(_section(text, "## Reading a server's state with /info").split())
-    for word in ("`Info: guild_id=<ID> blocking=<n> warnings=<n>`", f"`{REVISION_ENV}`", "any channel", "does not record it"):
+    for word in (
+        "`Info: guild_id=<ID> blocking=<n> warnings=<n>`",
+        f"`{REVISION_ENV}`",
+        "any channel",
+        "`Nettoyage`",
+        "`bot_state`",
+    ):
         assert word in section, word
     menu = _section(text, "## Staff commands in the slash menu")
     assert "`/info`)" in menu
     (row,) = [line for line in menu.splitlines() if line.startswith("| `/info` |")]
     assert set(row.strip("|").split("|")[1].strip().split(", ")) == INFO_ROLES
     assert "so does `/info`" in _section(text, "## Commands channel")
+
+
+def test_operator_guide_says_a_role_allowed_for_the_whole_bot_counts_in_the_server_check() -> None:
+    """The problem table says a bot-wide allow counts and that the group's own setting wins."""
+    text = " ".join(_read("docs/OPERATIONS.md").split())
+    assert "allowed at the top of the Integrations page, for the whole bot, counts as allowed on every group" in text
+    assert "a setting on the group wins" in text
+
+
+def test_user_guide_says_the_check_is_sent_once_and_a_restarted_relaunch_is_given_back() -> None:
+    """The guide tells the trainer gets the check once, and what a restart in the middle of a relaunch does."""
+    text = " ".join(_read("docs/USERGUIDE.md").split())
+    assert "it does not send it again" in text
+    assert "If the bot restarts in the middle of a relaunch, the next five-minute check gives the answer back" in text
+
+
+def test_user_guide_says_a_form_answered_twice_adds_the_session_once() -> None:
+    """The session form's refusals include a session the draft holds already."""
+    text = " ".join(_read("docs/USERGUIDE.md").split())
+    assert (
+        "the draft already holds a session with the same name, start and trainer (a form answered twice adds it once)" in text
+    )
+
+
+def test_user_guide_says_fm_add_holds_the_twenty_session_limit_too() -> None:
+    """The limit of 20 sessions is told for the legacy command as well."""
+    text = " ".join(_read("docs/USERGUIDE.md").split())
+    assert "by `/fm add` too (before its form opens, and again when the form is sent)" in text
+
+
+def test_user_guide_holds_welcome_approve_to_the_role_rank() -> None:
+    """The guide says /welcome approve gives the roles only below the caller's highest, owner exempt, like /user add_role."""
+    text = " ".join(_read("docs/USERGUIDE.md").split())
+    assert "only when your highest role is above both, as for `/user add_role`; the server owner is exempt" in text
+
+
+def test_the_guides_say_where_the_last_cleanup_is_kept_and_what_a_rollback_does_to_it() -> None:
+    """The user guide names the cleanup line, the operator guide the table, the `v4` copy and the way back that drops it."""
+    assert '"Nettoyage"' in " ".join(_section(_read("docs/USERGUIDE.md"), "## Bot status").split())
+    text = _read("docs/OPERATIONS.md")
+    stored = _section(text, "## Stored data")
+    for detail in ("`bot_state`", "the end of its last retention run", "`v4` before the bot state"):
+        assert detail in stored, detail
+    schema = _section(text, "### Rolling back").split("#### Back to a release before the database")[0]
+    assert "(schema 5)" in schema
+    assert schema.index("drops the `bot_state` table and nothing") < schema.index("(schema 4)")
 
 
 INFO_LINE = (
@@ -227,6 +279,7 @@ def test_user_guide_names_the_commands_outside_the_channel_rule() -> None:
     purge = " ".join(bullet.group().split())
     assert "works outside the commands channel" in purge
     assert "with neither `channel` nor `all_channels` it targets the current channel" in purge
+    assert "checks the permission again when it is pressed" in purge
 
 
 def test_operator_guide_describes_the_commands_channel_rule() -> None:
@@ -931,6 +984,7 @@ def test_user_guide_says_publier_warns_before_a_second_announcement() -> None:
         "**Publier quand même** goes on to the channel question",
         "**Annuler** posts nothing and changes nothing",
         "A new week's draft, once every session of the last announcement has started, gets no warning",
-        "`/fm publish` gives no such warning",
+        "`/fm publish` does not ask: while the published announcement still has sessions to come, "
+        "it posts nothing and points to `/fm brouillon`",
     ):
         assert detail in guide, detail

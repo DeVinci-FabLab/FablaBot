@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Literal
 from warnings import deprecated
 
-from discord import HTTPException, Interaction, Member, PermissionOverwrite, TextChannel, app_commands
+from discord import HTTPException, Interaction, Member, PermissionOverwrite, Role, TextChannel, app_commands
 from discord.ext import commands
 from discord.utils import get
 
@@ -14,7 +14,7 @@ from fablabot.guild_config import is_welcome_verify_enabled, set_welcome_verify_
 from fablabot.helpers.access import AnyRole, access
 from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames, staff_default_permissions
 from fablabot.helpers.safe_discord_operations import safe_add_roles, safe_create_text_channel, safe_delete_channel
-from fablabot.helpers.utils import ensure_command_context, escape_md
+from fablabot.helpers.utils import RefusalKind, ensure_command_context, escape_md, log_refusal, outranks
 
 if TYPE_CHECKING:
     from fablabot.main import Fablabot
@@ -22,6 +22,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _ACCESS = AnyRole(ADMIN_ROLES)
+_ROLE_NOT_BELOW_REFUSED = (
+    "L'un des rôles à donner est au même rang que votre rôle le plus haut, ou au-dessus : "
+    "demandez à un membre dont le rôle le plus haut est au-dessus des rôles de membre."
+)
 
 
 class WelcomeManagement(commands.Cog):
@@ -138,24 +142,23 @@ class WelcomeManagement(commands.Cog):
             )
             return
 
-        city_role_name = f"Membre {city}"
-        city_role = get(interaction.guild.roles, name=city_role_name)
-        if city_role is None:
-            await interaction.response.send_message(
-                ErrorMessages.ROLE_NOT_FOUND.format(role_name=city_role_name),
-                ephemeral=True,
-            )
+        roles: list[Role] = []
+        for role_name in (f"Membre {city}", RoleNames.MEMBER_VERIFIED):
+            role = get(interaction.guild.roles, name=role_name)
+            if role is None:
+                await interaction.response.send_message(
+                    ErrorMessages.ROLE_NOT_FOUND.format(role_name=role_name), ephemeral=True
+                )
+                return
+            roles.append(role)
+
+        assert isinstance(interaction.user, Member)
+        if not all(outranks(interaction.user, role) for role in roles):
+            log_refusal(logger, "welcome.approve", interaction, RefusalKind.ROLE_NOT_BELOW)
+            await interaction.response.send_message(_ROLE_NOT_BELOW_REFUSED, ephemeral=True)
             return
 
-        member_role = get(interaction.guild.roles, name=RoleNames.MEMBER_VERIFIED)
-        if member_role is None:
-            await interaction.response.send_message(
-                ErrorMessages.ROLE_NOT_FOUND.format(role_name=RoleNames.MEMBER_VERIFIED),
-                ephemeral=True,
-            )
-            return
-
-        success, error = await safe_add_roles(logger, member, city_role, member_role, reason="Validation du nouveau membre")
+        success, error = await safe_add_roles(logger, member, *roles, reason="Validation du nouveau membre")
         if not success:
             await interaction.response.send_message(error, ephemeral=True)
             return

@@ -26,7 +26,7 @@ from fablabot.helpers.formation.rendering import discord_timestamp, humanize_dt
 from fablabot.helpers.utils import RefusalKind, get_or_fetch_member, log_refusal, right_check
 from fablabot.logging_handlers import guild_log_context
 from fablabot.models import AlertAction
-from fablabot.services import attendance
+from fablabot.services import attendance, bot_state
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -50,10 +50,11 @@ _RELAUNCH_UNREACHED = "Le formateur n'a pas pu être relancé : ses MP sont ferm
 _RELAUNCH_NO_TRAINER = "Le formateur n'a pas pu être relancé : aucun formateur n'est nommé pour cette formation."
 _RELAUNCH_ERROR = "Le formateur n'a pas pu être relancé : une erreur est survenue. L'alerte reste ouverte."
 
-# The checks whose relaunch is in flight: the claim is stored before the trainer is reached, so until it settles a stored
-# "relaunch" does not yet mean the trainer was. Held in this process only: a restart mid-relaunch leaves the claim stored,
-# and it then reads as done. A stored pending flag would lift that limit, at the price of a migration.
+# The checks whose relaunch is in flight in this process: the claim is stored before the trainer is reached, so until it
+# settles a stored "relaunch" does not yet mean the trainer was. The same fact is stored under ``_RELAUNCH_KEY`` so that
+# a restart mid-relaunch is found at the next tick and its claim given back (see ``recover_relaunches``).
 _relaunching: Final[set[int]] = set()
+_RELAUNCH_KEY: Final = "relaunch:"
 
 
 @contextmanager
@@ -215,6 +216,11 @@ class AppelToggle(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<appel
 
         Setting rather than flipping what is stored makes a retried or doubled click, or one on an older copy, harmless.
         """
+        with _appel_log_context(self.appel_id):
+            await self._toggle(interaction)
+
+    async def _toggle(self, interaction: Interaction[Any]) -> None:
+        """Set the mark, then show the check."""
         if self.member_id in {r.user_id for r in attendance.registrants(self.appel_id)}:
             button = _shown(interaction.message, f"appel:{self.appel_id}:m:{self.member_id}")
             # A click always carries its message; the stored mark only stands in when a caller has none.
@@ -281,6 +287,11 @@ class AppelMenu(ui.DynamicItem[ui.Select[ui.View]], template=r"appel:(?P<appel>[
     @override
     async def callback(self, interaction: Interaction[Any]) -> None:
         """Set the members this menu lists to what was chosen, leave the others, then show the check."""
+        with _appel_log_context(self.appel_id):
+            await self._choose(interaction)
+
+    async def _choose(self, interaction: Interaction[Any]) -> None:
+        """Mark the chosen members, then show the check."""
         listed = _listed(interaction.message, self.item.custom_id)
         attendance.mark(self.appel_id, listed, [int(value) for value in self.item.values])
         logger.info(
@@ -467,6 +478,7 @@ class AppelAlertAction(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<
         failed = _RELAUNCH_UNREACHED
         _relaunching.add(self.appel_id)
         try:
+            bot_state.put(f"{_RELAUNCH_KEY}{self.appel_id}", "claimed")
             await interaction.response.defer()
             appel = attendance.get(self.appel_id)
             guild = interaction.client.get_guild(appel.guild_id) if appel else None
@@ -481,6 +493,7 @@ class AppelAlertAction(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<
             try:
                 if not reached:
                     attendance.release(self.appel_id, interaction.user.id, AlertAction.RELAUNCH)
+                bot_state.delete(f"{_RELAUNCH_KEY}{self.appel_id}")
             finally:
                 # Dropped with the release, before any await: a click that comes after finds the alert open again.
                 _relaunching.discard(self.appel_id)
@@ -489,6 +502,35 @@ class AppelAlertAction(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<
                 if released is not None:
                     await settle_alert(interaction.client, released)
         return None if reached else failed
+
+
+async def recover_relaunches(bot: Fablabot) -> None:
+    """Give back the claim of a relaunch that a restart interrupted, so the alert can be answered again.
+
+    A relaunch stores its claim, then reaches the trainer; the mark kept beside it says it was not over. One found here
+    that this process is not running belongs to an earlier process: whether the trainer was reached is unknown, so the
+    claim is released rather than the trainer sent the check a second time, and the Respo may relaunch again.
+
+    Args:
+        bot (Fablabot): The bot.
+    """
+    for key in bot_state.keys(_RELAUNCH_KEY):
+        appel_id = int(key.removeprefix(_RELAUNCH_KEY))
+        if appel_id in _relaunching:
+            continue
+        appel = attendance.get(appel_id)
+        # A server no longer served gets no write and no edit; its mark goes all the same.
+        if appel is not None and not bot.guild_access.is_served(appel.guild_id):
+            bot_state.delete(key)
+            continue
+        if appel is not None and appel.handled_action is AlertAction.RELAUNCH and appel.handled_by is not None:
+            attendance.release(appel_id, appel.handled_by, AlertAction.RELAUNCH)
+            with guild_log_context(appel.guild_id):
+                logger.warning(f"[appel] relaunch interrupted by a restart released appel_id={appel_id}")
+            released = attendance.get(appel_id)
+            if released is not None:
+                await settle_alert(bot, released)
+        bot_state.delete(key)
 
 
 class OpenAppelPicker(ui.View):

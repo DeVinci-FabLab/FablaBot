@@ -34,6 +34,7 @@ from fablabot.helpers.access import AnyRole, access
 from fablabot.helpers.constants import (
     APPEL_COMMAND_ROLES,
     APPEL_EDIT_WINDOW,
+    MAX_SESSIONS,
     PARIS_TZ,
     TEMPLATE_ROLES,
     ErrorMessages,
@@ -56,7 +57,8 @@ from fablabot.helpers.formation import (
     send_waitlist_dm,
     start_appel,
 )
-from fablabot.helpers.formation.attendance import appel_message, trainer_id
+from fablabot.helpers.formation.attendance import Start, appel_message, trainer_id
+from fablabot.helpers.formation.catalogue import has_sessions_to_come
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.safe_discord_operations import retract_unsaved_post
 from fablabot.helpers.utils import RefusalKind, counted, ensure_command_context, is_valid_emoji, log_refusal
@@ -64,7 +66,7 @@ from fablabot.logging_handlers import guild_log_context
 from fablabot.models import FmCommand, FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
 from fablabot.services import attendance, catalogue, formations
 from fablabot.ui import fmui
-from fablabot.ui.attendance import DYNAMIC_ITEMS, OpenAppelPicker
+from fablabot.ui.attendance import DYNAMIC_ITEMS, OpenAppelPicker, recover_relaunches
 from fablabot.ui.catalogue import CATALOGUE_ITEMS, cut, plain, templates_message
 from fablabot.ui.draft import DRAFT_ITEMS, draft_message
 from fablabot.ui.session import SESSION_ITEMS, open_session_form
@@ -75,6 +77,12 @@ if TYPE_CHECKING:
     from fablabot.main import Fablabot
 
 logger = logging.getLogger(__name__)
+
+_REPUBLISH_REFUSED = (
+    "Une annonce de formations est déjà publiée et a encore des sessions à venir : en publier une autre arrêterait de "
+    "compter les inscriptions de la première. Utilise `/fm brouillon` pour publier : il demande confirmation. "
+    "Rien n'a été publié."
+)
 
 
 _ACCESS = AnyRole(ALLOWED_ROLES)
@@ -313,6 +321,11 @@ class FormationManagement(commands.Cog):
         draft = self.get_guild_draft(interaction.guild.id)
 
         emoji_clean = emoji.strip()
+
+        if len(draft.fms) >= MAX_SESSIONS:
+            logger.warning(f"Guild {interaction.guild.id} tried to add formation to a draft of {len(draft.fms)} sessions.")
+            await interaction.response.send_message(ErrorMessages.DRAFT_FULL, ephemeral=True)
+            return
 
         if not is_valid_emoji(emoji_clean):
             logger.warning(f"Guild {interaction.guild.id} tried to add formation with invalid emoji: {emoji_clean!r}.")
@@ -601,6 +614,12 @@ class FormationManagement(commands.Cog):
             await interaction.response.send_message(ErrorMessages.DRAFT_EMPTY, ephemeral=True)
             return
 
+        # A second post stops the sign-ups of the first from counting; /fm brouillon warns and asks, this command does not.
+        if has_sessions_to_come(interaction.guild.id):
+            log_refusal(logger, "fm.publish", interaction, RefusalKind.DRAFT_NOT_READY)
+            await interaction.response.send_message(_REPUBLISH_REFUSED, ephemeral=True)
+            return
+
         await self.publish_draft(interaction, channel)
 
     async def publish_draft(self, interaction: Interaction, channel: TextChannel) -> None:
@@ -884,6 +903,7 @@ class FormationManagement(commands.Cog):
                 except sqlite3.Error:
                     logger.exception(f"Reminders of guild {guild_id} stopped by a storage failure; next tick tries again.")
         try:
+            await recover_relaunches(self.bot)
             await send_due_alerts(self.bot, now)
         except sqlite3.Error:
             logger.exception("Alerts stopped by a storage failure; next tick tries again.")
@@ -957,8 +977,12 @@ class FormationManagement(commands.Cog):
                 fm.notified_hour_before = True
                 continue
 
-            if now - APPEL_EDIT_WINDOW < fm.start_dt <= start_window_end and await start_appel(guild, pub, position):
-                if fm.start_dt >= now - window_tolerance:  # "starts now" is only true in the window
+            if now - APPEL_EDIT_WINDOW < fm.start_dt <= start_window_end:
+                started = await start_appel(guild, pub, position)
+                if started is Start.FAILED:
+                    continue
+                # A check kept from an earlier tick whose record failed was announced then: nothing goes out twice.
+                if started is Start.OPENED and fm.start_dt >= now - window_tolerance:  # "starts now" only holds in the window
                     await notify_responsible_before_formation(guild, fm, moment="start")
 
                 fm.notified_at_start = True  # only once the check exists: a failed opening is tried again at the next tick

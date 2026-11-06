@@ -54,10 +54,10 @@ def test_an_empty_folder_gets_the_whole_schema() -> None:
     db.open_database(DB_FILE)
 
     assert DB_FILE.exists()
-    assert _version(DB_FILE) == 4
+    assert _version(DB_FILE) == 5
     assert {"guild_settings", "fm_message", "formation", "registration", "tracked_message", "reaction_event"} <= _tables()
     assert {"op_expiry", "state_import", "legacy_log_channel", "tracked_reaction"} <= _tables()
-    assert {"appel", "appel_present", "appel_alert", "training_summary"} <= _tables()
+    assert {"appel", "appel_present", "appel_alert", "training_summary", "bot_state"} <= _tables()
     assert "training_template" in _tables()
 
 
@@ -655,7 +655,7 @@ def test_the_attendance_step_keeps_every_row_and_copies_the_first_version(tmp_pa
 
     db.open_database(DB_FILE)
 
-    assert _version(DB_FILE) == 4
+    assert _version(DB_FILE) == 5
     assert [tuple(r) for r in db.connection().execute("SELECT guild_id, member_id, channel_id FROM op_expiry")] == [(1, 2, 3)]
     assert [tuple(r) for r in db.connection().execute("SELECT log_channel_id FROM guild_settings")] == [(5,)]
     [copy] = DB_FILE.parent.glob("backups/test-v1-*.db")
@@ -701,7 +701,7 @@ def test_the_threshold_step_empties_the_counts_of_small_trainings_and_keeps_the_
 
     db.open_database(DB_FILE)
 
-    assert _version(DB_FILE) == 4
+    assert _version(DB_FILE) == 5
     rows = db.connection().execute(
         "SELECT name, registered, waitlisted, withdrawn, present, absent, outcome FROM training_summary"
     )
@@ -727,9 +727,29 @@ def test_the_catalogue_step_keeps_every_row_and_copies_schema_three(tmp_path: Pa
 
     db.open_database(DB_FILE)
 
-    assert _version(DB_FILE) == 4
+    assert _version(DB_FILE) == 5
     assert db.connection().execute("SELECT COUNT(*) FROM op_expiry").fetchone()[0] == 1
     assert db.connection().execute("SELECT COUNT(*) FROM training_summary").fetchone()[0] == 1
     assert db.connection().execute("SELECT COUNT(*) FROM training_template").fetchone()[0] == 0
     [copy] = DB_FILE.parent.glob("backups/test-v3-*.db")
     assert _version(copy) == 3
+
+
+def test_the_bot_state_step_keeps_every_row_and_copies_schema_four(tmp_path: Path) -> None:
+    """A file at schema 4 moves to 5 with its rows, an empty bot state, and a copy of the schema 4 file."""
+    fourth = tmp_path / "fourth-release"
+    fourth.mkdir()
+    for name in sorted(db.MIGRATIONS_DIR.glob("000[1-4]_*.sql")):
+        shutil.copy(name, fourth)
+    db.open_database(DB_FILE, migrations=fourth)
+    with db.transaction() as conn:
+        conn.execute("INSERT INTO op_expiry VALUES (1, 2, '2026-11-05T10:00:00+01:00', 3)")
+    db.close_database()
+
+    db.open_database(DB_FILE)
+
+    assert _version(DB_FILE) == 5
+    assert db.connection().execute("SELECT COUNT(*) FROM op_expiry").fetchone()[0] == 1
+    assert db.connection().execute("SELECT COUNT(*) FROM bot_state").fetchone()[0] == 0
+    [copy] = DB_FILE.parent.glob("backups/test-v4-*.db")
+    assert _version(copy) == 4

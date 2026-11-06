@@ -50,6 +50,8 @@ mockups = [
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
 asyncio_mode = "auto"
+# discord.py 2.7 passes re.sub's count positionally in escape_markdown; ignored by exact message so other warnings stand out.
+filterwarnings = ["ignore:'count' is passed as positional argument:DeprecationWarning:discord.utils"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 

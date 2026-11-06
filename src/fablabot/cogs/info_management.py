@@ -18,6 +18,7 @@ from fablabot.guild_config import get_log_channel_id
 from fablabot.helpers.access import AnyRole, access
 from fablabot.helpers.constants import INFO_ROLES, staff_default_permissions
 from fablabot.helpers.info_page import REVISION_ENV, Facts, build_info, short_revision
+from fablabot.helpers.retention import last_retention_run
 from fablabot.helpers.server_check import FIXES, check_guild, languages
 from fablabot.helpers.utils import ensure_command_context, find_commands_channel
 
@@ -74,6 +75,7 @@ class InfoManagement(commands.Cog):
             log_channel_id=log_channel.id if isinstance(log_channel, TextChannel) else None,
             language=languages(guild),
             revision=short_revision(os.environ.get(REVISION_ENV)),
+            last_cleanup=last_retention_run(),
         )
 
     @app_commands.command(

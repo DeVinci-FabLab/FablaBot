@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta
+from enum import StrEnum
 import logging
 import re
 import sqlite3
@@ -456,8 +457,20 @@ async def deliver(guild: Guild, appel: Appel) -> bool:
     return True
 
 
-async def start_appel(guild: Guild, published: PublishedMessage, position: int) -> bool:
-    """Open the check of a training that starts now, once, and send it to its trainer.
+class Start(StrEnum):
+    """How the start of a training went: the check was opened and sent, was there already, or could not be opened."""
+
+    OPENED = "opened"
+    KEPT = "kept"
+    FAILED = "failed"
+
+
+async def start_appel(guild: Guild, published: PublishedMessage, position: int) -> Start:
+    """Open the check of a training that starts now, once, and send it to its trainer, once.
+
+    A check found already open was sent at its first opening: it is not sent again, so a start whose record failed after
+    the send does not reach the trainer twice. A trainer who never got it, the process having stopped in between, is
+    reached by the alert that follows an unvalidated check.
 
     Args:
         guild (Guild): The server.
@@ -465,12 +478,13 @@ async def start_appel(guild: Guild, published: PublishedMessage, position: int) 
         position (int): The training's place in it.
 
     Returns:
-        bool: True when the check exists, new or already there, even if its trainer could not be reached; False when
-            it could not be opened, so that the start is tried again.
+        Start: ``OPENED`` when the check is new and was sent, even if its trainer could not be reached; ``KEPT`` when it
+            existed; ``FAILED`` when it could not be opened, so that the start is tried again.
     """
     training = published.message.fms[position]
     length = read_duration(training.duration) or SLOT_FALLBACK
     try:
+        kept = attendance.is_open(guild.id, published.message_id, position)
         appel_id = attendance.open_appel(
             guild.id,
             published.message_id,
@@ -482,12 +496,15 @@ async def start_appel(guild: Guild, published: PublishedMessage, position: int) 
         appel = attendance.get(appel_id)
     except (LookupError, sqlite3.Error):
         logger.exception(f"Could not open the appel of message {published.message_id} in guild {guild.id}.")
-        return False
+        return Start.FAILED
     if appel is None:
         logger.error(f"Appel {appel_id} of message {published.message_id} in guild {guild.id} vanished after opening.")
-        return False
+        return Start.FAILED
+    if kept:
+        logger.info(f"Appel {appel_id} of message {published.message_id} in guild {guild.id} was sent already.")
+        return Start.KEPT
     await deliver(guild, appel)
-    return True
+    return Start.OPENED
 
 
 def _mention_blocks(label: str, user_ids: Sequence[int]) -> list[str]:

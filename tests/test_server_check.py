@@ -815,14 +815,68 @@ async def test_everyone_allowed_on_a_group_warns(simcord_env: simcord.Env, caplo
     assert "detail=[/fm]" in problems(caplog)[0]
 
 
-async def test_a_bot_wide_allow_does_not_show_a_group(simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture) -> None:
-    """Only the setting on the group itself counts: roles allowed for the whole bot leave the group shown to nobody."""
+async def test_a_role_allowed_for_the_whole_bot_counts_on_a_group(
+    simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Roles allowed at the top of the Integrations page count on every group that sets nothing of its own."""
     await ready_server(simcord_env, without={"integrations"})
     bot: Any = simcord_env.bot
     ids = [role.id for name, role in simcord_env.guild.roles.items() if name != "@everyone"]
     simcord_env.backend.set_command_permissions(GUILD, bot.application_id, role_entries(ids))
     await run(simcord_env)
+    assert codes(caplog) == []
+
+
+async def test_a_role_allowed_on_the_group_or_on_the_whole_bot_counts_either_way(
+    simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Some roles on the group and the others on the whole bot leave nothing missing."""
+    await ready_server(simcord_env, without={"integrations"})
+    handle = simcord_env.guild
+    bot: Any = simcord_env.bot
+    command = await global_command(simcord_env, "fm")
+    ids = [role.id for name, role in handle.roles.items() if name != "@everyone"]
+    simcord_env.backend.set_command_permissions(GUILD, bot.application_id, role_entries(ids[1:]))
+    simcord_env.backend.set_command_permissions(GUILD, command.id, role_entries(ids[:1]))
+    await run(simcord_env)
+    assert "detail=[/fm" not in " ".join(lines_about(caplog, "integrations_role_missing"))
+    assert "detail=[/fm]" not in " ".join(lines_about(caplog, "integrations_no_role"))
+
+
+async def test_a_deny_on_the_group_wins_over_an_allow_for_the_whole_bot(
+    simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A role allowed bot-wide and denied on a group is still missing from that group."""
+    await ready_server(simcord_env, without={"integrations"})
+    handle = simcord_env.guild
+    bot: Any = simcord_env.bot
+    command = await global_command(simcord_env, "fm")
+    ids = [role.id for name, role in handle.roles.items() if name != "@everyone"]
+    simcord_env.backend.set_command_permissions(GUILD, bot.application_id, role_entries(ids))
+    simcord_env.backend.set_command_permissions(
+        GUILD, command.id, role_entries([handle.roles[RoleNames.CODIR].id], allowed=False)
+    )
+    await run(simcord_env)
+    [line] = lines_about(caplog, "integrations_role_missing")
+    assert f"detail=[/fm: {RoleNames.CODIR}]" in line
+
+
+async def test_no_allow_anywhere_still_blocks_the_group(simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture) -> None:
+    """With nothing allowed on the group or on the whole bot, the group is shown to nobody."""
+    await ready_server(simcord_env, without={"integrations"})
+    await run(simcord_env)
     assert "detail=[/fm]" in " ".join(lines_about(caplog, "integrations_no_role"))
+
+
+async def test_everyone_allowed_for_the_whole_bot_warns_on_a_group(
+    simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture
+) -> None:
+    """@everyone allowed at the top of the page is allowed on every group that sets nothing of its own."""
+    await ready_server(simcord_env)
+    bot: Any = simcord_env.bot
+    simcord_env.backend.set_command_permissions(GUILD, bot.application_id, role_entries([GUILD]))
+    await run(simcord_env)
+    assert set(codes(caplog)) == {"integrations_everyone_allowed"}
 
 
 async def test_a_role_denied_on_a_group_is_still_missing(simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture) -> None:

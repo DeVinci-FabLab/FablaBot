@@ -14,7 +14,7 @@ import pytest
 
 from fablabot import db
 from fablabot.helpers.constants import ANONYMOUS_MIN_REGISTERED, PARIS_TZ, retention_cutoff
-from fablabot.helpers.retention import apply_retention, old_copies, old_log_files
+from fablabot.helpers.retention import apply_retention, last_retention_run, old_copies, old_log_files
 from fablabot.models import FmMessageDraft, Formation, PublishedMessage
 from fablabot.models.attendance import AlertAction
 from fablabot.services import attendance, formations, retention
@@ -563,6 +563,59 @@ def test_a_run_does_everything_and_names_nobody(caplog: pytest.LogCaptureFixture
     assert list(backups.iterdir()) == []
     assert NAME not in caplog.text
     assert "1 training summarised" in caplog.text
+
+
+def test_an_empty_run_reads_in_the_english_plural(caplog: pytest.LogCaptureFixture) -> None:
+    """English reads 0 in the plural (``0 trainings``); the singular for 0 is the French rule."""
+    caplog.set_level(logging.INFO)
+    logs, backups = Path("logs"), Path("backups")
+    logs.mkdir()
+    backups.mkdir()
+
+    apply_retention(NOW, log_dir=logs, backups=backups)
+
+    assert (
+        "Retention: 0 trainings summarised; deleted 0 training messages, 0 reactions, 0 log files and 0 database copies."
+        in caplog.text
+    )
+
+
+def test_a_run_records_when_it_ended_and_the_next_one_replaces_it() -> None:
+    """The last run is kept in the database, as an instant, so that ``/info`` can say how long ago it was."""
+    logs, backups = Path("logs"), Path("backups")
+    logs.mkdir()
+    backups.mkdir()
+    assert last_retention_run() is None
+
+    apply_retention(NOW, log_dir=logs, backups=backups)
+    assert last_retention_run() == NOW
+
+    later = NOW + timedelta(days=1)
+    apply_retention(later, log_dir=logs, backups=backups)
+    assert last_retention_run() == later
+
+
+def test_a_run_a_step_of_which_is_refused_does_not_record_itself(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A run that stops on a storage failure leaves the date of the last complete run."""
+    logs, backups = Path("logs"), Path("backups")
+    logs.mkdir()
+    backups.mkdir()
+    apply_retention(NOW, log_dir=logs, backups=backups)
+    monkeypatch.setattr(retention, "forget", Mock(side_effect=sqlite3.OperationalError("disk full")))
+
+    with pytest.raises(sqlite3.OperationalError):
+        apply_retention(NOW + timedelta(days=1), log_dir=logs, backups=backups)
+
+    assert last_retention_run() == NOW
+
+
+@pytest.mark.parametrize("value", ["", "yesterday", "2029-11-20T04:00:00"])
+def test_a_recorded_value_that_is_no_instant_reads_as_unknown(value: str) -> None:
+    """A damaged or hand-edited value, or one without a time zone, is not shown rather than guessed."""
+    with db.transaction() as conn:
+        conn.execute("INSERT INTO bot_state VALUES ('retention_last_run', ?)", (value,))
+
+    assert last_retention_run() is None
 
 
 async def test_the_bot_applies_the_retention_at_start_then_daily(simcord_bot: Any) -> None:

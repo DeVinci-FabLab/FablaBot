@@ -24,7 +24,7 @@ from discord.utils import get
 from emoji import EMOJI_DATA
 
 from fablabot.guild_config import get_commands_channel_id, set_commands_channel_id
-from fablabot.helpers.constants import ErrorMessages
+from fablabot.helpers.constants import ErrorMessages, RoleNames
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -108,6 +108,24 @@ def right_check(
         return False
 
     return check
+
+
+def outranks(actor: Member, role: Role) -> bool:
+    """Tell whether ``actor`` may hand ``role`` out by rank: their highest role sits strictly above it, or they own the server.
+
+    The temporary admin role does not count toward the actor's rank.
+
+    Args:
+        actor (Member): The member acting, with their current roles.
+        role (Role): The role to give or take, as the guild holds it now.
+
+    Returns:
+        bool: True when the rank allows it.
+    """
+    if actor.id == actor.guild.owner_id:
+        return True
+    rank = max((r.position for r in actor.roles if r.name != RoleNames.ADMIN_TEMP), default=0)
+    return role.position < rank
 
 
 def _log_value(key: str, value: Any) -> str:
@@ -481,18 +499,20 @@ def escape_md(text: str) -> str:
     return f"`{text}`"
 
 
-def counted(count: int, one: str, many: str) -> str:
+def counted(count: int, one: str, many: str, *, zero_singular: bool = True) -> str:
     """Write a count with its noun in the right number: ``1 action``, ``3 actions``, ``0 action``.
 
     Args:
         count (int): The count.
         one (str): The words for one, singular.
         many (str): The words for several, plural.
+        zero_singular (bool): French reads 0 in the singular; English (the logs) passes False to read ``0 actions``.
 
     Returns:
         str: The count followed by the matching words.
     """
-    return f"{count} {one if abs(count) <= 1 else many}"
+    singular = abs(count) <= 1 if zero_singular else abs(count) == 1
+    return f"{count} {one if singular else many}"
 
 
 def format_member_mention(member: Member) -> str:

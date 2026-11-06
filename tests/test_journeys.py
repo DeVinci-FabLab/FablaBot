@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import json
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -12,10 +13,10 @@ import pytest
 
 from fablabot import db, guild_config
 from fablabot.cogs import user_management
-from fablabot.helpers.constants import PARIS_TZ, RoleNames
+from fablabot.helpers.constants import PARIS_TZ, SESSION_EMOJIS, RoleNames
 from fablabot.helpers.utils import RIGHT_LOST_MESSAGE
 from fablabot.import_state import main as run_import
-from fablabot.models import MessageDraft, MsgReactionEvent, TrackedMessage
+from fablabot.models import FmMessageDraft, Formation, MessageDraft, MsgReactionEvent, PublishedMessage, TrackedMessage
 from fablabot.services import formations, messages, op_expiries
 
 if TYPE_CHECKING:
@@ -235,6 +236,70 @@ async def test_fm_add_refuses_a_past_date(server: Server) -> None:
     assert result.ephemeral
 
 
+async def test_fm_add_logs_the_training_by_position_never_by_name(server: Server, caplog: pytest.LogCaptureFixture) -> None:
+    """A training typed in the form is not written to the logs: the lines carry IDs, the emoji and the draft's size."""
+    caplog.set_level(logging.DEBUG)
+
+    await _draft(server, later())
+
+    assert "Arduino" not in caplog.text
+    assert any("fm.add" in record.getMessage() and "name_chars=7" in record.getMessage() for record in caplog.records)
+
+
+def _full_draft(when: datetime) -> FmMessageDraft:
+    """A draft holding as many trainings as an announcement can carry, none with the emoji used by the tests."""
+    fms = [
+        Formation(
+            emoji=emoji,
+            name=f"Séance {number}",
+            trainer_mention="<@7>",
+            start_iso=(when + timedelta(hours=number)).isoformat(),
+            duration="1h",
+            seats=3,
+        )
+        for number, emoji in enumerate(SESSION_EMOJIS)
+    ]
+    return FmMessageDraft(header="", role_id=0, intro="Bonjour", fms=fms, end="A bientot")
+
+
+async def test_fm_add_refuses_a_draft_that_is_full_before_the_form_opens(server: Server) -> None:
+    """With 20 trainings in the draft, `/fm add` says why and opens nothing; the draft is left as it was."""
+    full = _full_draft(later())
+    formations.save_draft(GUILD_ID, full)
+
+    result = await server.admin.slash(
+        server.commands, "fm add", emoji="🔧", trainer=server.plain, date="01/01/2099", hour="10:00", duration="2h", seats=4
+    )
+
+    assert result.modal is None
+    assert result.ephemeral
+    assert "20 sessions" in (result.response.content or "")
+    assert formations.get_draft(GUILD_ID) == full
+
+
+async def test_fm_add_refuses_a_form_sent_after_the_draft_filled_up(server: Server) -> None:
+    """A form opened before the draft reached 20 trainings adds nothing when sent after."""
+    guild_id = GUILD_ID
+    await _draft(server, later())
+    added = await server.admin.slash(
+        server.commands,
+        "fm add",
+        emoji="🔩",
+        trainer=server.plain,
+        date="01/01/2099",
+        hour="10:00",
+        duration="2h",
+        seats=4,
+    )
+    full = _full_draft(later())
+    formations.save_draft(guild_id, full)
+
+    refused = await server.admin.submit_modal(added, fill(added, {"Nom de la formation": "Perceuse"}))
+
+    assert "20 sessions" in (refused.response.content or "")
+    assert formations.get_draft(guild_id) == full
+
+
 async def test_fm_preview_uses_a_discord_timestamp(server: Server) -> None:
     """The preview writes the start as a Discord timestamp."""
     when = later()
@@ -267,6 +332,35 @@ async def test_fm_publish_then_a_reaction_counts_as_a_sign_up(server: Server) ->
     export = await server.admin.slash(server.commands, "fm export")
     log = await next(a for a in export.response.attachments if a.filename.endswith(".csv")).read()
     assert str(server.plain.id).encode() in log
+
+
+async def test_fm_publish_refuses_a_second_post_while_the_first_has_sessions_to_come(server: Server) -> None:
+    """A second `/fm publish` would stop counting the sign-ups of the first: it posts nothing and points to /fm brouillon."""
+    await _draft(server, later())
+    await server.admin.slash(server.commands, "fm publish", channel=server.general)
+    first = server.general.last_message
+    assert first is not None
+
+    again = await server.admin.slash(server.commands, "fm publish", channel=server.general)
+
+    assert again.ephemeral
+    assert "/fm brouillon" in (again.response.content or "")
+    assert "Rien n'a été publié" in (again.response.content or "")
+    assert server.general.last_message == first
+
+
+async def test_fm_publish_posts_again_once_the_last_announcement_has_started(server: Server) -> None:
+    """When every session of the last announcement has started, a new week is posted as before."""
+    await _draft(server, later())
+    past = datetime.now(PARIS_TZ) - timedelta(days=2)
+    old = Formation(emoji="🔧", name="Old", trainer_mention="<@7>", start_iso=past.isoformat(), duration="1h", seats=3)
+    formations.save_published(
+        GUILD_ID, PublishedMessage(message_id=5, channel_id=server.general.id, message=FmMessageDraft("", 0, "", [old], ""))
+    )
+
+    await server.admin.slash(server.commands, "fm publish", channel=server.general)
+
+    assert "Arduino" in (server.general.last_message.content if server.general.last_message else "")
 
 
 async def test_fm_publish_the_database_refuses_takes_the_post_down_and_says_so(

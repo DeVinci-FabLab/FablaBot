@@ -224,19 +224,32 @@ def _entry(entries: Sequence[Mapping[str, Any]], target_id: int, kind: AppComman
     return None
 
 
-def _check_group(group: app_commands.Group, guild: Guild, entries: Sequence[Mapping[str, Any]]) -> list[Problem]:
-    """Check that the roles a staff group is for are shown it in Integrations, and that @everyone is not."""
-    allowed = {
-        int(entry["id"]) for entry in entries if entry["type"] == AppCommandPermissionType.role.value and entry["permission"]
-    }
+def _check_group(
+    group: app_commands.Group,
+    guild: Guild,
+    entries: Sequence[Mapping[str, Any]],
+    app_entries: Sequence[Mapping[str, Any]],
+) -> list[Problem]:
+    """Check that the roles a staff group is for are shown it in Integrations, and that @everyone is not.
+
+    A role counts as allowed when the group's own settings allow it, or say nothing of it and the settings at the top of the
+    page, for the whole bot, allow it: the group's own entry for a role wins over the bot-wide one, as for member commands.
+    """
+
+    def allowed(target_id: int) -> bool:
+        value = _entry(entries, target_id, AppCommandPermissionType.role)
+        if value is None:
+            value = _entry(app_entries, target_id, AppCommandPermissionType.role)
+        return bool(value)
+
     expected = _opening_roles(group, guild)
-    missing = [role for role in expected if role.id not in allowed]
+    missing = [role for role in expected if not allowed(role.id)]
     problems: list[Problem] = []
     if missing and len(missing) == len(expected):
         problems.append(Problem("integrations_no_role", f"/{group.name}"))
     elif missing:
         problems.append(Problem("integrations_role_missing", f"/{group.name}: {', '.join(_label(role) for role in missing)}"))
-    if guild.id in allowed:
+    if allowed(guild.id):
         problems.append(Problem("integrations_everyone_allowed", f"/{group.name}"))
     return problems
 
@@ -281,7 +294,7 @@ def _check_integrations(
         if command.default_permissions is None:  # pyright: ignore[reportAttributeAccessIssue] -- a union member has none
             problems.extend(_check_member_command(command.name, guild, entries, app_entries))
         else:
-            problems.extend(_check_group(command, guild, entries))  # pyright: ignore[reportArgumentType] -- not a context menu
+            problems.extend(_check_group(command, guild, entries, app_entries))  # pyright: ignore[reportArgumentType] -- not a context menu
     return problems
 
 

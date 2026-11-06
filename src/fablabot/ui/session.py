@@ -17,6 +17,7 @@ from fablabot.helpers.formation.catalogue import (
     EXCUSABLE_YES,
     add_session,
     day_text,
+    is_in_draft,
     read_date,
     read_date_time,
     read_hour,
@@ -68,7 +69,11 @@ _BAD_DESCRIPTION: Final = f"Description : {DESCRIPTION_CHARS} caractères au plu
 _BAD_DATE_TIME: Final = "Date et heure illisibles : écris JJ/MM HH:MM, par exemple 12/10 18:30."
 _FREE: Final = "free"
 """The value of the menu's last option, which no template ID can equal."""
-_FULL: Final = "Le brouillon compte déjà 20 sessions : Discord n'accepte pas plus de 20 réactions sur un message."
+_ALREADY_THERE: Final = (
+    "Cette session est déjà dans le brouillon (même formation, même date, même formateur) : "
+    "pour la changer, passe par `/fm brouillon` puis **Modifier**."
+)
+_FULL: Final = ErrorMessages.DRAFT_FULL
 
 
 def picker_message(guild_id: int, page: int) -> tuple[str, ui.View]:
@@ -182,6 +187,10 @@ async def _add(interaction: Interaction, session: Formation | str, template_id: 
     guild = interaction.guild
     if isinstance(session, str):
         await _refuse(interaction, session)
+        return
+    # A form answered twice, as when a reply was lost, must not put the same session in the draft twice.
+    if is_in_draft(guild.id, session):
+        await _refuse(interaction, _ALREADY_THERE, RefusalKind.DRAFT_NOT_READY)
         return
     # Nothing is awaited between reading the draft and saving it, so the emoji is free when it is taken.
     added = add_session(guild.id, session)

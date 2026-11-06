@@ -118,6 +118,29 @@ def open_appel(  # noqa: PLR0913
     return row["id"]
 
 
+def is_open(guild_id: int, message_id: int, position: int) -> bool:
+    """Tell whether the check of a training exists already.
+
+    Args:
+        guild_id (int): The server.
+        message_id (int): The published announcement.
+        position (int): The training's place in it.
+
+    Returns:
+        bool: True when a check was opened for it.
+    """
+    row = (
+        db.connection()
+        .execute(
+            "SELECT 1 FROM appel a JOIN fm_message m ON m.id = a.fm_message_id "
+            "WHERE m.guild_id = ? AND m.message_id = ? AND a.position = ?",
+            (guild_id, message_id, position),
+        )
+        .fetchone()
+    )
+    return row is not None
+
+
 def checked_elsewhere(guild_id: int, message_id: int) -> set[int]:
     """List the trainings of a published message whose check is already open from another message of the server.
 

@@ -26,7 +26,7 @@ from fablabot.helpers.guild_access import GuildAccessPolicy
 from fablabot.helpers.utils import RIGHT_LOST_MESSAGE
 from fablabot.logging_handlers.guild_context import current_guild_id
 from fablabot.models.formation import FmMessageDraft, Formation, PublishedMessage
-from fablabot.services import attendance, formations
+from fablabot.services import attendance, bot_state, formations
 from fablabot.ui import attendance as ui_attendance
 from fablabot.ui.attendance import DYNAMIC_ITEMS
 
@@ -716,6 +716,35 @@ async def test_a_failed_opening_is_tried_again_at_the_next_tick(hall: Hall, monk
     assert hall.handled
     assert len(hall.dm()) == 1
     assert len(hall.dm(hall.respo)) == 1
+
+
+async def test_a_start_whose_record_failed_does_not_send_the_check_again(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The check went out, then the save of the start failed: the next tick sends nothing more to the trainer or the Respo."""
+    hall.register(2)
+    hall.publish(start=datetime.now(PARIS_TZ) - timedelta(minutes=1))
+    cog: Any = hall.env.bot.get_cog("FormationManagement")  # pyright: ignore[reportAttributeAccessIssue]
+    real_save = cog._set_last_published_in_guild
+    attempts: list[int] = []
+
+    def refused_once(*args: Any, **kwargs: Any) -> None:
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise sqlite3.OperationalError
+        real_save(*args, **kwargs)
+
+    monkeypatch.setattr(cog, "_set_last_published_in_guild", refused_once)
+
+    await hall.tick()
+    assert not hall.handled
+    assert len(hall.dm()) == 1
+
+    await hall.tick()
+    await hall.tick()
+
+    assert hall.handled
+    assert len(hall.dm()) == 1
+    assert len(hall.dm(hall.respo)) == 1
+    assert db.connection().execute("SELECT COUNT(*) FROM appel").fetchone()[0] == 1
 
 
 @pytest.mark.parametrize("trainer_mention", ["Camille", "<@424242>"])
@@ -1578,6 +1607,70 @@ async def test_relaunch_sends_the_trainer_the_appel_again(hall: Hall) -> None:
     assert _stored_answer(hall)[:2] == (hall.respo.id, attendance.AlertAction.RELAUNCH)
 
 
+def _claim_relaunch(hall: Hall) -> None:
+    """Store what a relaunch leaves before the trainer is reached: the answer and the mark that it is in flight."""
+    attendance.handle(hall.appel_id, hall.respo.id, attendance.AlertAction.RELAUNCH, datetime.now(PARIS_TZ))
+    bot_state.put(f"relaunch:{hall.appel_id}", "claimed")
+
+
+async def test_a_relaunch_interrupted_by_a_restart_is_released_at_the_next_tick(hall: Hall) -> None:
+    """A claim left by a process that stopped before reaching the trainer is given back, so the alert can be answered again."""
+    await _overdue(hall)
+    _claim_relaunch(hall)
+
+    await hall.tick()
+
+    assert _stored_answer(hall) == (None, None, None)
+    assert bot_state.get(f"relaunch:{hall.appel_id}") is None
+    await hall.click(hall.respo, _alert(hall, hall.respo), _alert_id(hall, "r"))
+    assert len(_dms(hall.trainer)) == 2
+    assert _stored_answer(hall)[:2] == (hall.respo.id, attendance.AlertAction.RELAUNCH)
+
+
+async def test_a_relaunch_that_got_through_stays_answered_after_a_tick(hall: Hall) -> None:
+    """The mark goes with the relaunch: a tick leaves a delivered relaunch as it was."""
+    await _overdue(hall)
+    await hall.click(hall.respo, _alert(hall, hall.respo), _alert_id(hall, "r"))
+
+    await hall.tick()
+
+    assert bot_state.get(f"relaunch:{hall.appel_id}") is None
+    assert _stored_answer(hall)[:2] == (hall.respo.id, attendance.AlertAction.RELAUNCH)
+
+
+async def test_a_relaunch_in_flight_is_marked_and_a_tick_leaves_it_alone(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
+    """While this process is still reaching the trainer, the tick neither releases the claim nor drops the mark."""
+    await _overdue(hall)
+    seen: list[Any] = []
+
+    async def deliver_during_a_tick(_guild: Any, _appel: Any) -> bool:
+        await hall.tick()
+        seen.append((bot_state.get(f"relaunch:{hall.appel_id}"), _stored_answer(hall)[1]))
+        return True
+
+    monkeypatch.setattr(ui_attendance, "deliver", deliver_during_a_tick)
+
+    await hall.click(hall.respo, _alert(hall, hall.respo), _alert_id(hall, "r"))
+
+    assert seen == [("claimed", attendance.AlertAction.RELAUNCH)]
+    assert bot_state.get(f"relaunch:{hall.appel_id}") is None
+
+
+async def test_a_relaunch_that_reaches_nobody_leaves_no_mark(hall: Hall, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed relaunch gives its claim back and its mark with it."""
+    await _overdue(hall)
+
+    async def nobody(_guild: Any, _appel: Any) -> bool:
+        return False
+
+    monkeypatch.setattr(ui_attendance, "deliver", nobody)
+
+    await hall.click(hall.respo, _alert(hall, hall.respo), _alert_id(hall, "r"))
+
+    assert bot_state.get(f"relaunch:{hall.appel_id}") is None
+    assert _stored_answer(hall) == (None, None, None)
+
+
 def _close_dms_of(monkeypatch: pytest.MonkeyPatch, user_id: int) -> None:
     """Make private messages to one member fail the way a closed DM does."""
 
@@ -2100,6 +2193,22 @@ def click_logs(caplog: pytest.LogCaptureFixture) -> Iterator[list[tuple[str, int
     ui_attendance.logger.addFilter(tap)
     yield lines
     ui_attendance.logger.removeFilter(tap)
+
+
+async def test_a_toggle_and_a_menu_log_under_the_appels_server(hall: Hall, click_logs: list[tuple[str, int | None]]) -> None:
+    """The line of a name touched and the line of a menu choice are written under the check's server, as the save's is."""
+    members = hall.register(30)
+    hall.publish()
+    await hall.tick()
+    (message,) = hall.dm()
+    seen = SimpleNamespace(components=list(message.components))
+
+    await hall.forged_click(hall.trainer, hall.toggle_id(members[0]), shown=seen)
+    await hall.trainer.user.select(message, [str(members[27].id)], custom_id=f"appel:{hall.appel_id}:s:1")
+
+    lines = [(m, g) for m, g in click_logs if m.startswith(("[appel] mark", "[appel] menu"))]
+    assert [m.split(" appel_id=")[0] for m, _ in lines] == ["[appel] mark", "[appel] menu"]
+    assert {g for _, g in lines} == {GUILD_ID}
 
 
 async def test_the_alert_callback_logs_under_the_appels_server(hall: Hall, click_logs: list[tuple[str, int | None]]) -> None:
