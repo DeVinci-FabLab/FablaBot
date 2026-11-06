@@ -1801,6 +1801,28 @@ async def test_an_emoji_set_by_fm_add_is_never_taken_again(lab: Lab) -> None:
     assert "émoji 💙" in again.response.content
 
 
+async def test_an_fm_add_form_open_while_a_template_session_takes_its_emoji_is_refused(lab: Lab) -> None:
+    """`/fm add` checks the emoji when it runs; the form sent later checks it again against the draft as stored."""
+    await lab.show()
+    opened = await lab.respo.slash(
+        lab.commands,
+        "fm add",
+        emoji=SESSION_EMOJIS[0],
+        trainer=lab.plain,
+        date=_jjmm() + f"/{_day(3).year}",
+        hour="18:30",
+        duration="2 h",
+        seats=4,
+    )
+    assert opened.modal is not None
+    await _add(lab, _soudure())
+
+    refused = await lab.respo.submit_modal(opened, _form(opened, {"Nom de la formation": "Arduino"}))
+
+    assert refused.response.content == ErrorMessages.EMOJI_ALREADY_USED
+    assert [(fm.emoji, fm.name) for fm in _drafted()] == [(SESSION_EMOJIS[0], "Soudure")]
+
+
 OUTSIDE_THE_POOL = (
     "🔧",
     "🔨",

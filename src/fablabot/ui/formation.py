@@ -290,6 +290,12 @@ class AddFmModal(ui.Modal, title="Ajouter une formation"):
             description_chars=len(description),
         )
 
+        # The emoji was free when /fm add ran; a session added from a template may have taken it while this form was open.
+        if any(existing.emoji == self.fm.emoji for existing in draft.fms):
+            logger.warning(f"Guild {interaction.guild.id} sent an add form whose emoji {self.fm.emoji!r} was taken meanwhile.")
+            await interaction.response.send_message(ErrorMessages.EMOJI_ALREADY_USED, ephemeral=True)
+            return
+
         self.fm.name = name
         self.fm.description = description
 
