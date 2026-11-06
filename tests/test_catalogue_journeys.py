@@ -2341,7 +2341,7 @@ async def test_a_free_session_is_added_from_its_own_form(lab: Lab) -> None:
         f"✅ **Tricot** ajoutée : <t:{int(_at().timestamp())}:F> avec <@{lab.plain.id}>, 7 places, émoji 🧡.\n"
         "-# Le brouillon compte maintenant 1 session."
     )
-    assert _ids(done.response) == ["ses:again:0:8de8ebcb:🧡", "fmd:add", "fmd:show"]
+    assert _ids(done.response) == [f"ses:again:0:{session_ui.session_tag(session)}:🧡", "fmd:add", "fmd:show"]
     assert next(iter(_buttons(done.response))) == "🔁 Encore une session de Tricot"
     assert _stored() == []
 
@@ -2351,7 +2351,7 @@ async def test_encore_after_a_free_session_keeps_its_name_duration_and_seats(lab
     shown = await _free_form(lab)
     done = await lab.respo.submit_modal(shown, _free_filled(lab, shown))
 
-    again = await lab.respo.click(done.response, custom_id="ses:again:0:8de8ebcb:🧡")
+    again = await lab.respo.click(done.response, custom_id=_ids(done.response)[0])
 
     assert again.modal["title"] == "Session libre"
     assert _values(again) == {"Nom": "Tricot", "Date et heure": f"{_jjmm()} ", "Durée": "2 h", "Places": "7"}
@@ -2373,7 +2373,7 @@ async def test_encore_after_a_free_session_gone_opens_an_empty_free_form(lab: La
     done = await lab.respo.submit_modal(shown, _free_filled(lab, shown))
     formations.save_draft(GUILD_ID, replace(formations.get_draft(GUILD_ID), fms=[]))  # pyright: ignore[reportArgumentType]
 
-    again = await lab.respo.click(done.response, custom_id="ses:again:0:8de8ebcb:🧡")
+    again = await lab.respo.click(done.response, custom_id=_ids(done.response)[0])
 
     assert again.modal["title"] == "Session libre"
     assert _values(again) == {"Nom": None, "Date et heure": None, "Durée": None, "Places": None}
@@ -2385,7 +2385,21 @@ async def test_encore_after_a_free_session_whose_emoji_passed_to_another_opens_a
     done = await lab.respo.submit_modal(shown, _free_filled(lab, shown))
     _stage(lab, [_session("🧡", "Brodeuse", days=2, trainer=lab.plain, seats=12)])
 
-    again = await lab.respo.click(done.response, custom_id="ses:again:0:8de8ebcb:🧡")
+    again = await lab.respo.click(done.response, custom_id=_ids(done.response)[0])
+
+    assert again.modal["title"] == "Session libre"
+    assert _values(again) == {"Nom": None, "Date et heure": None, "Durée": None, "Places": None}
+    (trainer,) = (i for i in again.modal["components"] if i["type"] == 18 and i["label"] == "Formateur")
+    assert not trainer["component"].get("default_values")
+
+
+async def test_encore_after_a_free_session_replaced_by_one_of_the_same_name_opens_an_empty_free_form(lab: Lab) -> None:
+    """When the emoji of a free session went to another session of the same name, at another start, Encore opens it empty."""
+    shown = await _free_form(lab)
+    done = await lab.respo.submit_modal(shown, _free_filled(lab, shown))
+    _stage(lab, [_session("🧡", "Tricot", days=9, trainer=lab.admin, seats=3)])
+
+    again = await lab.respo.click(done.response, custom_id=_ids(done.response)[0])
 
     assert again.modal["title"] == "Session libre"
     assert _values(again) == {"Nom": None, "Date et heure": None, "Durée": None, "Places": None}
@@ -2413,10 +2427,12 @@ def _started_today_at_midnight() -> None:
 
 async def test_a_free_form_sent_after_midnight_refuses_the_day_it_offered(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
     """A free form that offered today and is sent after midnight is refused as past, not stored a year ahead."""
+    # The session is moved to midnight below, which its tag would notice: the tag is held still so the day is offered.
+    monkeypatch.setattr(session_ui, "session_tag", lambda _session: "feedc0de")
     shown = await _free_form(lab)
     done = await lab.respo.submit_modal(shown, _free_filled(lab, shown))
     _started_today_at_midnight()
-    again = await lab.respo.click(done.response, custom_id="ses:again:0:8de8ebcb:🧡")
+    again = await lab.respo.click(done.response, custom_id=_ids(done.response)[0])
     before = formations.get_draft(GUILD_ID)
     day = _values(again)["Date et heure"]
     assert day is not None

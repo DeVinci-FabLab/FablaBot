@@ -131,7 +131,7 @@ def added_message(session: Formation, count: int, template_id: int) -> tuple[str
         SessionAgain(
             template_id,
             session.emoji,
-            tag=name_tag(session.name) if template_id == 0 else "",
+            tag=session_tag(session) if template_id == 0 else "",
             label=cut(f"🔁 Encore une session de {session.name}", _BUTTON_CHARS),
         )
     )
@@ -554,9 +554,9 @@ class SessionPickPage(ui.DynamicItem[ui.Button[ui.View]], template=r"ses:pnav:(?
         await show(interaction, content, None, view)
 
 
-def name_tag(name: str) -> str:
-    """Shorten a session's name to eight hexadecimal digits, which a custom ID can carry to tell that name from another."""
-    return hashlib.blake2s(name.encode(), digest_size=4).hexdigest()
+def session_tag(session: Formation) -> str:
+    """Shorten a session's name and start to eight hexadecimal digits, which a custom ID can carry to tell it from another."""
+    return hashlib.blake2s(f"{session.name}\n{int(session.start_dt.timestamp())}".encode(), digest_size=4).hexdigest()
 
 
 class SessionAgain(
@@ -567,7 +567,7 @@ class SessionAgain(
     Attributes:
         template_id (int): The template of the session just added, 0 for a free session.
         emoji (str): The emoji of that session, which finds it again in the stored draft.
-        tag (str): For a free session, the name's ``name_tag``: it tells the session from one that took its emoji since.
+        tag (str): For a free session, its ``session_tag``: it tells the session from one that took its emoji since.
     """
 
     interaction_check = click_check(COMMAND, FORMATION_ROLES)
@@ -578,7 +578,7 @@ class SessionAgain(
         Args:
             template_id (int): The template of the session just added, 0 for a free session.
             emoji (str): The emoji of that session.
-            tag (str): For a free session, the ``name_tag`` of its name; empty for a template's session.
+            tag (str): For a free session, its ``session_tag``; empty for a template's session.
             label (str): The text of the button, which names the training.
         """
         custom_id = f"ses:again:{template_id}:{tag}:{emoji}" if tag else f"ses:again:{template_id}:{emoji}"
@@ -601,7 +601,7 @@ class SessionAgain(
         session = next((fm for fm in draft.fms if fm.emoji == self.emoji), None) if draft else None
         if self.template_id == 0:
             # The emoji may have passed to another session since, whose values are not the ones asked for.
-            same = session is not None and name_tag(session.name) == self.tag
+            same = session is not None and session_tag(session) == self.tag
             await open_free_form(interaction, session if same else None)
             return
         template = _template_of(interaction, str(self.template_id))
