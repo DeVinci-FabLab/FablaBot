@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.13.1...v0.14.0) (2026-11-06)
+
+
+### Features
+
+* **fm:** prepare trainings from templates in one draft panel ([#169](https://github.com/DeVinci-FabLab/FablaBot/issues/169)) ([c93c3b9](https://github.com/DeVinci-FabLab/FablaBot/commit/c93c3b91e67ef66c46dcb159bd3a65ed90c7f460))
+
 ## [0.13.1](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.13.0...v0.13.1) (2026-11-05)
 
 
