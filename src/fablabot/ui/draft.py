@@ -88,10 +88,18 @@ def publish_refusal(draft: FmMessageDraft) -> str | None:
     return f"{reason} {_NOT_PUBLISHED}"
 
 
+def _as_drafted(message: FmMessageDraft) -> str:
+    """Render the announcement with no sign-ups: the text shows their count, and only a posted copy has any."""
+    return render_message(replace(message, fms=[replace(fm, registered_users=[]) for fm in message.fms]))
+
+
 def _published_refusal(guild_id: int, draft: FmMessageDraft) -> str | None:
-    """Tell that the draft is the announcement already published, whose sign-ups a second post would stop counting."""
+    """Tell that the draft is the announcement already published, whose sign-ups a second post would stop counting.
+
+    The posted copy gains sign-ups and reminders the draft never holds, so the two are compared by what they say.
+    """
     last = formations.current_published(guild_id)
-    if last is None or last.message != draft:
+    if last is None or _as_drafted(last.message) != _as_drafted(draft):
         return None
     return (
         f"Cette annonce est déjà publiée dans <#{last.channel_id}> : change le brouillon pour en publier une autre. "

@@ -1088,6 +1088,75 @@ async def test_a_publier_left_open_elsewhere_is_refused_once_the_draft_is_posted
     assert formations.current_published(GUILD_ID) == first
 
 
+async def _after_the_post(lab: Lab, how: str) -> Any:
+    """Publish the draft, then let a member sign up on the post or the hour-before reminder run; return the stored post."""
+    await _published_via_publier(lab, lab.announce)
+    posted = lab.announce.last_message
+    assert posted is not None
+    if how == "signed-up":
+        await lab.codir.react(posted, "🧡")
+        await lab.env.advance_time(120)
+    else:
+        current = formations.current_published(GUILD_ID)
+        assert current is not None
+        for fm in current.message.fms:
+            fm.notified_hour_before = True
+        formations.save_published(GUILD_ID, current)
+    stored = formations.current_published(GUILD_ID)
+    assert stored is not None
+    assert stored.message != _without_sign_ups(stored)
+    return stored
+
+
+def _without_sign_ups(stored: PublishedMessage) -> FmMessageDraft:
+    """The stored post as the draft that made it: the same message with no sign-up and no reminder."""
+    return replace(
+        stored.message,
+        fms=[
+            replace(fm, registered_users=[], waitlisted_users=[], notified_hour_before=False, notified_at_start=False)
+            for fm in stored.message.fms
+        ],
+    )
+
+
+@pytest.mark.parametrize("how", ["signed-up", "reminded"])
+async def test_publier_still_refuses_the_posted_draft_once_members_signed_up_or_were_reminded(lab: Lab, how: str) -> None:
+    """A sign-up or a reminder on the post does not make the unchanged draft new: no second post, the sign-ups stay."""
+    _stage(lab, _three(lab))
+    left_open = await _asked_where(lab, lab.announce, lab.admin)
+    stored = await _after_the_post(lab, how)
+    refusal = (
+        f"Cette annonce est déjà publiée dans <#{lab.announce.id}> : change le brouillon pour en publier une autre. "
+        "Rien n'a été publié."
+    )
+
+    listing = await lab.brouillon(lab.respo)
+    asked = await lab.respo.click(listing.response, custom_id="fmd:publish")
+    again = await lab.admin.click(left_open, custom_id=f"fmd:pub-go:{lab.announce.id}")
+
+    assert asked.ephemeral
+    assert asked.response.content == refusal
+    assert again.ephemeral
+    assert again.response.content == refusal
+    assert len(lab.announce.history()) == 1
+    assert formations.current_published(GUILD_ID) == stored
+
+
+async def test_publier_with_a_changed_draft_after_a_sign_up_publishes_again(lab: Lab) -> None:
+    """A draft changed after members signed up is a new announcement, which Publier posts."""
+    draft = _stage(lab, _three(lab))
+    first = await _after_the_post(lab, "signed-up")
+    formations.save_draft(GUILD_ID, replace(draft, intro="Autre intro"))
+
+    await _published_via_publier(lab, lab.announce)
+
+    assert len(lab.announce.history()) == 2
+    current = formations.current_published(GUILD_ID)
+    assert current is not None
+    assert current.message_id != first.message_id
+    assert current.message.intro == "Autre intro"
+
+
 async def test_publier_with_a_changed_draft_after_a_post_publishes_again(lab: Lab) -> None:
     """Once the draft changes, Publier posts it as a new announcement."""
     draft = _stage(lab, _three(lab))
