@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.14.0...v0.15.0) (2026-11-06)
+
+
+### Features
+
+* **fm:** warn before publishing a second announcement ([#171](https://github.com/DeVinci-FabLab/FablaBot/issues/171)) ([699da5c](https://github.com/DeVinci-FabLab/FablaBot/commit/699da5c6f117f5696c1616eea99e9aa063c241d5))
+
 ## [0.14.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.13.1...v0.14.0) (2026-11-06)
 
 
