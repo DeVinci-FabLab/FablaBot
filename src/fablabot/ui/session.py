@@ -69,7 +69,10 @@ _BAD_DESCRIPTION: Final = f"Description : {DESCRIPTION_CHARS} caractères au plu
 _BAD_DATE_TIME: Final = "Date et heure illisibles : écris JJ/MM HH:MM, par exemple 12/10 18:30."
 _FREE: Final = "free"
 """The value of the menu's last option, which no template ID can equal."""
-_ALREADY_THERE: Final = "Cette session est déjà dans le brouillon."
+_ALREADY_THERE: Final = (
+    "Cette session est déjà dans le brouillon (même formation, même date, même formateur) : "
+    "pour la changer, passe par `/fm brouillon` puis **Modifier**."
+)
 _FULL: Final = ErrorMessages.DRAFT_FULL
 
 

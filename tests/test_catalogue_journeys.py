@@ -2023,7 +2023,7 @@ OUTSIDE_THE_POOL = (
     "🪵",
 )
 """Twenty emojis none of which the bot gives, as `/fm add` forms may have put in a draft."""
-FULL = "Le brouillon compte déjà 20 sessions : Discord n'accepte pas plus de 20 réactions sur un message."
+FULL = ErrorMessages.DRAFT_FULL
 
 
 async def test_the_twenty_first_session_is_refused(lab: Lab) -> None:
@@ -2045,7 +2045,10 @@ async def test_the_twenty_first_session_is_refused(lab: Lab) -> None:
     assert formations.get_draft(GUILD_ID) == before
 
 
-ALREADY_THERE = "Cette session est déjà dans le brouillon. Rien n'a été ajouté."
+ALREADY_THERE = (
+    "Cette session est déjà dans le brouillon (même formation, même date, même formateur) : "
+    "pour la changer, passe par `/fm brouillon` puis **Modifier**. Rien n'a été ajouté."
+)
 
 
 async def test_a_form_answered_twice_adds_the_session_once(lab: Lab) -> None:

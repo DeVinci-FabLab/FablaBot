@@ -222,7 +222,10 @@ class ErrorMessages:
     EMOJI_ALREADY_USED = "Cet émoji est déjà utilisé par une autre formation."
     """Emoji already in use by another formation."""
 
-    DRAFT_FULL = "Le brouillon compte déjà 20 sessions : Discord n'accepte pas plus de 20 réactions sur un message."
+    DRAFT_FULL = (
+        "Le brouillon compte déjà 20 sessions : Discord n'accepte pas plus de 20 réactions sur un message. "
+        "Retire une session dans `/fm brouillon` avec **Retirer**, ou garde-la pour l'annonce suivante."
+    )
     """The draft holds as many sessions as an announcement can carry reactions for (``MAX_SESSIONS``)."""
 
     INVALID_DATETIME = "Date/heure invalides. Format attendu: `DD/MM/YYYY HH:MM` (ex: `15/12/2024 18:30`)."
