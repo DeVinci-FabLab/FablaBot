@@ -11,7 +11,13 @@ from discord import AllowedMentions, ButtonStyle, ChannelType, Embed, Interactio
 from fablabot.helpers.constants import ANNOUNCEMENT_MAX_CHARS, BRAND_COLOUR, FORMATION_ROLES
 from fablabot.helpers.formation import announcement_header, humanize_dt, is_past, render_message
 from fablabot.helpers.formation.attendance import trainer_id
-from fablabot.helpers.formation.catalogue import find_session, remove_session, session_digest, session_value
+from fablabot.helpers.formation.catalogue import (
+    find_session,
+    has_sessions_to_come,
+    remove_session,
+    session_digest,
+    session_value,
+)
 from fablabot.helpers.formation.rendering import discord_timestamp
 from fablabot.helpers.utils import RefusalKind, counted, log_refusal
 from fablabot.models.formation import FmMessageDraft
@@ -415,7 +421,7 @@ async def ask_channel(interaction: Interaction[Any], *, warn: bool) -> None:
         return
     last = formations.current_published(guild.id)
     # Only an announcement with sessions still to come loses sign-ups: last week's, all held, is no cause to warn.
-    if warn and last is not None and any(not is_past(fm.start_dt) for fm in last.message.fms):
+    if warn and has_sessions_to_come(guild.id):
         content, view = republish_message()
     else:
         content, view = publish_message(_channel_of(guild, last.channel_id) if last else None)

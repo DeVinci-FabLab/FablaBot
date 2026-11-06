@@ -9,6 +9,7 @@ import re
 from typing import Final
 
 from fablabot.helpers.constants import MAX_SESSIONS, PARIS_TZ, SESSION_EMOJIS
+from fablabot.helpers.formation.rendering import is_past
 from fablabot.models.catalogue import TemplateFields
 from fablabot.models.formation import FmMessageDraft, Formation
 from fablabot.services import formations
@@ -190,6 +191,21 @@ def template_description(draft: FmMessageDraft, fields: TemplateFields) -> str:
         str: The template's description when no session of that name is in the draft, else an empty text.
     """
     return "" if any(session.name == fields.name for session in draft.fms) else fields.description
+
+
+def has_sessions_to_come(guild_id: int) -> bool:
+    """Tell whether the server's published announcement still has a session that has not started.
+
+    Only such an announcement loses sign-ups when a new one is posted: last week's, all held, does not.
+
+    Args:
+        guild_id (int): The server's ID.
+
+    Returns:
+        bool: True when a session of the last announcement is still to come.
+    """
+    last = formations.current_published(guild_id)
+    return last is not None and any(not is_past(fm.start_dt) for fm in last.message.fms)
 
 
 def is_in_draft(guild_id: int, session: Formation) -> bool:

@@ -58,6 +58,7 @@ from fablabot.helpers.formation import (
     start_appel,
 )
 from fablabot.helpers.formation.attendance import Start, appel_message, trainer_id
+from fablabot.helpers.formation.catalogue import has_sessions_to_come
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.safe_discord_operations import retract_unsaved_post
 from fablabot.helpers.utils import RefusalKind, counted, ensure_command_context, is_valid_emoji, log_refusal
@@ -76,6 +77,12 @@ if TYPE_CHECKING:
     from fablabot.main import Fablabot
 
 logger = logging.getLogger(__name__)
+
+_REPUBLISH_REFUSED = (
+    "Une annonce de formations est déjà publiée et a encore des sessions à venir : en publier une autre arrêterait de "
+    "compter les inscriptions de la première. Utilise `/fm brouillon` pour publier : il demande confirmation. "
+    "Rien n'a été publié."
+)
 
 
 _ACCESS = AnyRole(ALLOWED_ROLES)
@@ -605,6 +612,12 @@ class FormationManagement(commands.Cog):
         if not draft.fms:
             logger.warning(f"Guild {interaction.guild.id} tried to publish empty formations draft.")
             await interaction.response.send_message(ErrorMessages.DRAFT_EMPTY, ephemeral=True)
+            return
+
+        # A second post stops the sign-ups of the first from counting; /fm brouillon warns and asks, this command does not.
+        if has_sessions_to_come(interaction.guild.id):
+            log_refusal(logger, "fm.publish", interaction, RefusalKind.DRAFT_NOT_READY)
+            await interaction.response.send_message(_REPUBLISH_REFUSED, ephemeral=True)
             return
 
         await self.publish_draft(interaction, channel)

@@ -984,6 +984,7 @@ def test_user_guide_says_publier_warns_before_a_second_announcement() -> None:
         "**Publier quand même** goes on to the channel question",
         "**Annuler** posts nothing and changes nothing",
         "A new week's draft, once every session of the last announcement has started, gets no warning",
-        "`/fm publish` gives no such warning",
+        "`/fm publish` does not ask: while the published announcement still has sessions to come, "
+        "it posts nothing and points to `/fm brouillon`",
     ):
         assert detail in guide, detail

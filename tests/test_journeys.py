@@ -16,7 +16,7 @@ from fablabot.cogs import user_management
 from fablabot.helpers.constants import PARIS_TZ, SESSION_EMOJIS, RoleNames
 from fablabot.helpers.utils import RIGHT_LOST_MESSAGE
 from fablabot.import_state import main as run_import
-from fablabot.models import FmMessageDraft, Formation, MessageDraft, MsgReactionEvent, TrackedMessage
+from fablabot.models import FmMessageDraft, Formation, MessageDraft, MsgReactionEvent, PublishedMessage, TrackedMessage
 from fablabot.services import formations, messages, op_expiries
 
 if TYPE_CHECKING:
@@ -332,6 +332,35 @@ async def test_fm_publish_then_a_reaction_counts_as_a_sign_up(server: Server) ->
     export = await server.admin.slash(server.commands, "fm export")
     log = await next(a for a in export.response.attachments if a.filename.endswith(".csv")).read()
     assert str(server.plain.id).encode() in log
+
+
+async def test_fm_publish_refuses_a_second_post_while_the_first_has_sessions_to_come(server: Server) -> None:
+    """A second `/fm publish` would stop counting the sign-ups of the first: it posts nothing and points to /fm brouillon."""
+    await _draft(server, later())
+    await server.admin.slash(server.commands, "fm publish", channel=server.general)
+    first = server.general.last_message
+    assert first is not None
+
+    again = await server.admin.slash(server.commands, "fm publish", channel=server.general)
+
+    assert again.ephemeral
+    assert "/fm brouillon" in (again.response.content or "")
+    assert "Rien n'a été publié" in (again.response.content or "")
+    assert server.general.last_message == first
+
+
+async def test_fm_publish_posts_again_once_the_last_announcement_has_started(server: Server) -> None:
+    """When every session of the last announcement has started, a new week is posted as before."""
+    await _draft(server, later())
+    past = datetime.now(PARIS_TZ) - timedelta(days=2)
+    old = Formation(emoji="🔧", name="Old", trainer_mention="<@7>", start_iso=past.isoformat(), duration="1h", seats=3)
+    formations.save_published(
+        GUILD_ID, PublishedMessage(message_id=5, channel_id=server.general.id, message=FmMessageDraft("", 0, "", [old], ""))
+    )
+
+    await server.admin.slash(server.commands, "fm publish", channel=server.general)
+
+    assert "Arduino" in (server.general.last_message.content if server.general.last_message else "")
 
 
 async def test_fm_publish_the_database_refuses_takes_the_post_down_and_says_so(

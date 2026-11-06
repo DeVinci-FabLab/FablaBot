@@ -1059,6 +1059,9 @@ async def test_publier_posts_in_the_chosen_channel_like_fm_publish(lab: Lab) -> 
     assert stored is not None
     assert (stored.message_id, stored.channel_id) == (by_button.id, lab.elsewhere.id)
     await lab.show()
+    # `/fm publish` refuses to post over an announcement with sessions to come: start from none, as after a held week.
+    with db.transaction() as conn:
+        conn.execute("DELETE FROM fm_message WHERE message_id IS NOT NULL")
     await lab.respo.slash(lab.commands, "fm publish", channel=lab.announce)
     by_command = lab.announce.last_message
     assert by_command is not None
