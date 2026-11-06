@@ -1,0 +1,383 @@
+"""The screens that add a session to the draft: the template picker, the session form and the "Session ajoutée" answer."""
+
+from __future__ import annotations
+
+from datetime import date, datetime
+import logging
+from typing import TYPE_CHECKING, Any, Final, override
+
+from discord import AllowedMentions, ButtonStyle, Interaction, Object, SelectOption, TextStyle, ui
+
+from fablabot.helpers.constants import FORMATION_ROLES, PARIS_TZ, ErrorMessages
+from fablabot.helpers.formation import is_past
+from fablabot.helpers.formation.attendance import trainer_id
+from fablabot.helpers.formation.catalogue import (
+    add_session,
+    read_date,
+    read_hour,
+    read_seats,
+    starts_at,
+    template_description,
+)
+from fablabot.helpers.formation.rendering import discord_timestamp
+from fablabot.helpers.utils import RefusalKind, counted, log_refusal
+from fablabot.models.formation import FmMessageDraft, Formation
+from fablabot.services import catalogue, formations
+from fablabot.ui.catalogue import OPTIONS_PER_PAGE, click_check, cut, page_count, page_row, plain, show, template_line
+from fablabot.ui.draft import DraftButton
+
+if TYPE_CHECKING:
+    import re
+
+    from discord import Guild
+
+    from fablabot.models.catalogue import TrainingTemplate
+
+logger = logging.getLogger(__name__)
+
+COMMAND: Final = "fm.ajouter"
+PICKS_PER_PAGE: Final = OPTIONS_PER_PAGE - 1
+"""Templates per page of the picker; the last option of a menu is kept for the free session."""
+_NOT_ADDED: Final = "Rien n'a été ajouté."
+_GONE: Final = "Ce modèle n'existe plus."
+_BUTTON_CHARS: Final = 80
+_OPTION_CHARS: Final = 100
+_TITLE_CHARS: Final = 45
+_QUESTION: Final = (
+    "**Quelle formation ?** Choisis un modèle, ou une session libre.\n"
+    "-# Plus rapide au clavier : `/fm ajouter modele:` puis les premières lettres."
+)
+_NO_TEMPLATE: Final = "-# Aucun modèle pour l'instant : un Respo Formation ou un Administrateur les crée avec /fm modeles."
+_BAD_TRAINER: Final = "Choisis un formateur parmi les membres du serveur."
+_BAD_DATE: Final = "Date illisible : écris JJ/MM, par exemple 12/10."
+_BAD_HOUR: Final = "Heure illisible : écris HH:MM, par exemple 18:30."
+_BAD_SEATS: Final = "Places : un nombre entier de 1 à 500."
+_FULL: Final = "Le brouillon compte déjà 20 sessions : Discord n'accepte pas plus de 20 réactions sur un message."
+
+
+def picker_message(guild_id: int, page: int) -> tuple[str, ui.View]:
+    """Build the question that asks which training to add a session of, one page of the server's templates.
+
+    Args:
+        guild_id (int): The server's ID.
+        page (int): The page of options, from 0; one past the end shows the last.
+
+    Returns:
+        tuple[str, ui.View]: The question, and the menu with its page buttons when the server has templates.
+    """
+    templates = catalogue.list_templates(guild_id)
+    view = ui.View()
+    if not templates:
+        return f"{_QUESTION}\n{_NO_TEMPLATE}", view
+    pages = page_count(len(templates), PICKS_PER_PAGE)
+    page = min(max(page, 0), pages - 1)
+    shown = templates[page * PICKS_PER_PAGE : (page + 1) * PICKS_PER_PAGE]
+    options = [
+        SelectOption(
+            label=cut(t.fields.name, _OPTION_CHARS),
+            description=cut(template_line(t, markdown=False), _OPTION_CHARS),
+            value=str(t.id),
+        )
+        for t in shown
+    ]
+    view.add_item(SessionPick(page, placeholder=f"Choisis un modèle ({page + 1}/{pages})…", options=options, row=0))
+    page_row(
+        view,
+        previous_id=f"ses:pnav:{max(page - 1, 0)}",
+        next_id=f"ses:pnav:{min(page + 1, pages - 1)}",
+        label=f"Modèles {page * PICKS_PER_PAGE + 1} à {page * PICKS_PER_PAGE + len(shown)} sur {len(templates)}",
+        page=page,
+        pages=pages,
+        row=1,
+    )
+    return _QUESTION, view
+
+
+def added_message(session: Formation, count: int, template_id: int) -> tuple[str, ui.View]:
+    """Build the answer to a sent session form: what was added, and the buttons that go on.
+
+    Args:
+        session (Formation): The session as stored, with its emoji.
+        count (int): How many sessions the draft holds now.
+        template_id (int): The template the session comes from, 0 for a free session.
+
+    Returns:
+        tuple[str, ui.View]: The text and its three buttons: another session of the training, another training, the brouillon.
+    """
+    places = counted(session.seats, "place", "places")
+    content = (
+        f"✅ **{plain(session.name)}** ajoutée : {discord_timestamp(session.start_dt)} avec {session.trainer_mention}, "
+        f"{places}, émoji {session.emoji}.\n"
+        f"-# Le brouillon compte maintenant {counted(count, 'session', 'sessions')}."
+    )
+    view = ui.View()
+    view.add_item(
+        SessionAgain(template_id, session.emoji, label=cut(f"🔁 Encore une session de {session.name}", _BUTTON_CHARS))
+    )
+    view.add_item(DraftButton("add", label="➕ Autre formation", style=ButtonStyle.secondary))  # noqa: RUF001 - the sign the copy asks for
+    view.add_item(DraftButton("show"))
+    return content, view
+
+
+async def _refuse(interaction: Interaction, text: str, kind: RefusalKind | None = None) -> None:
+    """Tell the member privately why nothing was added, and log the kind when the refusal is not about the form's text."""
+    if kind is not None:
+        log_refusal(logger, COMMAND, interaction, kind)
+    await interaction.response.send_message(f"{text} {_NOT_ADDED}", ephemeral=True, allowed_mentions=AllowedMentions.none())
+
+
+def _template_of(interaction: Interaction, value: str) -> TrainingTemplate | None:
+    """Read a template of the clicker's server from the ID a custom ID or a menu holds; another server's reads as missing."""
+    assert interaction.guild is not None
+    return catalogue.get_template(interaction.guild.id, int(value)) if value.isdecimal() else None
+
+
+def _read_start(date_text: str, hour_text: str) -> datetime | str:
+    """Read a session's start from the form, or give the text of the first refusal."""
+    day = read_date(date_text, datetime.now(PARIS_TZ).date())
+    if day is None:
+        return _BAD_DATE
+    hour = read_hour(hour_text)
+    if hour is None:
+        return _BAD_HOUR
+    start = starts_at(day, hour)
+    return ErrorMessages.PAST_DATETIME if is_past(start) else start
+
+
+class SessionForm(ui.Modal):
+    """The form of a session of a template: who trains, when, how many seats, and an optional description.
+
+    Held in memory only: a form left open across a restart cannot be sent. Upgrade path: dispatch modal submits by custom
+    ID, with the template's ID in it.
+
+    Attributes:
+        template (TrainingTemplate): The template the form opened on.
+        trainer_select (ui.UserSelect): The trainer, preset when the form comes from "Encore une session".
+        date_input (ui.TextInput): The day, ``JJ/MM``.
+        hour_input (ui.TextInput): The hour, ``HH:MM``.
+        seats_input (ui.TextInput): The seats, those of the template to start with.
+        description_input (ui.TextInput): The description, optional.
+    """
+
+    interaction_check = click_check(COMMAND, FORMATION_ROLES)
+
+    def __init__(self, *, template: TrainingTemplate, trainer_id: int | None, day: date | None, description: str) -> None:
+        """Build the form.
+
+        Args:
+            template (TrainingTemplate): The template the session comes from.
+            trainer_id (int | None): The member to preset as trainer, or None for none.
+            day (date | None): The day to preset, or None for an empty date.
+            description (str): The description to start with, empty for none.
+        """
+        super().__init__(title=cut(template.fields.name, _TITLE_CHARS))
+        self.template = template
+        self.trainer_select = ui.UserSelect(
+            placeholder="Choisis le formateur", required=True, default_values=[Object(trainer_id)] if trainer_id else []
+        )
+        self.date_input = ui.TextInput(
+            label="Date", placeholder="JJ/MM", max_length=10, default=day.strftime("%d/%m") if day else None
+        )
+        self.hour_input = ui.TextInput(label="Heure", placeholder="HH:MM", max_length=8)
+        self.seats_input = ui.TextInput(label="Places", max_length=20, default=str(template.fields.seats))
+        self.description_input = ui.TextInput(
+            label="Description", style=TextStyle.paragraph, required=False, max_length=500, default=description or None
+        )
+        self.add_item(ui.Label(text="Formateur", component=self.trainer_select))
+        for item in (self.date_input, self.hour_input, self.seats_input, self.description_input):
+            self.add_item(item)
+
+    @override
+    async def on_submit(self, interaction: Interaction) -> None:
+        """Add the session to the draft when the form is valid, else say why not, and show what was added."""
+        assert interaction.guild is not None
+        guild = interaction.guild
+        template = catalogue.get_template(guild.id, self.template.id)
+        if template is None:
+            await _refuse(interaction, _GONE, RefusalKind.TEMPLATE_UNKNOWN)
+            return
+        refusal = self._session(guild, template)
+        if isinstance(refusal, str):
+            await _refuse(interaction, refusal)
+            return
+        # Nothing is awaited between reading the draft and saving it, so the emoji is free when it is taken.
+        added = add_session(guild.id, refusal)
+        if added is None:
+            await _refuse(interaction, _FULL, RefusalKind.DRAFT_NOT_READY)
+            return
+        stored, count = added
+        logger.info(
+            f"[{COMMAND}] add guild_id={guild.id} user_id={interaction.user.id} template_id={template.id} sessions={count}"
+        )
+        content, view = added_message(stored, count, template.id)
+        await show(interaction, content, None, view)
+
+    def _session(self, guild: Guild, template: TrainingTemplate) -> Formation | str:
+        """Read the form into a session of the template as it is now, or give the text of the first refusal."""
+        chosen = self.trainer_select.values[0] if self.trainer_select.values else None
+        trainer = guild.get_member(chosen.id) if chosen else None
+        if trainer is None or trainer.bot:
+            return _BAD_TRAINER
+        start = _read_start(self.date_input.value, self.hour_input.value)
+        if isinstance(start, str):
+            return start
+        seats = read_seats(self.seats_input.value)
+        if seats is None:
+            return _BAD_SEATS
+        fields = template.fields
+        return Formation(
+            emoji="",
+            name=fields.name,
+            trainer_mention=trainer.mention,
+            start_iso=start.isoformat(),
+            duration=fields.duration,
+            seats=seats,
+            description=self.description_input.value.strip(),
+            excusable=fields.excusable,
+        )
+
+
+async def open_session_form(
+    interaction: Interaction, template: TrainingTemplate, *, trainer_id: int | None = None, day: date | None = None
+) -> None:
+    """Open the form of a session of a template, with the template's seats and, for the first session of it, its description.
+
+    Args:
+        interaction (Interaction): The click that asks for the form.
+        template (TrainingTemplate): The template.
+        trainer_id (int | None): The member to preset as trainer.
+        day (date | None): The day to preset.
+    """
+    assert interaction.guild is not None
+    draft = formations.get_draft(interaction.guild.id) or FmMessageDraft(header="", role_id=0, intro="", fms=[], end="")
+    form = SessionForm(
+        template=template, trainer_id=trainer_id, day=day, description=template_description(draft, template.fields)
+    )
+    await interaction.response.send_modal(form)
+
+
+class SessionPick(ui.DynamicItem[ui.Select[ui.View]], template=r"ses:pick:(?P<page>[0-9]+)"):
+    """The menu that picks the template to add a session of.
+
+    Attributes:
+        page (int): The page of options it lists, from 0.
+    """
+
+    interaction_check = click_check(COMMAND, FORMATION_ROLES)
+
+    def __init__(
+        self, page: int, *, placeholder: str | None = None, options: list[SelectOption] | None = None, row: int | None = None
+    ) -> None:
+        """Build the menu.
+
+        Args:
+            page (int): The page of options it lists, from 0.
+            placeholder (str | None): The text shown while nothing is chosen.
+            options (list[SelectOption] | None): The templates it lists.
+            row (int | None): The row of the message.
+        """
+        super().__init__(ui.Select(custom_id=f"ses:pick:{page}", placeholder=placeholder, options=options or []), row=row)
+        self.page = page
+
+    @override
+    @classmethod
+    async def from_custom_id(cls, interaction: Interaction[Any], item: ui.Item[Any], match: re.Match[str], /) -> SessionPick:
+        """Rebuild the menu from its custom ID."""
+        return cls(int(match["page"]))
+
+    @override
+    async def callback(self, interaction: Interaction[Any]) -> None:
+        """Open the form of the chosen template, or say it is gone."""
+        template = _template_of(interaction, self.item.values[0])
+        if template is None:
+            await _refuse(interaction, _GONE, RefusalKind.TEMPLATE_UNKNOWN)
+            return
+        await open_session_form(interaction, template)
+
+
+class SessionPickPage(ui.DynamicItem[ui.Button[ui.View]], template=r"ses:pnav:(?P<page>[0-9]+)"):
+    """A page button of the menu that picks a template to add a session of.
+
+    Attributes:
+        page (int): The page of options it shows, from 0.
+    """
+
+    interaction_check = click_check(COMMAND, FORMATION_ROLES)
+
+    def __init__(self, page: int) -> None:
+        """Build the button.
+
+        Args:
+            page (int): The page of options it shows, from 0.
+        """
+        super().__init__(ui.Button(label="Page", custom_id=f"ses:pnav:{page}"))
+        self.page = page
+
+    @override
+    @classmethod
+    async def from_custom_id(
+        cls, interaction: Interaction[Any], item: ui.Item[Any], match: re.Match[str], /
+    ) -> SessionPickPage:
+        """Rebuild the button from its custom ID."""
+        return cls(int(match["page"]))
+
+    @override
+    async def callback(self, interaction: Interaction[Any]) -> None:
+        """Show that page of options."""
+        assert interaction.guild is not None
+        content, view = picker_message(interaction.guild.id, self.page)
+        await show(interaction, content, None, view)
+
+
+class SessionAgain(ui.DynamicItem[ui.Button[ui.View]], template=r"ses:again:(?P<template>[0-9]+):(?P<emoji>.+)"):
+    """The "Encore une session" button: it reopens the form on the date and trainer of the session just added.
+
+    Attributes:
+        template_id (int): The template of the session just added, 0 for a free session.
+        emoji (str): The emoji of that session, which finds it again in the stored draft.
+    """
+
+    interaction_check = click_check(COMMAND, FORMATION_ROLES)
+
+    def __init__(self, template_id: int, emoji: str, *, label: str = "🔁 Encore une session") -> None:
+        """Build the button.
+
+        Args:
+            template_id (int): The template of the session just added, 0 for a free session.
+            emoji (str): The emoji of that session.
+            label (str): The text of the button, which names the training.
+        """
+        super().__init__(ui.Button(label=label, style=ButtonStyle.primary, custom_id=f"ses:again:{template_id}:{emoji}"))
+        self.template_id = template_id
+        self.emoji = emoji
+
+    @override
+    @classmethod
+    async def from_custom_id(cls, interaction: Interaction[Any], item: ui.Item[Any], match: re.Match[str], /) -> SessionAgain:
+        """Rebuild the button from its custom ID."""
+        return cls(int(match["template"]), match["emoji"])
+
+    @override
+    async def callback(self, interaction: Interaction[Any]) -> None:
+        """Open the form on the template, with the date and trainer of the session just added if it is still in the draft."""
+        assert interaction.guild is not None
+        template = _template_of(interaction, str(self.template_id))
+        if template is None:
+            await _refuse(interaction, _GONE, RefusalKind.TEMPLATE_UNKNOWN)
+            return
+        draft = formations.get_draft(interaction.guild.id)
+        session = next((fm for fm in draft.fms if fm.emoji == self.emoji), None) if draft else None
+        if session is None:
+            await open_session_form(interaction, template)
+            return
+        day = session.start_dt.date()
+        # A day already gone would be read as the same day next year, so it is not offered.
+        await open_session_form(
+            interaction,
+            template,
+            trainer_id=trainer_id(session.trainer_mention),
+            day=day if day >= datetime.now(PARIS_TZ).date() else None,
+        )
+
+
+SESSION_ITEMS: Final = (SessionPick, SessionPickPage, SessionAgain)

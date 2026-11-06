@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -20,6 +20,7 @@ from fablabot.ui.catalogue import TemplateForm, deletion_message
 from fablabot.ui.draft import DraftTextForm, draft_message, publish_message
 from fablabot.ui.formation import StartFmModal
 from fablabot.ui.message import SuggestionView
+from fablabot.ui.session import SessionForm, added_message, picker_message
 
 from .preview import Capture, Sent
 
@@ -295,6 +296,41 @@ async def draft_publish() -> Screen:
     return Screen(capture.sent, dict(_DRAFT_NAMES))
 
 
+async def session_pick() -> Screen:
+    """The question that asks which training to add a session of, the 14 templates on its one page."""
+    capture = Capture()
+    with patch("fablabot.services.catalogue.list_templates", return_value=_templates()):
+        content, view = picker_message(1234, 0)
+    await capture.interaction().response.send_message(content, view=view, ephemeral=True)
+    return Screen(capture.sent)
+
+
+async def session_form() -> Screen:
+    """The form of a session of the first template: the trainer still to choose, the day, the seats and the description."""
+    capture = Capture()
+    template = next(t for t in _templates() if t.fields.name == _TEMPLATES[0][0])
+    form = SessionForm(template=template, trainer_id=None, day=date(2026, 10, 12), description=template.fields.description)
+    await capture.interaction().response.send_modal(form)
+    return Screen(capture.sent)
+
+
+async def session_added() -> Screen:
+    """The answer to a sent session form: the session, its emoji, the count and the three buttons that go on."""
+    capture = Capture()
+    template = next(t for t in _templates() if t.fields.name == _TEMPLATES[0][0])
+    session = Formation(
+        emoji="🩷",
+        name=template.fields.name,
+        trainer_mention="<@2222>",
+        start_iso="2026-10-12T10:00:00+02:00",
+        duration=template.fields.duration,
+        seats=template.fields.seats,
+    )
+    content, view = added_message(session, 6, template.id)
+    await capture.interaction().response.send_message(content, view=view, ephemeral=True)
+    return Screen(capture.sent, dict(_DRAFT_NAMES))
+
+
 APPEL_START = datetime(2026, 11, 5, 18, 0, tzinfo=PARIS_TZ)
 PSEUDOS = ["lea.mkr", "hugo3d", "ines_lab", "tom_r", "sarah.fab"]
 
@@ -456,6 +492,9 @@ SCREENS: dict[str, Callable[[], Coroutine[Any, Any, Screen]]] = {
     "draft": draft,
     "draft-text-form": draft_text_form,
     "draft-publish": draft_publish,
+    "session-pick": session_pick,
+    "session-form": session_form,
+    "session-added": session_added,
     "suggest": suggest,
     "suggest-modal": suggest_modal,
     "fm-start-modal": fm_start_modal,

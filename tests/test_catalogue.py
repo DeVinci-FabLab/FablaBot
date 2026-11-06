@@ -2,10 +2,25 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime, time
+
 import pytest
 
-from fablabot.helpers.formation.catalogue import MAX_SEATS, MIN_SEATS, read_seats, template_fields, trainer_id
+from fablabot.helpers.constants import MAX_SESSIONS, PARIS_TZ, SESSION_EMOJIS
+from fablabot.helpers.formation.catalogue import (
+    MAX_SEATS,
+    MIN_SEATS,
+    pick_emoji,
+    read_date,
+    read_hour,
+    read_seats,
+    starts_at,
+    template_description,
+    template_fields,
+)
+from fablabot.helpers.utils import is_valid_emoji
 from fablabot.models import TemplateFields
+from fablabot.models.formation import FmMessageDraft, Formation
 
 
 @pytest.mark.parametrize(
@@ -74,9 +89,90 @@ def test_a_template_form_without_oui_or_non_is_refused_not_read_as_a_choice(chos
 
 
 @pytest.mark.parametrize(
-    ("mention", "member"),
-    [("<@123>", 123), (" <@!456> ", 456), ("<@&789>", None), ("123", None), ("<@1><@2>", None), ("", None)],
+    ("today", "text", "expected"),
+    [
+        (date(2026, 11, 6), "12/10", date(2027, 10, 12)),
+        (date(2026, 12, 20), "05/01", date(2027, 1, 5)),
+        (date(2026, 11, 6), "06/11", date(2026, 11, 6)),
+        (date(2026, 11, 6), "07/11", date(2026, 11, 7)),
+        (date(2026, 11, 6), "5/1", date(2027, 1, 5)),
+        (date(2026, 11, 6), " 12/12 ", date(2026, 12, 12)),
+        (date(2027, 3, 1), "29/02", date(2028, 2, 29)),
+    ],
 )
-def test_a_trainer_mention_names_one_member(mention: str, member: int | None) -> None:
-    """A stored user mention gives its member's ID; a role mention, a bare number or two mentions give none."""
-    assert trainer_id(mention) == member
+def test_a_day_and_month_mean_the_next_such_date(today: date, text: str, expected: date) -> None:
+    """`JJ/MM` is the next such date counting today, so a date already gone this year means next year."""
+    assert read_date(text, today) == expected
+
+
+def test_a_full_date_and_the_hours_read() -> None:
+    """`JJ/MM/AAAA` is taken as written, past dates included, and an hour reads as `HH:MM`, `18h30` or `18h`."""
+    assert read_date("12/10/2026", date(2026, 11, 6)) == date(2026, 10, 12)
+    assert read_date("01/01/2030", date(2026, 11, 6)) == date(2030, 1, 1)
+    assert read_hour("18:30") == time(18, 30)
+    assert read_hour(" 8:05 ") == time(8, 5)
+    assert read_hour("18h30") == time(18, 30)
+    assert read_hour("18h") == time(18, 0)
+    assert read_hour("00:00") == time(0, 0)
+    assert read_hour("23h59") == time(23, 59)
+
+
+@pytest.mark.parametrize(
+    "text", ["31/02", "12-10", "", "12", "12/13", "0/10", "12/10/26", "29/02/2027", "a/b", "\u0661\u0662/\u0661\u0660"]
+)
+def test_an_unreadable_date_or_hour_reads_none(text: str) -> None:
+    """A date that does not exist or is not written `JJ/MM` or `JJ/MM/AAAA` reads as none."""
+    assert read_date(text, date(2026, 11, 6)) is None
+
+
+@pytest.mark.parametrize("text", ["25:00", "18h70", "", "18", "18:5", "18:60", "h30", "6pm", "18h3", "1\u0668:00"])
+def test_an_unreadable_hour_reads_none(text: str) -> None:
+    """An hour past 23, a minute past 59 or any other shape reads as none."""
+    assert read_hour(text) is None
+
+
+def test_a_start_is_a_paris_time() -> None:
+    """The start joins a day and an hour in Paris time, summer and winter."""
+    assert starts_at(date(2026, 7, 1), time(18, 30)) == datetime(2026, 7, 1, 18, 30, tzinfo=PARIS_TZ)
+    assert starts_at(date(2026, 7, 1), time(18, 30)).utcoffset() == datetime(2026, 7, 1, tzinfo=PARIS_TZ).utcoffset()
+    assert starts_at(date(2026, 1, 1), time(18, 30)).isoformat() == "2026-01-01T18:30:00+01:00"
+
+
+def test_the_emoji_pool_holds_twenty_distinct_single_code_point_emojis() -> None:
+    """The pool has twenty emojis, none twice, each one code point that Discord takes as a reaction."""
+    assert len(SESSION_EMOJIS) == MAX_SESSIONS == 20
+    assert len(set(SESSION_EMOJIS)) == 20
+    assert all(len(emoji) == 1 and is_valid_emoji(emoji) for emoji in SESSION_EMOJIS)
+
+
+def _session(emoji: str, name: str = "Soudure") -> Formation:
+    """A session of the draft."""
+    return Formation(
+        emoji=emoji, name=name, trainer_mention="<@1>", start_iso="2026-11-10T18:00:00+01:00", duration="1 h", seats=5
+    )
+
+
+def _draft(*sessions: Formation) -> FmMessageDraft:
+    """A draft holding these sessions."""
+    return FmMessageDraft(header="h", role_id=1, intro="i", fms=list(sessions), end="e")
+
+
+def test_the_first_unused_emoji_is_picked() -> None:
+    """The emoji is the first of the pool no session holds, whatever order the sessions are in."""
+    assert pick_emoji(_draft()) == SESSION_EMOJIS[0]
+    assert pick_emoji(_draft(_session(SESSION_EMOJIS[0]), _session(SESSION_EMOJIS[2]))) == SESSION_EMOJIS[1]
+    assert pick_emoji(_draft(_session("🔧"), _session(SESSION_EMOJIS[0]))) == SESSION_EMOJIS[1]
+
+
+def test_no_emoji_is_picked_when_the_pool_is_used_up() -> None:
+    """With every emoji of the pool held by a session there is none left to pick."""
+    assert pick_emoji(_draft(*[_session(emoji) for emoji in SESSION_EMOJIS])) is None
+
+
+def test_only_the_first_session_of_a_training_gets_its_description() -> None:
+    """The template's description comes with the first session of that name and not with the next ones."""
+    fields = TemplateFields("Soudure", "1 h", 5, "Apportez vos lunettes.", True)
+
+    assert template_description(_draft(), fields) == "Apportez vos lunettes."
+    assert template_description(_draft(_session("🧡", "Résine")), fields) == "Apportez vos lunettes."
+    assert template_description(_draft(_session("🧡")), fields) == ""

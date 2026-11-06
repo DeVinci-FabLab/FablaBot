@@ -32,13 +32,14 @@ _NOT_PUBLISHED: Final = "Rien n'a été publié."
 _GONE_CHANNEL: Final = "Ce salon n'existe plus : choisis-en un autre."
 _DEFAULT_URL: Final = FmMessageDraft(header="", role_id=0, intro="", fms=[], end="").request_forms_url
 _BUTTONS: Final = {
+    "add": ("➕ Ajouter une session", ButtonStyle.primary),  # noqa: RUF001 - the sign the copy asks for
     "text": ("💬 Intro / conclusion", ButtonStyle.secondary),
     "preview": ("👁️ Aperçu", ButtonStyle.secondary),
     "publish": ("📣 Publier", ButtonStyle.success),
     "show": ("📝 Voir le brouillon", ButtonStyle.secondary),
 }
 
-Action = Literal["text", "preview", "publish", "show"]
+Action = Literal["add", "text", "preview", "publish", "show"]
 
 
 def _length(draft: FmMessageDraft) -> str:
@@ -136,6 +137,7 @@ def draft_message(guild: Guild, draft: FmMessageDraft, *, note: str = "") -> tup
         colour=BRAND_COLOUR,
     )
     view = ui.View()
+    view.add_item(DraftButton("add", row=0))
     view.add_item(DraftButton("text", row=1))
     view.add_item(DraftButton("preview", row=1))
     view.add_item(DraftButton("publish", disabled=not sessions, row=1))
@@ -224,25 +226,36 @@ class DraftTextForm(ui.Modal):
         await show(interaction, content, embed, view)
 
 
-class DraftButton(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:(?P<action>text|preview|publish|show)"):
+class DraftButton(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:(?P<action>add|text|preview|publish|show)"):
     """A button of the brouillon; its custom ID names the action and the draft is read at each click.
 
     Attributes:
-        action (Action): What the button does: ``text``, ``preview``, ``publish`` or ``show``.
+        action (Action): What the button does: ``add``, ``text``, ``preview``, ``publish`` or ``show``.
     """
 
     interaction_check = click_check(COMMAND, FORMATION_ROLES)
 
-    def __init__(self, action: Action, *, disabled: bool = False, row: int | None = None) -> None:
+    def __init__(
+        self,
+        action: Action,
+        *,
+        label: str | None = None,
+        style: ButtonStyle | None = None,
+        disabled: bool = False,
+        row: int | None = None,
+    ) -> None:
         """Build the button.
 
         Args:
-            action (Action): ``text``, ``preview``, ``publish`` or ``show``.
+            action (Action): ``add``, ``text``, ``preview``, ``publish`` or ``show``.
+            label (str | None): The text to show instead of the action's own, as "Autre formation" does for ``add``.
+            style (ButtonStyle | None): The style to show instead of the action's own.
             disabled (bool): Whether the button takes no click, as Publier does with no session.
             row (int | None): The row of the message.
         """
-        label, style = _BUTTONS[action]
-        super().__init__(ui.Button(label=label, style=style, custom_id=f"fmd:{action}", disabled=disabled), row=row)
+        own_label, own_style = _BUTTONS[action]
+        button = ui.Button(label=label or own_label, style=style or own_style, custom_id=f"fmd:{action}", disabled=disabled)
+        super().__init__(button, row=row)
         self.action: Action = action
 
     @override
@@ -253,11 +266,17 @@ class DraftButton(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:(?P<action>
 
     @override
     async def callback(self, interaction: Interaction[Any]) -> None:
-        """Open the text form, show the preview, ask where to publish, or show the brouillon."""
+        """Ask which training to add, open the text form, show the preview, ask where to publish, or show the brouillon."""
         assert interaction.guild is not None
         guild = interaction.guild
         draft = _stored(guild.id)
-        if self.action == "text":
+        if self.action == "add":
+            # Imported here: the session screens return to the brouillon through this very item.
+            from fablabot.ui.session import picker_message
+
+            content, view = picker_message(guild.id, 0)
+            await show(interaction, content, None, view)
+        elif self.action == "text":
             await interaction.response.send_modal(DraftTextForm(guild, draft))
         elif self.action == "preview":
             await self._preview(interaction, _live(guild, draft))

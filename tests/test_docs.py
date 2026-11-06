@@ -841,3 +841,20 @@ def test_user_guide_says_who_manages_the_templates_and_that_sessions_keep_their_
         "leaves the sessions already in the draft or published as they are",
     ):
         assert detail in guide, detail
+
+
+def test_user_guide_says_how_a_session_is_added_and_why_only_the_first_has_the_description() -> None:
+    """The draft section covers the template menu, the emoji, Encore une session, the 2 000 limit and the 20 sessions."""
+    guide = _section(_read("docs/USERGUIDE.md"), "### The draft")
+    for detail in (
+        "**Ajouter une session**",
+        "next such date, today included",
+        "The bot picks the session's emoji when the form is sent",
+        "an emoji set with `/fm add` is never taken again",
+        "**Encore une session**",
+        "date and the trainer kept",
+        "comes with the first session of a training only",
+        "at most 2 000 characters",
+        "20 sessions at most",
+    ):
+        assert detail in guide, detail

@@ -129,8 +129,8 @@ def click_check(command: str, roles: set[str]) -> Callable[[Any, Interaction], C
     return check
 
 
-def _places(template: TrainingTemplate, *, markdown: bool = True) -> str:
-    """Write a template's duration and seats, and whether an absence may be excused.
+def template_line(template: TrainingTemplate, *, markdown: bool = True) -> str:
+    """Write a template's duration and seats, and whether an absence may be excused: the line the lists and menus show.
 
     Args:
         template (TrainingTemplate): The template.
@@ -161,7 +161,7 @@ def templates_message(guild_id: int, page: int, *, note: str = "") -> tuple[str,
     page = min(max(page, 0), pages - 1)
     shown = templates[page * TEMPLATES_PER_PAGE : (page + 1) * TEMPLATES_PER_PAGE]
     if templates:
-        lines = [f"**{plain(t.fields.name)}** — {_places(t)}" for t in shown]
+        lines = [f"**{plain(t.fields.name)}** — {template_line(t)}" for t in shown]
         footer = f"-# Page {page + 1}/{pages} · {counted(len(templates), 'modèle', 'modèles')}"
         description = "\n".join([*lines, "", footer])
     else:
@@ -201,7 +201,7 @@ def pick_message(guild_id: int, action: Action, page: int) -> tuple[str, ui.View
     options = [
         SelectOption(
             label=cut(t.fields.name, _OPTION_CHARS),
-            description=cut(_places(t, markdown=False), _OPTION_CHARS),
+            description=cut(template_line(t, markdown=False), _OPTION_CHARS),
             value=str(t.id),
         )
         for t in shown

@@ -56,8 +56,7 @@ from fablabot.helpers.formation import (
     send_waitlist_dm,
     start_appel,
 )
-from fablabot.helpers.formation.attendance import appel_message
-from fablabot.helpers.formation.catalogue import trainer_id
+from fablabot.helpers.formation.attendance import appel_message, trainer_id
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.safe_discord_operations import retract_unsaved_post
 from fablabot.helpers.utils import RefusalKind, counted, ensure_command_context, is_valid_emoji, log_refusal
@@ -68,6 +67,7 @@ from fablabot.ui import fmui
 from fablabot.ui.attendance import DYNAMIC_ITEMS, OpenAppelPicker
 from fablabot.ui.catalogue import CATALOGUE_ITEMS, templates_message
 from fablabot.ui.draft import DRAFT_ITEMS, draft_message
+from fablabot.ui.session import SESSION_ITEMS
 
 if TYPE_CHECKING:
     from discord import Guild
@@ -141,7 +141,7 @@ class FormationManagement(commands.Cog):
         # are logged and wait for the next reminder tick to run it again. Same ceiling: a restart forgets them.
         self._retry_guilds: set[int] = set()
         self._reaction_logs.purge_all()
-        self.bot.add_dynamic_items(*DYNAMIC_ITEMS, *CATALOGUE_ITEMS, *DRAFT_ITEMS)
+        self.bot.add_dynamic_items(*DYNAMIC_ITEMS, *CATALOGUE_ITEMS, *DRAFT_ITEMS, *SESSION_ITEMS)
         self._check_upcoming_formations.start()
         logger.info("FormationManagement initialized")
 
@@ -149,7 +149,7 @@ class FormationManagement(commands.Cog):
     async def cog_unload(self) -> None:
         """Clean up when the cog is unloaded."""
         self._check_upcoming_formations.cancel()
-        self.bot.remove_dynamic_items(*DYNAMIC_ITEMS, *CATALOGUE_ITEMS, *DRAFT_ITEMS)
+        self.bot.remove_dynamic_items(*DYNAMIC_ITEMS, *CATALOGUE_ITEMS, *DRAFT_ITEMS, *SESSION_ITEMS)
         for task in list(self._pending_update_tasks.values()):
             try:
                 task.cancel()
