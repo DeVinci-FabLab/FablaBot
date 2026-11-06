@@ -133,6 +133,13 @@ def test_operator_guide_documents_info() -> None:
     assert "so does `/info`" in _section(text, "## Commands channel")
 
 
+def test_operator_guide_says_a_role_allowed_for_the_whole_bot_counts_in_the_server_check() -> None:
+    """The problem table says a bot-wide allow counts and that the group's own setting wins."""
+    text = " ".join(_read("docs/OPERATIONS.md").split())
+    assert "allowed at the top of the Integrations page, for the whole bot, counts as allowed on every group" in text
+    assert "a setting on the group wins" in text
+
+
 def test_user_guide_holds_welcome_approve_to_the_role_rank() -> None:
     """The guide says /welcome approve gives the roles only below the caller's highest, owner exempt, like /user add_role."""
     text = " ".join(_read("docs/USERGUIDE.md").split())
