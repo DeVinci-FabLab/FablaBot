@@ -12,7 +12,7 @@ import pytest
 from fablabot.helpers.command_sync import COMMAND_SYNC_STATE_FILE, command_fingerprint
 from fablabot.helpers.i18n import catalog
 
-STAFF_GROUPS = ("text", "vocal", "fm", "log", "msg", "user", "welcome")
+STAFF_GROUPS = ("text", "vocal", "fm", "log", "msg", "user", "welcome", "info")
 MEMBER_COMMANDS = ("suggest", "help")
 GUILD_CONTEXT = 0
 """Discord's interaction context type for a server channel."""

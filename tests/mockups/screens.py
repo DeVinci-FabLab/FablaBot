@@ -14,6 +14,8 @@ from fablabot.cogs import formation_management, help_management, message_managem
 from fablabot.helpers.constants import APPEL_EDIT_WINDOW, PARIS_TZ, SESSION_EMOJIS, RoleNames
 from fablabot.helpers.formation.attendance import alert_message, appel_content, appel_view, log_line, respo_messages
 from fablabot.helpers.help_page import leaf_commands
+from fablabot.helpers.info_page import Facts, build_info
+from fablabot.helpers.server_check import Problem
 from fablabot.models import AlertAction, Appel, Registrant, TemplateFields, TrainingTemplate
 from fablabot.models.formation import FmMessageDraft, Formation
 from fablabot.ui.catalogue import TemplateForm, deletion_message
@@ -409,6 +411,32 @@ async def session_added() -> Screen:
     return Screen(capture.sent, dict(_DRAFT_NAMES))
 
 
+async def info() -> Screen:
+    """``/info`` on a server with two warnings: the bot, the database and the instance, the settings and two problems to fix."""
+    capture = Capture()
+    facts = Facts(
+        version="0.14.0",
+        uptime=timedelta(hours=3),
+        latency_ms=42,
+        schema_version=4,
+        database_bytes=1_200_000,
+        copies=6,
+        servers=4,
+        commands=9,
+        watched=1,
+        commands_channel_id=1,
+        log_channel_id=2,
+        language=("fr", "fr"),
+        revision="8822a20",
+    )
+    problems = [
+        Problem("integrations_role_missing", "/log: Pôle Numérique"),
+        Problem("integrations_role_missing", "/user: CoDir"),
+    ]
+    await capture.interaction().followup.send(embed=build_info(facts, problems), ephemeral=True)
+    return Screen(capture.sent, {1: "commandes-bot", 2: "logs-bot"})
+
+
 APPEL_START = datetime(2026, 11, 5, 18, 0, tzinfo=PARIS_TZ)
 PSEUDOS = ["lea.mkr", "hugo3d", "ines_lab", "tom_r", "sarah.fab"]
 
@@ -562,6 +590,7 @@ SCREENS: dict[str, Callable[[], Coroutine[Any, Any, Screen]]] = {
     "help-member": help_member,
     "help-trainer": help_trainer,
     "help-admin": help_admin,
+    "info": info,
     "fm-edit": fm_edit,
     "fm-appel": fm_appel,
     "catalogue-list": catalogue_list,

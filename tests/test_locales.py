@@ -14,7 +14,7 @@ from discord import Locale, app_commands
 import pytest
 
 from fablabot.helpers import i18n
-from fablabot.helpers.help_page import DOMAINS, EVERYONE_DOMAIN, line_key
+from fablabot.helpers.help_page import DOMAINS, TOP_LEVEL_DOMAINS, line_key
 from fablabot.helpers.i18n import REFERENCE, Catalog, CatalogError, Entry, Texts, catalog, load_catalog, read_locale
 
 ROOT = Path(__file__).parent.parent
@@ -232,7 +232,7 @@ def test_catalogue_lines_match_the_domains() -> None:
     """Each listed command has a line in English, and each line of English belongs to a listed command."""
     english = catalog().locales[REFERENCE]
     listed = {
-        line_key(name if domain == EVERYONE_DOMAIN else f"{domain} {name}") for domain, names in DOMAINS for name in names
+        line_key(name if domain in TOP_LEVEL_DOMAINS else f"{domain} {name}") for domain, names in DOMAINS for name in names
     }
     assert listed <= english.keys()
     lines = {key for key in english if key.startswith("help.cmd.")}

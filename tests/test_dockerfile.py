@@ -6,6 +6,7 @@ import re
 import pytest
 
 from fablabot.healthcheck import HEARTBEAT_INTERVAL_SECONDS
+from fablabot.helpers.info_page import REVISION_ENV
 
 ROOT = Path(__file__).resolve().parent.parent
 DOCKERFILE = (ROOT / "docker" / "Dockerfile").read_text()
@@ -76,6 +77,13 @@ def test_production_stage_holds_only_the_environment() -> None:
     body = "\n".join(production)
     assert "/app/data" not in body
     assert "/app/logs" not in body
+
+
+def test_production_image_carries_the_commit_it_is_built_from() -> None:
+    """The production stage turns the REVISION build argument into the variable /info reads, empty when none is given."""
+    production = stages(DOCKERFILE)["production"]
+    assert 'ARG REVISION=""' in production
+    assert f"ENV {REVISION_ENV}=$REVISION" in production
 
 
 def test_production_runs_as_10001_throughout() -> None:

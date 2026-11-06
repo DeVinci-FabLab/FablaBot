@@ -5,6 +5,7 @@ from fablabot.cogs.channel_management import ChannelManagement
 from fablabot.cogs.formation_management import FormationManagement
 from fablabot.cogs.guild_access import GuildAccess
 from fablabot.cogs.help_management import HelpManagement
+from fablabot.cogs.info_management import InfoManagement
 from fablabot.cogs.log_management import LogManagement
 from fablabot.cogs.message_management import MessageManagement
 from fablabot.cogs.user_management import UserManagement
@@ -16,6 +17,7 @@ __all__ = [
     "FormationManagement",
     "GuildAccess",
     "HelpManagement",
+    "InfoManagement",
     "LogManagement",
     "MessageManagement",
     "UserManagement",

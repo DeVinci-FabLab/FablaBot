@@ -38,6 +38,7 @@ msg = "Messages du bot"
 user = "Membres et rôles"
 welcome = "Accueil des nouveaux"
 log = "Journaux du bot"
+status = "État du bot"
 everyone = "Pour tout le monde"
 
 [help.cmd.text]
@@ -101,3 +102,4 @@ export = "exporte les journaux"
 [help.cmd]
 suggest = "envoie une idée ou un problème au staff, anonymement si tu veux"
 help = "affiche cette liste"
+info = "vérifie le bot et ce qu’il manque sur ce serveur"

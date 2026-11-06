@@ -571,14 +571,14 @@ async def test_a_failing_report_does_not_stop_the_next_server(
     caplog.handler.addFilter(GuildContextFilter())
     await ready_server(simcord_env)
     await ready_server(simcord_env, OTHER)
-    read = server_check._languages
+    read = server_check.languages
 
     def languages(guild: discord.Guild) -> tuple[str, str]:
         if guild.id == GUILD:
             raise RuntimeError("kevin_secret_name")
         return read(guild)
 
-    monkeypatch.setattr(server_check, "_languages", languages)
+    monkeypatch.setattr(server_check, "languages", languages)
     await run(simcord_env, GUILD, OTHER)
     assert problems(caplog, GUILD) == [
         f"Server check problem: guild_id={GUILD} severity=warning code=check_failed "

@@ -15,7 +15,15 @@ from fablabot.cogs import user_management
 from fablabot.helpers import utils
 from fablabot.helpers.access import AccessRule, AnyRole, Caller, rule_of
 from fablabot.helpers.constants import ADMIN_ROLES, ErrorMessages, RoleNames
-from fablabot.helpers.help_page import DOMAINS, EVERYONE_DOMAIN, HELP_COMMAND, build_help, leaf_commands, line_key
+from fablabot.helpers.help_page import (
+    DOMAINS,
+    EVERYONE_DOMAIN,
+    HELP_COMMAND,
+    TOP_LEVEL_DOMAINS,
+    build_help,
+    leaf_commands,
+    line_key,
+)
 from fablabot.helpers.i18n import catalog
 
 if TYPE_CHECKING:
@@ -58,9 +66,9 @@ PROFILES = {
     "temp-admin": Profile((RoleNames.ADMIN_TEMP,), Permissions.none(), 11),
     "codir": Profile((RoleNames.CODIR,), Permissions.none(), 12),
     "bureau": Profile((RoleNames.BUREAU,), Permissions.none(), 17),
-    "digital-manager": Profile((RoleNames.DIGITAL_MANAGER,), Permissions.none(), 7),
-    "admin-no-permission": Profile((RoleNames.ADMIN,), Permissions.none(), 41),
-    "admin-bureau-administrator": Profile((RoleNames.BUREAU, RoleNames.ADMIN), Permissions.all(), 44),
+    "digital-manager": Profile((RoleNames.DIGITAL_MANAGER,), Permissions.none(), 8),
+    "admin-no-permission": Profile((RoleNames.ADMIN,), Permissions.none(), 42),
+    "admin-bureau-administrator": Profile((RoleNames.BUREAU, RoleNames.ADMIN), Permissions.all(), 45),
     "manage-messages-only": Profile((), Permissions(manage_messages=True), 1),
 }
 
@@ -224,7 +232,7 @@ async def test_every_command_has_a_rule_a_line_and_a_place(started_bot: Any) -> 
     """Every command of the real tree has a rule, an English line and a place in DOMAINS, and DOMAINS lists no other."""
     reference = catalog().texts("en").reference
     tree = {c.qualified_name: c for c in leaf_commands(started_bot.tree.walk_commands())}
-    placed = {name if domain == EVERYONE_DOMAIN else f"{domain} {name}" for domain, names in DOMAINS for name in names}
+    placed = {name if domain in TOP_LEVEL_DOMAINS else f"{domain} {name}" for domain, names in DOMAINS for name in names}
     lacking = {
         name: [
             what

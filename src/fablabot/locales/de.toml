@@ -37,6 +37,7 @@ msg = "Bot-Nachrichten"
 user = "Mitglieder und Rollen"
 welcome = "Begrüßung neuer Mitglieder"
 log = "Bot-Protokolle"
+status = "Bot-Status"
 everyone = "Für alle"
 
 [help.cmd.text]
@@ -100,3 +101,4 @@ export = "exportiert die Protokolle"
 [help.cmd]
 suggest = "schickt dem Staff eine Idee oder ein Problem, auf Wunsch anonym"
 help = "zeigt diese Liste"
+info = "prüft den Bot und was diesem Server fehlt"
