@@ -32,7 +32,7 @@ from fablabot.models.catalogue import TemplateFields, TrainingTemplate
 from fablabot.models.formation import FmMessageDraft, Formation
 from fablabot.services import catalogue, formations
 from fablabot.ui.catalogue import OPTIONS_PER_PAGE, click_check, cut, page_count, page_row, plain, show, template_line
-from fablabot.ui.draft import DraftButton, draft_message, stored_draft
+from fablabot.ui.draft import _NOT_CHANGED, _SESSION_CHANGED, DraftButton, draft_message, stored_draft
 
 if TYPE_CHECKING:
     import re
@@ -46,8 +46,6 @@ COMMAND: Final = "fm.ajouter"
 PICKS_PER_PAGE: Final = OPTIONS_PER_PAGE - 1
 """Templates per page of the picker; the last option of a menu is kept for the free session."""
 _NOT_ADDED: Final = "Rien n'a été ajouté."
-_NOT_CHANGED: Final = "Rien n'a été modifié."
-_SESSION_CHANGED: Final = "Cette session a changé depuis : rouvre le brouillon."
 _GONE: Final = "Ce modèle n'existe plus."
 _NAME_CHARS: Final = 100
 _DURATION_CHARS: Final = 50
