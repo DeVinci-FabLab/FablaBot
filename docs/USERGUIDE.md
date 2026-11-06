@@ -67,9 +67,12 @@ A session copies a template when it is added: the template fills in the form, an
 
 ### The draft
 
-`/fm brouillon` shows the week's draft in a private message: the intro, then the sessions sorted by start, with the trainer and the seats, and a last line with the role that will be notified and the length of the announcement. Four buttons act on it:
+`/fm brouillon` shows the week's draft in a private message: the intro, then the sessions sorted by start, with the trainer and the seats, and a last line with the role that will be notified and the length of the announcement. Six buttons act on it:
 
 - **Ajouter une session** asks which training to add, from the templates. See below.
+- **Modifier** and **Retirer** are greyed out while the draft has no session. Each asks which session in a menu of up to 25, sorted by start; every option shows the emoji, the name, the day and hour and the trainer, and page buttons go on past 25.
+  **Modifier** opens a form with the session's trainer, date, hour, seats and description filled in. Sending it changes those four and nothing else: the emoji, name, duration and excusable flag stay, and so does the template the session came from. `/fm edit` changes the rest.
+  **Retirer** asks first, naming the session, and takes it out only on **Retirer**; **Annuler** keeps it. At the click the session is found again by its start and emoji. If it was moved with `/fm edit`, removed, or given another emoji since the menu was shown, the form or the confirmation is refused with the reason and nothing changes.
 - **Intro / conclusion** opens a form for the intro, the closing, the link of the form where members propose a training (left empty, it keeps the usual one) and the role to notify, which is required. Saving it keeps the sessions and the header.
 - **Aperçu** shows the announcement exactly as it will be posted, in a private message that notifies nobody.
 - **Publier** asks in which channel to post, starting on the channel of the last announcement, then posts the draft like `/fm publish`. It is greyed out while the draft has no session. It refuses, and posts nothing, when there is no session, no role chosen, a session that has already started, or an announcement past 2 000 characters. It also refuses a draft that is already the published announcement, even once members have signed up on it, or a publication that is still posting: a second post would stop counting the sign-ups on the first. Once posted, the question shows where the announcement went and no longer offers Publier.

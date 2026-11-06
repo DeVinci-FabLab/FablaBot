@@ -212,3 +212,78 @@ def add_session(guild_id: int, session: Formation) -> tuple[Formation, int] | No
     sessions = sorted([*draft.fms, stored], key=lambda fm: fm.start_dt)
     formations.save_draft(guild_id, replace(draft, fms=sessions))
     return stored, len(sessions)
+
+
+def session_value(session: Formation) -> str:
+    """Write what a menu holds to name a session: its start as a Unix time, a colon and its emoji."""
+    return f"{int(session.start_dt.timestamp())}:{session.emoji}"
+
+
+def find_session(draft: FmMessageDraft, start_unix: int, emoji: str) -> int | None:
+    """Find a session of the draft by its start and its emoji, as a menu value or a custom ID names it.
+
+    Both must match, so a session whose start moved, or whose emoji now belongs to another, is not found. Of two
+    sessions with the same start and emoji, left by old forms, the first is taken.
+
+    Args:
+        draft (FmMessageDraft): The draft.
+        start_unix (int): The start, in seconds since the epoch.
+        emoji (str): The emoji.
+
+    Returns:
+        int | None: The position in the draft, or None when no session has both.
+    """
+    return next((n for n, fm in enumerate(draft.fms) if fm.emoji == emoji and int(fm.start_dt.timestamp()) == start_unix), None)
+
+
+def replace_session(  # noqa: PLR0913 - the four values the form changes, by name
+    guild_id: int, start_unix: int, emoji: str, *, trainer_mention: str, start_iso: str, seats: int, description: str
+) -> Formation | None:
+    """Change the trainer, start, seats and description of a session of the draft, the draft kept sorted by start.
+
+    The draft is read, changed and saved with no await in between. The emoji, name, duration and excusable stay.
+
+    Args:
+        guild_id (int): The server's ID.
+        start_unix (int): The start of the session to change, as the menu named it.
+        emoji (str): The emoji of the session to change.
+        trainer_mention (str): The new trainer's mention.
+        start_iso (str): The new start.
+        seats (int): The new seats.
+        description (str): The new description.
+
+    Returns:
+        Formation | None: The session as stored, or None when no session has that start and emoji any more.
+    """
+    draft = formations.get_draft(guild_id)
+    position = None if draft is None else find_session(draft, start_unix, emoji)
+    if draft is None or position is None:
+        return None
+    changed = replace(
+        draft.fms[position], trainer_mention=trainer_mention, start_iso=start_iso, seats=seats, description=description
+    )
+    sessions = sorted([*draft.fms[:position], changed, *draft.fms[position + 1 :]], key=lambda fm: fm.start_dt)
+    formations.save_draft(guild_id, replace(draft, fms=sessions))
+    return changed
+
+
+def remove_session(guild_id: int, start_unix: int, emoji: str) -> Formation | None:
+    """Take a session out of the draft, the rest kept as it is.
+
+    The draft is read, changed and saved with no await in between.
+
+    Args:
+        guild_id (int): The server's ID.
+        start_unix (int): The start of the session to remove, as the confirmation named it.
+        emoji (str): The emoji of the session to remove.
+
+    Returns:
+        Formation | None: The session removed, or None when no session has that start and emoji any more.
+    """
+    draft = formations.get_draft(guild_id)
+    position = None if draft is None else find_session(draft, start_unix, emoji)
+    if draft is None or position is None:
+        return None
+    removed = draft.fms[position]
+    formations.save_draft(guild_id, replace(draft, fms=[*draft.fms[:position], *draft.fms[position + 1 :]]))
+    return removed

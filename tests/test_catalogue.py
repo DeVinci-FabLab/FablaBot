@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime, time
 
 import pytest
@@ -11,11 +12,13 @@ from fablabot.helpers.formation.catalogue import (
     MAX_SEATS,
     MIN_SEATS,
     day_text,
+    find_session,
     pick_emoji,
     read_date,
     read_date_time,
     read_hour,
     read_seats,
+    session_value,
     starts_at,
     template_description,
     template_fields,
@@ -214,3 +217,26 @@ def test_only_the_first_session_of_a_training_gets_its_description() -> None:
     assert template_description(_draft(), fields) == "Apportez vos lunettes."
     assert template_description(_draft(_session("🧡", "Résine")), fields) == "Apportez vos lunettes."
     assert template_description(_draft(_session("🧡")), fields) == ""
+
+
+def test_a_session_is_found_by_its_start_and_emoji() -> None:
+    """A session is found by the start and emoji its menu value holds, and a duplicate emoji resolves to the first."""
+    first, other = _session("🧡"), replace(_session("💛"), start_iso="2026-11-10T19:00:00+01:00")
+    draft = _draft(first, other)
+
+    assert session_value(first) == f"{int(first.start_dt.timestamp())}:🧡"
+    assert find_session(draft, int(first.start_dt.timestamp()), "🧡") == 0
+    assert find_session(draft, int(other.start_dt.timestamp()), "💛") == 1
+    twin = replace(first, name="Résine")
+    assert find_session(_draft(first, twin), int(first.start_dt.timestamp()), "🧡") == 0
+
+
+def test_a_changed_or_removed_session_is_not_found() -> None:
+    """A start that moved, an emoji that changed or a session that left the draft finds nothing."""
+    session = _session("🧡")
+    start = int(session.start_dt.timestamp())
+    draft = _draft(session)
+
+    assert find_session(draft, start + 60, "🧡") is None
+    assert find_session(draft, start, "💛") is None
+    assert find_session(_draft(), start, "🧡") is None

@@ -14,7 +14,7 @@ import discord
 import pytest
 
 from fablabot.helpers.constants import PARIS_TZ, SESSION_EMOJIS, ErrorMessages, RoleNames
-from fablabot.helpers.formation import announcement_header, render_message
+from fablabot.helpers.formation import announcement_header, humanize_dt, render_message
 from fablabot.helpers.guild_access import GuildAccessPolicy
 from fablabot.helpers.utils import RIGHT_LOST_MESSAGE
 from fablabot.models import TemplateFields
@@ -841,8 +841,6 @@ async def test_fm_brouillon_shows_the_draft_sorted_by_start(lab: Lab) -> None:
         f"-# Triées par date · rôle notifié : <@&{lab.notified.id}> · "
         f"annonce : {len(render_message(draft))} / 2 000 caractères",
     ]
-    assert list(_buttons(result.response)) == ["➕ Ajouter une session", "💬 Intro / conclusion", "👁️ Aperçu", "📣 Publier"]  # noqa: RUF001 - the sign the copy asks for
-    assert _ids(result.response) == ["fmd:add", "fmd:text", "fmd:preview", "fmd:publish"]
     assert not any(b["disabled"] for b in _buttons(result.response).values())
 
 
@@ -1302,7 +1300,23 @@ async def test_who_may_use_the_brouillon(lab: Lab, who: str, may: bool) -> None:
         assert (result.response.content or "").startswith(ErrorMessages.ROLE_REQUIRED.split("{")[0])
 
 
-EVERY_DRAFT_ITEM_ID = ("fmd:add", "fmd:text", "fmd:preview", "fmd:publish", "fmd:show", "fmd:pub-ch", "fmd:pub-go:5")
+EVERY_DRAFT_ITEM_ID = (
+    "fmd:add",
+    "fmd:edit",
+    "fmd:remove",
+    "fmd:text",
+    "fmd:preview",
+    "fmd:publish",
+    "fmd:show",
+    "fmd:pub-ch",
+    "fmd:pub-go:5",
+    "fmd:ses:edit:0",
+    "fmd:ses:remove:0",
+    "fmd:snav:edit:0",
+    "fmd:snav:remove:1",
+    "fmd:rm-ok:1:🧡",
+    "fmd:rm-no",
+)
 """One custom ID of each button and menu of the brouillon."""
 
 
@@ -2539,3 +2553,305 @@ async def test_fm_ajouter_is_listed_for_the_formation_roles(lab: Lab, who: str, 
     text = await _help_text(getattr(lab, who), lab)
 
     assert ("/fm ajouter" in text) is listed
+
+
+NOT_CHANGED = "Cette session a changé depuis : rouvre le brouillon. Rien n'a été modifié."
+
+
+def _planned(emoji: str, name: str, start: datetime, *, trainer: Any, **changes: Any) -> Formation:
+    """A session of one hour starting at ``start``, given by `<@trainer>`."""
+    session = Formation(
+        emoji=emoji, name=name, trainer_mention=f"<@{trainer.id}>", start_iso=start.isoformat(), duration="1 h", seats=5
+    )
+    return replace(session, **changes)
+
+
+def _menu(message: Any) -> dict[str, Any]:
+    """The first menu of a message."""
+    return next(c for row in message.components for c in row["components"] if c["type"] == 3)
+
+
+async def _sessions_menu(lab: Lab, action: str, who: Any = None) -> Any:
+    """Open the brouillon as a member and click Modifier (``edit``) or Retirer (``remove``); return the menu message."""
+    who = who or lab.respo
+    listing = await lab.brouillon(who)
+    return await who.click(listing.response, custom_id=f"fmd:{action}")
+
+
+def _value(session: Formation) -> str:
+    """The value a session has in the menus: its start and its emoji."""
+    return f"{int(session.start_dt.timestamp())}:{session.emoji}"
+
+
+async def test_the_brouillon_shows_the_six_buttons_of_the_mockup(lab: Lab) -> None:
+    """The brouillon holds Ajouter, Modifier, Retirer, then Intro, Aperçu, Publier; three wait for a session."""
+    empty = await lab.brouillon(lab.respo)
+
+    rows = [[c["label"] for c in row["components"]] for row in empty.response.components]
+    assert rows == [
+        ["➕ Ajouter une session", "✏️ Modifier", "🗑️ Retirer"],  # noqa: RUF001 - the sign the copy asks for
+        ["💬 Intro / conclusion", "👁️ Aperçu", "📣 Publier"],
+    ]
+    assert _ids(empty.response) == ["fmd:add", "fmd:edit", "fmd:remove", "fmd:text", "fmd:preview", "fmd:publish"]
+    assert [label for label, b in _buttons(empty.response).items() if b["disabled"]] == [
+        "✏️ Modifier",
+        "🗑️ Retirer",
+        "📣 Publier",
+    ]
+    assert [b["style"] for b in _buttons(empty.response).values()] == [1, 2, 4, 2, 2, 3]
+
+    _stage(lab, _three(lab))
+    full = await lab.brouillon(lab.respo)
+
+    assert not any(b["disabled"] for b in _buttons(full.response).values())
+
+
+async def test_modifier_lists_the_sessions_by_date_with_day_time_and_trainer(lab: Lab) -> None:
+    """Modifier asks which session in a menu sorted by start, each option showing the emoji, name, day, hour and trainer."""
+    _stage(
+        lab,
+        [
+            _planned("🧡", "Soudure", _at(4), trainer=lab.plain),
+            _planned("💛", "Brodeuse", _at(2), trainer=lab.admin),
+            _planned("💚", "Résine", _at(3, time(9, 5)), trainer=lab.plain),
+        ],
+    )
+
+    asked = await _sessions_menu(lab, "edit")
+
+    assert asked.response.content == "**Quelle session modifier ?** 3 sessions, triées par date."
+    menu = _menu(asked.response)
+    assert menu["custom_id"] == "fmd:ses:edit:0"
+    assert menu["placeholder"] == "Sessions 1 à 3 sur 3…"
+    assert [(o["label"], o["description"]) for o in menu["options"]] == [
+        ("💛 Brodeuse", f"{humanize_dt(_at(2))} · admin"),
+        ("💚 Résine", f"{humanize_dt(_at(3, time(9, 5)))} · plain"),
+        ("🧡 Soudure", f"{humanize_dt(_at(4))} · plain"),
+    ]
+    assert [o["value"] for o in menu["options"]] == [
+        f"{int(_at(d, h).timestamp())}:{e}"
+        for d, h, e in ((2, time(18, 30), "💛"), (3, time(9, 5), "💚"), (4, time(18, 30), "🧡"))
+    ]
+    assert _ids(asked.response)[1:] == ["fmd:snav:edit:0:first", "fmd:snav:edit:0:label", "fmd:snav:edit:0:last"]
+    assert [b["disabled"] for b in _buttons(asked.response).values()] == [True, True, True]
+
+
+async def test_a_trainer_who_left_the_server_reads_formateur_inconnu(lab: Lab) -> None:
+    """A session whose trainer is no longer a member shows formateur inconnu in the menu."""
+    _stage(lab, [_session("🧡", "Soudure", days=2)])
+
+    asked = await _sessions_menu(lab, "remove")
+
+    assert _menu(asked.response)["options"][0]["description"].endswith(" · formateur inconnu")
+    assert asked.response.content == "**Quelle session retirer ?** 1 session, triées par date."
+
+
+async def test_the_session_menu_pages_past_twenty_five(lab: Lab) -> None:
+    """With 30 sessions the menu lists 25, then the 5 others on the next page, and the placeholder counts them."""
+    sessions = [
+        _planned(SESSION_EMOJIS[n % 20], f"Formation {n:02}", _at(2) + timedelta(hours=n), trainer=lab.plain) for n in range(30)
+    ]
+    _stage(lab, sessions)
+
+    first = await _sessions_menu(lab, "remove")
+
+    options = _menu(first.response)["options"]
+    assert [o["label"].split(" ", 1)[1] for o in options] == [f"Formation {n:02}" for n in range(25)]
+    assert _menu(first.response)["placeholder"] == "Sessions 1 à 25 sur 30…"
+    assert first.response.content == "**Quelle session retirer ?** 30 sessions, triées par date."
+    buttons = _buttons(first.response)
+    assert buttons["Suivant ▶"]["custom_id"] == "fmd:snav:remove:1"
+    assert buttons["◀ Précédent"]["disabled"]
+
+    second = await lab.respo.click(first.response, custom_id="fmd:snav:remove:1")
+
+    options = _menu(second.response)["options"]
+    assert [o["label"].split(" ", 1)[1] for o in options] == [f"Formation {n:02}" for n in range(25, 30)]
+    assert _menu(second.response)["placeholder"] == "Sessions 26 à 30 sur 30…"
+    assert _menu(second.response)["custom_id"] == "fmd:ses:remove:1"
+    assert _buttons(second.response)["Suivant ▶"]["disabled"]
+
+    back = await lab.respo.click(second.response, custom_id="fmd:snav:remove:0")
+
+    assert len(_menu(back.response)["options"]) == 25
+
+
+async def test_modifier_opens_the_form_of_that_session_and_changes_only_it(lab: Lab) -> None:
+    """The form opens on the session's values; sending it changes the trainer, start, seats and description, never the rest."""
+    template = _soudure()
+    target = _planned("🧡", "Soudure", _at(3), trainer=lab.plain, description="Gants fournis.", excusable=False)
+    other = _planned("💛", "Brodeuse", _at(5), trainer=lab.plain, duration="2 h", seats=3)
+    staged = _stage(lab, [target, other])
+
+    asked = await _sessions_menu(lab, "edit")
+    shown = await lab.respo.select(asked.response, [_value(target)], custom_id="fmd:ses:edit:0")
+
+    assert shown.modal["title"] == "Modifier : Soudure"
+    (trainer,) = (i for i in shown.modal["components"] if i["type"] == 18 and i["label"] == "Formateur")
+    assert trainer["component"]["default_values"] == [{"id": lab.plain.id, "type": "user"}]
+    assert _values(shown) == {"Date": _jjmm(3), "Heure": "18:30", "Places": "5", "Description": "Gants fournis."}
+
+    done = await lab.respo.submit_modal(
+        shown, _filled(lab, shown, Formateur=[lab.admin], Date=_jjmm(6), Heure="09:15", Places="7", Description="Lunettes.")
+    )
+
+    changed = replace(
+        target,
+        trainer_mention=f"<@{lab.admin.id}>",
+        start_iso=_at(6, time(9, 15)).isoformat(),
+        seats=7,
+        description="Lunettes.",
+    )
+    stored = formations.get_draft(GUILD_ID)
+    assert stored == replace(staged, fms=[other, changed])
+    assert (changed.emoji, changed.name, changed.duration, changed.excusable) == ("🧡", "Soudure", "1 h", False)
+    assert catalogue.get_template(GUILD_ID, template.id) == template
+    assert done.response.embeds[0].title == "📝 Brouillon de la semaine · 2 sessions"
+    assert done.response.embeds[0].description is not None
+    assert _ids(done.response)[:3] == ["fmd:add", "fmd:edit", "fmd:remove"]
+
+
+@pytest.mark.parametrize(
+    ("given", "refusal"),
+    [
+        ({"Date": "32/13"}, "Date illisible : écris JJ/MM, par exemple 12/10."),
+        ({"Heure": "25:99"}, "Heure illisible : écris HH:MM, par exemple 18:30."),
+        ({"Places": "0"}, "Places : un nombre entier de 1 à 500."),
+        ({"Date": "01/01/2020"}, ErrorMessages.PAST_DATETIME),
+    ],
+    ids=["date", "hour", "seats", "past"],
+)
+async def test_a_modifier_form_refuses_and_changes_nothing(lab: Lab, given: dict[str, Any], refusal: str) -> None:
+    """A bad value in the Modifier form is refused with the reason and the word that nothing was changed."""
+    target = _planned("🧡", "Soudure", _at(3), trainer=lab.plain)
+    _stage(lab, [target])
+    before = formations.get_draft(GUILD_ID)
+    asked = await _sessions_menu(lab, "edit")
+    shown = await lab.respo.select(asked.response, [_value(target)], custom_id="fmd:ses:edit:0")
+
+    refused = await lab.respo.submit_modal(shown, _filled(lab, shown, **given))
+
+    assert refused.ephemeral
+    assert refused.response.content == f"{refusal} Rien n'a été modifié."
+    assert formations.get_draft(GUILD_ID) == before
+
+
+async def test_retirer_asks_first_then_removes_the_session(lab: Lab) -> None:
+    """Choosing a session in Retirer asks for confirmation and removes nothing; Retirer then removes that one session."""
+    target = _planned("🧡", "Soudure", _at(3), trainer=lab.plain)
+    other = _planned("💛", "Brodeuse", _at(5), trainer=lab.plain)
+    staged = _stage(lab, [target, other])
+    asked = await _sessions_menu(lab, "remove")
+
+    question = await lab.respo.select(asked.response, [_value(target)], custom_id="fmd:ses:remove:0")
+
+    assert question.response.content == (
+        f"Retirer **🧡 Soudure** (<t:{int(_at(3).timestamp())}:F>, <@{lab.plain.id}>) du brouillon ?"
+    )
+    assert list(_buttons(question.response)) == ["🗑️ Retirer", "Annuler"]
+    assert [b["style"] for b in _buttons(question.response).values()] == [4, 2]
+    assert formations.get_draft(GUILD_ID) == staged
+
+    done = await lab.respo.click(question.response, custom_id=f"fmd:rm-ok:{int(_at(3).timestamp())}:🧡")
+
+    assert done.response.content == "Session **🧡 Soudure** retirée."
+    assert done.response.embeds[0].title == "📝 Brouillon de la semaine · 1 session"
+    assert formations.get_draft(GUILD_ID) == replace(staged, fms=[other])
+
+
+async def test_cancelling_keeps_the_session(lab: Lab) -> None:
+    """Annuler on the question shows the brouillon again with the word that nothing was removed, and the draft is as it was."""
+    target = _planned("🧡", "Soudure", _at(3), trainer=lab.plain)
+    staged = _stage(lab, [target])
+    asked = await _sessions_menu(lab, "remove")
+    question = await lab.respo.select(asked.response, [_value(target)], custom_id="fmd:ses:remove:0")
+
+    kept = await lab.respo.click(question.response, custom_id="fmd:rm-no")
+
+    assert kept.response.content == "Rien n'a été retiré."
+    assert kept.response.embeds[0].title == "📝 Brouillon de la semaine · 1 session"
+    assert formations.get_draft(GUILD_ID) == staged
+
+
+async def _elsewhere(lab: Lab, how: str) -> None:
+    """Change the 🧡 session's start with /fm edit, or remove it with /fm remove, as another member would."""
+    if how == "edited":
+        picker = await lab.admin.slash(lab.commands, "fm edit")
+        editor = await lab.admin.click(picker.response.message, label="🧡 Soudure")
+        shown = await lab.admin.click(editor.response.message, label="Date & Heure")
+        moved = _at(5).strftime("%d/%m/%Y %H:%M")
+        await lab.admin.submit_modal(shown, _form(shown, {"Date et heure (DD/MM/YYYY HH:MM)": moved}))
+        await lab.admin.click(editor.response.message, label="Valider les modifications")
+    else:
+        picker = await lab.admin.slash(lab.commands, "fm remove")
+        await lab.admin.click(picker.response.message, label="🧡 Soudure")
+
+
+@pytest.mark.parametrize("surface", ["modifier", "retirer"])
+@pytest.mark.parametrize("how", ["edited", "removed"])
+async def test_a_session_changed_since_the_menu_is_refused_and_nothing_is_stored(lab: Lab, how: str, surface: str) -> None:
+    """A session moved by /fm edit or removed by /fm remove after the menu is refused at the form or the confirmation."""
+    target = _planned("🧡", "Soudure", _at(3), trainer=lab.plain)
+    _stage(lab, [target, _planned("💛", "Brodeuse", _at(6), trainer=lab.plain)])
+    await lab.show()
+    action = "edit" if surface == "modifier" else "remove"
+    asked = await _sessions_menu(lab, action)
+    chosen = await lab.respo.select(asked.response, [_value(target)], custom_id=f"fmd:ses:{action}:0")
+    await _elsewhere(lab, how)
+    after = formations.get_draft(GUILD_ID)
+    assert after is not None
+    assert [fm.emoji for fm in after.fms] == (["🧡", "💛"] if how == "edited" else ["💛"])
+
+    if surface == "modifier":
+        refused = await lab.respo.submit_modal(chosen, _filled(lab, chosen, Places="9"))
+    else:
+        refused = await lab.respo.click(chosen.response, custom_id=f"fmd:rm-ok:{int(_at(3).timestamp())}:🧡")
+
+    assert refused.ephemeral
+    assert refused.response.content == NOT_CHANGED
+    assert formations.get_draft(GUILD_ID) == after
+
+
+async def test_the_session_menu_works_after_a_restart(started_bot: Any) -> None:
+    """A second bot on the same database answers the clicks on a session menu the first bot sent, from the database alone."""
+    target = Formation(
+        emoji="🧡", name="Soudure", trainer_mention="<@4242>", start_iso=_at(3).isoformat(), duration="1 h", seats=5
+    )
+    other = replace(target, emoji="💛", name="Brodeuse", start_iso=_at(5).isoformat())
+    formations.save_draft(GUILD_ID, FmMessageDraft(header="h", role_id=0, intro="i", fms=[target, other], end="e"))
+    store = started_bot._connection._view_store
+
+    async def click(custom_id: str, *, chosen: str | None = None) -> MagicMock:
+        interaction = make_interaction(user_id=7, guild_id=GUILD_ID)
+        interaction.client = started_bot
+        interaction.user.roles = [make_role(RoleNames.CODIR)]
+        interaction.message = MagicMock()
+        interaction.guild.get_member.return_value = None
+        interaction.guild.get_role.return_value = None
+        pattern, item_class = next((p, c) for p, c in store._dynamic_items.items() if p.fullmatch(custom_id))
+        item = await item_class.from_custom_id(interaction, MagicMock(), pattern.fullmatch(custom_id))
+        if chosen is not None:
+            item.item._values = [chosen]
+        assert await item.interaction_check(interaction)
+        await item.callback(interaction)
+        return interaction
+
+    assert set(DRAFT_ITEMS) <= set(store._dynamic_items.values())
+    asked = await click("fmd:remove")
+    paged = await click("fmd:snav:remove:0")
+    question = await click("fmd:ses:remove:0", chosen=_value(target))
+    kept = await click("fmd:rm-no")
+    modifier = await click("fmd:ses:edit:0", chosen=_value(other))
+    done = await click(f"fmd:rm-ok:{int(_at(3).timestamp())}:🧡")
+
+    assert (
+        asked.response.edit_message.await_args.kwargs["content"] == "**Quelle session retirer ?** 2 sessions, triées par date."
+    )
+    assert paged.response.edit_message.await_args.kwargs["content"].startswith("**Quelle session retirer ?**")
+    assert question.response.edit_message.await_args.kwargs["content"].startswith("Retirer **🧡 Soudure**")
+    assert kept.response.edit_message.await_args.kwargs["content"] == "Rien n'a été retiré."
+    assert modifier.response.send_modal.await_args.args[0].title == "Modifier : Brodeuse"
+    assert done.response.edit_message.await_args.kwargs["content"] == "Session **🧡 Soudure** retirée."
+    stored = formations.get_draft(GUILD_ID)
+    assert stored is not None
+    assert [fm.emoji for fm in stored.fms] == ["💛"]

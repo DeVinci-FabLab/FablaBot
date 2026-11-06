@@ -17,7 +17,7 @@ from fablabot.helpers.help_page import leaf_commands
 from fablabot.models import AlertAction, Appel, Registrant, TemplateFields, TrainingTemplate
 from fablabot.models.formation import FmMessageDraft, Formation
 from fablabot.ui.catalogue import TemplateForm, deletion_message
-from fablabot.ui.draft import DraftTextForm, draft_message, publish_message
+from fablabot.ui.draft import DraftTextForm, draft_message, publish_message, removal_message, sessions_message
 from fablabot.ui.formation import StartFmModal
 from fablabot.ui.message import SuggestionView
 from fablabot.ui.session import FreeSessionForm, SessionForm, added_message, picker_message
@@ -273,10 +273,57 @@ def _sample_guild() -> MagicMock:
 
 
 async def draft() -> Screen:
-    """``/fm brouillon`` on a draft of five sessions sorted by start, with the buttons that exist so far."""
+    """``/fm brouillon`` on a draft of five sessions sorted by start, with its six buttons."""
     capture = Capture()
     content, embed, view = draft_message(_sample_guild(), _sample_draft())
     await capture.interaction().response.send_message(content or None, embed=embed, view=view, ephemeral=True)
+    return Screen(capture.sent, dict(_DRAFT_NAMES))
+
+
+_LIST_TRAINERS = (2222, 2222, 2222, 3333, 4444, 3333, 4444)
+
+
+def _long_draft() -> FmMessageDraft:
+    """The draft of the validated list mockup: 14 sessions over four days, the trainers of the sample."""
+    starts = [
+        "2026-10-12T10:00:00+02:00",
+        "2026-10-12T11:00:00+02:00",
+        "2026-10-12T14:00:00+02:00",
+        "2026-10-13T11:45:00+02:00",
+        "2026-10-13T12:30:00+02:00",
+        "2026-10-14T11:45:00+02:00",
+        "2026-10-15T13:45:00+02:00",
+    ]
+    names = ["SRG + Imp 3D"] * 5 + ["Formation GitHub", "Impression résine"]
+    emojis = ["🩷", "❤️‍🔥", "🧡", "💛", "💚", "😼", "☣️"]
+    fms = [
+        Formation(emoji=emoji, name=name, trainer_mention=f"<@{trainer}>", start_iso=start, duration="45 min", seats=5)
+        for emoji, name, trainer, start in zip(emojis, names, _LIST_TRAINERS, starts, strict=True)
+    ]
+    later = [replace(fm, start_iso=(fm.start_dt + timedelta(days=7)).isoformat()) for fm in fms]
+    return FmMessageDraft(header="# [FORMATIONS]", role_id=ROLE_FORMATIONS, intro=_DRAFT_INTRO, fms=[*fms, *later], end="")
+
+
+def _named_guild() -> MagicMock:
+    """A server whose members have the pseudos of the sample."""
+    guild = _sample_guild()
+    guild.get_member.side_effect = lambda member_id: MagicMock(display_name=_DRAFT_NAMES[member_id])
+    return guild
+
+
+async def session_list() -> Screen:
+    """The question that asks which session to change, the 14 sessions of a long draft on its one page."""
+    capture = Capture()
+    content, view = sessions_message(_named_guild(), _long_draft(), action="remove", page=0)
+    await capture.interaction().response.send_message(content, view=view, ephemeral=True)
+    return Screen(capture.sent, dict(_DRAFT_NAMES))
+
+
+async def session_remove() -> Screen:
+    """The question that asks for the confirmation of a removal."""
+    capture = Capture()
+    content, view = removal_message(_sample_draft().fms[3])
+    await capture.interaction().response.send_message(content, view=view, ephemeral=True)
     return Screen(capture.sent, dict(_DRAFT_NAMES))
 
 
@@ -512,6 +559,8 @@ SCREENS: dict[str, Callable[[], Coroutine[Any, Any, Screen]]] = {
     "session-form": session_form,
     "session-free-form": session_free_form,
     "session-added": session_added,
+    "session-list": session_list,
+    "session-remove": session_remove,
     "suggest": suggest,
     "suggest-modal": suggest_modal,
     "fm-start-modal": fm_start_modal,

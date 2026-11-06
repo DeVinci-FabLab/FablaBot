@@ -6,15 +6,17 @@ from dataclasses import replace
 import logging
 from typing import TYPE_CHECKING, Any, Final, Literal, cast, override
 
-from discord import AllowedMentions, ButtonStyle, ChannelType, Embed, Interaction, TextChannel, TextStyle, ui
+from discord import AllowedMentions, ButtonStyle, ChannelType, Embed, Interaction, SelectOption, TextChannel, TextStyle, ui
 
 from fablabot.helpers.constants import ANNOUNCEMENT_MAX_CHARS, BRAND_COLOUR, FORMATION_ROLES
-from fablabot.helpers.formation import announcement_header, is_past, render_message
+from fablabot.helpers.formation import announcement_header, humanize_dt, is_past, render_message
+from fablabot.helpers.formation.attendance import trainer_id
+from fablabot.helpers.formation.catalogue import find_session, remove_session, session_value
 from fablabot.helpers.formation.rendering import discord_timestamp
 from fablabot.helpers.utils import RefusalKind, counted, log_refusal
 from fablabot.models.formation import FmMessageDraft
 from fablabot.services import formations
-from fablabot.ui.catalogue import click_check, plain, show
+from fablabot.ui.catalogue import OPTIONS_PER_PAGE, click_check, cut, page_count, page_row, plain, show
 
 if TYPE_CHECKING:
     import re
@@ -30,16 +32,25 @@ COMMAND: Final = "fm.brouillon"
 _NBSP: Final = "\N{NO-BREAK SPACE}"
 _NOT_PUBLISHED: Final = "Rien n'a été publié."
 _GONE_CHANNEL: Final = "Ce salon n'existe plus : choisis-en un autre."
+_NOT_CHANGED: Final = "Rien n'a été modifié."
+_SESSION_CHANGED: Final = "Cette session a changé depuis : rouvre le brouillon."
+_OPTION_CHARS: Final = 100
+_PLACEHOLDER_CHARS: Final = 150
+_UNKNOWN_TRAINER: Final = "formateur inconnu"
+_PICK_VERBS: Final = {"edit": "modifier", "remove": "retirer"}
 _DEFAULT_URL: Final = FmMessageDraft(header="", role_id=0, intro="", fms=[], end="").request_forms_url
 _BUTTONS: Final = {
     "add": ("➕ Ajouter une session", ButtonStyle.primary),  # noqa: RUF001 - the sign the copy asks for
+    "edit": ("✏️ Modifier", ButtonStyle.secondary),
+    "remove": ("🗑️ Retirer", ButtonStyle.danger),
     "text": ("💬 Intro / conclusion", ButtonStyle.secondary),
     "preview": ("👁️ Aperçu", ButtonStyle.secondary),
     "publish": ("📣 Publier", ButtonStyle.success),
     "show": ("📝 Voir le brouillon", ButtonStyle.secondary),
 }
 
-Action = Literal["add", "text", "preview", "publish", "show"]
+Action = Literal["add", "edit", "remove", "text", "preview", "publish", "show"]
+PickAction = Literal["edit", "remove"]
 
 
 def _length(draft: FmMessageDraft) -> str:
@@ -47,7 +58,7 @@ def _length(draft: FmMessageDraft) -> str:
     return f"{len(render_message(draft)):,}".replace(",", _NBSP)
 
 
-def _stored(guild_id: int) -> FmMessageDraft:
+def stored_draft(guild_id: int) -> FmMessageDraft:
     """Read the server's draft, or an empty one when none is stored."""
     return formations.get_draft(guild_id) or FmMessageDraft(header="", role_id=0, intro="", fms=[], end="")
 
@@ -138,10 +149,77 @@ def draft_message(guild: Guild, draft: FmMessageDraft, *, note: str = "") -> tup
     )
     view = ui.View()
     view.add_item(DraftButton("add", row=0))
+    view.add_item(DraftButton("edit", disabled=not sessions, row=0))
+    view.add_item(DraftButton("remove", disabled=not sessions, row=0))
     view.add_item(DraftButton("text", row=1))
     view.add_item(DraftButton("preview", row=1))
     view.add_item(DraftButton("publish", disabled=not sessions, row=1))
     return note, embed, view
+
+
+def sessions_message(guild: Guild, draft: FmMessageDraft, *, action: PickAction, page: int) -> tuple[str, ui.View]:
+    """Build the menu that asks which session to change or remove, one page of the sessions sorted by start.
+
+    Args:
+        guild (Guild): The server, which gives the trainers' names.
+        draft (FmMessageDraft): The server's draft, which holds at least one session.
+        action (PickAction): ``edit`` or ``remove``.
+        page (int): The page of options, from 0; one past the end shows the last.
+
+    Returns:
+        tuple[str, ui.View]: The question and the menu with its page buttons.
+    """
+    sessions = sorted(draft.fms, key=lambda fm: fm.start_dt)
+    pages = page_count(len(sessions), OPTIONS_PER_PAGE)
+    page = min(max(page, 0), pages - 1)
+    shown = sessions[page * OPTIONS_PER_PAGE : (page + 1) * OPTIONS_PER_PAGE]
+    label = f"Sessions {page * OPTIONS_PER_PAGE + 1} à {page * OPTIONS_PER_PAGE + len(shown)} sur {len(sessions)}"
+    options = [
+        SelectOption(
+            label=cut(f"{fm.emoji} {fm.name}", _OPTION_CHARS),
+            description=cut(f"{humanize_dt(fm.start_dt)} · {_trainer_name(guild, fm)}", _OPTION_CHARS),
+            value=session_value(fm),
+        )
+        for fm in shown
+    ]
+    view = ui.View()
+    view.add_item(SessionList(action, page, placeholder=cut(f"{label}…", _PLACEHOLDER_CHARS), options=options, row=0))
+    page_row(
+        view,
+        previous_id=f"fmd:snav:{action}:{max(page - 1, 0)}",
+        next_id=f"fmd:snav:{action}:{min(page + 1, pages - 1)}",
+        label=label,
+        page=page,
+        pages=pages,
+        row=1,
+    )
+    return f"**Quelle session {_PICK_VERBS[action]} ?** {counted(len(sessions), 'session', 'sessions')}, triées par date.", view
+
+
+def _trainer_name(guild: Guild, session: Formation) -> str:
+    """Give the trainer's display name on the server, or ``formateur inconnu`` when the session names nobody the server has."""
+    found = trainer_id(session.trainer_mention)
+    member = guild.get_member(found) if found else None
+    return member.display_name if member else _UNKNOWN_TRAINER
+
+
+def removal_message(session: Formation) -> tuple[str, ui.View]:
+    """Build the question that asks for the confirmation of a removal.
+
+    Args:
+        session (Formation): The session to remove.
+
+    Returns:
+        tuple[str, ui.View]: The question and its two buttons.
+    """
+    view = ui.View()
+    view.add_item(SessionRemove(int(session.start_dt.timestamp()), session.emoji))
+    view.add_item(SessionKeep())
+    content = (
+        f"Retirer **{session.emoji} {plain(session.name)}** "
+        f"({discord_timestamp(session.start_dt)}, {session.trainer_mention}) du brouillon ?"
+    )
+    return content, view
 
 
 def publish_message(channel: TextChannel | None) -> tuple[str, ui.View]:
@@ -211,7 +289,7 @@ class DraftTextForm(ui.Modal):
         assert interaction.guild is not None
         guild = interaction.guild
         # Read, changed and saved with no await in between, so a session added meanwhile is not lost.
-        current = _stored(guild.id)
+        current = stored_draft(guild.id)
         draft = replace(
             current,
             header=current.header or announcement_header(guild),
@@ -226,11 +304,11 @@ class DraftTextForm(ui.Modal):
         await show(interaction, content, embed, view)
 
 
-class DraftButton(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:(?P<action>add|text|preview|publish|show)"):
+class DraftButton(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:(?P<action>add|edit|remove|text|preview|publish|show)"):
     """A button of the brouillon; its custom ID names the action and the draft is read at each click.
 
     Attributes:
-        action (Action): What the button does: ``add``, ``text``, ``preview``, ``publish`` or ``show``.
+        action (Action): What the button does: ``add``, ``edit``, ``remove``, ``text``, ``preview``, ``publish`` or ``show``.
     """
 
     interaction_check = click_check(COMMAND, FORMATION_ROLES)
@@ -247,7 +325,7 @@ class DraftButton(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:(?P<action>
         """Build the button.
 
         Args:
-            action (Action): ``add``, ``text``, ``preview``, ``publish`` or ``show``.
+            action (Action): ``add``, ``edit``, ``remove``, ``text``, ``preview``, ``publish`` or ``show``.
             label (str | None): The text to show instead of the action's own, as "Autre formation" does for ``add``.
             style (ButtonStyle | None): The style to show instead of the action's own.
             disabled (bool): Whether the button takes no click, as Publier does with no session.
@@ -266,15 +344,18 @@ class DraftButton(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:(?P<action>
 
     @override
     async def callback(self, interaction: Interaction[Any]) -> None:
-        """Ask which training to add, open the text form, show the preview, ask where to publish, or show the brouillon."""
+        """Ask which training to add or which session to change or remove, open the text form, preview, publish, or show."""
         assert interaction.guild is not None
         guild = interaction.guild
-        draft = _stored(guild.id)
+        draft = stored_draft(guild.id)
         if self.action == "add":
             # Imported here: the session screens return to the brouillon through this very item.
             from fablabot.ui.session import picker_message
 
             content, view = picker_message(guild.id, 0)
+            await show(interaction, content, None, view)
+        elif self.action in ("edit", "remove") and draft.fms:
+            content, view = sessions_message(guild, draft, action=self.action, page=0)
             await show(interaction, content, None, view)
         elif self.action == "text":
             await interaction.response.send_modal(DraftTextForm(guild, draft))
@@ -386,7 +467,7 @@ class PublishGo(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:pub-go:(?P<ch
         """Publish the draft in the chosen channel as `/fm publish` does, unless it can no longer be published."""
         assert interaction.guild is not None
         guild = interaction.guild
-        draft = _live(guild, _stored(guild.id))
+        draft = _live(guild, stored_draft(guild.id))
         if (refusal := publish_refusal(draft) or _published_refusal(guild.id, draft)) is not None:
             await _refuse(interaction, refusal, RefusalKind.DRAFT_NOT_READY)
             return
@@ -402,4 +483,173 @@ class PublishGo(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:pub-go:(?P<ch
         await cog.publish_draft(interaction, channel)
 
 
-DRAFT_ITEMS: Final = (DraftButton, PublishChannel, PublishGo)
+class SessionList(ui.DynamicItem[ui.Select[ui.View]], template=r"fmd:ses:(?P<action>edit|remove):(?P<page>[0-9]+)"):
+    """The menu that picks the session to change or remove; each option's value holds the session's start and emoji.
+
+    Attributes:
+        action (PickAction): ``edit`` or ``remove``.
+        page (int): The page of options it lists, from 0.
+    """
+
+    interaction_check = click_check(COMMAND, FORMATION_ROLES)
+
+    def __init__(
+        self,
+        action: PickAction,
+        page: int,
+        *,
+        placeholder: str | None = None,
+        options: list[SelectOption] | None = None,
+        row: int | None = None,
+    ) -> None:
+        """Build the menu.
+
+        Args:
+            action (PickAction): ``edit`` or ``remove``.
+            page (int): The page of options it lists, from 0.
+            placeholder (str | None): The text shown while nothing is chosen.
+            options (list[SelectOption] | None): The sessions it lists.
+            row (int | None): The row of the message.
+        """
+        super().__init__(
+            ui.Select(custom_id=f"fmd:ses:{action}:{page}", placeholder=placeholder, options=options or []), row=row
+        )
+        self.action: PickAction = action
+        self.page = page
+
+    @override
+    @classmethod
+    async def from_custom_id(cls, interaction: Interaction[Any], item: ui.Item[Any], match: re.Match[str], /) -> SessionList:
+        """Rebuild the menu from its custom ID."""
+        return cls(cast("PickAction", match["action"]), int(match["page"]))
+
+    @override
+    async def callback(self, interaction: Interaction[Any]) -> None:
+        """Open the form of the chosen session, or ask for the confirmation of its removal; refuse a session that is gone."""
+        assert interaction.guild is not None
+        draft = stored_draft(interaction.guild.id)
+        start, _, emoji = self.item.values[0].partition(":")
+        position = find_session(draft, int(start), emoji) if start.isdecimal() else None
+        if position is None:
+            await _refuse(interaction, f"{_SESSION_CHANGED} {_NOT_CHANGED}", RefusalKind.SESSION_CHANGED)
+        elif self.action == "edit":
+            # Imported here: the session screens return to the brouillon through this module.
+            from fablabot.ui.session import open_edit_form
+
+            await open_edit_form(interaction, draft.fms[position])
+        else:
+            content, view = removal_message(draft.fms[position])
+            await show(interaction, content, None, view)
+
+
+class SessionListPage(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:snav:(?P<action>edit|remove):(?P<page>[0-9]+)"):
+    """A page button of the menu that picks a session.
+
+    Attributes:
+        action (PickAction): ``edit`` or ``remove``.
+        page (int): The page of options it shows, from 0.
+    """
+
+    interaction_check = click_check(COMMAND, FORMATION_ROLES)
+
+    def __init__(self, action: PickAction, page: int) -> None:
+        """Build the button.
+
+        Args:
+            action (PickAction): ``edit`` or ``remove``.
+            page (int): The page of options it shows, from 0.
+        """
+        super().__init__(ui.Button(label="Page", custom_id=f"fmd:snav:{action}:{page}"))
+        self.action: PickAction = action
+        self.page = page
+
+    @override
+    @classmethod
+    async def from_custom_id(
+        cls, interaction: Interaction[Any], item: ui.Item[Any], match: re.Match[str], /
+    ) -> SessionListPage:
+        """Rebuild the button from its custom ID."""
+        return cls(cast("PickAction", match["action"]), int(match["page"]))
+
+    @override
+    async def callback(self, interaction: Interaction[Any]) -> None:
+        """Show that page of options, or the brouillon when the draft has no session left."""
+        assert interaction.guild is not None
+        guild = interaction.guild
+        draft = stored_draft(guild.id)
+        if not draft.fms:
+            content, embed, view = draft_message(guild, draft)
+            await show(interaction, content, embed, view)
+            return
+        content, view = sessions_message(guild, draft, action=self.action, page=self.page)
+        await show(interaction, content, None, view)
+
+
+class SessionRemove(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:rm-ok:(?P<start>[0-9]+):(?P<emoji>.+)"):
+    """The button that confirms the removal of a session, named by its start and emoji.
+
+    Attributes:
+        start_unix (int): The start of the session to remove, in seconds since the epoch.
+        emoji (str): The emoji of the session to remove.
+    """
+
+    interaction_check = click_check(COMMAND, FORMATION_ROLES)
+
+    def __init__(self, start_unix: int, emoji: str) -> None:
+        """Build the button.
+
+        Args:
+            start_unix (int): The start of the session to remove.
+            emoji (str): The emoji of the session to remove.
+        """
+        label, style = _BUTTONS["remove"]
+        super().__init__(ui.Button(label=label, style=style, custom_id=f"fmd:rm-ok:{start_unix}:{emoji}"))
+        self.start_unix = start_unix
+        self.emoji = emoji
+
+    @override
+    @classmethod
+    async def from_custom_id(cls, interaction: Interaction[Any], item: ui.Item[Any], match: re.Match[str], /) -> SessionRemove:
+        """Rebuild the button from its custom ID."""
+        return cls(int(match["start"]), match["emoji"])
+
+    @override
+    async def callback(self, interaction: Interaction[Any]) -> None:
+        """Remove the session if the draft still holds it as it was named, and show the brouillon; else tell why it was kept."""
+        assert interaction.guild is not None
+        guild = interaction.guild
+        # Read, changed and saved with no await in between: the session is found by its start and emoji or refused.
+        removed = remove_session(guild.id, self.start_unix, self.emoji)
+        if removed is None:
+            await _refuse(interaction, f"{_SESSION_CHANGED} {_NOT_CHANGED}", RefusalKind.SESSION_CHANGED)
+            return
+        draft = stored_draft(guild.id)
+        logger.info(f"[{COMMAND}] remove guild_id={guild.id} user_id={interaction.user.id} sessions={len(draft.fms)}")
+        content, embed, view = draft_message(guild, draft, note=f"Session **{removed.emoji} {plain(removed.name)}** retirée.")
+        await show(interaction, content, embed, view)
+
+
+class SessionKeep(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:rm-no"):
+    """The button that gives up a removal."""
+
+    interaction_check = click_check(COMMAND, FORMATION_ROLES)
+
+    def __init__(self) -> None:
+        """Build the button."""
+        super().__init__(ui.Button(label="Annuler", style=ButtonStyle.secondary, custom_id="fmd:rm-no"))
+
+    @override
+    @classmethod
+    async def from_custom_id(cls, interaction: Interaction[Any], item: ui.Item[Any], match: re.Match[str], /) -> SessionKeep:
+        """Rebuild the button from its custom ID."""
+        return cls()
+
+    @override
+    async def callback(self, interaction: Interaction[Any]) -> None:
+        """Show the brouillon again, with the word that nothing was removed."""
+        assert interaction.guild is not None
+        content, embed, view = draft_message(interaction.guild, stored_draft(interaction.guild.id), note="Rien n'a été retiré.")
+        await show(interaction, content, embed, view)
+
+
+DRAFT_ITEMS: Final = (DraftButton, PublishChannel, PublishGo, SessionList, SessionListPage, SessionRemove, SessionKeep)

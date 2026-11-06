@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 import hashlib
 import logging
 from typing import TYPE_CHECKING, Any, Final, override
@@ -20,23 +20,24 @@ from fablabot.helpers.formation.catalogue import (
     read_date_time,
     read_hour,
     read_seats,
+    replace_session,
     starts_at,
     template_description,
     template_fields,
 )
 from fablabot.helpers.formation.rendering import discord_timestamp
 from fablabot.helpers.utils import RefusalKind, counted, log_refusal
+from fablabot.models.catalogue import TemplateFields, TrainingTemplate
 from fablabot.models.formation import FmMessageDraft, Formation
 from fablabot.services import catalogue, formations
 from fablabot.ui.catalogue import OPTIONS_PER_PAGE, click_check, cut, page_count, page_row, plain, show, template_line
-from fablabot.ui.draft import DraftButton
+from fablabot.ui.draft import DraftButton, draft_message, stored_draft
 
 if TYPE_CHECKING:
     import re
 
     from discord import Guild
 
-    from fablabot.models.catalogue import TrainingTemplate
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +45,15 @@ COMMAND: Final = "fm.ajouter"
 PICKS_PER_PAGE: Final = OPTIONS_PER_PAGE - 1
 """Templates per page of the picker; the last option of a menu is kept for the free session."""
 _NOT_ADDED: Final = "Rien n'a été ajouté."
+_NOT_CHANGED: Final = "Rien n'a été modifié."
+_SESSION_CHANGED: Final = "Cette session a changé depuis : rouvre le brouillon."
 _GONE: Final = "Ce modèle n'existe plus."
 _NAME_CHARS: Final = 100
 _DURATION_CHARS: Final = 50
 _BUTTON_CHARS: Final = 80
 _OPTION_CHARS: Final = 100
 _TITLE_CHARS: Final = 45
+_MODIFY: Final = "Modifier : "
 _QUESTION: Final = (
     "**Quelle formation ?** Choisis un modèle, ou une session libre.\n"
     "-# Plus rapide au clavier : `/fm ajouter modele:` puis les premières lettres."
@@ -136,11 +140,11 @@ def added_message(session: Formation, count: int, template_id: int) -> tuple[str
     return content, view
 
 
-async def _refuse(interaction: Interaction, text: str, kind: RefusalKind | None = None) -> None:
-    """Tell the member privately why nothing was added, and log the kind when the refusal is not about the form's text."""
+async def _refuse(interaction: Interaction, text: str, kind: RefusalKind | None = None, *, outcome: str = _NOT_ADDED) -> None:
+    """Tell the member privately why nothing was added (or changed), and log the kind when the refusal is not about the text."""
     if kind is not None:
         log_refusal(logger, COMMAND, interaction, kind)
-    await interaction.response.send_message(f"{text} {_NOT_ADDED}", ephemeral=True, allowed_mentions=AllowedMentions.none())
+    await interaction.response.send_message(f"{text} {outcome}", ephemeral=True, allowed_mentions=AllowedMentions.none())
 
 
 def _template_of(interaction: Interaction, value: str) -> TrainingTemplate | None:
@@ -192,8 +196,12 @@ class SessionForm(ui.Modal):
     Held in memory only: a form left open across a restart cannot be sent. Upgrade path: dispatch modal submits by custom
     ID, with the template's ID in it.
 
+    The same form changes a session already in the draft (Modifier): ``replace`` names that session, and sending it
+    changes the trainer, start, seats and description of that session only.
+
     Attributes:
-        template (TrainingTemplate): The template the form opened on.
+        template (TrainingTemplate): The template the form opened on; for Modifier, the session's own values in one.
+        replace (tuple[int, str] | None): The start and emoji of the session to change, None when the form adds one.
         trainer_select (ui.UserSelect): The trainer, preset when the form comes from "Encore une session".
         date_input (ui.TextInput): The day, ``JJ/MM``.
         hour_input (ui.TextInput): The hour, ``HH:MM``.
@@ -203,7 +211,16 @@ class SessionForm(ui.Modal):
 
     interaction_check = click_check(COMMAND, FORMATION_ROLES)
 
-    def __init__(self, *, template: TrainingTemplate, trainer_id: int | None, day: date | None, description: str) -> None:
+    def __init__(  # noqa: PLR0913 - what a form opens with, by name
+        self,
+        *,
+        template: TrainingTemplate,
+        trainer_id: int | None,
+        day: date | None,
+        description: str,
+        hour: time | None = None,
+        replace: tuple[int, str] | None = None,
+    ) -> None:
         """Build the form.
 
         Args:
@@ -211,9 +228,13 @@ class SessionForm(ui.Modal):
             trainer_id (int | None): The member to preset as trainer, or None for none.
             day (date | None): The day to preset, or None for an empty date.
             description (str): The description to start with, empty for none.
+            hour (time | None): The hour to preset, or None for an empty hour.
+            replace (tuple[int, str] | None): The start and emoji of the session to change, or None to add a session.
         """
-        super().__init__(title=cut(template.fields.name, _TITLE_CHARS))
+        name = cut(template.fields.name, _TITLE_CHARS if replace is None else _TITLE_CHARS - len(_MODIFY))
+        super().__init__(title=name if replace is None else f"{_MODIFY}{name}")
         self.template = template
+        self.replace = replace
         self.trainer_select = ui.UserSelect(
             placeholder="Choisis le formateur", required=True, default_values=[Object(trainer_id)] if trainer_id else []
         )
@@ -223,7 +244,9 @@ class SessionForm(ui.Modal):
             max_length=10,
             default=day_text(day, datetime.now(PARIS_TZ).date()) if day else None,
         )
-        self.hour_input = ui.TextInput(label="Heure", placeholder="HH:MM", max_length=8)
+        self.hour_input = ui.TextInput(
+            label="Heure", placeholder="HH:MM", max_length=8, default=hour.strftime("%H:%M") if hour else None
+        )
         self.seats_input = ui.TextInput(label="Places", max_length=20, default=str(template.fields.seats))
         self.description_input = ui.TextInput(
             label="Description", style=TextStyle.paragraph, required=False, max_length=500, default=description or None
@@ -234,17 +257,46 @@ class SessionForm(ui.Modal):
 
     @override
     async def on_submit(self, interaction: Interaction) -> None:
-        """Add the session to the draft when the form is valid, else say why not, and show what was added."""
+        """Add the session to the draft, or change the one this form was opened on, when the form is valid; else say why not."""
         assert interaction.guild is not None
         guild = interaction.guild
+        if self.replace is not None:
+            await self._change(interaction, *self.replace)
+            return
         template = catalogue.get_template(guild.id, self.template.id)
         if template is None:
             await _refuse(interaction, _GONE, RefusalKind.TEMPLATE_UNKNOWN)
             return
         await _add(interaction, self._session(guild, template), template.id)
 
-    def _session(self, guild: Guild, template: TrainingTemplate) -> Formation | str:
-        """Read the form into a session of the template as it is now, or give the text of the first refusal."""
+    async def _change(self, interaction: Interaction, start_unix: int, emoji: str) -> None:
+        """Change the session this form was opened on, in the draft as it is now, and show the brouillon."""
+        assert interaction.guild is not None
+        guild = interaction.guild
+        read = self._read(guild)
+        if isinstance(read, str):
+            await _refuse(interaction, read, outcome=_NOT_CHANGED)
+            return
+        trainer, start, seats = read
+        # Read, changed and saved with no await in between: the session is found by its start and emoji or refused.
+        changed = replace_session(
+            guild.id,
+            start_unix,
+            emoji,
+            trainer_mention=trainer.mention,
+            start_iso=start.isoformat(),
+            seats=seats,
+            description=self.description_input.value.strip(),
+        )
+        if changed is None:
+            await _refuse(interaction, _SESSION_CHANGED, RefusalKind.SESSION_CHANGED, outcome=_NOT_CHANGED)
+            return
+        logger.info(f"[{COMMAND}] change guild_id={guild.id} user_id={interaction.user.id}")
+        content, embed, view = draft_message(guild, stored_draft(guild.id))
+        await show(interaction, content, embed, view)
+
+    def _read(self, guild: Guild) -> tuple[Member, datetime, int] | str:
+        """Read the trainer, start and seats of the form, or give the text of the first refusal."""
         trainer = _trainer_of(guild, self.trainer_select)
         if trainer is None:
             return _BAD_TRAINER
@@ -252,8 +304,14 @@ class SessionForm(ui.Modal):
         if isinstance(start, str):
             return start
         seats = read_seats(self.seats_input.value)
-        if seats is None:
-            return _BAD_SEATS
+        return _BAD_SEATS if seats is None else (trainer, start, seats)
+
+    def _session(self, guild: Guild, template: TrainingTemplate) -> Formation | str:
+        """Read the form into a session of the template as it is now, or give the text of the first refusal."""
+        read = self._read(guild)
+        if isinstance(read, str):
+            return read
+        trainer, start, seats = read
         fields = template.fields
         return Formation(
             emoji="",
@@ -370,6 +428,27 @@ class FreeSessionForm(ui.Modal):
             description="",
             excusable=True,
         )
+
+
+async def open_edit_form(interaction: Interaction, session: Formation) -> None:
+    """Open the form of a session already in the draft, filled with its trainer, day, hour, seats and description.
+
+    Args:
+        interaction (Interaction): The click that asks for the form.
+        session (Formation): The session to change, as the draft holds it now.
+    """
+    assert interaction.guild is not None
+    start = session.start_dt.astimezone(PARIS_TZ)
+    fields = TemplateFields(session.name, session.duration, session.seats, session.description, session.excusable)
+    form = SessionForm(
+        template=TrainingTemplate(0, interaction.guild.id, fields),
+        trainer_id=trainer_id(session.trainer_mention),
+        day=start.date(),
+        description=session.description,
+        hour=start.time(),
+        replace=(int(session.start_dt.timestamp()), session.emoji),
+    )
+    await interaction.response.send_modal(form)
 
 
 async def open_free_form(interaction: Interaction, session: Formation | None = None) -> None:
