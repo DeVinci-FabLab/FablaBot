@@ -143,17 +143,18 @@ def read_date_time(text: str, today: date) -> datetime | None:
 
 
 def day_text(day: date, today: date) -> str:
-    """Write a day so that ``read_date`` gives it back: ``JJ/MM`` when that means this very day, else with the year.
+    """Write a day so that ``read_date`` gives it back, even from a form sent after midnight.
 
     Args:
         day (date): The day to write.
         today (date): The day it is, in Paris.
 
     Returns:
-        str: ``JJ/MM``, or ``JJ/MM/AAAA`` when ``JJ/MM`` would be read as an earlier year.
+        str: ``JJ/MM`` for a later day this year that ``JJ/MM`` reads back; else ``JJ/MM/AAAA``, today included, since
+            ``JJ/MM`` sent the day after would be read as next year.
     """
     short = day.strftime("%d/%m")
-    return short if read_date(short, today) == day else day.strftime("%d/%m/%Y")
+    return short if day > today and read_date(short, today) == day else day.strftime("%d/%m/%Y")
 
 
 def starts_at(day: date, hour: time) -> datetime:

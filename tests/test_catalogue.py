@@ -150,14 +150,15 @@ def test_a_date_and_time_read_in_one_field(text: str, expected: datetime | None)
 @pytest.mark.parametrize(
     ("day", "expected"),
     [
-        (date(2026, 11, 6), "06/11"),
+        (date(2026, 11, 6), "06/11/2026"),
+        (date(2026, 11, 7), "07/11"),
         (date(2027, 11, 5), "05/11"),
         (date(2027, 11, 6), "06/11/2027"),
         (date(2030, 1, 1), "01/01/2030"),
     ],
 )
 def test_a_day_is_written_with_its_year_only_when_the_short_form_would_read_as_another(day: date, expected: str) -> None:
-    """`JJ/MM` is written when it reads back as that very day, else `JJ/MM/AAAA`."""
+    """`JJ/MM` is written when it reads back as that day and the day is not today, else `JJ/MM/AAAA`."""
     assert day_text(day, date(2026, 11, 6)) == expected
     assert read_date(expected, date(2026, 11, 6)) == day
 

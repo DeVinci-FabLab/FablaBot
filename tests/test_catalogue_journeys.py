@@ -6,7 +6,7 @@ import asyncio
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 from unittest.mock import MagicMock
 
 from conftest import LISTED_GUILD, OTHER_LISTED_GUILD, make_interaction, make_role
@@ -20,6 +20,7 @@ from fablabot.helpers.utils import RIGHT_LOST_MESSAGE
 from fablabot.models import TemplateFields
 from fablabot.models.formation import FmMessageDraft, Formation, PublishedMessage
 from fablabot.services import catalogue, formations
+from fablabot.ui import session as session_ui
 from fablabot.ui.catalogue import CATALOGUE_ITEMS, deletion_message, templates_message
 from fablabot.ui.draft import DRAFT_ITEMS, publish_refusal
 from fablabot.ui.session import PICKS_PER_PAGE, SESSION_ITEMS
@@ -2375,6 +2376,58 @@ async def test_encore_after_a_free_session_whose_emoji_passed_to_another_opens_a
     assert _values(again) == {"Nom": None, "Date et heure": None, "Durée": None, "Places": None}
     (trainer,) = (i for i in again.modal["components"] if i["type"] == 18 and i["label"] == "Formateur")
     assert not trainer["component"].get("default_values")
+
+
+class _TheNextDay(datetime):
+    """A clock that reads a day later than the real one: the form was opened before midnight, it is sent after."""
+
+    @override
+    @classmethod
+    def now(cls, tz: Any = None) -> _TheNextDay:  # pyright: ignore[reportIncompatibleMethodOverride]
+        """Read the real clock and add a day."""
+        return datetime.now(tz) + timedelta(days=1)  # pyright: ignore[reportReturnType]
+
+
+def _started_today_at_midnight() -> None:
+    """Move the one session of the draft to today 00:01, which is gone by now but a form may still offer today."""
+    draft = formations.get_draft(GUILD_ID)
+    assert draft is not None
+    start = datetime.combine(_day(0), time(0, 1), tzinfo=PARIS_TZ)
+    formations.save_draft(GUILD_ID, replace(draft, fms=[replace(fm, start_iso=start.isoformat()) for fm in draft.fms]))
+
+
+async def test_a_free_form_sent_after_midnight_refuses_the_day_it_offered(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A free form that offered today and is sent after midnight is refused as past, not stored a year ahead."""
+    shown = await _free_form(lab)
+    done = await lab.respo.submit_modal(shown, _free_filled(lab, shown))
+    _started_today_at_midnight()
+    again = await lab.respo.click(done.response, custom_id="ses:again:0:8de8ebcb:🧡")
+    before = formations.get_draft(GUILD_ID)
+    day = _values(again)["Date et heure"]
+    assert day is not None
+    monkeypatch.setattr(session_ui, "datetime", _TheNextDay)
+
+    refused = await lab.respo.submit_modal(again, _free_filled(lab, again, **{"Date et heure": f"{day.strip()} 00:01"}))
+
+    assert refused.response.content == f"{ErrorMessages.PAST_DATETIME} {NOT_ADDED}"
+    assert formations.get_draft(GUILD_ID) == before
+
+
+async def test_a_session_form_sent_after_midnight_refuses_the_day_it_offered(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A template's form that offered today and is sent after midnight is refused as past, not stored a year ahead."""
+    template = _soudure()
+    done = await _add(lab, template)
+    _started_today_at_midnight()
+    again = await lab.respo.click(done.response, custom_id=f"ses:again:{template.id}:🧡")
+    before = formations.get_draft(GUILD_ID)
+    day = _values(again)["Date"]
+    assert day is not None
+    monkeypatch.setattr(session_ui, "datetime", _TheNextDay)
+
+    refused = await lab.respo.submit_modal(again, _filled(lab, again, Date=day, Heure="00:01"))
+
+    assert refused.response.content == f"{ErrorMessages.PAST_DATETIME} {NOT_ADDED}"
+    assert formations.get_draft(GUILD_ID) == before
 
 
 @pytest.mark.parametrize(
