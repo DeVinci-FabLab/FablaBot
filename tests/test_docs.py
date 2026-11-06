@@ -127,6 +127,29 @@ def test_operator_guide_documents_info() -> None:
     assert "so does `/info`" in _section(text, "## Commands channel")
 
 
+INFO_LINE = (
+    "Server check problem: guild_id=<ID> severity=blocking code=integrations_no_role detail=[/info] "
+    "fix: allow the group's roles in Integrations"
+)
+
+
+def test_operator_guide_makes_allowing_info_a_step_of_the_release() -> None:
+    """Until /info is allowed in Integrations, each server logs a blocking problem and /info shows red: the guide says so."""
+    text = _read("docs/OPERATIONS.md")
+    release = " ".join(_section(text, "### Releasing and redeploying").split())
+    reading = " ".join(_section(text, "## Reading a server's state with /info").split())
+    for section in (release, reading):
+        assert INFO_LINE in section
+        assert "Server Settings > Integrations" in section
+        assert "red" in section
+    for role in sorted(INFO_ROLES):
+        assert role in release, role
+    assert "Staff commands in the slash menu" in release
+    moving = " ".join(_section(text, "## Moving to the database").split())
+    assert "you had before" not in moving
+    assert "`integrations_no_role` for `/info`" in moving
+
+
 def _audiences(text: str) -> dict[str, frozenset[str] | str]:
     """Return what each domain table says about who can run each command, keyed by ``/group name``.
 
