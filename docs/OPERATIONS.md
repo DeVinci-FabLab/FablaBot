@@ -124,11 +124,15 @@ them is a decision for the association (GDPR), not for the bot.
 
 1. Archive `logs/` and `data/`, as in "Before every redeploy": do it before the merge, since the release can
    deploy itself. The bot also copies the database to `data/backups/` at its first start on the new release.
-2. Merge the release pull request `chore(main): release X.Y.Z`.
-3. Wait for the "Build and Push Docker Image" run to finish green: `:latest` is then `:X.Y.Z`.
-4. Read the running revision. If it is still the old one, redeploy the stack in Komodo, or wait for the update.
-5. Check the start in the log, as usual: the `Server check` lines give each server's state.
-6. On the release that brought `/info`, allow it on each server, since a new command is shown to nobody until
+2. Wait until the "Build and Push Docker Image" run of the last merge on `main` has finished. That run also
+   updates the release pull request: merged while it still runs, it tags the release on a commit it is not building,
+   stops in error, and the release's own run then finds the release made and publishes `:edge` only, so `:latest`
+   does not move. If that happens, nothing breaks: ship the next fix as a new release, merged once every run is done.
+3. Merge the release pull request `chore(main): release X.Y.Z`.
+4. Wait for the "Build and Push Docker Image" run to finish green: `:latest` is then `:X.Y.Z`.
+5. Read the running revision. If it is still the old one, redeploy the stack in Komodo, or wait for the update.
+6. Check the start in the log, as usual: the `Server check` lines give each server's state.
+7. On the release that brought `/info`, allow it on each server, since a new command is shown to nobody until
    then. Until it is, each server logs one more blocking problem, and `/info` itself shows red:
 
    ```text
