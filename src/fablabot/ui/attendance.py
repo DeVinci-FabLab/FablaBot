@@ -215,6 +215,11 @@ class AppelToggle(ui.DynamicItem[ui.Button[ui.View]], template=r"appel:(?P<appel
 
         Setting rather than flipping what is stored makes a retried or doubled click, or one on an older copy, harmless.
         """
+        with _appel_log_context(self.appel_id):
+            await self._toggle(interaction)
+
+    async def _toggle(self, interaction: Interaction[Any]) -> None:
+        """Set the mark, then show the check."""
         if self.member_id in {r.user_id for r in attendance.registrants(self.appel_id)}:
             button = _shown(interaction.message, f"appel:{self.appel_id}:m:{self.member_id}")
             # A click always carries its message; the stored mark only stands in when a caller has none.
@@ -281,6 +286,11 @@ class AppelMenu(ui.DynamicItem[ui.Select[ui.View]], template=r"appel:(?P<appel>[
     @override
     async def callback(self, interaction: Interaction[Any]) -> None:
         """Set the members this menu lists to what was chosen, leave the others, then show the check."""
+        with _appel_log_context(self.appel_id):
+            await self._choose(interaction)
+
+    async def _choose(self, interaction: Interaction[Any]) -> None:
+        """Mark the chosen members, then show the check."""
         listed = _listed(interaction.message, self.item.custom_id)
         attendance.mark(self.appel_id, listed, [int(value) for value in self.item.values])
         logger.info(

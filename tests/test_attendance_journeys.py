@@ -2102,6 +2102,22 @@ def click_logs(caplog: pytest.LogCaptureFixture) -> Iterator[list[tuple[str, int
     ui_attendance.logger.removeFilter(tap)
 
 
+async def test_a_toggle_and_a_menu_log_under_the_appels_server(hall: Hall, click_logs: list[tuple[str, int | None]]) -> None:
+    """The line of a name touched and the line of a menu choice are written under the check's server, as the save's is."""
+    members = hall.register(30)
+    hall.publish()
+    await hall.tick()
+    (message,) = hall.dm()
+    seen = SimpleNamespace(components=list(message.components))
+
+    await hall.forged_click(hall.trainer, hall.toggle_id(members[0]), shown=seen)
+    await hall.trainer.user.select(message, [str(members[27].id)], custom_id=f"appel:{hall.appel_id}:s:1")
+
+    lines = [(m, g) for m, g in click_logs if m.startswith(("[appel] mark", "[appel] menu"))]
+    assert [m.split(" appel_id=")[0] for m, _ in lines] == ["[appel] mark", "[appel] menu"]
+    assert {g for _, g in lines} == {GUILD_ID}
+
+
 async def test_the_alert_callback_logs_under_the_appels_server(hall: Hall, click_logs: list[tuple[str, int | None]]) -> None:
     """Every line of an alert click, answered or already answered, is written under the check's server."""
     other_respo = hall.member("respo2", RoleNames.TRAININGS_MANAGER)
