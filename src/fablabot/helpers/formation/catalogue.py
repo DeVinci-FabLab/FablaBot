@@ -57,6 +57,7 @@ def template_fields(name: str, duration: str, seats: str, description: str, excu
         (len(duration) > _DURATION_CHARS, f"Durée : {_DURATION_CHARS} caractères au plus."),
         (count is None, f"Places : un nombre entier de {MIN_SEATS} à {MAX_SEATS}."),
         (len(description) > _DESCRIPTION_CHARS, f"Description : {_DESCRIPTION_CHARS} caractères au plus."),
+        (excusable not in (EXCUSABLE_YES, EXCUSABLE_NO), "Excusable : à choisir."),
     )
     for failed, refusal in checks:
         if failed:

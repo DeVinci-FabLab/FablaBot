@@ -65,3 +65,9 @@ def test_a_template_form_keeps_the_limits_inclusive() -> None:
     fields = template_fields("n" * 100, "d" * 50, "500", "x" * 500, "Oui")
 
     assert isinstance(fields, TemplateFields)
+
+
+@pytest.mark.parametrize("chosen", ["", "Peut-être", "oui"])
+def test_a_template_form_without_oui_or_non_is_refused_not_read_as_a_choice(chosen: str) -> None:
+    """Anything but the menu's Oui or Non is refused with the field named, never defaulted."""
+    assert template_fields("Soudure", "1 h", "4", "", chosen) == "Excusable : à choisir."

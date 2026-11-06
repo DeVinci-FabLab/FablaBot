@@ -315,7 +315,7 @@ class TemplateForm(ui.Modal):
             self.duration_input.value,
             self.seats_input.value,
             self.description_input.value,
-            self.excusable_select.values[0] if self.excusable_select.values else EXCUSABLE_YES,
+            self.excusable_select.values[0] if self.excusable_select.values else "",
         )
         if isinstance(parsed, str):
             await _refuse(interaction, f"{parsed} {_NOT_STORED}")
