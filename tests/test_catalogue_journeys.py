@@ -2776,6 +2776,25 @@ async def test_retirer_asks_first_then_removes_the_session(lab: Lab, later: bool
     assert formations.get_draft(GUILD_ID) == replace(staged, fms=[other])
 
 
+@pytest.mark.parametrize("emoji", ["<:fablab:123456789012345678>", "<a:fete:123456789012345678>"], ids=["server", "animated"])
+async def test_retirer_removes_a_session_whose_emoji_is_a_server_emoji(lab: Lab, emoji: str) -> None:
+    """A session marked with a server emoji, which holds colons, is asked about and removed like any other."""
+    target = _planned(emoji, "Soudure", _at(3), trainer=lab.plain)
+    other = _planned("💛", "Brodeuse", _at(5), trainer=lab.plain)
+    staged = _stage(lab, [target, other])
+    asked = await _sessions_menu(lab, "remove")
+
+    question = await lab.respo.select(asked.response, [_value(target)], custom_id="fmd:ses:remove:0")
+
+    assert question.response.content.startswith(f"Retirer **{emoji} Soudure**")
+    assert formations.get_draft(GUILD_ID) == staged
+
+    done = await lab.respo.click(question.response, custom_id=_ids(question.response)[0])
+
+    assert done.response.content == f"Session **{emoji} Soudure** retirée."
+    assert formations.get_draft(GUILD_ID) == replace(staged, fms=[other])
+
+
 async def test_cancelling_keeps_the_session(lab: Lab) -> None:
     """Annuler on the question shows the brouillon again with the word that nothing was removed, and the draft is as it was."""
     target = _planned("🧡", "Soudure", _at(3), trainer=lab.plain)

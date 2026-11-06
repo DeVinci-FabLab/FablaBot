@@ -585,8 +585,9 @@ class SessionListPage(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:snav:(?
         await show(interaction, content, None, view)
 
 
+# A server emoji (<:name:id>) holds colons: the emoji runs up to the digest, which ends the ID.
 class SessionRemove(
-    ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:rm-ok:(?P<start>[0-9]+):(?P<emoji>[^:]+):(?P<digest>[0-9a-f]{12})"
+    ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:rm-ok:(?P<start>[0-9]+):(?P<emoji>.+):(?P<digest>[0-9a-f]{12})"
 ):
     """The button that confirms the removal of a session, named by its start and emoji and the digest of what it held.
 
