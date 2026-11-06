@@ -858,3 +858,18 @@ def test_user_guide_says_how_a_session_is_added_and_why_only_the_first_has_the_d
         "20 sessions at most",
     ):
         assert detail in guide, detail
+
+
+def test_user_guide_says_publier_warns_before_a_second_announcement() -> None:
+    """The draft section says Publier warns when an announcement is already published, and what each button does."""
+    guide = _section(_read("docs/USERGUIDE.md"), "### The draft")
+    for detail in (
+        "still has sessions to come and the draft has changed since",
+        "first warns that posting creates a new announcement",
+        "the sign-ups on the old one stop counting",
+        "**Publier quand même** goes on to the channel question",
+        "**Annuler** posts nothing and changes nothing",
+        "A new week's draft, once every session of the last announcement has started, gets no warning",
+        "`/fm publish` gives no such warning",
+    ):
+        assert detail in guide, detail

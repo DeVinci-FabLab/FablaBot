@@ -13,6 +13,7 @@ from conftest import LISTED_GUILD, OTHER_LISTED_GUILD, fill_text_input, make_int
 import discord
 import pytest
 
+from fablabot import db
 from fablabot.helpers.constants import PARIS_TZ, SESSION_EMOJIS, ErrorMessages, RoleNames
 from fablabot.helpers.formation import announcement_header, humanize_dt, render_message
 from fablabot.helpers.formation.catalogue import session_digest
@@ -1009,7 +1010,9 @@ async def test_publier_starts_on_the_last_announcement_channel(lab: Lab) -> None
     published = FmMessageDraft(header="h", role_id=1, intro="i", fms=_three(lab), end="e")
     formations.save_published(GUILD_ID, PublishedMessage(message_id=5000, channel_id=lab.announce.id, message=published))
     listing = await lab.brouillon(lab.respo)
-    preset = await lab.respo.click(listing.response, custom_id="fmd:publish")
+    warning = await lab.respo.click(listing.response, custom_id="fmd:publish")
+    assert warning.response.content == REPUBLISH_WARNING
+    preset = await lab.respo.click(warning.response, custom_id="fmd:pub-ok")
 
     (menu,) = (c for row in preset.response.components for c in row["components"] if c["type"] == 8)
     assert menu["default_values"] == [{"id": lab.announce.id, "type": "channel"}]
@@ -1018,10 +1021,28 @@ async def test_publier_starts_on_the_last_announcement_channel(lab: Lab) -> None
     assert not go["disabled"]
 
 
+REPUBLISH_WARNING = (
+    "⚠️ Une annonce de formations est déjà publiée. Publier crée une nouvelle annonce : "
+    "les inscriptions de l'ancienne ne compteront plus. Rien n'a encore été publié."
+)
+"""The warning Publier gives when the server already has an announcement and the draft changed since."""
+
+
+async def _warned(lab: Lab) -> Any:
+    """Publish the draft once, change its intro, open the brouillon and click Publier; return the warning."""
+    draft = _stage(lab, _three(lab))
+    await _published_via_publier(lab, lab.announce)
+    formations.save_draft(GUILD_ID, replace(draft, intro="Autre intro"))
+    listing = await lab.brouillon(lab.respo)
+    return await lab.respo.click(listing.response, custom_id="fmd:publish")
+
+
 async def _published_via_publier(lab: Lab, channel: Any) -> Any:
     """Open the brouillon, click Publier, choose the channel and click Publier again; return the last result."""
     listing = await lab.brouillon(lab.respo)
     asked = await lab.respo.click(listing.response, custom_id="fmd:publish")
+    if asked.response.content == REPUBLISH_WARNING:
+        asked = await lab.respo.click(asked.response, custom_id="fmd:pub-ok")
     chosen = await lab.respo.select(asked.response, [channel], custom_id="fmd:pub-ch")
     return await lab.respo.click(chosen.response, custom_id=f"fmd:pub-go:{channel.id}")
 
@@ -1066,6 +1087,8 @@ async def _asked_where(lab: Lab, channel: Any, who: Any = None) -> Any:
     who = who or lab.respo
     listing = await lab.brouillon(who)
     asked = await who.click(listing.response, custom_id="fmd:publish")
+    if asked.response.content == REPUBLISH_WARNING:
+        asked = await who.click(asked.response, custom_id="fmd:pub-ok")
     return (await who.select(asked.response, [channel], custom_id="fmd:pub-ch")).response
 
 
@@ -1167,6 +1190,113 @@ async def test_publier_with_a_changed_draft_after_a_post_publishes_again(lab: La
     await _published_via_publier(lab, lab.announce)
 
     assert len(lab.announce.history()) == 2
+
+
+async def test_publier_warns_when_an_announcement_is_published_and_the_draft_changed(lab: Lab) -> None:
+    """With an announcement published and the draft changed since, Publier warns first and posts nothing."""
+    first = await _warned(lab)
+
+    assert first.response.content == REPUBLISH_WARNING
+    assert not first.response.embeds
+    buttons = _buttons(first.response)
+    assert list(buttons) == ["Publier quand même", "Annuler"]
+    assert buttons["Publier quand même"]["style"] == discord.ButtonStyle.danger.value
+    assert buttons["Annuler"]["style"] == discord.ButtonStyle.secondary.value
+    assert len(lab.announce.history()) == 1
+
+
+async def test_publier_quand_meme_goes_on_to_the_channel_and_posts_again(lab: Lab) -> None:
+    """Confirming the warning asks for the channel as usual, and Publier then posts a second announcement."""
+    warning = await _warned(lab)
+    before = formations.current_published(GUILD_ID)
+    assert before is not None
+
+    asked = await lab.respo.click(warning.response, custom_id="fmd:pub-ok")
+    assert asked.response.content == "**Où publier ?** Choisis le salon, puis **Publier**."
+    chosen = await lab.respo.select(asked.response, [lab.announce], custom_id="fmd:pub-ch")
+    await lab.respo.click(chosen.response, custom_id=f"fmd:pub-go:{lab.announce.id}")
+
+    assert len(lab.announce.history()) == 2
+    current = formations.current_published(GUILD_ID)
+    assert current is not None
+    assert current.message_id != before.message_id
+    assert current.message.intro == "Autre intro"
+
+
+async def test_annuler_on_the_warning_posts_nothing_and_changes_nothing(lab: Lab) -> None:
+    """Annuler says nothing was published, shows the brouillon again, and leaves the draft and the posts as they were."""
+    warning = await _warned(lab)
+    draft_before = formations.get_draft(GUILD_ID)
+    published_before = formations.current_published(GUILD_ID)
+
+    kept = await lab.respo.click(warning.response, custom_id="fmd:pub-no")
+
+    assert kept.response.content == "Rien n'a été publié."
+    assert kept.response.embeds[0].title.startswith("📝 Brouillon de la semaine")
+    assert len(lab.announce.history()) == 1
+    assert formations.get_draft(GUILD_ID) == draft_before
+    assert formations.current_published(GUILD_ID) == published_before
+
+
+async def test_publier_does_not_warn_before_a_first_publication(lab: Lab) -> None:
+    """With no announcement published yet, Publier asks for the channel straight away."""
+    _stage(lab, _three(lab))
+    listing = await lab.brouillon(lab.respo)
+
+    asked = await lab.respo.click(listing.response, custom_id="fmd:publish")
+
+    assert asked.response.content == "**Où publier ?** Choisis le salon, puis **Publier**."
+
+
+async def test_publier_does_not_warn_once_every_session_of_the_announcement_has_started(lab: Lab) -> None:
+    """Last week's announcement, all held, loses nothing: the new week's draft asks for the channel straight away."""
+    draft = _stage(lab, _three(lab))
+    await _published_via_publier(lab, lab.announce)
+    held = (datetime.now(PARIS_TZ) - timedelta(days=1)).isoformat()
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE formation SET start_iso = ? "
+            "WHERE fm_message_id IN (SELECT id FROM fm_message WHERE message_id IS NOT NULL)",
+            (held,),
+        )
+    formations.save_draft(GUILD_ID, replace(draft, intro="Nouvelle semaine"))
+    listing = await lab.brouillon(lab.respo)
+
+    asked = await lab.respo.click(listing.response, custom_id="fmd:publish")
+
+    assert asked.response.content == "**Où publier ?** Choisis le salon, puis **Publier**."
+
+
+async def test_a_member_who_lost_the_role_is_refused_at_the_warning_and_nothing_is_posted(lab: Lab) -> None:
+    """Both buttons of the warning refuse a member who lost the role; nothing is posted and the draft stays."""
+    warning = await _warned(lab)
+    draft_before = formations.get_draft(GUILD_ID)
+    published_before = formations.current_published(GUILD_ID)
+    lab.lose_roles(lab.respo)
+    await asyncio.sleep(0)
+
+    confirmed = await lab.respo.click(warning.response, custom_id="fmd:pub-ok")
+    kept = await lab.respo.click(warning.response, custom_id="fmd:pub-no")
+
+    for result in (confirmed, kept):
+        assert result.ephemeral
+        assert result.response.content == RIGHT_LOST_MESSAGE
+    assert len(lab.announce.history()) == 1
+    assert formations.get_draft(GUILD_ID) == draft_before
+    assert formations.current_published(GUILD_ID) == published_before
+
+
+async def test_the_warning_is_refused_again_if_the_draft_became_unpublishable(lab: Lab) -> None:
+    """Confirming after the draft lost its role is refused like Publier, and nothing is posted."""
+    warning = await _warned(lab)
+    stored = formations.get_draft(GUILD_ID)
+    assert stored is not None
+    formations.save_draft(GUILD_ID, replace(stored, role_id=0))
+
+    confirmed = await lab.respo.click(warning.response, custom_id="fmd:pub-ok")
+
+    assert confirmed.response.content == "Choisis d'abord le rôle à notifier : **Intro / conclusion**. Rien n'a été publié."
+    assert len(lab.announce.history()) == 1
 
 
 async def test_publier_leaves_no_button_to_click_twice_on_the_question(lab: Lab) -> None:
@@ -1311,6 +1441,8 @@ EVERY_DRAFT_ITEM_ID = (
     "fmd:show",
     "fmd:pub-ch",
     "fmd:pub-go:5",
+    "fmd:pub-ok",
+    "fmd:pub-no",
     "fmd:ses:edit:0",
     "fmd:ses:remove:0",
     "fmd:snav:edit:0",

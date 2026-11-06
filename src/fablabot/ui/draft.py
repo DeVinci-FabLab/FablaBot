@@ -31,6 +31,10 @@ logger = logging.getLogger(__name__)
 COMMAND: Final = "fm.brouillon"
 _NBSP: Final = "\N{NO-BREAK SPACE}"
 _NOT_PUBLISHED: Final = "Rien n'a été publié."
+_REPUBLISH_WARNING: Final = (
+    "⚠️ Une annonce de formations est déjà publiée. Publier crée une nouvelle annonce : "
+    "les inscriptions de l'ancienne ne compteront plus. Rien n'a encore été publié."
+)
 _GONE_CHANNEL: Final = "Ce salon n'existe plus : choisis-en un autre."
 _NOT_CHANGED: Final = "Rien n'a été modifié."
 _SESSION_CHANGED: Final = "Cette session a changé depuis : rouvre le brouillon."
@@ -237,6 +241,18 @@ def publish_message(channel: TextChannel | None) -> tuple[str, ui.View]:
     return "**Où publier ?** Choisis le salon, puis **Publier**.", view
 
 
+def republish_message() -> tuple[str, ui.View]:
+    """Build the warning that a second announcement stops the sign-ups of the first, with the way on or out.
+
+    Returns:
+        tuple[str, ui.View]: The warning, the confirming button and the one that gives up.
+    """
+    view = ui.View()
+    view.add_item(PublishConfirm())
+    view.add_item(PublishKeep())
+    return _REPUBLISH_WARNING, view
+
+
 async def _refuse(interaction: Interaction, text: str, kind: RefusalKind) -> None:
     """Tell the member privately why nothing was done, and log the kind."""
     log_refusal(logger, COMMAND, interaction, kind)
@@ -362,7 +378,7 @@ class DraftButton(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:(?P<action>
         elif self.action == "preview":
             await self._preview(interaction, _live(guild, draft))
         elif self.action == "publish":
-            await self._ask_channel(interaction, draft)
+            await ask_channel(interaction, warn=True)
         else:
             content, embed, view = draft_message(guild, draft)
             await show(interaction, content, embed, view)
@@ -380,17 +396,30 @@ class DraftButton(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:(?P<action>
             render_message(draft), ephemeral=True, allowed_mentions=mentions, suppress_embeds=True
         )
 
-    async def _ask_channel(self, interaction: Interaction[Any], draft: FmMessageDraft) -> None:
-        """Ask where to publish, the channel of the last announcement already chosen, unless the draft cannot be published."""
-        assert interaction.guild is not None
-        guild = interaction.guild
-        live = _live(guild, draft)
-        if (refusal := publish_refusal(live) or _published_refusal(guild.id, live)) is not None:
-            await _refuse(interaction, refusal, RefusalKind.DRAFT_NOT_READY)
-            return
-        last = formations.current_published(guild.id)
+
+async def ask_channel(interaction: Interaction[Any], *, warn: bool) -> None:
+    """Ask where to publish, the channel of the last announcement already chosen, unless the draft cannot be published.
+
+    The draft is read again here, so both the Publier button and the confirmation of the warning run the same checks.
+
+    Args:
+        interaction (Interaction[Any]): The click, on a server.
+        warn (bool): Whether to warn first when the published announcement still has sessions to come; the confirmation
+            passes False.
+    """
+    assert interaction.guild is not None
+    guild = interaction.guild
+    live = _live(guild, stored_draft(guild.id))
+    if (refusal := publish_refusal(live) or _published_refusal(guild.id, live)) is not None:
+        await _refuse(interaction, refusal, RefusalKind.DRAFT_NOT_READY)
+        return
+    last = formations.current_published(guild.id)
+    # Only an announcement with sessions still to come loses sign-ups: last week's, all held, is no cause to warn.
+    if warn and last is not None and any(not is_past(fm.start_dt) for fm in last.message.fms):
+        content, view = republish_message()
+    else:
         content, view = publish_message(_channel_of(guild, last.channel_id) if last else None)
-        await show(interaction, content, None, view)
+    await show(interaction, content, None, view)
 
 
 class PublishChannel(ui.DynamicItem[ui.ChannelSelect[ui.View]], template=r"fmd:pub-ch"):
@@ -481,6 +510,50 @@ class PublishGo(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:pub-go:(?P<ch
         )
         cog = cast("FormationManagement", interaction.client.get_cog("FormationManagement"))
         await cog.publish_draft(interaction, channel)
+
+
+class PublishConfirm(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:pub-ok"):
+    """The button that goes on with Publier despite the warning: it asks where to publish, after the usual checks."""
+
+    interaction_check = click_check(COMMAND, FORMATION_ROLES)
+
+    def __init__(self) -> None:
+        """Build the button."""
+        super().__init__(ui.Button(label="Publier quand même", style=ButtonStyle.danger, custom_id="fmd:pub-ok"))
+
+    @override
+    @classmethod
+    async def from_custom_id(cls, interaction: Interaction[Any], item: ui.Item[Any], match: re.Match[str], /) -> PublishConfirm:
+        """Rebuild the button from its custom ID."""
+        return cls()
+
+    @override
+    async def callback(self, interaction: Interaction[Any]) -> None:
+        """Ask where to publish, or say why the draft can no longer be published."""
+        await ask_channel(interaction, warn=False)
+
+
+class PublishKeep(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:pub-no"):
+    """The button that gives up Publier after the warning."""
+
+    interaction_check = click_check(COMMAND, FORMATION_ROLES)
+
+    def __init__(self) -> None:
+        """Build the button."""
+        super().__init__(ui.Button(label="Annuler", style=ButtonStyle.secondary, custom_id="fmd:pub-no"))
+
+    @override
+    @classmethod
+    async def from_custom_id(cls, interaction: Interaction[Any], item: ui.Item[Any], match: re.Match[str], /) -> PublishKeep:
+        """Rebuild the button from its custom ID."""
+        return cls()
+
+    @override
+    async def callback(self, interaction: Interaction[Any]) -> None:
+        """Show the brouillon again, with the word that nothing was published."""
+        assert interaction.guild is not None
+        content, embed, view = draft_message(interaction.guild, stored_draft(interaction.guild.id), note=_NOT_PUBLISHED)
+        await show(interaction, content, embed, view)
 
 
 class SessionList(ui.DynamicItem[ui.Select[ui.View]], template=r"fmd:ses:(?P<action>edit|remove):(?P<page>[0-9]+)"):
@@ -658,4 +731,14 @@ class SessionKeep(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:rm-no"):
         await show(interaction, content, embed, view)
 
 
-DRAFT_ITEMS: Final = (DraftButton, PublishChannel, PublishGo, SessionList, SessionListPage, SessionRemove, SessionKeep)
+DRAFT_ITEMS: Final = (
+    DraftButton,
+    PublishChannel,
+    PublishGo,
+    PublishConfirm,
+    PublishKeep,
+    SessionList,
+    SessionListPage,
+    SessionRemove,
+    SessionKeep,
+)

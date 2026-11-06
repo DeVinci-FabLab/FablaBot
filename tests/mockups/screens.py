@@ -17,7 +17,14 @@ from fablabot.helpers.help_page import leaf_commands
 from fablabot.models import AlertAction, Appel, Registrant, TemplateFields, TrainingTemplate
 from fablabot.models.formation import FmMessageDraft, Formation
 from fablabot.ui.catalogue import TemplateForm, deletion_message
-from fablabot.ui.draft import DraftTextForm, draft_message, publish_message, removal_message, sessions_message
+from fablabot.ui.draft import (
+    DraftTextForm,
+    draft_message,
+    publish_message,
+    removal_message,
+    republish_message,
+    sessions_message,
+)
 from fablabot.ui.formation import StartFmModal
 from fablabot.ui.message import SuggestionView
 from fablabot.ui.session import FreeSessionForm, SessionForm, added_message, picker_message
@@ -343,6 +350,14 @@ async def draft_publish() -> Screen:
     return Screen(capture.sent, dict(_DRAFT_NAMES))
 
 
+async def draft_republish() -> Screen:
+    """The warning that Publier gives when an announcement is already published and the draft changed since."""
+    capture = Capture()
+    content, view = republish_message()
+    await capture.interaction().response.send_message(content, view=view, ephemeral=True)
+    return Screen(capture.sent, dict(_DRAFT_NAMES))
+
+
 class _October(datetime):
     """A datetime whose clock stands on 1 October 2026, so that ``JJ/MM`` days are written the same on every run."""
 
@@ -555,6 +570,7 @@ SCREENS: dict[str, Callable[[], Coroutine[Any, Any, Screen]]] = {
     "draft": draft,
     "draft-text-form": draft_text_form,
     "draft-publish": draft_publish,
+    "draft-republish": draft_republish,
     "session-pick": session_pick,
     "session-form": session_form,
     "session-free-form": session_free_form,
