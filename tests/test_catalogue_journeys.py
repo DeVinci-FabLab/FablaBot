@@ -13,6 +13,7 @@ from conftest import LISTED_GUILD, OTHER_LISTED_GUILD, fill_text_input, make_int
 import discord
 import pytest
 
+from fablabot import db
 from fablabot.helpers.constants import PARIS_TZ, SESSION_EMOJIS, ErrorMessages, RoleNames
 from fablabot.helpers.formation import announcement_header, humanize_dt, render_message
 from fablabot.helpers.formation.catalogue import session_digest
@@ -1240,6 +1241,25 @@ async def test_annuler_on_the_warning_posts_nothing_and_changes_nothing(lab: Lab
 async def test_publier_does_not_warn_before_a_first_publication(lab: Lab) -> None:
     """With no announcement published yet, Publier asks for the channel straight away."""
     _stage(lab, _three(lab))
+    listing = await lab.brouillon(lab.respo)
+
+    asked = await lab.respo.click(listing.response, custom_id="fmd:publish")
+
+    assert asked.response.content == "**Où publier ?** Choisis le salon, puis **Publier**."
+
+
+async def test_publier_does_not_warn_once_every_session_of_the_announcement_has_started(lab: Lab) -> None:
+    """Last week's announcement, all held, loses nothing: the new week's draft asks for the channel straight away."""
+    draft = _stage(lab, _three(lab))
+    await _published_via_publier(lab, lab.announce)
+    held = (datetime.now(PARIS_TZ) - timedelta(days=1)).isoformat()
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE formation SET start_iso = ? "
+            "WHERE fm_message_id IN (SELECT id FROM fm_message WHERE message_id IS NOT NULL)",
+            (held,),
+        )
+    formations.save_draft(GUILD_ID, replace(draft, intro="Nouvelle semaine"))
     listing = await lab.brouillon(lab.respo)
 
     asked = await lab.respo.click(listing.response, custom_id="fmd:publish")

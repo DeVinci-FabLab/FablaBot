@@ -404,7 +404,8 @@ async def ask_channel(interaction: Interaction[Any], *, warn: bool) -> None:
 
     Args:
         interaction (Interaction[Any]): The click, on a server.
-        warn (bool): Whether to warn first when an announcement is already published; the confirmation passes False.
+        warn (bool): Whether to warn first when the published announcement still has sessions to come; the confirmation
+            passes False.
     """
     assert interaction.guild is not None
     guild = interaction.guild
@@ -413,7 +414,8 @@ async def ask_channel(interaction: Interaction[Any], *, warn: bool) -> None:
         await _refuse(interaction, refusal, RefusalKind.DRAFT_NOT_READY)
         return
     last = formations.current_published(guild.id)
-    if last is not None and warn:
+    # Only an announcement with sessions still to come loses sign-ups: last week's, all held, is no cause to warn.
+    if warn and last is not None and any(not is_past(fm.start_dt) for fm in last.message.fms):
         content, view = republish_message()
     else:
         content, view = publish_message(_channel_of(guild, last.channel_id) if last else None)
