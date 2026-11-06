@@ -1430,3 +1430,16 @@ async def test_fm_brouillon_is_listed_for_the_formation_roles(lab: Lab, who: str
     text = await _help_text(getattr(lab, who), lab)
 
     assert ("/fm brouillon" in text) is listed
+
+
+async def test_the_text_form_keeps_the_header_the_draft_holds(lab: Lab) -> None:
+    """Sending the intro form leaves a header the draft already has as it is."""
+    draft = _stage(lab, _three(lab))
+    formations.save_draft(GUILD_ID, replace(draft, header="# Mon en-tête"))
+    shown = await lab.respo.click((await lab.brouillon(lab.respo)).response, custom_id="fmd:text")
+
+    await lab.respo.submit_modal(shown, _form(shown, {"Intro": "Après", "Rôle à notifier": [lab.notified]}))
+
+    stored = formations.get_draft(GUILD_ID)
+    assert stored is not None
+    assert stored.header == "# Mon en-tête"

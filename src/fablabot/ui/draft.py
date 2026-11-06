@@ -209,9 +209,10 @@ class DraftTextForm(ui.Modal):
         assert interaction.guild is not None
         guild = interaction.guild
         # Read, changed and saved with no await in between, so a session added meanwhile is not lost.
+        current = _stored(guild.id)
         draft = replace(
-            _stored(guild.id),
-            header=announcement_header(guild),
+            current,
+            header=current.header or announcement_header(guild),
             role_id=self.role_select.values[0].id,
             intro=self.intro_input.value.strip(),
             end=self.end_input.value.strip(),
