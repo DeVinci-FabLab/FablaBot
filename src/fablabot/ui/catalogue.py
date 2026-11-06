@@ -129,11 +129,20 @@ def click_check(command: str, roles: set[str]) -> Callable[[Any, Interaction], C
     return check
 
 
-def _places(template: TrainingTemplate) -> str:
-    """Write a template's duration and seats, and whether an absence may be excused."""
+def _places(template: TrainingTemplate, *, markdown: bool = True) -> str:
+    """Write a template's duration and seats, and whether an absence may be excused.
+
+    Args:
+        template (TrainingTemplate): The template.
+        markdown (bool): Whether the line is shown as markdown, so the typed duration is escaped; a menu shows plain text.
+
+    Returns:
+        str: The line.
+    """
     fields = template.fields
     excusable = " · excusable" if fields.excusable else ""
-    return f"{_plain(fields.duration)} · {counted(fields.seats, 'place', 'places')}{excusable}"
+    duration = _plain(fields.duration) if markdown else fields.duration
+    return f"{duration} · {counted(fields.seats, 'place', 'places')}{excusable}"
 
 
 def templates_message(guild_id: int, page: int, *, note: str = "") -> tuple[str, Embed, ui.View]:
@@ -190,7 +199,11 @@ def pick_message(guild_id: int, action: Action, page: int) -> tuple[str, ui.View
     shown = templates[page * OPTIONS_PER_PAGE : (page + 1) * OPTIONS_PER_PAGE]
     label = f"Modèles {page * OPTIONS_PER_PAGE + 1} à {page * OPTIONS_PER_PAGE + len(shown)} sur {len(templates)}"
     options = [
-        SelectOption(label=_cut(t.fields.name, _OPTION_CHARS), description=_cut(_places(t), _OPTION_CHARS), value=str(t.id))
+        SelectOption(
+            label=_cut(t.fields.name, _OPTION_CHARS),
+            description=_cut(_places(t, markdown=False), _OPTION_CHARS),
+            value=str(t.id),
+        )
         for t in shown
     ]
     view = ui.View()

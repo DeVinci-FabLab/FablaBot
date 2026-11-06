@@ -454,6 +454,19 @@ async def test_the_menu_of_templates_offers_each_name_with_its_duration_and_seat
     ]
 
 
+async def test_the_menu_shows_a_duration_with_markdown_characters_as_typed(lab: Lab) -> None:
+    """A menu shows no markup, so a duration typed with an underscore or a star has no backslash in the option."""
+    catalogue.create_template(GUILD_ID, TemplateFields("Soudure", "1_h *env.*", 4, "", False))
+    listing = await lab.modeles(lab.respo)
+    listed = listing.response.embeds[0].description or ""
+
+    chosen = await lab.respo.click(listing.response, custom_id="cat:edit")
+
+    (menu,) = (c for row in chosen.response.components for c in row["components"] if c["type"] == 3)
+    assert [o["description"] for o in menu["options"]] == ["1_h *env.* · 4 places"]
+    assert "1\\_h" in listed  # the list is markdown, so it escapes
+
+
 async def test_the_menu_of_templates_pages_beyond_discords_limit(lab: Lab) -> None:
     """With 30 templates the menu holds 25 options and its page buttons reach the other 5."""
     for number in range(30):
