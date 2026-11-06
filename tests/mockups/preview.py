@@ -287,23 +287,43 @@ def message_html(payload: Mapping[str, Any], names: Mapping[int, str] | None = N
     return f'<div class="{css}">' + "\n".join(body) + "</div>"
 
 
-def _field(data: Mapping[str, Any]) -> str:
-    """Render one text input of a modal."""
+def _field(data: Mapping[str, Any], label: str | None = None) -> str:
+    """Render one control of a modal: a text input, or a closed select that shows its preset option.
+
+    Args:
+        data (Mapping[str, Any]): The control's API dict.
+        label (str | None): The text of the Label that holds it; the control's own label when None.
+    """
     star = '<span class="required-star">*</span>' if data.get("required") else ""
-    label = f'<div class="field-label">{html.escape(data.get("label") or "")}{star}</div>'
+    title = f'<div class="field-label">{html.escape((label if label is not None else data.get("label")) or "")}{star}</div>'
+    if data.get("type") == 3:
+        chosen = next((o["label"] for o in data.get("options", []) if o.get("default")), None)
+        shown = (
+            html.escape(chosen) if chosen else f'<span class="placeholder">{html.escape(data.get("placeholder") or "")}</span>'
+        )
+        head = f'<div class="select-head"><span>{shown}</span><span class="chevron">⌄</span></div>'
+        return f'<div class="field">{title}<div class="select">{head}</div></div>'
     if value := data.get("value"):
         shown = html.escape(value)
     else:
         shown = f'<span class="placeholder">{html.escape(data.get("placeholder") or "")}</span>'
     kind = "textarea" if data.get("style") == 2 else "input"
-    return f'<div class="field">{label}<div class="{kind}">{shown}</div></div>'
+    return f'<div class="field">{title}<div class="{kind}">{shown}</div></div>'
+
+
+def _modal_controls(payload: Mapping[str, Any]) -> list[str]:
+    """Render every text input and select of a modal, whether in an action row or under a Label (type 18)."""
+    fields: list[str] = []
+    for item in payload.get("components", []):
+        if item.get("type") == 18:
+            fields.append(_field(item["component"], item.get("label")))
+        fields.extend(_field(child) for child in item.get("components", []) if child.get("type") == 4)
+    return fields
 
 
 def modal_html(payload: Mapping[str, Any]) -> str:
-    """Render one modal over a dimmed channel: title and close mark, one line per text input, then Annuler and Envoyer."""
-    fields = [
-        _field(child) for row in payload.get("components", []) for child in row.get("components", []) if child.get("type") == 4
-    ]
+    """Render one modal over a dimmed channel: title and close mark, one line per control, then Annuler and Envoyer."""
+    fields = _modal_controls(payload)
     return (
         '<div class="backdrop"><div class="modal">\n'
         f'<div class="modal-header"><span class="modal-title">{html.escape(payload.get("title") or "")}</span>'

@@ -274,3 +274,30 @@ def test_markdown_short_timestamps_read_as_time_and_date() -> None:
     """The time-of-day and date styles show only that part, in Paris time."""
     assert '<span class="timestamp">14:30</span>' in markdown("<t:1901277000:t>")
     assert '<span class="timestamp">1 avril 2030</span>' in markdown("<t:1901277000:D>")
+
+
+def test_a_modal_label_shows_its_select() -> None:
+    """A Label holding a select shows its text and the preset option, and one holding a text input shows its value."""
+    select = {
+        "type": 3,
+        "custom_id": "s",
+        "options": [{"label": "Non", "value": "n"}, {"label": "Oui", "value": "o", "default": True}],
+    }
+    text = {"type": 4, "custom_id": "t", "style": 1, "value": "Soudure", "required": True}
+    payload = {
+        "title": "T",
+        "components": [
+            {"type": 18, "label": "Excusable", "component": select},
+            {"type": 18, "label": "Nom", "component": text},
+        ],
+    }
+
+    out = modal_html(payload)
+
+    assert out.count('class="field"') == 2
+    assert 'field-label">Excusable' in out
+    assert '<div class="select">' in out
+    assert "Oui" in out
+    assert "Non" not in out
+    assert 'field-label">Nom<span class="required-star">' in out
+    assert "Soudure" in out

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, override
 from warnings import deprecated
 
 from discord import (
+    AllowedMentions,
     Embed,
     File,
     Interaction,
@@ -30,6 +31,7 @@ from fablabot.helpers.constants import (
     APPEL_COMMAND_ROLES,
     APPEL_EDIT_WINDOW,
     PARIS_TZ,
+    TEMPLATE_ROLES,
     ErrorMessages,
     retention_cutoff,
     staff_default_permissions,
@@ -59,6 +61,7 @@ from fablabot.models import FmCommand, FmMessageDraft, Formation, PublishedMessa
 from fablabot.services import attendance, formations
 from fablabot.ui import fmui
 from fablabot.ui.attendance import DYNAMIC_ITEMS, OpenAppelPicker
+from fablabot.ui.catalogue import CATALOGUE_ITEMS, templates_message
 
 if TYPE_CHECKING:
     from discord import Guild
@@ -94,6 +97,7 @@ class FormationManagement(commands.Cog):
         - /fm preview: Preview the draft.
         - /fm publish: Publish the draft to a channel.
         - /fm export: Export the draft as a message.
+        - /fm modeles: Manage the training templates of the server.
 
     Listeners:
         - on_raw_reaction_event: Log reactions (add/remove) on messages published by this cog.
@@ -127,7 +131,7 @@ class FormationManagement(commands.Cog):
         # are logged and wait for the next reminder tick to run it again. Same ceiling: a restart forgets them.
         self._retry_guilds: set[int] = set()
         self._reaction_logs.purge_all()
-        self.bot.add_dynamic_items(*DYNAMIC_ITEMS)
+        self.bot.add_dynamic_items(*DYNAMIC_ITEMS, *CATALOGUE_ITEMS)
         self._check_upcoming_formations.start()
         logger.info("FormationManagement initialized")
 
@@ -135,7 +139,7 @@ class FormationManagement(commands.Cog):
     async def cog_unload(self) -> None:
         """Clean up when the cog is unloaded."""
         self._check_upcoming_formations.cancel()
-        self.bot.remove_dynamic_items(*DYNAMIC_ITEMS)
+        self.bot.remove_dynamic_items(*DYNAMIC_ITEMS, *CATALOGUE_ITEMS)
         for task in list(self._pending_update_tasks.values()):
             try:
                 task.cancel()
@@ -386,6 +390,26 @@ class FormationManagement(commands.Cog):
             await interaction.response.send_message(content, view=view, ephemeral=True)
             return
         await interaction.response.send_message("Choisis une formation", view=OpenAppelPicker(appels), ephemeral=True)
+
+    @fm_group.command(
+        name="modeles",
+        description="Gérer les modèles de formation.",
+        extras=access(AnyRole(TEMPLATE_ROLES)),
+    )
+    async def fm_modeles(self, interaction: Interaction) -> None:
+        """Show the training templates of the server, with the buttons that add, change and delete them.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+        """
+        if not await ensure_command_context(logger, "fm.modeles", interaction, required_roles=TEMPLATE_ROLES):
+            return
+
+        assert interaction.guild is not None
+        content, embed, view = templates_message(interaction.guild.id, 0)
+        await interaction.response.send_message(
+            content or None, embed=embed, view=view, ephemeral=True, allowed_mentions=AllowedMentions.none()
+        )
 
     @fm_group.command(name="remove", description="Retirer une formation du brouillon.", extras=access(_ACCESS))
     async def fm_remove(self, interaction: Interaction) -> None:

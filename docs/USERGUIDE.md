@@ -53,6 +53,15 @@ In the tables below, "admin roles" means Administrateur, Président, Vice-Prési
 | `/fm publish` | Post the draft in a channel | Same |
 | `/fm export` | List sign-ups and drop-outs | Same |
 | `/fm appel` | Take or fix the attendance of a training of the last 7 days | Respo Formation, Administrateur |
+| `/fm modeles` | Manage the training templates of the server | Respo Formation, Administrateur |
+
+### Training templates
+
+A template is a training the server gives again and again, typed once: its name, its duration, its number of seats from 1 to 500, a description that may stay empty, and whether an absence may be excused. Each server has its own templates, and a name is used once on a server, whatever its case.
+
+`/fm modeles` shows them, 10 to a page and in alphabetical order, in a private message. **Nouveau modèle** opens the form. **Modifier** and **Supprimer** each ask which template first; a long list is shown 25 at a time, with page buttons. Deleting asks for a confirmation. Only Respo Formation and Administrateur use it: Admin -temp- and CoDir, who may write the weekly announcement, may not change the templates. The roles are read again at every click, so a member who has lost the role is refused and nothing is saved.
+
+A session copies a template when it is added: the template fills in the form, and the session then lives on its own. Changing or deleting a template leaves the sessions already in the draft or published as they are.
 
 ### Attendance check
 

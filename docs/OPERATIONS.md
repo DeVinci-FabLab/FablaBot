@@ -154,8 +154,8 @@ fablabot_state "$VOLUMES_PATH/fablabot/data" fablabot.downgrade_schema
 ```
 
 The first run, from the release that brought the training templates (schema 4), drops the templates and nothing else;
-a server types them again after the next upgrade. Export them first if you want to keep them: `fablabot.export_state`
-counts them, and the archive of "Before every redeploy" holds them.
+a server types them again after the next upgrade. The export does not hold them: `fablabot.export_state` only counts
+them, and only the archive taken before the rollback ("Before every redeploy") keeps them.
 
 The next run, from the release that keeps no present and absent counts for small trainings (schema 3), keeps every
 count and gives 0 to a present or absent count that was not kept: the older schema needs a value, so a 0 there

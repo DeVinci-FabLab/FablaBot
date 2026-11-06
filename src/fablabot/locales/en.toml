@@ -61,6 +61,7 @@ preview = "preview the draft here"
 publish = "post the draft in a channel"
 export = "list sign-ups and drop-outs"
 appel = "take or fix a training's attendance"
+modeles = "manage the training templates"
 
 [help.cmd.msg]
 start = "start a draft"

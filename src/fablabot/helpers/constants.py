@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from typing import Final
 from zoneinfo import ZoneInfo
 
 from discord import Permissions
@@ -110,6 +111,9 @@ APPEL_ROLES = ADMIN_ROLES | {RoleNames.TRAININGS_MANAGER}
 # The roles that already see `/fm`, since Integrations work per command.
 APPEL_COMMAND_ROLES = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN}
 FORMATION_ROLES = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN_TEMP, RoleNames.ADMIN, RoleNames.CODIR}
+# Who may change the shared templates. A temporary role never reconfigures; its own constant though it equals
+# APPEL_COMMAND_ROLES, so one can move without the other.
+TEMPLATE_ROLES: Final = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN}
 
 
 def staff_default_permissions() -> Permissions:

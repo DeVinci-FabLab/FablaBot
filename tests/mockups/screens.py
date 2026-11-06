@@ -14,8 +14,9 @@ from fablabot.cogs import formation_management, help_management, message_managem
 from fablabot.helpers.constants import APPEL_EDIT_WINDOW, PARIS_TZ, RoleNames
 from fablabot.helpers.formation.attendance import alert_message, appel_content, appel_view, log_line, respo_messages
 from fablabot.helpers.help_page import leaf_commands
-from fablabot.models import AlertAction, Appel, Registrant
+from fablabot.models import AlertAction, Appel, Registrant, TemplateFields, TrainingTemplate
 from fablabot.models.formation import FmMessageDraft, Formation
+from fablabot.ui.catalogue import TemplateForm, deletion_message
 from fablabot.ui.formation import StartFmModal
 from fablabot.ui.message import SuggestionView
 
@@ -181,6 +182,61 @@ async def fm_start_modal() -> Screen:
     return Screen(capture.sent)
 
 
+_TEMPLATES = [
+    ("SRG + Imp 3D", "45 min", 5, "Formation obligatoire. Ramenez votre PC avec Bambu Studio installé.", True),
+    ("Formation GitHub", "1 h 30", 10, "", False),
+    ("Formation KiCad", "1 h 30", 10, "", False),
+    ("Impression résine", "1 h", 5, "", False),
+    ("Formation inserts", "1 h", 5, "", False),
+    ("Citrouilles en crochet", "1 h 30", 4, "", False),
+    ("Découpe laser", "1 h", 6, "", False),
+    ("Soudure", "1 h", 4, "", False),
+    ("Fusion 360", "2 h", 8, "", False),
+    ("Brodeuse", "1 h", 3, "", False),
+    ("Thermoformage", "1 h", 4, "", False),
+    ("Reliure", "2 h", 6, "", False),
+    ("Sérigraphie", "2 h", 6, "", False),
+    ("Tournage", "1 h 30", 3, "", False),
+]
+
+
+def _templates() -> list[TrainingTemplate]:
+    """The 14 templates of the validated mockup, as the list holds them, sorted by name without regard to case."""
+    stored = [TrainingTemplate(number, 1234, TemplateFields(*row)) for number, row in enumerate(_TEMPLATES, start=1)]
+    return sorted(stored, key=lambda template: template.fields.name.casefold())
+
+
+async def catalogue_list() -> Screen:
+    """``/fm modeles`` on a server with 14 templates: the first page of 10, its page row and the three buttons."""
+    capture = Capture()
+    with (
+        patch.object(formation_management, "ensure_command_context", _allowed()),
+        patch("fablabot.services.catalogue.list_templates", return_value=_templates()),
+    ):
+        await _invoke(formation_management.FormationManagement.fm_modeles, MagicMock(), capture.interaction())
+    return Screen(capture.sent)
+
+
+async def catalogue_form() -> Screen:
+    """The form of a new template, filled as the staff would fill it, with Excusable preset to Oui."""
+    capture = Capture()
+    form = TemplateForm(None)
+    form.name_input.default = "SRG + Imp 3D"
+    form.duration_input.default = "45 min"
+    form.seats_input.default = "5"
+    form.description_input.default = _TEMPLATES[0][3]
+    await capture.interaction().response.send_modal(form)
+    return Screen(capture.sent)
+
+
+async def catalogue_delete() -> Screen:
+    """The question that asks to confirm the deletion of a template, with its two buttons."""
+    capture = Capture()
+    content, view = deletion_message(_templates()[-4])
+    await capture.interaction().response.send_message(content, view=view, ephemeral=True)
+    return Screen(capture.sent)
+
+
 APPEL_START = datetime(2026, 11, 5, 18, 0, tzinfo=PARIS_TZ)
 PSEUDOS = ["lea.mkr", "hugo3d", "ines_lab", "tom_r", "sarah.fab"]
 
@@ -336,6 +392,9 @@ SCREENS: dict[str, Callable[[], Coroutine[Any, Any, Screen]]] = {
     "help-admin": help_admin,
     "fm-edit": fm_edit,
     "fm-appel": fm_appel,
+    "catalogue-list": catalogue_list,
+    "catalogue-form": catalogue_form,
+    "catalogue-delete": catalogue_delete,
     "suggest": suggest,
     "suggest-modal": suggest_modal,
     "fm-start-modal": fm_start_modal,

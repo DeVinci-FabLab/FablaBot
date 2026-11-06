@@ -49,6 +49,8 @@ class RefusalKind(StrEnum):
     RIGHT_LOST = "right_lost_before_confirm"
     APPEL_UNKNOWN = "appel_unknown"
     SERVER_NOT_SERVED = "server_not_served"
+    TEMPLATE_UNKNOWN = "template_unknown"
+    TEMPLATE_CHANGED = "template_changed"
     APPEL_CLOSED = "appel_closed"
     APPEL_CANCELLED = "appel_cancelled"
     APPEL_ANSWERED = "appel_answered"

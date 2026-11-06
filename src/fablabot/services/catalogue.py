@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import sqlite3
 from typing import TYPE_CHECKING
 
@@ -31,6 +32,19 @@ def _template(row: sqlite3.Row) -> TrainingTemplate:
 def _values(fields: TemplateFields) -> tuple[str, str, int, str, int]:
     """Give the column values of what a template holds, in table order."""
     return (fields.name, fields.duration, fields.seats, fields.description, int(fields.excusable))
+
+
+def _trimmed(fields: TemplateFields) -> TemplateFields:
+    """Give the fields with the spaces around the name removed, so "Soudure" and "Soudure " are one name.
+
+    Raises:
+        ValueError: If the name is blank.
+    """
+    name = fields.name.strip()
+    if not name:
+        message = "A template needs a name"
+        raise ValueError(message)
+    return replace(fields, name=name)
 
 
 def _rows(rows: Iterable[sqlite3.Row]) -> list[TrainingTemplate]:
@@ -113,11 +127,13 @@ def create_template(guild_id: int, fields: TemplateFields) -> TrainingTemplate:
         fields (TemplateFields): What the template holds.
 
     Returns:
-        TrainingTemplate: The stored template.
+        TrainingTemplate: The stored template, its name trimmed.
 
     Raises:
         TemplateNameTakenError: If another template of the server has this name, whatever the case.
+        ValueError: If the name is blank.
     """
+    fields = _trimmed(fields)
     try:
         with db.transaction() as conn:
             template_id = conn.execute(
@@ -147,7 +163,9 @@ def update_template(guild_id: int, template_id: int, fields: TemplateFields, *, 
 
     Raises:
         TemplateNameTakenError: If another template of the server has the new name, whatever the case.
+        ValueError: If the new name is blank.
     """
+    fields = _trimmed(fields)
     try:
         with db.transaction() as conn:
             changed = conn.execute(

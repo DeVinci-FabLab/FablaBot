@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from conftest import make_guild, make_interaction, make_member, make_role
+from conftest import fill_text_input, make_guild, make_interaction, make_member, make_role
 from discord import Forbidden, HTTPException, Member, TextChannel, ui
 import pytest
 
@@ -21,8 +21,9 @@ from fablabot.helpers.safe_discord_operations import safe_add_roles, safe_remove
 from fablabot.helpers.utils import log_request, send_dm_to_member
 from fablabot.models.formation import FmMessageDraft, Formation, PublishedMessage
 from fablabot.models.message import EasterEggTrigger
-from fablabot.services import attendance, formations
+from fablabot.services import attendance, catalogue, formations
 from fablabot.ui.attendance import AppelValidate
+from fablabot.ui.catalogue import TemplateDelete, TemplateForm
 
 NAME = "kevin_secret_name"
 
@@ -321,3 +322,36 @@ async def test_attendance_lines_stay_nameless_when_the_log_channel_refuses(caplo
     assert "Could not post the counts of appel" in caplog.text
     assert NAME not in caplog.text
     assert "Training Secret" not in caplog.text
+
+
+async def _submit_template_form(form: TemplateForm, *, name: str) -> None:
+    """Fill the form of a template with the secret name and submit it as a Respo Formation."""
+    interaction = make_interaction(user_name=NAME, guild_id=1234)
+    interaction.user.roles = [make_role(RoleNames.TRAININGS_MANAGER)]
+    fill_text_input(form.name_input, name)
+    fill_text_input(form.duration_input, "1 h")
+    fill_text_input(form.seats_input, "4")
+    fill_text_input(form.description_input, f"{NAME} décrit")
+    form.excusable_select._values = ["Oui"]  # pyright: ignore[reportPrivateUsage]
+    await form.on_submit(interaction)
+
+
+async def test_template_lines_name_templates_by_id_only(caplog: pytest.LogCaptureFixture) -> None:
+    """Creating, editing and deleting a template logs its ID and the server and member IDs: never its name or description."""
+    caplog.set_level(logging.DEBUG)
+
+    await _submit_template_form(TemplateForm(None), name=NAME)
+    (stored,) = catalogue.list_templates(1234)
+    await _submit_template_form(TemplateForm(stored), name=f"{NAME} 2")
+    (stored,) = catalogue.list_templates(1234)
+    interaction = make_interaction(user_name=NAME, guild_id=1234)
+    interaction.user.roles = [make_role(RoleNames.TRAININGS_MANAGER)]
+    await TemplateDelete(stored.id).callback(interaction)
+
+    assert catalogue.list_templates(1234) == []
+    assert f"template_id={stored.id}" in caplog.text
+    assert "create" in caplog.text
+    assert "update" in caplog.text
+    assert "delete" in caplog.text
+    assert NAME not in caplog.text
+    assert "Kevin Secret" not in caplog.text

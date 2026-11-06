@@ -184,3 +184,39 @@ def test_the_templates_are_counted_for_the_export() -> None:
     _srg(GUILD_B)
 
     assert catalogue.count_templates() == 2
+
+
+def test_a_name_is_stored_without_the_spaces_around_it() -> None:
+    """A name is stored trimmed on creation and on update, so "Soudure" and "Soudure " cannot both exist."""
+    created = _srg(name="  Soudure ")
+
+    assert created.fields.name == "Soudure"
+    assert catalogue.get_template(GUILD_A, created.id) == created
+    with pytest.raises(TemplateNameTakenError):
+        _srg(name="Soudure ")
+    other = _srg(name="Laser")
+    assert catalogue.update_template(
+        GUILD_A, other.id, TemplateFields(" Brodeuse  ", "1h", 5, "", False), expected=other.fields
+    )
+    assert [t.fields.name for t in catalogue.list_templates(GUILD_A)] == ["Brodeuse", "Soudure"]
+
+
+@pytest.mark.parametrize("name", ["", "   "])
+def test_a_blank_name_is_refused_on_creation_and_on_update(name: str) -> None:
+    """A name of nothing or of spaces raises a ValueError and stores nothing."""
+    srg = _srg()
+
+    with pytest.raises(ValueError, match="name"):
+        _srg(name=name)
+    with pytest.raises(ValueError, match="name"):
+        catalogue.update_template(GUILD_A, srg.id, TemplateFields(name, "1h", 5, "", False), expected=srg.fields)
+    assert catalogue.list_templates(GUILD_A) == [srg]
+
+
+def test_a_check_failure_is_not_a_taken_name() -> None:
+    """Seats of 0 through the service raise the database's IntegrityError, not TemplateNameTakenError."""
+    with pytest.raises(sqlite3.IntegrityError) as raised:
+        catalogue.create_template(GUILD_A, TemplateFields("Laser", "1h", 0, "", False))
+
+    assert not isinstance(raised.value, TemplateNameTakenError)
+    assert catalogue.list_templates(GUILD_A) == []

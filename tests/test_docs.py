@@ -828,3 +828,16 @@ def test_operator_guide_says_the_templates_hold_no_member_and_are_the_first_thin
     schema = rolling.split("#### Back to a release before the database")[0]
     assert "schema 4" in schema
     assert schema.index("drops the templates and nothing else") < schema.index("(schema 3)")
+
+
+def test_user_guide_says_who_manages_the_templates_and_that_sessions_keep_their_copy() -> None:
+    """The templates section names the two roles, keeps Admin -temp- and CoDir out, and says changes spare the sessions."""
+    guide = _section(_read("docs/USERGUIDE.md"), "### Training templates")
+    for detail in (
+        "`/fm modeles`",
+        "Only Respo Formation and Administrateur",
+        "Admin -temp- and CoDir",
+        "copies a template",
+        "leaves the sessions already in the draft or published as they are",
+    ):
+        assert detail in guide, detail
