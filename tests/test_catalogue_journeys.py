@@ -2189,6 +2189,22 @@ async def test_fm_ajouter_suggests_nothing_to_a_member_without_the_role(lab: Lab
     assert await _suggest(lab, getattr(lab, who), "") == []
 
 
+async def test_fm_ajouter_suggests_nothing_on_a_server_not_served(lab: Lab) -> None:
+    """A member who holds a formation role on a server that is not served is suggested no template, whatever is typed."""
+    _soudure()
+    bot: Any = lab.env.bot
+    cog = bot.get_cog("FormationManagement")
+    interaction = make_interaction(user_id=lab.respo.id, guild_id=GUILD_ID)
+    interaction.client = bot
+    interaction.user.roles = [make_role(RoleNames.TRAININGS_MANAGER)]
+    assert [c.name for c in await cog._template_choices(interaction, "sou")] == ["Soudure"]
+    bot.guild_access = GuildAccessPolicy(allowed=frozenset({OTHER_GUILD_ID}))
+
+    assert await cog._template_choices(interaction, "sou") == []
+    assert await cog._template_choices(interaction, "") == []
+    assert await _suggest(lab, lab.respo, "sou") == []
+
+
 async def test_fm_ajouter_opens_the_chosen_templates_form(lab: Lab) -> None:
     """The ID a suggestion carries opens the form of that template, as the menu does."""
     template = _soudure()
