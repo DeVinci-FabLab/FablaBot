@@ -19,7 +19,7 @@ from discord import Permissions
 import pytest
 from test_server_check import codes, global_command, problems, ready_server, role_entries, run
 
-from fablabot import db
+from fablabot import db, guild_config
 from fablabot.cogs import audit_watch, info_management
 from fablabot.helpers import i18n, problem_text, server_check
 from fablabot.helpers.constants import ADMIN_ROLES, INFO_ROLES, ErrorMessages, RoleNames
@@ -34,6 +34,8 @@ if TYPE_CHECKING:
 
 GUILD = int(LISTED_GUILD)
 OTHER = int(OTHER_LISTED_GUILD)
+UNSERVED = 333333333333333333
+GONE_CHANNEL = 444444444444444444
 GREEN = 0x57F287
 ORANGE = 0xF5A623
 RED = 0xED4245
@@ -630,6 +632,35 @@ async def test_nothing_of_another_server_shows(simcord_env: simcord.Env) -> None
     for channel in other.text_channels:
         assert str(channel.id) not in text
     assert f"holder_{OTHER}" not in text
+
+
+async def test_a_server_the_bot_does_not_serve_is_not_counted(simcord_env: simcord.Env) -> None:
+    """A server the bot is in but does not serve is left out of the count of servers served."""
+    await _world(simcord_env)
+    simcord_env.create_guild(id=UNSERVED)
+    await simcord_env.settle()
+    bot: Any = simcord_env.bot
+    assert UNSERVED in {guild.id for guild in bot.guilds}
+    assert not bot.guild_access.is_served(UNSERVED)
+    who = _member(simcord_env, "someone", RoleNames.ADMIN)
+
+    embed = _embed(await _info(simcord_env, who))
+
+    assert "**1** serveur servi" in _fields(embed)["🛰️ Instance"]
+    assert str(UNSERVED) not in _text(embed)
+
+
+async def test_a_stored_log_channel_that_is_gone_is_not_shown_as_set(simcord_env: simcord.Env) -> None:
+    """A log channel stored for the server but deleted since shows as "aucun salon", with its blocking problem."""
+    await _world(simcord_env)
+    guild_config.set_log_channel_id(GUILD, GONE_CHANNEL)
+    who = _member(simcord_env, "someone", RoleNames.ADMIN)
+
+    embed = _embed(await _info(simcord_env, who))
+
+    assert "Logs : aucun salon" in _fields(embed)["⚙️ Réglages de ce serveur"]
+    assert str(GONE_CHANNEL) not in _text(embed)
+    assert embed.title == "🩺 FablaBot : 1 point bloquant sur ce serveur"
 
 
 async def test_no_member_name_is_shown(simcord_env: simcord.Env) -> None:
