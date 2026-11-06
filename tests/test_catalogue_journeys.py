@@ -193,6 +193,12 @@ async def test_fm_modeles_lists_the_templates_ten_per_page(lab: Lab) -> None:
     assert buttons["Suivant ▶"]["disabled"]
     assert not buttons["◀ Précédent"]["disabled"]
 
+    back = await lab.respo.click(second.response, custom_id=buttons["◀ Précédent"]["custom_id"])
+
+    assert _listed(back.response) == [f"Formation {number:02}" for number in range(10)]
+    assert (back.response.embeds[0].description or "").endswith("-# Page 1/2 · 14 modèles")
+    assert _buttons(back.response)["Page 1/2"]["disabled"]
+
 
 async def test_one_template_counts_in_the_singular(lab: Lab) -> None:
     """A single template reads 1 modèle and its seats read in the singular."""
