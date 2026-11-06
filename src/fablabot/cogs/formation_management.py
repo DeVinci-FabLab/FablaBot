@@ -576,16 +576,17 @@ class FormationManagement(commands.Cog):
         msg, draft = posted
 
         success_reactions = 0
-        for fm in draft.fms:
+        for index, fm in enumerate(draft.fms, start=1):
             try:
                 await msg.add_reaction(fm.emoji)
                 success_reactions += 1
             except Exception:
                 logger.exception(
-                    f"Guild {guild_id} failed to add reaction {fm.emoji!r} for formation {fm.name!r} in published message.",
+                    f"Guild {guild_id} failed to add reaction {fm.emoji!r} to the published message {msg.id} "
+                    f"(session {index} of {len(draft.fms)})."
                 )
 
-        logger.info(f"Guild {guild_id} published the formations draft in {channel}.")
+        logger.info(f"Guild {guild_id} published the formations draft in channel_id={channel.id}.")
         await interaction.followup.send(
             f"Message publié dans {channel.mention} (ID: `{msg.id}`) avec "
             f"{success_reactions}/{len(draft.fms)} "
@@ -634,7 +635,7 @@ class FormationManagement(commands.Cog):
             )
             msg = await channel.send(content, suppress_embeds=True, allowed_mentions=mentions)
         except Exception:
-            logger.exception(f"Guild {interaction.guild.id} failed to publish the formations draft in {channel!r}.")
+            logger.exception(f"Guild {interaction.guild.id} failed to publish the formations draft in channel_id={channel.id}.")
             await interaction.followup.send("Erreur pendant la publication du message.", ephemeral=True)
             return None
 

@@ -1469,3 +1469,24 @@ async def test_publier_pings_the_trainers_but_nobody_typed_in_the_intro(lab: Lab
     sent = lab.env.backend.get_message(lab.announce.id, posted.id)
     assert sent.ping_user_ids == [lab.plain.id]
     assert sent.ping_role_ids == [lab.notified.id]
+
+
+async def test_publier_logs_the_channel_and_the_sessions_by_id_only(
+    lab: Lab, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lines of a publication, a failed reaction included, name the channel by ID, never its name or a session's."""
+    caplog.set_level("DEBUG")
+    sessions = _three(lab)
+    _stage(lab, sessions)
+
+    async def refuse(_message: discord.Message, _emoji: Any) -> None:
+        raise discord.HTTPException(MagicMock(status=500, reason="boom"), "boom")
+
+    monkeypatch.setattr(discord.Message, "add_reaction", refuse)
+
+    await _published_via_publier(lab, lab.announce)
+
+    assert "failed to add reaction" in caplog.text
+    assert all(fm.name not in caplog.text for fm in sessions)
+    assert lab.announce.name not in caplog.text
+    assert f"channel_id={lab.announce.id}" in caplog.text
