@@ -3,12 +3,40 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from typing import Final
 from zoneinfo import ZoneInfo
 
 from discord import Permissions
 
 PARIS_TZ = ZoneInfo("Europe/Paris")
 MAX_MSG_CHARS = 1900
+ANNOUNCEMENT_MAX_CHARS: Final = 2000
+"""Discord's limit for one message; the announcement is one message because sign-ups read one."""
+SESSION_EMOJIS: Final = (
+    "\N{ORANGE HEART}",
+    "\N{YELLOW HEART}",
+    "\N{GREEN HEART}",
+    "\N{BLUE HEART}",
+    "\N{PURPLE HEART}",
+    "\N{BROWN HEART}",
+    "\N{BLACK HEART}",
+    "\N{WHITE HEART}",
+    "\N{LARGE RED CIRCLE}",
+    "\N{LARGE ORANGE CIRCLE}",
+    "\N{LARGE YELLOW CIRCLE}",
+    "\N{LARGE GREEN CIRCLE}",
+    "\N{LARGE BLUE CIRCLE}",
+    "\N{LARGE PURPLE CIRCLE}",
+    "\N{LARGE BROWN CIRCLE}",
+    "\N{LARGE RED SQUARE}",
+    "\N{LARGE ORANGE SQUARE}",
+    "\N{LARGE YELLOW SQUARE}",
+    "\N{LARGE GREEN SQUARE}",
+    "\N{LARGE BLUE SQUARE}",
+)
+"""The emojis the bot gives the sessions it adds, in the order it takes them; one code point each, so a reaction matches."""
+MAX_SESSIONS: Final = len(SESSION_EMOJIS)
+# Discord takes 20 reactions on a message, and each session is announced by the reaction of its emoji.
 RETENTION_YEARS = 3
 """How many calendar years the bot keeps personal data: registrations, attendance, reaction history, log files and copies."""
 
@@ -110,6 +138,9 @@ APPEL_ROLES = ADMIN_ROLES | {RoleNames.TRAININGS_MANAGER}
 # The roles that already see `/fm`, since Integrations work per command.
 APPEL_COMMAND_ROLES = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN}
 FORMATION_ROLES = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN_TEMP, RoleNames.ADMIN, RoleNames.CODIR}
+# Who may change the shared templates. A temporary role never reconfigures; its own constant though it equals
+# APPEL_COMMAND_ROLES, so one can move without the other.
+TEMPLATE_ROLES: Final = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN}
 
 
 def staff_default_permissions() -> Permissions:

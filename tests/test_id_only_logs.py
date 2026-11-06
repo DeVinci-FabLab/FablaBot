@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from conftest import make_guild, make_interaction, make_member, make_role
+from conftest import fill_text_input, make_guild, make_interaction, make_member, make_role
 from discord import Forbidden, HTTPException, Member, TextChannel, ui
 import pytest
 
@@ -19,10 +19,14 @@ from fablabot.cogs.message_management import MessageManagement
 from fablabot.helpers.constants import PARIS_TZ, RoleNames
 from fablabot.helpers.safe_discord_operations import safe_add_roles, safe_remove_roles
 from fablabot.helpers.utils import log_request, send_dm_to_member
+from fablabot.models import TemplateFields
 from fablabot.models.formation import FmMessageDraft, Formation, PublishedMessage
 from fablabot.models.message import EasterEggTrigger
-from fablabot.services import attendance, formations
+from fablabot.services import attendance, catalogue, formations
 from fablabot.ui.attendance import AppelValidate
+from fablabot.ui.catalogue import TemplateForm, deletion_message
+from fablabot.ui.draft import removal_message
+from fablabot.ui.session import SessionForm, open_edit_form
 
 NAME = "kevin_secret_name"
 
@@ -321,3 +325,90 @@ async def test_attendance_lines_stay_nameless_when_the_log_channel_refuses(caplo
     assert "Could not post the counts of appel" in caplog.text
     assert NAME not in caplog.text
     assert "Training Secret" not in caplog.text
+
+
+async def _submit_template_form(form: TemplateForm, *, name: str) -> None:
+    """Fill the form of a template with the secret name and submit it as a Respo Formation."""
+    interaction = make_interaction(user_name=NAME, guild_id=1234)
+    interaction.user.roles = [make_role(RoleNames.TRAININGS_MANAGER)]
+    fill_text_input(form.name_input, name)
+    fill_text_input(form.duration_input, "1 h")
+    fill_text_input(form.seats_input, "4")
+    fill_text_input(form.description_input, f"{NAME} décrit")
+    form.excusable_select._values = ["Oui"]  # pyright: ignore[reportPrivateUsage]
+    await form.on_submit(interaction)
+
+
+async def test_template_lines_name_templates_by_id_only(caplog: pytest.LogCaptureFixture) -> None:
+    """Creating, editing and deleting a template logs its ID and the server and member IDs: never its name or description."""
+    caplog.set_level(logging.DEBUG)
+
+    await _submit_template_form(TemplateForm(None), name=NAME)
+    (stored,) = catalogue.list_templates(1234)
+    await _submit_template_form(TemplateForm(stored), name=f"{NAME} 2")
+    (stored,) = catalogue.list_templates(1234)
+    interaction = make_interaction(user_name=NAME, guild_id=1234)
+    interaction.user.roles = [make_role(RoleNames.TRAININGS_MANAGER)]
+    _, confirmation = deletion_message(stored)
+    await confirmation.children[0].callback(interaction)  # pyright: ignore[reportAttributeAccessIssue]
+
+    assert catalogue.list_templates(1234) == []
+    assert f"template_id={stored.id}" in caplog.text
+    assert "create" in caplog.text
+    assert "update" in caplog.text
+    assert "delete" in caplog.text
+    assert NAME not in caplog.text
+    assert "Kevin Secret" not in caplog.text
+
+
+async def test_session_lines_name_no_training(caplog: pytest.LogCaptureFixture) -> None:
+    """Adding a session logs the server, member and template by ID and the count: the training's name never appears."""
+    caplog.set_level(logging.DEBUG)
+    template = catalogue.create_template(1234, TemplateFields(NAME, "1 h", 4, "", True))
+    trainer = _member(77)
+    trainer.mention = "<@77>"
+    form = SessionForm(template=template, trainer_id=None, day=None, description=f"{NAME} décrit")
+    interaction = make_interaction(user_name=NAME, guild_id=1234)
+    interaction.user.roles = [make_role(RoleNames.TRAININGS_MANAGER)]
+    interaction.guild.get_member = MagicMock(return_value=trainer)
+    interaction.message = MagicMock()
+    fill_text_input(form.date_input, (datetime.now(PARIS_TZ) + timedelta(days=2)).strftime("%d/%m"))
+    fill_text_input(form.hour_input, "18:30")
+    fill_text_input(form.seats_input, "4")
+    fill_text_input(form.description_input, f"{NAME} décrit")
+    form.trainer_select._values = [trainer]  # pyright: ignore[reportPrivateUsage]
+
+    await form.on_submit(interaction)
+
+    draft = formations.get_draft(1234)
+    assert draft is not None
+    assert [fm.name for fm in draft.fms] == [NAME]
+    assert f"template_id={template.id}" in caplog.text
+    assert "sessions=1" in caplog.text
+    assert NAME not in caplog.text
+    assert "Kevin Secret" not in caplog.text
+
+    # Modifier and Retirer on that session log the server, member and count, never its name.
+    caplog.clear()
+    (session,) = draft.fms
+    await open_edit_form(interaction, session)
+    change = interaction.response.send_modal.await_args.args[0]
+    fill_text_input(change.date_input, (datetime.now(PARIS_TZ) + timedelta(days=3)).strftime("%d/%m"))
+    fill_text_input(change.hour_input, "19:00")
+    fill_text_input(change.seats_input, "5")
+    fill_text_input(change.description_input, f"{NAME} décrit encore")
+    change.trainer_select._values = [trainer]  # pyright: ignore[reportPrivateUsage]
+    await change.on_submit(interaction)
+    changed = formations.get_draft(1234)
+    assert changed is not None
+    assert [fm.seats for fm in changed.fms] == [5]
+    assert "change" in caplog.text
+
+    _, confirmation = removal_message(changed.fms[0])
+    await confirmation.children[0].callback(interaction)  # pyright: ignore[reportAttributeAccessIssue]
+    removed = formations.get_draft(1234)
+    assert removed is not None
+    assert removed.fms == []
+    assert "remove" in caplog.text
+    assert NAME not in caplog.text
+    assert "Kevin Secret" not in caplog.text

@@ -12,7 +12,7 @@ import sys
 from typing import Any, Final
 
 from fablabot import db
-from fablabot.services import formations, messages
+from fablabot.services import catalogue, formations, messages
 
 GUILD_CONFIG_FILE, FORMATIONS_FILE, MESSAGES_FILE, TEMP_ADMIN_FILE = db.STATE_FILES
 LEGACY_SECTION: Final = "__global__"
@@ -183,6 +183,7 @@ def main(argv: list[str] | None = None) -> None:
         export_to(folder)
         replaced = replaced_messages()
         checks, counts = unexported_attendance()
+        templates = catalogue.count_templates()
     except (db.StorageError, OSError, sqlite3.Error) as error:
         sys.exit(f"Cannot export: {error}")
     finally:
@@ -194,6 +195,9 @@ def main(argv: list[str] | None = None) -> None:
         noun = "attendance check" if checks == 1 else "attendance checks"
         what = "training count" if counts == 1 else "training counts"
         print(f"{checks} {noun} and {counts} {what} have no place in these files; they stay in the database.")
+    if templates:
+        what = "training template has" if templates == 1 else "training templates have"
+        print(f"{templates} {what} no place in these files; they stay in the database.")
 
 
 if __name__ == "__main__":

@@ -230,6 +230,12 @@ def _embed(data: Mapping[str, Any], names: Mapping[int, str]) -> str:
     return f'<div class="embed"{border}>\n' + "\n".join(parts) + "\n</div>"
 
 
+def _preset(data: Mapping[str, Any], names: Mapping[int, str]) -> str:
+    """Write what a menu opens on: its preset values by name, ``@`` for people and roles, ``#`` for channels."""
+    sign = "#" if data.get("type") == 8 else "@"
+    return ", ".join(f"{sign}{names.get(int(d['id']), d['id'])}" for d in data.get("default_values") or [])
+
+
 def _button(data: Mapping[str, Any]) -> str:
     """Render one button from its API dict."""
     style = BUTTON_CLASS.get(data.get("style", 2), "secondary")
@@ -241,10 +247,13 @@ def _button(data: Mapping[str, Any]) -> str:
     return f'<span class="button {style}{disabled}">{icon}{label}{link}</span>'
 
 
-def _select(data: Mapping[str, Any]) -> str:
-    """Render one select menu: a text select lists its options, the others stay closed."""
-    placeholder = html.escape(data.get("placeholder") or "")
-    head = f'<div class="select-head"><span class="placeholder">{placeholder}</span><span class="chevron">⌄</span></div>'
+def _select(data: Mapping[str, Any], names: Mapping[int, str]) -> str:
+    """Render one select menu: a text select lists its options, the others stay closed and show their preset."""
+    preset = html.escape(_preset(data, names))
+    placeholder = (
+        f"<span>{preset}</span>" if preset else f'<span class="placeholder">{html.escape(data.get("placeholder") or "")}</span>'
+    )
+    head = f'<div class="select-head">{placeholder}<span class="chevron">⌄</span></div>'
     options = ""
     if data.get("type") == 3:
         items = []
@@ -256,7 +265,7 @@ def _select(data: Mapping[str, Any]) -> str:
     return f'<div class="select">{head}{options}</div>'
 
 
-def _row(data: Mapping[str, Any]) -> str:
+def _row(data: Mapping[str, Any], names: Mapping[int, str]) -> str:
     """Render one action row."""
     items: list[str] = []
     for child in data.get("components", []):
@@ -264,7 +273,7 @@ def _row(data: Mapping[str, Any]) -> str:
         if kind == 2:
             items.append(_button(child))
         elif kind in (3, 5, 6, 7, 8):
-            items.append(_select(child))
+            items.append(_select(child, names))
     return f'<div class="row">{"".join(items)}</div>'
 
 
@@ -279,7 +288,7 @@ def message_html(payload: Mapping[str, Any], names: Mapping[int, str] | None = N
     if payload.get("content"):
         body.append(f'<div class="content">{markdown(payload["content"], names)}</div>')
     body.extend(_embed(e, names) for e in payload.get("embeds", []))
-    body.extend(_row(r) for r in payload.get("components", []))
+    body.extend(_row(r, names or {}) for r in payload.get("components", []))
     if payload.get("ephemeral"):
         body.append(f'<div class="ephemeral"><span class="eye">👁</span>{EPHEMERAL_NOTE}</div>')
     body.append("</div>")
@@ -287,23 +296,51 @@ def message_html(payload: Mapping[str, Any], names: Mapping[int, str] | None = N
     return f'<div class="{css}">' + "\n".join(body) + "</div>"
 
 
-def _field(data: Mapping[str, Any]) -> str:
-    """Render one text input of a modal."""
+def _field(data: Mapping[str, Any], label: str | None = None, names: Mapping[int, str] | None = None) -> str:
+    """Render one control of a modal: a text input, or a closed select that shows its preset option.
+
+    Args:
+        data (Mapping[str, Any]): The control's API dict.
+        label (str | None): The text of the Label that holds it; the control's own label when None.
+        names (Mapping[int, str] | None): Display names for the IDs a member, role or channel menu opens on.
+    """
     star = '<span class="required-star">*</span>' if data.get("required") else ""
-    label = f'<div class="field-label">{html.escape(data.get("label") or "")}{star}</div>'
+    title = f'<div class="field-label">{html.escape((label if label is not None else data.get("label")) or "")}{star}</div>'
+    if data.get("type") in (5, 6, 7, 8):
+        shown = (
+            html.escape(_preset(data, names or {}))
+            or f'<span class="placeholder">{html.escape(data.get("placeholder") or "")}</span>'
+        )
+        head = f'<div class="select-head"><span>{shown}</span><span class="chevron">⌄</span></div>'
+        return f'<div class="field">{title}<div class="select">{head}</div></div>'
+    if data.get("type") == 3:
+        chosen = next((o["label"] for o in data.get("options", []) if o.get("default")), None)
+        shown = (
+            html.escape(chosen) if chosen else f'<span class="placeholder">{html.escape(data.get("placeholder") or "")}</span>'
+        )
+        head = f'<div class="select-head"><span>{shown}</span><span class="chevron">⌄</span></div>'
+        return f'<div class="field">{title}<div class="select">{head}</div></div>'
     if value := data.get("value"):
         shown = html.escape(value)
     else:
         shown = f'<span class="placeholder">{html.escape(data.get("placeholder") or "")}</span>'
     kind = "textarea" if data.get("style") == 2 else "input"
-    return f'<div class="field">{label}<div class="{kind}">{shown}</div></div>'
+    return f'<div class="field">{title}<div class="{kind}">{shown}</div></div>'
 
 
-def modal_html(payload: Mapping[str, Any]) -> str:
-    """Render one modal over a dimmed channel: title and close mark, one line per text input, then Annuler and Envoyer."""
-    fields = [
-        _field(child) for row in payload.get("components", []) for child in row.get("components", []) if child.get("type") == 4
-    ]
+def _modal_controls(payload: Mapping[str, Any], names: Mapping[int, str] | None = None) -> list[str]:
+    """Render every text input and select of a modal, whether in an action row or under a Label (type 18)."""
+    fields: list[str] = []
+    for item in payload.get("components", []):
+        if item.get("type") == 18:
+            fields.append(_field(item["component"], item.get("label"), names))
+        fields.extend(_field(child) for child in item.get("components", []) if child.get("type") == 4)
+    return fields
+
+
+def modal_html(payload: Mapping[str, Any], names: Mapping[int, str] | None = None) -> str:
+    """Render one modal over a dimmed channel: title and close mark, one line per control, then Annuler and Envoyer."""
+    fields = _modal_controls(payload, names)
     return (
         '<div class="backdrop"><div class="modal">\n'
         f'<div class="modal-header"><span class="modal-title">{html.escape(payload.get("title") or "")}</span>'
@@ -400,7 +437,7 @@ def markup(sent: Sequence[Sent], names: Mapping[int, str] | None = None) -> str:
     Returns:
         str: The screen's markup, without the page around it.
     """
-    parts = [message_html(s.payload, names) if s.kind == "message" else modal_html(s.payload) for s in sent]
+    parts = [message_html(s.payload, names) if s.kind == "message" else modal_html(s.payload, names) for s in sent]
     return "\n".join(parts) + "\n"
 
 

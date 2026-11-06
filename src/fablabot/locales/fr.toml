@@ -61,6 +61,9 @@ preview = "montre l’aperçu du brouillon ici"
 publish = "poste le brouillon dans un salon"
 export = "liste les inscriptions et désinscriptions"
 appel = "fait ou corrige l’appel d’une formation"
+modeles = "gère les modèles de formation"
+brouillon = "montre et prépare le brouillon de la semaine"
+ajouter = "ajoute une session d’un modèle"
 
 [help.cmd.msg]
 start = "commence un brouillon"

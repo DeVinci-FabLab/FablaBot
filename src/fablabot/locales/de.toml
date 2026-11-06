@@ -60,6 +60,9 @@ preview = "zeigt hier die Vorschau des Entwurfs"
 publish = "postet den Entwurf in einem Kanal"
 export = "listet An- und Abmeldungen auf"
 appel = "führt oder korrigiert die Anwesenheit einer Schulung"
+modeles = "verwaltet die Schulungsvorlagen"
+brouillon = "zeigt und bereitet den Wochenentwurf vor"
+ajouter = "fügt eine Sitzung aus einer Vorlage hinzu"
 
 [help.cmd.msg]
 start = "beginnt einen Entwurf"

@@ -13,11 +13,16 @@ from typing import TYPE_CHECKING, Any, override
 from warnings import deprecated
 
 from discord import (
+    AllowedMentions,
     Embed,
     File,
+    HTTPException,
     Interaction,
+    InteractionType,
     Member,
+    Message,
     NotFound,
+    Object,
     RawReactionActionEvent,
     Role,
     TextChannel,
@@ -30,6 +35,7 @@ from fablabot.helpers.constants import (
     APPEL_COMMAND_ROLES,
     APPEL_EDIT_WINDOW,
     PARIS_TZ,
+    TEMPLATE_ROLES,
     ErrorMessages,
     retention_cutoff,
     staff_default_permissions,
@@ -50,15 +56,18 @@ from fablabot.helpers.formation import (
     send_waitlist_dm,
     start_appel,
 )
-from fablabot.helpers.formation.attendance import appel_message
+from fablabot.helpers.formation.attendance import appel_message, trainer_id
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.safe_discord_operations import retract_unsaved_post
-from fablabot.helpers.utils import counted, ensure_command_context, is_valid_emoji
+from fablabot.helpers.utils import RefusalKind, counted, ensure_command_context, is_valid_emoji, log_refusal
 from fablabot.logging_handlers import guild_log_context
 from fablabot.models import FmCommand, FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
-from fablabot.services import attendance, formations
+from fablabot.services import attendance, catalogue, formations
 from fablabot.ui import fmui
 from fablabot.ui.attendance import DYNAMIC_ITEMS, OpenAppelPicker
+from fablabot.ui.catalogue import CATALOGUE_ITEMS, cut, plain, templates_message
+from fablabot.ui.draft import DRAFT_ITEMS, draft_message
+from fablabot.ui.session import SESSION_ITEMS, open_session_form
 
 if TYPE_CHECKING:
     from discord import Guild
@@ -69,6 +78,9 @@ logger = logging.getLogger(__name__)
 
 
 _ACCESS = AnyRole(ALLOWED_ROLES)
+_CHOICE_CHARS = 100
+_UNKNOWN_CHARS = 100
+_ID_DIGITS = 18
 TRAINER_NOTIFICATION_ADVANCE = timedelta(hours=1)
 REGISTRATION_WINDOW = timedelta(minutes=20)
 
@@ -94,6 +106,8 @@ class FormationManagement(commands.Cog):
         - /fm preview: Preview the draft.
         - /fm publish: Publish the draft to a channel.
         - /fm export: Export the draft as a message.
+        - /fm modeles: Manage the training templates of the server.
+        - /fm brouillon: See the draft, set its text and role, preview it and publish it.
 
     Listeners:
         - on_raw_reaction_event: Log reactions (add/remove) on messages published by this cog.
@@ -116,6 +130,9 @@ class FormationManagement(commands.Cog):
         )
         self._reaction_lock = asyncio.Lock()
         self._published_locks: dict[int, asyncio.Lock] = {}
+        # Servers whose draft is being posted: no second post starts before the first is saved. Ceiling: in memory, which
+        # is enough as a post never outlives the process.
+        self._posting: set[int] = set()
         self._pending_update_tasks: dict[int, asyncio.Task] = {}
         # Servers asked for an update after the running one began: it runs once more when it ends.
         self._update_wanted: set[int] = set()
@@ -127,7 +144,7 @@ class FormationManagement(commands.Cog):
         # are logged and wait for the next reminder tick to run it again. Same ceiling: a restart forgets them.
         self._retry_guilds: set[int] = set()
         self._reaction_logs.purge_all()
-        self.bot.add_dynamic_items(*DYNAMIC_ITEMS)
+        self.bot.add_dynamic_items(*DYNAMIC_ITEMS, *CATALOGUE_ITEMS, *DRAFT_ITEMS, *SESSION_ITEMS)
         self._check_upcoming_formations.start()
         logger.info("FormationManagement initialized")
 
@@ -135,7 +152,7 @@ class FormationManagement(commands.Cog):
     async def cog_unload(self) -> None:
         """Clean up when the cog is unloaded."""
         self._check_upcoming_formations.cancel()
-        self.bot.remove_dynamic_items(*DYNAMIC_ITEMS)
+        self.bot.remove_dynamic_items(*DYNAMIC_ITEMS, *CATALOGUE_ITEMS, *DRAFT_ITEMS, *SESSION_ITEMS)
         for task in list(self._pending_update_tasks.values()):
             try:
                 task.cancel()
@@ -387,6 +404,95 @@ class FormationManagement(commands.Cog):
             return
         await interaction.response.send_message("Choisis une formation", view=OpenAppelPicker(appels), ephemeral=True)
 
+    @fm_group.command(
+        name="modeles",
+        description="Gérer les modèles de formation.",
+        extras=access(AnyRole(TEMPLATE_ROLES)),
+    )
+    async def fm_modeles(self, interaction: Interaction) -> None:
+        """Show the training templates of the server, with the buttons that add, change and delete them.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+        """
+        if not await ensure_command_context(logger, "fm.modeles", interaction, required_roles=TEMPLATE_ROLES):
+            return
+
+        assert interaction.guild is not None
+        content, embed, view = templates_message(interaction.guild.id, 0)
+        await interaction.response.send_message(
+            content or None, embed=embed, view=view, ephemeral=True, allowed_mentions=AllowedMentions.none()
+        )
+
+    @fm_group.command(name="brouillon", description="Voir et préparer le brouillon de la semaine.", extras=access(_ACCESS))
+    async def fm_brouillon(self, interaction: Interaction) -> None:
+        """Show the draft with the buttons that set its text, preview it and publish it.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+        """
+        if not await ensure_command_context(logger, "fm.brouillon", interaction, required_roles=ALLOWED_ROLES):
+            return
+
+        assert interaction.guild is not None
+        content, embed, view = draft_message(interaction.guild, self.get_guild_draft(interaction.guild.id))
+        await interaction.response.send_message(
+            content or None, embed=embed, view=view, ephemeral=True, allowed_mentions=AllowedMentions.none()
+        )
+
+    @fm_group.command(name="ajouter", description="Ajouter au brouillon une session d'un modèle.", extras=access(_ACCESS))
+    @app_commands.describe(modele="Le modèle : tape les premières lettres")
+    async def fm_ajouter(self, interaction: Interaction, *, modele: str) -> None:
+        """Open the form of a session of a template, picked by the suggestions or typed in full.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            modele (str): The template's name, else the ID of a suggested template of this server.
+        """
+        if not await ensure_command_context(logger, "fm.ajouter", interaction, required_roles=ALLOWED_ROLES):
+            return
+
+        assert interaction.guild is not None
+        guild_id = interaction.guild.id
+        typed = modele.strip()
+        # A name typed in full comes first, so a name of digits opens its own template; else a suggestion's value is an ID,
+        # and a number too long to be one is only a name.
+        by_id = typed.isascii() and typed.isdecimal() and len(typed) <= _ID_DIGITS
+        template = catalogue.find_by_name(guild_id, typed) or (catalogue.get_template(guild_id, int(typed)) if by_id else None)
+        if template is None:
+            log_refusal(logger, "fm.ajouter", interaction, RefusalKind.TEMPLATE_UNKNOWN)
+            await interaction.response.send_message(
+                f"Aucun modèle **{cut(plain(typed), _UNKNOWN_CHARS)}** sur ce serveur : choisis-en un dans les "
+                "suggestions, ou passe par /fm brouillon. Rien n'a été ajouté.",
+                ephemeral=True,
+                allowed_mentions=AllowedMentions.none(),
+            )
+            return
+        await open_session_form(interaction, template)
+
+    @fm_ajouter.autocomplete("modele")
+    async def _template_choices(self, interaction: Interaction, current: str) -> list[app_commands.Choice[str]]:
+        """Suggest the templates of this server whose name holds the letters typed, to a member who may add sessions.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            current (str): What was typed so far.
+
+        Returns:
+            list[app_commands.Choice[str]]: At most 25 choices named by template and valued by ID; none for a server that
+                is not served, or for a member without a formation role.
+        """
+        user = interaction.user
+        if (
+            interaction.guild is None
+            or not self.bot.guild_access.is_served(interaction.guild.id)
+            or not isinstance(user, Member)
+            or not {role.name for role in user.roles} & ALLOWED_ROLES
+        ):
+            return []
+        templates = catalogue.search_templates(interaction.guild.id, current)
+        return [app_commands.Choice(name=cut(t.fields.name, _CHOICE_CHARS), value=str(t.id)) for t in templates]
+
     @fm_group.command(name="remove", description="Retirer une formation du brouillon.", extras=access(_ACCESS))
     async def fm_remove(self, interaction: Interaction) -> None:
         """Remove a formation from the draft, picked from a selector.
@@ -495,16 +601,99 @@ class FormationManagement(commands.Cog):
             await interaction.response.send_message(ErrorMessages.DRAFT_EMPTY, ephemeral=True)
             return
 
-        await interaction.response.defer(thinking=True)
+        await self.publish_draft(interaction, channel)
+
+    async def publish_draft(self, interaction: Interaction, channel: TextChannel) -> None:
+        """Post the draft in a channel with its reactions, store it as the published message and announce it later.
+
+        The caller has checked the roles and that the draft can be posted. One post runs at a time on a server: the
+        claim is taken before the first await and kept until the message is saved, so two clicks cannot both post.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            channel (TextChannel): The target announcement channel.
+        """
+        assert interaction.guild is not None
+        guild_id = interaction.guild.id
+        if guild_id in self._posting:
+            log_refusal(logger, "fm.publish", interaction, RefusalKind.DRAFT_NOT_READY)
+            await interaction.response.send_message(
+                "Une publication est déjà en cours sur ce serveur. Rien n'a été publié.", ephemeral=True
+            )
+            return
+        self._posting.add(guild_id)
+        try:
+            posted = await self._post_draft(interaction, channel)
+        finally:
+            self._posting.discard(guild_id)
+        if posted is None:
+            await self._close_question(interaction, f"Rien n'a été publié dans {channel.mention}.")
+            return
+        msg, draft = posted
+
+        success_reactions = 0
+        for index, fm in enumerate(draft.fms, start=1):
+            try:
+                await msg.add_reaction(fm.emoji)
+                success_reactions += 1
+            except Exception:
+                logger.exception(
+                    f"Guild {guild_id} failed to add reaction {fm.emoji!r} to the published message {msg.id} "
+                    f"(session {index} of {len(draft.fms)})."
+                )
+
+        logger.info(f"Guild {guild_id} published the formations draft in channel_id={channel.id}.")
+        await interaction.followup.send(
+            f"Message publié dans {channel.mention} (ID: `{msg.id}`) avec "
+            f"{success_reactions}/{len(draft.fms)} "
+            + ("réactions ajoutées." if success_reactions > 1 else "réaction ajoutée."),
+        )
+        await self._close_question(interaction, f"📣 Annonce publiée dans {channel.mention}.")
+
+        await asyncio.sleep(1.5 * 60 * 60)
+        with contextlib.suppress(Exception):
+            await msg.publish()
+
+        logger.info(f"Guild {guild_id} published the formations message as announcement.")
+        await interaction.followup.send("Message publié en mode annonce.")
+
+    async def _post_draft(self, interaction: Interaction, channel: TextChannel) -> tuple[Message, FmMessageDraft] | None:
+        """Send the draft to the channel and store it as the published message.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            channel (TextChannel): The target announcement channel.
+
+        Returns:
+            tuple[Message, FmMessageDraft] | None: The posted message and the draft it holds, or None when it failed
+                and the member has been told.
+        """
+        assert interaction.guild is not None
+        draft = self.get_guild_draft(interaction.guild.id)
+        if interaction.type is InteractionType.component:
+            # The click answers in place, which also takes the Publier button off the question for good.
+            await interaction.response.edit_message(
+                content=f"📣 Publication dans {channel.mention}…", view=None, allowed_mentions=AllowedMentions.none()
+            )
+        else:
+            await interaction.response.defer(thinking=True)
 
         content = render_message(draft)
 
         try:
-            msg = await channel.send(content, suppress_embeds=True)
+            # Staff type the intro, so it may not reach beyond the chosen role and the trainers: the bot's own rights
+            # must not ping everyone, nor anyone named in the text.
+            trainers = {found for fm in draft.fms if (found := trainer_id(fm.trainer_mention)) is not None}
+            mentions = AllowedMentions(
+                everyone=False,
+                roles=[Object(draft.role_id)] if draft.role_id else False,
+                users=[Object(user_id) for user_id in sorted(trainers)],
+            )
+            msg = await channel.send(content, suppress_embeds=True, allowed_mentions=mentions)
         except Exception:
-            logger.exception(f"Guild {interaction.guild.id} failed to publish the formations draft in {channel!r}.")
+            logger.exception(f"Guild {interaction.guild.id} failed to publish the formations draft in channel_id={channel.id}.")
             await interaction.followup.send("Erreur pendant la publication du message.", ephemeral=True)
-            return
+            return None
 
         # Saved before the reactions: a reaction counts from the first one, and a refused save leaves nothing to undo.
         try:
@@ -519,32 +708,17 @@ class FormationManagement(commands.Cog):
         except sqlite3.Error:
             logger.exception(f"Guild {interaction.guild.id} could not save the published message {msg.id}; retracting it.")
             await interaction.followup.send(await retract_unsaved_post(logger, msg))
+            return None
+        return msg, draft
+
+    async def _close_question(self, interaction: Interaction, text: str) -> None:
+        """Say how the publication ended on the "where to publish" question a Publier click came from."""
+        if interaction.type is not InteractionType.component:
             return
-
-        success_reactions = 0
-        for fm in draft.fms:
-            try:
-                await msg.add_reaction(fm.emoji)
-                success_reactions += 1
-            except Exception:
-                logger.exception(
-                    f"Guild {interaction.guild.id} failed to add reaction {fm.emoji!r} "
-                    f"for formation {fm.name!r} in published message.",
-                )
-
-        logger.info(f"Guild {interaction.guild.id} published the formations draft in {channel}.")
-        await interaction.followup.send(
-            f"Message publié dans {channel.mention} (ID: `{msg.id}`) avec "
-            f"{success_reactions}/{len(draft.fms)} "
-            + ("réactions ajoutées." if success_reactions > 1 else "réaction ajoutée."),
-        )
-
-        await asyncio.sleep(1.5 * 60 * 60)
-        with contextlib.suppress(Exception):
-            await msg.publish()
-
-        logger.info(f"Guild {interaction.guild.id} published the formations message as announcement.")
-        await interaction.followup.send("Message publié en mode annonce.")
+        try:
+            await interaction.edit_original_response(content=text, view=None, allowed_mentions=AllowedMentions.none())
+        except HTTPException:
+            logger.warning(f"Guild {interaction.guild_id} could not close the question of the publication.")
 
     @fm_group.command(
         name="export", description="Exporter la liste des membres ayant (dé)réagi aux émojis des FMs.", extras=access(_ACCESS)

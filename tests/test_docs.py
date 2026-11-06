@@ -817,3 +817,44 @@ def test_operator_guide_no_longer_says_the_bot_deletes_no_log_file() -> None:
     for stale in ("Never purge logs", "The bot deletes no log file", "The bot never removes these copies", "no time limit"):
         assert stale not in guide, stale
     assert "past 3 years" in guide
+
+
+def test_operator_guide_says_the_templates_hold_no_member_and_are_the_first_thing_a_rollback_drops() -> None:
+    """The guide names the templates as stored data without members, and the first way back drops them alone."""
+    stored = _section(_read("docs/OPERATIONS.md"), "## Stored data")
+    for detail in ("training templates", "hold no member", "`v3`", "never deletes a template"):
+        assert detail in stored, detail
+    rolling = _section(_read("docs/OPERATIONS.md"), "### Rolling back")
+    schema = rolling.split("#### Back to a release before the database")[0]
+    assert "schema 4" in schema
+    assert schema.index("drops the templates and nothing else") < schema.index("(schema 3)")
+
+
+def test_user_guide_says_who_manages_the_templates_and_that_sessions_keep_their_copy() -> None:
+    """The templates section names the two roles, keeps Admin -temp- and CoDir out, and says changes spare the sessions."""
+    guide = _section(_read("docs/USERGUIDE.md"), "### Training templates")
+    for detail in (
+        "`/fm modeles`",
+        "Only Respo Formation and Administrateur",
+        "Admin -temp- and CoDir",
+        "copies a template",
+        "leaves the sessions already in the draft or published as they are",
+    ):
+        assert detail in guide, detail
+
+
+def test_user_guide_says_how_a_session_is_added_and_why_only_the_first_has_the_description() -> None:
+    """The draft section covers the template menu, the emoji, Encore une session, the 2 000 limit and the 20 sessions."""
+    guide = _section(_read("docs/USERGUIDE.md"), "### The draft")
+    for detail in (
+        "**Ajouter une session**",
+        "next such date, today included",
+        "The bot picks the session's emoji when the form is sent",
+        "an emoji set with `/fm add` is never taken again",
+        "**Encore une session**",
+        "date and the trainer kept",
+        "comes with the first session of a training only",
+        "at most 2 000 characters",
+        "20 sessions at most",
+    ):
+        assert detail in guide, detail

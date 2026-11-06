@@ -3,21 +3,24 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, tzinfo
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from discord import Locale, Member, Permissions, Role
+from discord import Locale, Member, Permissions, Role, TextChannel
 
 import fablabot.cogs as cogs_package
 from fablabot.cogs import formation_management, help_management, message_management
-from fablabot.helpers.constants import APPEL_EDIT_WINDOW, PARIS_TZ, RoleNames
+from fablabot.helpers.constants import APPEL_EDIT_WINDOW, PARIS_TZ, SESSION_EMOJIS, RoleNames
 from fablabot.helpers.formation.attendance import alert_message, appel_content, appel_view, log_line, respo_messages
 from fablabot.helpers.help_page import leaf_commands
-from fablabot.models import AlertAction, Appel, Registrant
+from fablabot.models import AlertAction, Appel, Registrant, TemplateFields, TrainingTemplate
 from fablabot.models.formation import FmMessageDraft, Formation
+from fablabot.ui.catalogue import TemplateForm, deletion_message
+from fablabot.ui.draft import DraftTextForm, draft_message, publish_message, removal_message, sessions_message
 from fablabot.ui.formation import StartFmModal
 from fablabot.ui.message import SuggestionView
+from fablabot.ui.session import FreeSessionForm, SessionForm, added_message, picker_message
 
 from .preview import Capture, Sent
 
@@ -181,6 +184,216 @@ async def fm_start_modal() -> Screen:
     return Screen(capture.sent)
 
 
+_TEMPLATES = [
+    ("SRG + Imp 3D", "45 min", 5, "Formation obligatoire. Ramenez votre PC avec Bambu Studio installé.", True),
+    ("Formation GitHub", "1 h 30", 10, "", False),
+    ("Formation KiCad", "1 h 30", 10, "", False),
+    ("Impression résine", "1 h", 5, "", False),
+    ("Formation inserts", "1 h", 5, "", False),
+    ("Citrouilles en crochet", "1 h 30", 4, "", False),
+    ("Découpe laser", "1 h", 6, "", False),
+    ("Soudure", "1 h", 4, "", False),
+    ("Fusion 360", "2 h", 8, "", False),
+    ("Brodeuse", "1 h", 3, "", False),
+    ("Thermoformage", "1 h", 4, "", False),
+    ("Reliure", "2 h", 6, "", False),
+    ("Sérigraphie", "2 h", 6, "", False),
+    ("Tournage", "1 h 30", 3, "", False),
+]
+
+
+def _templates() -> list[TrainingTemplate]:
+    """The 14 templates of the validated mockup, as the list holds them, sorted by name without regard to case."""
+    stored = [TrainingTemplate(number, 1234, TemplateFields(*row)) for number, row in enumerate(_TEMPLATES, start=1)]
+    return sorted(stored, key=lambda template: template.fields.name.casefold())
+
+
+async def catalogue_list() -> Screen:
+    """``/fm modeles`` on a server with 14 templates: the first page of 10, its page row and the three buttons."""
+    capture = Capture()
+    with (
+        patch.object(formation_management, "ensure_command_context", _allowed()),
+        patch("fablabot.services.catalogue.list_templates", return_value=_templates()),
+    ):
+        await _invoke(formation_management.FormationManagement.fm_modeles, MagicMock(), capture.interaction())
+    return Screen(capture.sent)
+
+
+async def catalogue_form() -> Screen:
+    """The form of a new template, filled as the staff would fill it, with Excusable preset to Oui."""
+    capture = Capture()
+    form = TemplateForm(None)
+    form.name_input.default = "SRG + Imp 3D"
+    form.duration_input.default = "45 min"
+    form.seats_input.default = "5"
+    form.description_input.default = _TEMPLATES[0][3]
+    await capture.interaction().response.send_modal(form)
+    return Screen(capture.sent)
+
+
+async def catalogue_delete() -> Screen:
+    """The question that asks to confirm the deletion of a template, with its two buttons."""
+    capture = Capture()
+    content, view = deletion_message(_templates()[-4])
+    await capture.interaction().response.send_message(content, view=view, ephemeral=True)
+    return Screen(capture.sent)
+
+
+ANNOUNCE_CHANNEL = 5555
+_DRAFT_NAMES = {ROLE_FORMATIONS: "Formations", 2222: "lea.mkr", 3333: "hugo3d", 4444: "camille", ANNOUNCE_CHANNEL: "annonces"}
+_DRAFT_INTRO = "Oyé oyé habitants du DeVinci Fablab, voici les formations de la semaine !"
+_DRAFT_SESSIONS = [
+    ("🩷", "SRG + Imp 3D", 2222, "2026-10-12T10:00:00+02:00", 5),
+    ("❤️‍🔥", "SRG + Imp 3D", 2222, "2026-10-12T11:00:00+02:00", 5),
+    ("🧡", "SRG + Imp 3D", 2222, "2026-10-12T14:00:00+02:00", 5),
+    ("😼", "Formation GitHub", 3333, "2026-10-14T11:45:00+02:00", 10),
+    ("☣️", "Impression résine", 4444, "2026-10-15T13:45:00+02:00", 5),
+]
+
+
+def _sample_draft() -> FmMessageDraft:
+    """The draft of the validated mockup: five sessions, an intro and the role to notify."""
+    fms = [
+        Formation(emoji=emoji, name=name, trainer_mention=f"<@{trainer}>", start_iso=start, duration="45 min", seats=seats)
+        for emoji, name, trainer, start, seats in _DRAFT_SESSIONS
+    ]
+    return FmMessageDraft(header="# [FORMATIONS]", role_id=ROLE_FORMATIONS, intro=_DRAFT_INTRO, fms=fms, end="À très vite !")
+
+
+def _sample_guild() -> MagicMock:
+    """A server that knows the role to notify and the announcement channel."""
+    guild = MagicMock()
+    role = MagicMock(spec=Role)
+    role.id = ROLE_FORMATIONS
+    channel = MagicMock(spec=TextChannel)
+    channel.id = ANNOUNCE_CHANNEL
+    guild.get_role.return_value = role
+    guild.get_channel.return_value = channel
+    return guild
+
+
+async def draft() -> Screen:
+    """``/fm brouillon`` on a draft of five sessions sorted by start, with its six buttons."""
+    capture = Capture()
+    content, embed, view = draft_message(_sample_guild(), _sample_draft())
+    await capture.interaction().response.send_message(content or None, embed=embed, view=view, ephemeral=True)
+    return Screen(capture.sent, dict(_DRAFT_NAMES))
+
+
+_LIST_TRAINERS = (2222, 2222, 2222, 3333, 4444, 3333, 4444)
+
+
+def _long_draft() -> FmMessageDraft:
+    """The draft of the validated list mockup: 14 sessions over four days, the trainers of the sample."""
+    starts = [
+        "2026-10-12T10:00:00+02:00",
+        "2026-10-12T11:00:00+02:00",
+        "2026-10-12T14:00:00+02:00",
+        "2026-10-13T11:45:00+02:00",
+        "2026-10-13T12:30:00+02:00",
+        "2026-10-14T11:45:00+02:00",
+        "2026-10-15T13:45:00+02:00",
+    ]
+    names = ["SRG + Imp 3D"] * 5 + ["Formation GitHub", "Impression résine"]
+    emojis = ["🩷", "❤️‍🔥", "🧡", "💛", "💚", "😼", "☣️"]
+    fms = [
+        Formation(emoji=emoji, name=name, trainer_mention=f"<@{trainer}>", start_iso=start, duration="45 min", seats=5)
+        for emoji, name, trainer, start in zip(emojis, names, _LIST_TRAINERS, starts, strict=True)
+    ]
+    later = [replace(fm, start_iso=(fm.start_dt + timedelta(days=7)).isoformat()) for fm in fms]
+    return FmMessageDraft(header="# [FORMATIONS]", role_id=ROLE_FORMATIONS, intro=_DRAFT_INTRO, fms=[*fms, *later], end="")
+
+
+def _named_guild() -> MagicMock:
+    """A server whose members have the pseudos of the sample."""
+    guild = _sample_guild()
+    guild.get_member.side_effect = lambda member_id: MagicMock(display_name=_DRAFT_NAMES[member_id])
+    return guild
+
+
+async def session_list() -> Screen:
+    """The question that asks which session to change, the 14 sessions of a long draft on its one page."""
+    capture = Capture()
+    content, view = sessions_message(_named_guild(), _long_draft(), action="remove", page=0)
+    await capture.interaction().response.send_message(content, view=view, ephemeral=True)
+    return Screen(capture.sent, dict(_DRAFT_NAMES))
+
+
+async def session_remove() -> Screen:
+    """The question that asks for the confirmation of a removal."""
+    capture = Capture()
+    content, view = removal_message(_sample_draft().fms[3])
+    await capture.interaction().response.send_message(content, view=view, ephemeral=True)
+    return Screen(capture.sent, dict(_DRAFT_NAMES))
+
+
+async def draft_text_form() -> Screen:
+    """The Intro / conclusion form, filled with what the draft holds and the role to notify preset."""
+    capture = Capture()
+    await capture.interaction().response.send_modal(DraftTextForm(_sample_guild(), _sample_draft()))
+    return Screen(capture.sent, dict(_DRAFT_NAMES))
+
+
+async def draft_publish() -> Screen:
+    """The question that asks where to publish, the channel of the last announcement already chosen."""
+    capture = Capture()
+    guild = _sample_guild()
+    content, view = publish_message(guild.get_channel(ANNOUNCE_CHANNEL))
+    await capture.interaction().response.send_message(content, view=view, ephemeral=True)
+    return Screen(capture.sent, dict(_DRAFT_NAMES))
+
+
+class _October(datetime):
+    """A datetime whose clock stands on 1 October 2026, so that ``JJ/MM`` days are written the same on every run."""
+
+    @classmethod
+    def now(cls, tz: tzinfo | None = None) -> _October:
+        return cls(2026, 10, 1, 12, 0, tzinfo=tz)
+
+
+async def session_pick() -> Screen:
+    """The question that asks which training to add a session of, the 14 templates on its one page."""
+    capture = Capture()
+    with patch("fablabot.services.catalogue.list_templates", return_value=_templates()):
+        content, view = picker_message(1234, 0)
+    await capture.interaction().response.send_message(content, view=view, ephemeral=True)
+    return Screen(capture.sent)
+
+
+async def session_form() -> Screen:
+    """The form of a session of the first template: the trainer still to choose, the day, the seats and the description."""
+    capture = Capture()
+    template = next(t for t in _templates() if t.fields.name == _TEMPLATES[0][0])
+    with patch("fablabot.ui.session.datetime", _October):
+        form = SessionForm(template=template, trainer_id=None, day=date(2026, 10, 12), description=template.fields.description)
+    await capture.interaction().response.send_modal(form)
+    return Screen(capture.sent)
+
+
+async def session_free_form() -> Screen:
+    """The form of a one-off session, as Session libre opens it: five empty fields and their hints."""
+    capture = Capture()
+    await capture.interaction().response.send_modal(FreeSessionForm())
+    return Screen(capture.sent)
+
+
+async def session_added() -> Screen:
+    """The answer to a sent session form: the session, its emoji, the count and the three buttons that go on."""
+    capture = Capture()
+    template = next(t for t in _templates() if t.fields.name == _TEMPLATES[0][0])
+    session = Formation(
+        emoji=SESSION_EMOJIS[5],  # the sixth, as the count says
+        name=template.fields.name,
+        trainer_mention="<@2222>",
+        start_iso="2026-10-12T10:00:00+02:00",
+        duration=template.fields.duration,
+        seats=template.fields.seats,
+    )
+    content, view = added_message(session, 6, template.id)
+    await capture.interaction().response.send_message(content, view=view, ephemeral=True)
+    return Screen(capture.sent, dict(_DRAFT_NAMES))
+
+
 APPEL_START = datetime(2026, 11, 5, 18, 0, tzinfo=PARIS_TZ)
 PSEUDOS = ["lea.mkr", "hugo3d", "ines_lab", "tom_r", "sarah.fab"]
 
@@ -336,6 +549,18 @@ SCREENS: dict[str, Callable[[], Coroutine[Any, Any, Screen]]] = {
     "help-admin": help_admin,
     "fm-edit": fm_edit,
     "fm-appel": fm_appel,
+    "catalogue-list": catalogue_list,
+    "catalogue-form": catalogue_form,
+    "catalogue-delete": catalogue_delete,
+    "draft": draft,
+    "draft-text-form": draft_text_form,
+    "draft-publish": draft_publish,
+    "session-pick": session_pick,
+    "session-form": session_form,
+    "session-free-form": session_free_form,
+    "session-added": session_added,
+    "session-list": session_list,
+    "session-remove": session_remove,
     "suggest": suggest,
     "suggest-modal": suggest_modal,
     "fm-start-modal": fm_start_modal,

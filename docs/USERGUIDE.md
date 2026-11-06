@@ -53,6 +53,47 @@ In the tables below, "admin roles" means Administrateur, Président, Vice-Prési
 | `/fm publish` | Post the draft in a channel | Same |
 | `/fm export` | List sign-ups and drop-outs | Same |
 | `/fm appel` | Take or fix the attendance of a training of the last 7 days | Respo Formation, Administrateur |
+| `/fm modeles` | Manage the training templates of the server | Respo Formation, Administrateur |
+| `/fm brouillon` | See the week's draft, set its text and role, preview it and post it | Administrateur, CoDir, Respo Formation, Admin -temp- |
+| `/fm ajouter` | Add a session of a template to the draft, typing the first letters of its name | Administrateur, CoDir, Respo Formation, Admin -temp- |
+
+### Training templates
+
+A template is a training the server gives again and again, typed once: its name, its duration, its number of seats from 1 to 500, a description that may stay empty, and whether an absence may be excused. Each server has its own templates, and a name is used once on a server, whatever its case.
+
+`/fm modeles` shows them, 10 to a page and in alphabetical order, in a private message. **Nouveau modèle** opens the form. **Modifier** and **Supprimer** each ask which template first; a long list is shown 25 at a time, with page buttons. Deleting asks for a confirmation. Only Respo Formation and Administrateur use it: Admin -temp- and CoDir, who may write the weekly announcement, may not change the templates. The roles are read again at every click, so a member who has lost the role is refused and nothing is saved.
+
+A session copies a template when it is added: the template fills in the form, and the session then lives on its own. Changing or deleting a template leaves the sessions already in the draft or published as they are.
+
+### The draft
+
+`/fm brouillon` shows the week's draft in a private message: the intro, then the sessions sorted by start, with the trainer and the seats, and a last line with the role that will be notified and the length of the announcement. Six buttons act on it:
+
+- **Ajouter une session** asks which training to add, from the templates. See below.
+- **Modifier** and **Retirer** are greyed out while the draft has no session. Each asks which session in a menu of up to 25, sorted by start; every option shows the emoji, the name, the day and hour and the trainer, and page buttons go on past 25.
+  **Modifier** opens a form with the session's trainer, date, hour, seats and description filled in. Sending it changes those five and nothing else: the emoji, name, duration and excusable flag stay, and so does the template the session came from. `/fm edit` changes the rest.
+  **Retirer** asks first, naming the session, and takes it out only on **Retirer**; **Annuler** keeps it. At the click the session is found again by its start and emoji and compared with what the form or the question showed. If it was changed (trainer, date, seats, description or anything else, by `/fm edit`, another **Modifier** or another member), removed, or replaced by another session with the same emoji, the form or the confirmation is refused with the reason and nothing changes.
+- **Intro / conclusion** opens a form for the intro, the closing, the link of the form where members propose a training (left empty, it keeps the usual one) and the role to notify, which is required. Saving it keeps the sessions and the header.
+- **Aperçu** shows the announcement exactly as it will be posted, in a private message that notifies nobody.
+- **Publier** asks in which channel to post, starting on the channel of the last announcement, then posts the draft like `/fm publish`. It is greyed out while the draft has no session. It refuses, and posts nothing, when there is no session, no role chosen, a session that has already started, or an announcement past 2 000 characters. It also refuses a draft that is already the published announcement, even once members have signed up on it, or a publication that is still posting: a second post would stop counting the sign-ups on the first. Once posted, the question shows where the announcement went and no longer offers Publier.
+
+#### Adding a session
+
+**Ajouter une session** shows the server's templates in a menu, 24 to a page with page buttons, each with its duration and seats. Choosing one opens a form titled with the training. The form keeps what the template holds, the seats and the description, and asks what the template cannot know: the trainer (a member of the server, not a bot), the date and the hour. The date is `JJ/MM`, for example `12/10`, and means the next such date, today included; `JJ/MM/AAAA` is read as written. The hour is `HH:MM`, `18h30` or `18h`. The seats of the form may differ from the template's, and the template does not change.
+
+The bot picks the session's emoji when the form is sent, the first of its pool of 20 that no session of the draft holds, so two forms sent one after the other never get the same one, and an emoji set with `/fm add` is never taken again. The draft stays sorted by start. A form is refused, with the reason and nothing added, when the date or the hour cannot be read, when the start has already passed, when the seats are not a whole number from 1 to 500, when the trainer is not a member, or when the template has been deleted meanwhile.
+
+**Session libre**, the last option of the menu on every page, is for a training that has no template. It opens a form with five fields: the name, the trainer, the date and hour written together (`JJ/MM HH:MM`, for example `12/10 18:30`, or `JJ/MM/AAAA HH:MM`), the duration as it should be shown, and the seats. The session is added as excusable and with no description: add a description with **Modifier** in the brouillon, and change the excusable flag with `/fm edit`. The same refusals apply as for a template's form, and a name, duration or seats left empty or too long is refused too.
+
+`/fm ajouter modele:` is the keyboard shortcut to the same form. Type the first letters of a name, or any letters it holds, and Discord suggests up to 25 of the server's templates, whatever the case; pick one and the form of that template opens. A name typed in full without picking it also works. A name no template of the server has is refused, with a pointer to the suggestions, and nothing is added. Only the roles of `/fm add` are suggested anything, and only the templates of their own server.
+
+The answer names the session, its start, its trainer, its seats and its emoji, and offers three buttons. **Encore une session** reopens the form on the same training with the date and the trainer kept, to chain the sessions of a day; only the hour is left to write. After a free session it reopens the free form with its name, duration and seats as well, and the date followed by a space, to write the hour after it. A date more than a year ahead is written with its year. **Autre formation** goes back to the templates, and **Voir le brouillon** to the draft.
+
+The template's description comes with the first session of a training only. The announcement is one message of at most 2 000 characters, and the same description repeated on every session of a training would use it up; the later sessions start with an empty description, which can still be filled in by hand. The draft holds 20 sessions at most, since Discord takes no more than 20 reactions on a message and each session is announced by the reaction of its emoji; the twenty-first is refused with that reason.
+
+The length line counts the announcement as posted. It stops at 2 000 because the announcement is one Discord message, and Discord accepts no more in one; sign-ups are read from that one message. Past the limit the draft shows a warning: remove a session or shorten a description.
+
+The same roles as `/fm add` use it, and they are read again at every click, so a member who has lost the role is refused and nothing is posted. The buttons keep working after the bot restarts; only an open form is lost, and it is opened again from the button.
 
 ### Attendance check
 

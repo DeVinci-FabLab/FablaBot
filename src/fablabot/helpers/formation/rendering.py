@@ -211,6 +211,20 @@ def render_message(draft: FmMessageDraft) -> str:
     return "\n".join(lines)
 
 
+def announcement_header(guild: Guild) -> str:
+    """Write the title line of an announcement: the server's ``dvfl`` emoji when it has one, else a loudspeaker.
+
+    Args:
+        guild (Guild): The server the announcement is for.
+
+    Returns:
+        str: The ``# [FORMATIONS]`` line.
+    """
+    emoji_set = {emoji for emoji in guild.emojis if emoji.name == "dvfl"}
+    emoji = emoji_set.pop() if emoji_set else Emojis.LOUDSPEAKER
+    return f"# [FORMATIONS] {emoji}"
+
+
 def format_respo_contacts(guild: Guild) -> str:
     """Build the contact string for formation managers.
 
