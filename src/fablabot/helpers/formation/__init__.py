@@ -12,9 +12,11 @@ from fablabot.helpers.formation.notifications import (
 from fablabot.helpers.formation.rendering import (
     Emojis,
     announcement_header,
+    announcement_length,
     format_current_registrations,
     format_formation_export,
     format_respo_contacts,
+    grouped,
     humanize_dt,
     is_past,
     parse_date_time,
@@ -25,9 +27,11 @@ from fablabot.helpers.formation.rendering import (
 __all__ = [
     "Emojis",
     "announcement_header",
+    "announcement_length",
     "format_current_registrations",
     "format_formation_export",
     "format_respo_contacts",
+    "grouped",
     "humanize_dt",
     "is_past",
     "notify_participants_before_formation",

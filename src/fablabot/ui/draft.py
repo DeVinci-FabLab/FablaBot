@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime
 import logging
 from typing import TYPE_CHECKING, Any, Final, Literal, cast, override
 
 from discord import AllowedMentions, ButtonStyle, ChannelType, Embed, Interaction, SelectOption, TextChannel, TextStyle, ui
 
 from fablabot.helpers.constants import ANNOUNCEMENT_MAX_CHARS, BRAND_COLOUR, FORMATION_ROLES
-from fablabot.helpers.formation import announcement_header, humanize_dt, is_past, render_message
+from fablabot.helpers.formation import announcement_header, announcement_length, grouped, humanize_dt, is_past, render_message
 from fablabot.helpers.formation.attendance import trainer_id
 from fablabot.helpers.formation.catalogue import (
     find_session,
@@ -19,6 +20,7 @@ from fablabot.helpers.formation.catalogue import (
     session_value,
 )
 from fablabot.helpers.formation.rendering import discord_timestamp
+from fablabot.helpers.formation.update import Step, UpdatePlan, plan_update
 from fablabot.helpers.utils import RefusalKind, counted, log_refusal
 from fablabot.models.formation import FmMessageDraft
 from fablabot.services import formations
@@ -35,12 +37,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 COMMAND: Final = "fm.brouillon"
-_NBSP: Final = "\N{NO-BREAK SPACE}"
 _NOT_PUBLISHED: Final = "Rien n'a été publié."
-_REPUBLISH_WARNING: Final = (
-    "⚠️ Une annonce de formations est déjà publiée. Publier crée une nouvelle annonce : "
-    "les inscriptions de l'ancienne ne compteront plus. Rien n'a encore été publié."
-)
+_UPDATE_CHANGED: Final = "L'annonce ou le brouillon a changé depuis ce résumé : presse de nouveau **Publier** pour le revoir."
+_EMBED_CHARS: Final = 4096
+"""Discord's room for the description of one embed."""
 _GONE_CHANNEL: Final = "Ce salon n'existe plus : choisis-en un autre."
 _NOT_CHANGED: Final = "Rien n'a été modifié."
 _SESSION_CHANGED: Final = "Cette session a changé depuis : rouvre le brouillon."
@@ -56,16 +56,17 @@ _BUTTONS: Final = {
     "text": ("💬 Intro / conclusion", ButtonStyle.secondary),
     "preview": ("👁️ Aperçu", ButtonStyle.secondary),
     "publish": ("📣 Publier", ButtonStyle.success),
+    "update": ("🔄 Mettre à jour l'annonce", ButtonStyle.primary),
     "show": ("📝 Voir le brouillon", ButtonStyle.secondary),
 }
 
-Action = Literal["add", "edit", "remove", "text", "preview", "publish", "show"]
+Action = Literal["add", "edit", "remove", "text", "preview", "publish", "show", "update"]
 PickAction = Literal["edit", "remove"]
 
 
 def _length(draft: FmMessageDraft) -> str:
-    """Write the announcement's length with a no-break space as thousands separator, as the copy shows it."""
-    return f"{len(render_message(draft)):,}".replace(",", _NBSP)
+    """Write the announcement's length, every seat taken, with a no-break space as thousands separator."""
+    return grouped(announcement_length(draft))
 
 
 def stored_draft(guild_id: int) -> FmMessageDraft:
@@ -100,7 +101,7 @@ def publish_refusal(draft: FmMessageDraft) -> str | None:
         reason = "Choisis d'abord le rôle à notifier : **Intro / conclusion**."
     elif started := next((fm for fm in sorted(draft.fms, key=lambda fm: fm.start_dt) if is_past(fm.start_dt)), None):
         reason = f"La session **{started.emoji} {plain(started.name)}** a déjà commencé : retire-la ou change sa date."
-    elif len(render_message(draft)) > ANNOUNCEMENT_MAX_CHARS:
+    elif announcement_length(draft) > ANNOUNCEMENT_MAX_CHARS:
         reason = (
             f"L'annonce fait {_length(draft)} caractères, Discord en accepte 2 000 : "
             "retire une session ou raccourcis une description."
@@ -146,7 +147,7 @@ def draft_message(guild: Guild, draft: FmMessageDraft, *, note: str = "") -> tup
     lines = [f"**Intro** : {draft.intro.strip() or '_(vide)_'}", ""]
     lines += [_line(session) for session in sessions] or ["_Aucune session pour l'instant._"]
     lines.append("")
-    if len(render_message(draft)) > ANNOUNCEMENT_MAX_CHARS:
+    if announcement_length(draft) > ANNOUNCEMENT_MAX_CHARS:
         lines.append(
             f"⚠️ **L'annonce fait {_length(draft)} caractères**, Discord en accepte 2 000 : "
             "retire une session ou raccourcis une description."
@@ -247,16 +248,118 @@ def publish_message(channel: TextChannel | None) -> tuple[str, ui.View]:
     return "**Où publier ?** Choisis le salon, puis **Publier**.", view
 
 
-def republish_message() -> tuple[str, ui.View]:
-    """Build the warning that a second announcement stops the sign-ups of the first, with the way on or out.
+def republish_message(channel_id: int) -> tuple[str, ui.View]:
+    """Build the warning that an announcement is published with sessions to come, with what each way on does.
+
+    Args:
+        channel_id (int): The channel of the published announcement.
 
     Returns:
-        tuple[str, ui.View]: The warning, the confirming button and the one that gives up.
+        tuple[str, ui.View]: The warning and its three buttons: update the announcement, post a new one, give up.
     """
     view = ui.View()
+    view.add_item(DraftButton("update"))
     view.add_item(PublishConfirm())
     view.add_item(PublishKeep())
-    return _REPUBLISH_WARNING, view
+    warning = (
+        f"⚠️ Une annonce de formations est déjà publiée dans <#{channel_id}>, avec des sessions à venir.\n"
+        "**Mettre à jour l'annonce** y reporte le brouillon : les inscriptions restent, "
+        "et les membres concernés sont prévenus.\n"
+        "**Nouvelle annonce** en publie une autre : les inscriptions de l'ancienne ne compteront plus.\n"
+        "Rien n'a encore été publié."
+    )
+    return warning, view
+
+
+def _changed_parts(before: Formation, after: Formation) -> list[str]:
+    """List what differs between a published session and its update, in the order of the copy."""
+    parts: list[str] = []
+    if before.name != after.name:
+        parts.append(f"« {plain(before.name)} » → « {plain(after.name)} »")
+    if int(before.start_dt.timestamp()) != int(after.start_dt.timestamp()):
+        parts.append(f"{discord_timestamp(before.start_dt)} → {discord_timestamp(after.start_dt)}")
+    if before.trainer_mention != after.trainer_mention:
+        parts.append(f"{before.trainer_mention} → {after.trainer_mention}")
+    if before.duration != after.duration:
+        parts.append(f"durée {plain(before.duration)} → {plain(after.duration)}")
+    if before.seats != after.seats:
+        parts.append(f"{counted(before.seats, 'place', 'places')} → {counted(after.seats, 'place', 'places')}")
+    if before.description != after.description:
+        parts.append("description modifiée")
+    if before.excusable != after.excusable:
+        parts.append("excusable → non excusable" if before.excusable else "non excusable → excusable")
+    return parts
+
+
+def _changed_block(step: Step) -> list[str]:
+    """Write a changed session of the summary: its line, then who is told and who changes place, one line each."""
+    before, after = step.before, step.after
+    assert before is not None
+    assert after is not None
+    block = [f"✏️ {after.emoji} **{plain(after.name)}** : {' · '.join(_changed_parts(before, after))}"]
+    registered, waiting = len(before.registered_users), len(before.waitlisted_users)
+    moved = (
+        int(before.start_dt.timestamp()) != int(after.start_dt.timestamp()) or before.trainer_mention != after.trainer_mention
+    )
+    if moved and registered + waiting:
+        block.append(f"-# À prévenir : {counted(registered, 'inscrit', 'inscrits')}, {waiting} en attente")
+    if after.seats < registered:
+        block.append(
+            f"-# Vers la liste d'attente : {counted(registered - after.seats, 'inscrit', 'inscrits')}, par ordre d'arrivée"
+        )
+    if after.seats > before.seats and (brought := min(waiting, after.seats - registered)) > 0:
+        block.append(f"-# Vers les places : {counted(brought, 'membre en attente', 'membres en attente')}")
+    return block
+
+
+def update_message(plan: UpdatePlan, channel_id: int, message_id: int) -> tuple[list[Embed], ui.View]:
+    """Build the summary of an update: what changes, who is told, the sessions left as they are, and the way to confirm.
+
+    The summary goes on in another embed of the same message when it outgrows one, between two blocks of lines.
+
+    Args:
+        plan (UpdatePlan): The update, worked out from what is stored.
+        channel_id (int): The channel of the published announcement.
+        message_id (int): The published message, which the confirmation names.
+
+    Returns:
+        tuple[list[Embed], ui.View]: The embeds and the buttons that confirm or give up.
+    """
+    steps = [step for step in plan.steps if step.kind != "frozen"]
+    blocks = [[f"Dans <#{channel_id}>. Les inscriptions et leur ordre d'arrivée restent.", ""]]
+    blocks += [_changed_block(step) for step in steps]
+    if plan.text_changes:
+        blocks.append([f"💬 Texte de l'annonce : {', '.join(plan.text_changes)}"])
+    footer = [""]
+    held = [f"{step.before.emoji} {plain(step.before.name)}" for step in plan.steps if step.kind == "frozen" and step.before]
+    if len(held) == 1:
+        footer.append(f"-# Déjà commencée, laissée telle quelle : {held[0]}")
+    elif held:
+        footer.append(f"-# Déjà commencées, laissées telles quelles : {' · '.join(held)}")
+    footer.append(f"-# Annonce : {grouped(announcement_length(plan.message))} / 2 000 caractères, toutes places prises")
+    blocks.append(footer)
+
+    chunks: list[list[str]] = [[]]
+    for block in blocks:
+        if chunks[-1] and len("\n".join([*chunks[-1], *block])) > _EMBED_CHARS:
+            chunks.append([])
+            block = block[1:] if block[0] == "" else block  # a blank line does not open an embed
+        chunks[-1].extend(block)
+    title = f"🔄 Mettre à jour l'annonce · {counted(len(steps) + bool(plan.text_changes), 'changement', 'changements')}"
+    embeds = [
+        Embed(title=title if n == 0 else None, description="\n".join(chunk), colour=BRAND_COLOUR)
+        for n, chunk in enumerate(chunks)
+    ]
+    view = ui.View()
+    view.add_item(
+        ui.Button(
+            label="✅ Confirmer la mise à jour",
+            style=ButtonStyle.success,
+            custom_id=f"fmd:upd-ok:{message_id}:{plan.digest(message_id)}",
+        )
+    )
+    view.add_item(UpdateKeep())
+    return embeds, view
 
 
 async def _refuse(interaction: Interaction, text: str, kind: RefusalKind) -> None:
@@ -269,6 +372,29 @@ def _channel_of(guild: Guild, channel_id: int) -> TextChannel | None:
     """Read a text or announcement channel of the server by its ID, or None when it has no such channel."""
     channel = guild.get_channel(channel_id)
     return channel if isinstance(channel, TextChannel) else None
+
+
+async def _summarise_update(interaction: Interaction[Any]) -> None:
+    """Show what updating the published announcement with the draft would change, or say why it cannot be done.
+
+    Nothing is changed: the summary is worked out from what is stored, and the buttons act on it later.
+    """
+    assert interaction.guild is not None
+    guild = interaction.guild
+    last = formations.current_published(guild.id)
+    if last is None:
+        await _refuse(interaction, f"{_UPDATE_CHANGED} {_NOT_CHANGED}", RefusalKind.DRAFT_NOT_READY)
+        return
+    plan = plan_update(last.message, _live(guild, stored_draft(guild.id)), now=datetime.now(UTC))
+    if isinstance(plan, str):
+        await _refuse(interaction, plan, RefusalKind.DRAFT_NOT_READY)
+        return
+    logger.info(
+        f"[{COMMAND}] update summary guild_id={guild.id} user_id={interaction.user.id} message_id={last.message_id} "
+        f"steps={len(plan.steps)} text_changes={len(plan.text_changes)}"
+    )
+    embeds, view = update_message(plan, last.channel_id, last.message_id)
+    await show(interaction, "", None, view, embeds=embeds)
 
 
 class DraftTextForm(ui.Modal):
@@ -326,11 +452,14 @@ class DraftTextForm(ui.Modal):
         await show(interaction, content, embed, view)
 
 
-class DraftButton(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:(?P<action>add|edit|remove|text|preview|publish|show)"):
+class DraftButton(
+    ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:(?P<action>add|edit|remove|text|preview|publish|show|update)"
+):
     """A button of the brouillon; its custom ID names the action and the draft is read at each click.
 
     Attributes:
-        action (Action): What the button does: ``add``, ``edit``, ``remove``, ``text``, ``preview``, ``publish`` or ``show``.
+        action (Action): What the button does: ``add``, ``edit``, ``remove``, ``text``, ``preview``, ``publish``, ``show`` or
+            ``update``.
     """
 
     interaction_check = click_check(COMMAND, FORMATION_ROLES)
@@ -347,7 +476,7 @@ class DraftButton(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:(?P<action>
         """Build the button.
 
         Args:
-            action (Action): ``add``, ``edit``, ``remove``, ``text``, ``preview``, ``publish`` or ``show``.
+            action (Action): ``add``, ``edit``, ``remove``, ``text``, ``preview``, ``publish``, ``show`` or ``update``.
             label (str | None): The text to show instead of the action's own, as "Autre formation" does for ``add``.
             style (ButtonStyle | None): The style to show instead of the action's own.
             disabled (bool): Whether the button takes no click, as Publier does with no session.
@@ -366,7 +495,10 @@ class DraftButton(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:(?P<action>
 
     @override
     async def callback(self, interaction: Interaction[Any]) -> None:
-        """Ask which training to add or which session to change or remove, open the text form, preview, publish, or show."""
+        """Ask which training to add or which session to change or remove, open the text form, preview, publish, or show.
+
+        Update shows what an update of the published announcement would change.
+        """
         assert interaction.guild is not None
         guild = interaction.guild
         draft = stored_draft(guild.id)
@@ -385,6 +517,8 @@ class DraftButton(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:(?P<action>
             await self._preview(interaction, _live(guild, draft))
         elif self.action == "publish":
             await ask_channel(interaction, warn=True)
+        elif self.action == "update":
+            await _summarise_update(interaction)
         else:
             content, embed, view = draft_message(guild, draft)
             await show(interaction, content, embed, view)
@@ -392,7 +526,7 @@ class DraftButton(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:(?P<action>
     async def _preview(self, interaction: Interaction[Any], draft: FmMessageDraft) -> None:
         """Show the announcement as Publier posts it, privately and notifying nobody, or say it is too long."""
         mentions = AllowedMentions.none()
-        if len(render_message(draft)) > ANNOUNCEMENT_MAX_CHARS:
+        if announcement_length(draft) > ANNOUNCEMENT_MAX_CHARS:
             text = (
                 f"L'annonce fait {_length(draft)} caractères, Discord en accepte 2 000 : elle ne peut pas être publiée ainsi."
             )
@@ -421,8 +555,8 @@ async def ask_channel(interaction: Interaction[Any], *, warn: bool) -> None:
         return
     last = formations.current_published(guild.id)
     # Only an announcement with sessions still to come loses sign-ups: last week's, all held, is no cause to warn.
-    if warn and has_sessions_to_come(guild.id):
-        content, view = republish_message()
+    if warn and last is not None and has_sessions_to_come(guild.id):
+        content, view = republish_message(last.channel_id)
     else:
         content, view = publish_message(_channel_of(guild, last.channel_id) if last else None)
     await show(interaction, content, None, view)
@@ -519,13 +653,13 @@ class PublishGo(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:pub-go:(?P<ch
 
 
 class PublishConfirm(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:pub-ok"):
-    """The button that goes on with Publier despite the warning: it asks where to publish, after the usual checks."""
+    """The button that goes on with a new announcement despite the warning: it asks where to publish, after the usual checks."""
 
     interaction_check = click_check(COMMAND, FORMATION_ROLES)
 
     def __init__(self) -> None:
         """Build the button."""
-        super().__init__(ui.Button(label="Publier quand même", style=ButtonStyle.danger, custom_id="fmd:pub-ok"))
+        super().__init__(ui.Button(label="📣 Nouvelle annonce", style=ButtonStyle.danger, custom_id="fmd:pub-ok"))
 
     @override
     @classmethod
@@ -559,6 +693,29 @@ class PublishKeep(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:pub-no"):
         """Show the brouillon again, with the word that nothing was published."""
         assert interaction.guild is not None
         content, embed, view = draft_message(interaction.guild, stored_draft(interaction.guild.id), note=_NOT_PUBLISHED)
+        await show(interaction, content, embed, view)
+
+
+class UpdateKeep(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:upd-no"):
+    """The button that gives up the update after its summary."""
+
+    interaction_check = click_check(COMMAND, FORMATION_ROLES)
+
+    def __init__(self) -> None:
+        """Build the button."""
+        super().__init__(ui.Button(label="Annuler", style=ButtonStyle.secondary, custom_id="fmd:upd-no"))
+
+    @override
+    @classmethod
+    async def from_custom_id(cls, interaction: Interaction[Any], item: ui.Item[Any], match: re.Match[str], /) -> UpdateKeep:
+        """Rebuild the button from its custom ID."""
+        return cls()
+
+    @override
+    async def callback(self, interaction: Interaction[Any]) -> None:
+        """Show the brouillon again, with the word that nothing was changed."""
+        assert interaction.guild is not None
+        content, embed, view = draft_message(interaction.guild, stored_draft(interaction.guild.id), note=_NOT_CHANGED)
         await show(interaction, content, embed, view)
 
 
@@ -743,6 +900,7 @@ DRAFT_ITEMS: Final = (
     PublishGo,
     PublishConfirm,
     PublishKeep,
+    UpdateKeep,
     SessionList,
     SessionListPage,
     SessionRemove,

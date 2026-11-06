@@ -16,7 +16,7 @@ from fablabot.services import catalogue
 from fablabot.services.catalogue import TemplateNameTakenError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
     import re
     from types import CoroutineType
 
@@ -239,13 +239,32 @@ def deletion_message(template: TrainingTemplate) -> tuple[str, ui.View]:
     return content, view
 
 
-async def show(interaction: Interaction, content: str, embed: Embed | None, view: ui.View) -> None:
-    """Show a screen in place of the message the click came from, or in a new private message when there is none."""
+async def show(
+    interaction: Interaction, content: str, embed: Embed | None, view: ui.View, *, embeds: Sequence[Embed] = ()
+) -> None:
+    """Show a screen in place of the message the click came from, or in a new private message when there is none.
+
+    Args:
+        interaction (Interaction): The click.
+        content (str): The text above the screen, empty for none.
+        embed (Embed | None): The screen's embed, when it has one.
+        view (ui.View): The buttons and menus.
+        embeds (Sequence[Embed]): The embeds of a screen that spans several; used instead of ``embed`` when given.
+    """
     mentions = AllowedMentions.none()
     if interaction.message is not None:
-        await interaction.response.edit_message(content=content or None, embed=embed, view=view, allowed_mentions=mentions)
+        if embeds:
+            await interaction.response.edit_message(
+                content=content or None, embeds=list(embeds), view=view, allowed_mentions=mentions
+            )
+        else:
+            await interaction.response.edit_message(content=content or None, embed=embed, view=view, allowed_mentions=mentions)
         return
-    extra: dict[str, Any] = {} if embed is None else {"embed": embed}
+    extra: dict[str, Any] = {}
+    if embeds:
+        extra["embeds"] = list(embeds)
+    elif embed is not None:
+        extra["embed"] = embed
     await interaction.response.send_message(content or None, view=view, ephemeral=True, allowed_mentions=mentions, **extra)
 
 

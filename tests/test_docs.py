@@ -979,12 +979,26 @@ def test_user_guide_says_publier_warns_before_a_second_announcement() -> None:
     guide = _section(_read("docs/USERGUIDE.md"), "### The draft")
     for detail in (
         "still has sessions to come and the draft has changed since",
-        "first warns that posting creates a new announcement",
+        "first warns, naming the channel of the announcement, with three buttons",
         "the sign-ups on the old one stop counting",
-        "**Publier quand même** goes on to the channel question",
+        "**Nouvelle annonce** goes on to the channel question",
         "**Annuler** posts nothing and changes nothing",
         "A new week's draft, once every session of the last announcement has started, gets no warning",
         "`/fm publish` does not ask: while the published announcement still has sessions to come, "
         "it posts nothing and points to `/fm brouillon`",
+    ):
+        assert detail in guide, detail
+
+
+def test_user_guide_says_what_mettre_a_jour_l_annonce_shows_and_refuses() -> None:
+    """The draft section says what the update summary lists, the sessions left as they are, the refusals and the length."""
+    guide = _section(_read("docs/USERGUIDE.md"), "### The draft")
+    for detail in (
+        "**Mettre à jour l'annonce** changes nothing either",
+        "A session is recognised by its emoji",
+        "A session that has started, or starts within 5 minutes, is left as it is whatever the draft says",
+        "a draft that already says what the announcement says",
+        "a result past 2 000 characters",
+        "counted with every seat taken",
     ):
         assert detail in guide, detail
