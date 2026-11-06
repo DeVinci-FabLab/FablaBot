@@ -96,7 +96,7 @@ def test_the_embed_has_the_layout_of_the_validated_example() -> None:
     """Two warnings give the orange embed with its three inline blocks, its settings, its two problems and its footer."""
     embed = build_info(_facts(), [LOG_CLOSED, USER_CLOSED])
 
-    assert embed.title == "🩺 FablaBot : 2 points à corriger sur ce serveur"
+    assert embed.title == "📊 FablaBot : 2 points à corriger sur ce serveur"
     assert embed.colour is not None
     assert embed.colour.value == ORANGE
     assert embed.description == "✅ Le bot tourne normalement · ⚠️ ce serveur a 2 avertissements, 0 bloquant."
@@ -123,7 +123,7 @@ def test_a_server_with_no_problem_is_green_and_has_no_list() -> None:
     """Nothing to fix gives the green title, the green colour and no problem field."""
     embed = build_info(_facts(), [])
 
-    assert embed.title == "🩺 FablaBot : tout va bien"
+    assert embed.title == "📊 FablaBot : tout va bien"
     assert embed.colour is not None
     assert embed.colour.value == GREEN
     assert embed.description is not None
@@ -135,7 +135,7 @@ def test_one_warning_reads_in_the_singular() -> None:
     """One warning is one point, and the orange colour holds."""
     embed = build_info(_facts(), [LOG_CLOSED])
 
-    assert embed.title == "🩺 FablaBot : 1 point à corriger sur ce serveur"
+    assert embed.title == "📊 FablaBot : 1 point à corriger sur ce serveur"
     assert embed.colour is not None
     assert embed.colour.value == ORANGE
     assert embed.description == "✅ Le bot tourne normalement · ⚠️ ce serveur a 1 avertissement, 0 bloquant."
@@ -145,7 +145,7 @@ def test_anything_that_blocks_makes_the_embed_red_and_is_said_in_words() -> None
     """A blocking problem turns the embed red, comes before the warnings, and says "bloquant" in text, not by colour alone."""
     embed = build_info(_facts(), [LOG_CLOSED, BLOCKING, USER_CLOSED])
 
-    assert embed.title == "🩺 FablaBot : 1 point bloquant sur ce serveur"
+    assert embed.title == "📊 FablaBot : 1 point bloquant sur ce serveur"
     assert embed.colour is not None
     assert embed.colour.value == RED
     assert embed.description == "✅ Le bot tourne normalement · ❌ ce serveur a 2 avertissements, 1 bloquant."
@@ -158,7 +158,7 @@ def test_two_blocking_problems_read_in_the_plural() -> None:
     """Two blocking problems are two points bloquants."""
     embed = build_info(_facts(), [BLOCKING, Problem("log_channel_missing")])
 
-    assert embed.title == "🩺 FablaBot : 2 points bloquants sur ce serveur"
+    assert embed.title == "📊 FablaBot : 2 points bloquants sur ce serveur"
 
 
 def test_the_footer_has_no_revision_when_the_image_gives_none() -> None:
@@ -474,7 +474,7 @@ async def test_each_allowed_role_gets_a_private_embed_in_any_channel(simcord_env
 
     embed = _embed(await _info(simcord_env, who))
 
-    assert (embed.title or "").startswith("🩺 FablaBot")
+    assert (embed.title or "").startswith("📊 FablaBot")
 
 
 def test_the_allowed_roles_are_respo_numerique_and_the_admin_roles() -> None:
@@ -521,7 +521,7 @@ async def test_a_ready_server_is_green_with_the_facts_of_the_instance(
     embed = _embed(await _info(simcord_env, who))
 
     assert guild.id == GUILD
-    assert embed.title == "🩺 FablaBot : tout va bien"
+    assert embed.title == "📊 FablaBot : tout va bien"
     assert embed.colour is not None
     assert embed.colour.value == GREEN
     fields = _fields(embed)
@@ -544,7 +544,7 @@ async def test_a_blocking_problem_is_red_and_told_in_french_with_its_fix(simcord
 
     embed = _embed(await _info(simcord_env, who))
 
-    assert embed.title == "🩺 FablaBot : 1 point bloquant sur ce serveur"
+    assert embed.title == "📊 FablaBot : 1 point bloquant sur ce serveur"
     assert embed.colour is not None
     assert embed.colour.value == RED
     value = _fields(embed)["🔍 À corriger sur ce serveur"]
@@ -577,7 +577,7 @@ async def test_info_not_allowed_in_integrations_is_reported_at_start_and_by_info
     assert codes(caplog) == ["integrations_no_role"]
     assert "severity=blocking" in problems(caplog)[0]
     assert "detail=[/info]" in problems(caplog)[0]
-    assert embed.title == "🩺 FablaBot : 1 point bloquant sur ce serveur"
+    assert embed.title == "📊 FablaBot : 1 point bloquant sur ce serveur"
     assert embed.colour is not None
     assert embed.colour.value == RED
     assert _fields(embed)["🔍 À corriger sur ce serveur"] == (
@@ -596,7 +596,7 @@ async def test_a_warning_alone_is_orange(simcord_env: simcord.Env) -> None:
 
     embed = _embed(await _info(simcord_env, who))
 
-    assert embed.title == "🩺 FablaBot : 1 point à corriger sur ce serveur"
+    assert embed.title == "📊 FablaBot : 1 point à corriger sur ce serveur"
     assert embed.colour is not None
     assert embed.colour.value == ORANGE
     assert "Pôle Projet" in _fields(embed)["🔍 À corriger sur ce serveur"]
@@ -625,7 +625,7 @@ async def test_nothing_of_another_server_shows(simcord_env: simcord.Env) -> None
     embed = _embed(await _info(simcord_env, who))
 
     text = _text(embed)
-    assert embed.title == "🩺 FablaBot : tout va bien"
+    assert embed.title == "📊 FablaBot : tout va bien"
     assert "À corriger" not in " ".join(_fields(embed))
     assert "**2** serveurs servis" in text
     assert str(OTHER) not in text
@@ -660,7 +660,7 @@ async def test_a_stored_log_channel_that_is_gone_is_not_shown_as_set(simcord_env
 
     assert "Logs : aucun salon" in _fields(embed)["⚙️ Réglages de ce serveur"]
     assert str(GONE_CHANNEL) not in _text(embed)
-    assert embed.title == "🩺 FablaBot : 1 point bloquant sur ce serveur"
+    assert embed.title == "📊 FablaBot : 1 point bloquant sur ce serveur"
 
 
 async def test_no_member_name_is_shown(simcord_env: simcord.Env) -> None:

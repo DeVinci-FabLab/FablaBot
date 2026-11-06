@@ -156,7 +156,7 @@ def build_info(facts: Facts, problems: Sequence[Problem]) -> Embed:
         title, colour, mark = "FablaBot : tout va bien", GREEN, ""
     counts = f"{counted(warnings, 'avertissement', 'avertissements')}, {counted(blocking, 'bloquant', 'bloquants')}"
     verdict = f"{mark} ce serveur a {counts}." if mark else "ce serveur n'a aucun problème."
-    embed = Embed(title=f"🩺 {title}", description=f"✅ Le bot tourne normalement · {verdict}", colour=colour)
+    embed = Embed(title=f"📊 {title}", description=f"✅ Le bot tourne normalement · {verdict}", colour=colour)
 
     bot = [f"Version **{facts.version}**", f"En ligne depuis **{_duration(facts.uptime)}**"]
     if facts.latency_ms is not None:
