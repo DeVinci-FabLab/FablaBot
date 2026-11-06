@@ -57,6 +57,7 @@ from fablabot.helpers.formation import (
     start_appel,
 )
 from fablabot.helpers.formation.attendance import appel_message
+from fablabot.helpers.formation.catalogue import trainer_id
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.safe_discord_operations import retract_unsaved_post
 from fablabot.helpers.utils import RefusalKind, counted, ensure_command_context, is_valid_emoji, log_refusal
@@ -623,8 +624,14 @@ class FormationManagement(commands.Cog):
         content = render_message(draft)
 
         try:
-            # Staff type the intro, so it may not reach beyond the chosen role: the bot's own rights must not ping everyone.
-            mentions = AllowedMentions(everyone=False, roles=[Object(draft.role_id)] if draft.role_id else False, users=True)
+            # Staff type the intro, so it may not reach beyond the chosen role and the trainers: the bot's own rights
+            # must not ping everyone, nor anyone named in the text.
+            trainers = {found for fm in draft.fms if (found := trainer_id(fm.trainer_mention)) is not None}
+            mentions = AllowedMentions(
+                everyone=False,
+                roles=[Object(draft.role_id)] if draft.role_id else False,
+                users=[Object(user_id) for user_id in sorted(trainers)],
+            )
             msg = await channel.send(content, suppress_embeds=True, allowed_mentions=mentions)
         except Exception:
             logger.exception(f"Guild {interaction.guild.id} failed to publish the formations draft in {channel!r}.")

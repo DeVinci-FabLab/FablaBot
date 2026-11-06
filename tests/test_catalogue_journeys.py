@@ -1455,3 +1455,17 @@ async def test_apercu_shows_a_role_the_server_lost_as_publier_posts_it(lab: Lab)
 
     assert "<@&999999>" not in preview.response.content
     assert preview.response.content == render_message(replace(draft, role_id=0))
+
+
+async def test_publier_pings_the_trainers_but_nobody_typed_in_the_intro(lab: Lab) -> None:
+    """A user mention typed in the intro is posted as text and pings nobody; the sessions' trainers are pinged."""
+    _stage(lab, _three(lab), intro=f"Salut <@{lab.respo.id}> et <@{lab.admin.id}>")
+
+    await _published_via_publier(lab, lab.announce)
+
+    posted = lab.announce.last_message
+    assert posted is not None
+    assert f"<@{lab.respo.id}>" in posted.content
+    sent = lab.env.backend.get_message(lab.announce.id, posted.id)
+    assert sent.ping_user_ids == [lab.plain.id]
+    assert sent.ping_role_ids == [lab.notified.id]

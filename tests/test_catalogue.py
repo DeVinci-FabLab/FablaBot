@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from fablabot.helpers.formation.catalogue import MAX_SEATS, MIN_SEATS, read_seats, template_fields
+from fablabot.helpers.formation.catalogue import MAX_SEATS, MIN_SEATS, read_seats, template_fields, trainer_id
 from fablabot.models import TemplateFields
 
 
@@ -71,3 +71,12 @@ def test_a_template_form_keeps_the_limits_inclusive() -> None:
 def test_a_template_form_without_oui_or_non_is_refused_not_read_as_a_choice(chosen: str) -> None:
     """Anything but the menu's Oui or Non is refused with the field named, never defaulted."""
     assert template_fields("Soudure", "1 h", "4", "", chosen) == "Excusable : à choisir."
+
+
+@pytest.mark.parametrize(
+    ("mention", "member"),
+    [("<@123>", 123), (" <@!456> ", 456), ("<@&789>", None), ("123", None), ("<@1><@2>", None), ("", None)],
+)
+def test_a_trainer_mention_names_one_member(mention: str, member: int | None) -> None:
+    """A stored user mention gives its member's ID; a role mention, a bare number or two mentions give none."""
+    assert trainer_id(mention) == member

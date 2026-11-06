@@ -13,6 +13,7 @@ _NAME_CHARS: Final = 100
 _DURATION_CHARS: Final = 50
 _DESCRIPTION_CHARS: Final = 500
 _WHOLE_NUMBER: Final = re.compile(r"[0-9]+")
+_USER_MENTION: Final = re.compile(r"<@!?([0-9]{1,19})>")
 EXCUSABLE_YES: Final = "Oui"
 EXCUSABLE_NO: Final = "Non"
 
@@ -32,6 +33,19 @@ def read_seats(text: str) -> int | None:
         return None
     seats = int(typed)
     return seats if MIN_SEATS <= seats <= MAX_SEATS else None
+
+
+def trainer_id(mention: str) -> int | None:
+    """Read the ID of the member a session's trainer mention names.
+
+    Args:
+        mention (str): The stored mention, such as ``<@123>``.
+
+    Returns:
+        int | None: The member's ID, or None when the text is not a user mention.
+    """
+    found = _USER_MENTION.fullmatch(mention.strip())
+    return int(found[1]) if found else None
 
 
 def template_fields(name: str, duration: str, seats: str, description: str, excusable: str) -> TemplateFields | str:
