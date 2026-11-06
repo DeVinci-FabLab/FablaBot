@@ -120,7 +120,7 @@ def test_the_previous_release_opens_the_file_and_the_next_start_moves_it_forward
 def test_going_back_from_the_catalogue_drops_the_templates_only() -> None:
     """The first run takes the templates away and leaves every sign-up, temporary admin, check and count."""
     _fill()
-    _write("INSERT INTO training_template VALUES (NULL, 5, ?, '1h', 1, '', 1)")
+    _write("INSERT INTO training_template VALUES (NULL, 5, ?, 'key', '1h', 1, '', 1)")
 
     assert downgrade_schema.downgrade(FILE) == 3
 

@@ -34,6 +34,16 @@ def _values(fields: TemplateFields) -> tuple[str, str, int, str, int]:
     return (fields.name, fields.duration, fields.seats, fields.description, int(fields.excusable))
 
 
+def _key(name: str) -> str:
+    """Give the name a server compares templates by: casefolded, so "Électronique" and "électronique" are one name."""
+    return name.casefold()
+
+
+def _stored(fields: TemplateFields) -> tuple[str, str, str, int, str, int]:
+    """Give the column values to write for a template: its name, the name's key, then the rest in table order."""
+    return (fields.name, _key(fields.name), fields.duration, fields.seats, fields.description, int(fields.excusable))
+
+
 def _trimmed(fields: TemplateFields) -> TemplateFields:
     """Give the fields with the spaces around the name removed, so "Soudure" and "Soudure " are one name.
 
@@ -61,9 +71,7 @@ def list_templates(guild_id: int) -> list[TrainingTemplate]:
     Returns:
         list[TrainingTemplate]: Its templates.
     """
-    rows = db.connection().execute(
-        "SELECT * FROM training_template WHERE guild_id = ? ORDER BY name COLLATE NOCASE, id", (guild_id,)
-    )
+    rows = db.connection().execute("SELECT * FROM training_template WHERE guild_id = ? ORDER BY name_key, id", (guild_id,))
     return _rows(rows)
 
 
@@ -97,7 +105,7 @@ def find_by_name(guild_id: int, name: str) -> TrainingTemplate | None:
     """
     row = (
         db.connection()
-        .execute("SELECT * FROM training_template WHERE guild_id = ? AND name = ? COLLATE NOCASE", (guild_id, name.strip()))
+        .execute("SELECT * FROM training_template WHERE guild_id = ? AND name_key = ?", (guild_id, _key(name.strip())))
         .fetchone()
     )
     return _template(row) if row else None
@@ -137,9 +145,9 @@ def create_template(guild_id: int, fields: TemplateFields) -> TrainingTemplate:
     try:
         with db.transaction() as conn:
             template_id = conn.execute(
-                "INSERT INTO training_template (guild_id, name, duration, seats, description, excusable) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (guild_id, *_values(fields)),
+                "INSERT INTO training_template (guild_id, name, name_key, duration, seats, description, excusable) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (guild_id, *_stored(fields)),
             ).lastrowid
     except sqlite3.IntegrityError as error:
         if "UNIQUE" not in str(error):
@@ -169,10 +177,10 @@ def update_template(guild_id: int, template_id: int, fields: TemplateFields, *, 
     try:
         with db.transaction() as conn:
             changed = conn.execute(
-                "UPDATE training_template SET name = ?, duration = ?, seats = ?, description = ?, excusable = ? "
+                "UPDATE training_template SET name = ?, name_key = ?, duration = ?, seats = ?, description = ?, excusable = ? "
                 "WHERE guild_id = ? AND id = ? "
                 "AND name = ? AND duration = ? AND seats = ? AND description = ? AND excusable = ?",
-                (*_values(fields), guild_id, template_id, *_values(expected)),
+                (*_stored(fields), guild_id, template_id, *_values(expected)),
             ).rowcount
     except sqlite3.IntegrityError as error:
         if "UNIQUE" not in str(error):

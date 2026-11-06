@@ -74,6 +74,22 @@ def test_a_name_is_unique_on_a_server_whatever_the_case() -> None:
     assert _srg(GUILD_B).guild_id == GUILD_B
 
 
+@pytest.mark.parametrize(("stored", "again"), [("Électronique", "électronique"), ("Straße", "STRASSE"), ("Œuvre", "œUVRE")])
+def test_a_name_is_unique_whatever_the_case_of_an_accented_letter(stored: str, again: str) -> None:
+    """Names that differ only in the case of an accented letter are one name: the second is refused, found as the first."""
+    first = _srg(name=stored)
+    other = _srg(name="Soudure")
+
+    with pytest.raises(TemplateNameTakenError):
+        _srg(name=again)
+    with pytest.raises(TemplateNameTakenError):
+        catalogue.update_template(GUILD_A, other.id, TemplateFields(again, "1h", 10, "", False), expected=other.fields)
+
+    assert [t.fields.name for t in catalogue.list_templates(GUILD_A)] == sorted([stored, "Soudure"], key=str.casefold)
+    assert catalogue.find_by_name(GUILD_A, again) == first
+    assert catalogue.get_template(GUILD_A, other.id) == other
+
+
 def test_renaming_onto_another_template_is_refused_and_changes_nothing() -> None:
     """An update that takes another template's name raises, and both templates stay as they were."""
     srg = _srg()

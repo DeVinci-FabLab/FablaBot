@@ -277,6 +277,18 @@ async def test_a_template_form_refuses_and_stores_nothing(lab: Lab, given: dict[
     assert _stored() == before
 
 
+async def test_a_name_taken_in_another_case_of_an_accented_letter_is_refused(lab: Lab) -> None:
+    """The form refuses "électronique" when "Électronique" is stored, and the server keeps one template."""
+    _template("Électronique")
+    before = _stored()
+    listing = await lab.modeles(lab.respo)
+
+    refused = await _new_template(lab.respo, listing, {"Nom": "électronique"})
+
+    assert refused.response.content == "Un modèle s'appelle déjà **électronique** sur ce serveur. Rien n'a été enregistré."
+    assert _stored() == before
+
+
 async def test_a_name_taken_in_another_server_is_free_here(lab: Lab) -> None:
     """Two servers may each have a template of the same name."""
     _template("Brodeuse", guild_id=OTHER_GUILD_ID)
