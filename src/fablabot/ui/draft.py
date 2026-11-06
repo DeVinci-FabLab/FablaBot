@@ -88,6 +88,17 @@ def publish_refusal(draft: FmMessageDraft) -> str | None:
     return f"{reason} {_NOT_PUBLISHED}"
 
 
+def _published_refusal(guild_id: int, draft: FmMessageDraft) -> str | None:
+    """Tell that the draft is the announcement already published, whose sign-ups a second post would stop counting."""
+    last = formations.current_published(guild_id)
+    if last is None or last.message != draft:
+        return None
+    return (
+        f"Cette annonce est déjà publiée dans <#{last.channel_id}> : change le brouillon pour en publier une autre. "
+        f"{_NOT_PUBLISHED}"
+    )
+
+
 def draft_message(guild: Guild, draft: FmMessageDraft, *, note: str = "") -> tuple[str, Embed, ui.View]:
     """Build the brouillon: the sessions sorted by start, the announcement's length and the buttons that act on it.
 
@@ -264,7 +275,8 @@ class DraftButton(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:(?P<action>
         """Ask where to publish, the channel of the last announcement already chosen, unless the draft cannot be published."""
         assert interaction.guild is not None
         guild = interaction.guild
-        if (refusal := publish_refusal(_live(guild, draft))) is not None:
+        live = _live(guild, draft)
+        if (refusal := publish_refusal(live) or _published_refusal(guild.id, live)) is not None:
             await _refuse(interaction, refusal, RefusalKind.DRAFT_NOT_READY)
             return
         last = formations.current_published(guild.id)
@@ -347,7 +359,7 @@ class PublishGo(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:pub-go:(?P<ch
         assert interaction.guild is not None
         guild = interaction.guild
         draft = _live(guild, _stored(guild.id))
-        if (refusal := publish_refusal(draft)) is not None:
+        if (refusal := publish_refusal(draft) or _published_refusal(guild.id, draft)) is not None:
             await _refuse(interaction, refusal, RefusalKind.DRAFT_NOT_READY)
             return
         channel = _channel_of(guild, self.channel_id)

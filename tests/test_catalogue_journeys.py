@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 from conftest import LISTED_GUILD, OTHER_LISTED_GUILD, make_interaction, make_role
+import discord
 import pytest
 
 from fablabot.helpers.constants import PARIS_TZ, ErrorMessages, RoleNames
@@ -1027,20 +1028,20 @@ async def _published_via_publier(lab: Lab, channel: Any) -> Any:
 async def test_publier_posts_in_the_chosen_channel_like_fm_publish(lab: Lab) -> None:
     """Publier posts the same message with the same reactions as `/fm publish` and stores it as the published one."""
     _stage(lab, _three(lab))
-    await lab.show()
-    await lab.respo.slash(lab.commands, "fm publish", channel=lab.announce)
-    by_command = lab.announce.last_message
-    assert by_command is not None
 
     await _published_via_publier(lab, lab.elsewhere)
 
     by_button = lab.elsewhere.last_message
     assert by_button is not None
-    assert by_button.content == by_command.content
-    assert [str(r.emoji) for r in by_button.reactions] == [str(r.emoji) for r in by_command.reactions] == ["🧡", "💛", "💚"]
     stored = formations.current_published(GUILD_ID)
     assert stored is not None
     assert (stored.message_id, stored.channel_id) == (by_button.id, lab.elsewhere.id)
+    await lab.show()
+    await lab.respo.slash(lab.commands, "fm publish", channel=lab.announce)
+    by_command = lab.announce.last_message
+    assert by_command is not None
+    assert by_button.content == by_command.content
+    assert [str(r.emoji) for r in by_button.reactions] == [str(r.emoji) for r in by_command.reactions] == ["🧡", "💛", "💚"]
 
 
 async def test_publier_pings_the_chosen_role_and_never_everyone(lab: Lab) -> None:
@@ -1057,6 +1058,90 @@ async def test_publier_pings_the_chosen_role_and_never_everyone(lab: Lab) -> Non
     assert not sent.mention_everyone
     assert sent.ping_role_ids == [lab.notified.id]
     assert sent.ping_user_ids == [lab.plain.id]
+
+
+async def _asked_where(lab: Lab, channel: Any, who: Any = None) -> Any:
+    """Open the brouillon as a member, click Publier and choose the channel; return the question with its Publier button."""
+    who = who or lab.respo
+    listing = await lab.brouillon(who)
+    asked = await who.click(listing.response, custom_id="fmd:publish")
+    return (await who.select(asked.response, [channel], custom_id="fmd:pub-ch")).response
+
+
+async def test_a_publier_left_open_elsewhere_is_refused_once_the_draft_is_posted(lab: Lab) -> None:
+    """A question another member left open is refused after the draft is posted; the posts and the current message stay."""
+    _stage(lab, _three(lab))
+    mine = await _asked_where(lab, lab.announce)
+    theirs = await _asked_where(lab, lab.announce, lab.admin)
+    await lab.respo.click(mine, custom_id=f"fmd:pub-go:{lab.announce.id}")
+    first = formations.current_published(GUILD_ID)
+    assert first is not None
+
+    again = await lab.admin.click(theirs, custom_id=f"fmd:pub-go:{lab.announce.id}")
+
+    assert again.ephemeral
+    assert again.response.content == (
+        f"Cette annonce est déjà publiée dans <#{lab.announce.id}> : change le brouillon pour en publier une autre. "
+        "Rien n'a été publié."
+    )
+    assert len(lab.announce.history()) == 1
+    assert formations.current_published(GUILD_ID) == first
+
+
+async def test_publier_with_a_changed_draft_after_a_post_publishes_again(lab: Lab) -> None:
+    """Once the draft changes, Publier posts it as a new announcement."""
+    draft = _stage(lab, _three(lab))
+    await _published_via_publier(lab, lab.announce)
+    formations.save_draft(GUILD_ID, replace(draft, intro="Autre intro"))
+
+    await _published_via_publier(lab, lab.announce)
+
+    assert len(lab.announce.history()) == 2
+
+
+async def test_publier_leaves_no_button_to_click_twice_on_the_question(lab: Lab) -> None:
+    """The click answers on the question itself, which no longer offers Publier and says where the post went."""
+    _stage(lab, _three(lab))
+    question = await _asked_where(lab, lab.announce)
+
+    await lab.respo.click(question, custom_id=f"fmd:pub-go:{lab.announce.id}")
+
+    left = lab.env.backend.get_message(question.message.channel.id, question.message.id)
+    assert left.content == f"📣 Annonce publiée dans <#{lab.announce.id}>."
+    assert not left.components
+
+
+async def test_a_publication_that_comes_while_another_is_posting_is_refused(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    """While one publication is still posting, a second one on the server is refused, so the announcement is posted once."""
+    _stage(lab, _three(lab))
+    question = await _asked_where(lab, lab.announce)
+    sending, release = asyncio.Event(), asyncio.Event()
+    real_send = discord.TextChannel.send
+
+    async def slow_send(self: Any, *args: Any, **kwargs: Any) -> Any:
+        sending.set()
+        await release.wait()
+        return await real_send(self, *args, **kwargs)
+
+    monkeypatch.setattr(discord.TextChannel, "send", slow_send)
+    first = asyncio.create_task(lab.respo.click(question, custom_id=f"fmd:pub-go:{lab.announce.id}"))
+    await asyncio.wait_for(sending.wait(), timeout=5)
+    bot: Any = lab.env.bot
+    cog = bot.get_cog("FormationManagement")
+    second = make_interaction(user_id=lab.admin.id, guild_id=GUILD_ID)
+    second.guild = _guild(lab)
+
+    try:
+        await asyncio.wait_for(cog.publish_draft(second, _guild(lab).get_channel(lab.announce.id)), timeout=5)
+    finally:
+        release.set()
+    await first
+
+    refusal = "Une publication est déjà en cours sur ce serveur. Rien n'a été publié."
+    assert second.response.send_message.await_args.args == (refusal,)
+    assert second.response.send_message.await_args.kwargs["ephemeral"]
+    second.response.defer.assert_not_awaited()
+    assert len(lab.announce.history()) == 1
 
 
 _BAD_DRAFTS = {

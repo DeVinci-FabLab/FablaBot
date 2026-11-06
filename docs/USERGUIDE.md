@@ -70,7 +70,7 @@ A session copies a template when it is added: the template fills in the form, an
 
 - **Intro / conclusion** opens a form for the intro, the closing, the link of the form where members propose a training (left empty, it keeps the usual one) and the role to notify, which is required. Saving it keeps the sessions and the header.
 - **Aperçu** shows the announcement exactly as it will be posted, in a private message that notifies nobody.
-- **Publier** asks in which channel to post, starting on the channel of the last announcement, then posts the draft like `/fm publish`. It is greyed out while the draft has no session. It refuses, and posts nothing, when there is no session, no role chosen, a session that has already started, or an announcement past 2 000 characters.
+- **Publier** asks in which channel to post, starting on the channel of the last announcement, then posts the draft like `/fm publish`. It is greyed out while the draft has no session. It refuses, and posts nothing, when there is no session, no role chosen, a session that has already started, or an announcement past 2 000 characters. It also refuses a draft that is already the published announcement, or a publication that is still posting: a second post would stop counting the sign-ups on the first. Once posted, the question shows where the announcement went and no longer offers Publier.
 
 The length line counts the announcement as posted. It stops at 2 000 because the announcement is one Discord message, and Discord accepts no more in one; sign-ups are read from that one message. Past the limit the draft shows a warning: remove a session or shorten a description.
 

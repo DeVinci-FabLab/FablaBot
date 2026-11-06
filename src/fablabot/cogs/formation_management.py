@@ -16,8 +16,11 @@ from discord import (
     AllowedMentions,
     Embed,
     File,
+    HTTPException,
     Interaction,
+    InteractionType,
     Member,
+    Message,
     NotFound,
     Object,
     RawReactionActionEvent,
@@ -56,7 +59,7 @@ from fablabot.helpers.formation import (
 from fablabot.helpers.formation.attendance import appel_message
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.safe_discord_operations import retract_unsaved_post
-from fablabot.helpers.utils import counted, ensure_command_context, is_valid_emoji
+from fablabot.helpers.utils import RefusalKind, counted, ensure_command_context, is_valid_emoji, log_refusal
 from fablabot.logging_handlers import guild_log_context
 from fablabot.models import FmCommand, FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
 from fablabot.services import attendance, formations
@@ -123,6 +126,9 @@ class FormationManagement(commands.Cog):
         )
         self._reaction_lock = asyncio.Lock()
         self._published_locks: dict[int, asyncio.Lock] = {}
+        # Servers whose draft is being posted: no second post starts before the first is saved. Ceiling: in memory, which
+        # is enough as a post never outlives the process.
+        self._posting: set[int] = set()
         self._pending_update_tasks: dict[int, asyncio.Task] = {}
         # Servers asked for an update after the running one began: it runs once more when it ends.
         self._update_wanted: set[int] = set()
@@ -543,15 +549,76 @@ class FormationManagement(commands.Cog):
     async def publish_draft(self, interaction: Interaction, channel: TextChannel) -> None:
         """Post the draft in a channel with its reactions, store it as the published message and announce it later.
 
-        The caller has checked the roles and that the draft can be posted.
+        The caller has checked the roles and that the draft can be posted. One post runs at a time on a server: the
+        claim is taken before the first await and kept until the message is saved, so two clicks cannot both post.
 
         Args:
             interaction (Interaction): The Discord interaction context.
             channel (TextChannel): The target announcement channel.
         """
         assert interaction.guild is not None
+        guild_id = interaction.guild.id
+        if guild_id in self._posting:
+            log_refusal(logger, "fm.publish", interaction, RefusalKind.DRAFT_NOT_READY)
+            await interaction.response.send_message(
+                "Une publication est déjà en cours sur ce serveur. Rien n'a été publié.", ephemeral=True
+            )
+            return
+        self._posting.add(guild_id)
+        try:
+            posted = await self._post_draft(interaction, channel)
+        finally:
+            self._posting.discard(guild_id)
+        if posted is None:
+            await self._close_question(interaction, f"Rien n'a été publié dans {channel.mention}.")
+            return
+        msg, draft = posted
+
+        success_reactions = 0
+        for fm in draft.fms:
+            try:
+                await msg.add_reaction(fm.emoji)
+                success_reactions += 1
+            except Exception:
+                logger.exception(
+                    f"Guild {guild_id} failed to add reaction {fm.emoji!r} for formation {fm.name!r} in published message.",
+                )
+
+        logger.info(f"Guild {guild_id} published the formations draft in {channel}.")
+        await interaction.followup.send(
+            f"Message publié dans {channel.mention} (ID: `{msg.id}`) avec "
+            f"{success_reactions}/{len(draft.fms)} "
+            + ("réactions ajoutées." if success_reactions > 1 else "réaction ajoutée."),
+        )
+        await self._close_question(interaction, f"📣 Annonce publiée dans {channel.mention}.")
+
+        await asyncio.sleep(1.5 * 60 * 60)
+        with contextlib.suppress(Exception):
+            await msg.publish()
+
+        logger.info(f"Guild {guild_id} published the formations message as announcement.")
+        await interaction.followup.send("Message publié en mode annonce.")
+
+    async def _post_draft(self, interaction: Interaction, channel: TextChannel) -> tuple[Message, FmMessageDraft] | None:
+        """Send the draft to the channel and store it as the published message.
+
+        Args:
+            interaction (Interaction): The Discord interaction context.
+            channel (TextChannel): The target announcement channel.
+
+        Returns:
+            tuple[Message, FmMessageDraft] | None: The posted message and the draft it holds, or None when it failed
+                and the member has been told.
+        """
+        assert interaction.guild is not None
         draft = self.get_guild_draft(interaction.guild.id)
-        await interaction.response.defer(thinking=True)
+        if interaction.type is InteractionType.component:
+            # The click answers in place, which also takes the Publier button off the question for good.
+            await interaction.response.edit_message(
+                content=f"📣 Publication dans {channel.mention}…", view=None, allowed_mentions=AllowedMentions.none()
+            )
+        else:
+            await interaction.response.defer(thinking=True)
 
         content = render_message(draft)
 
@@ -562,7 +629,7 @@ class FormationManagement(commands.Cog):
         except Exception:
             logger.exception(f"Guild {interaction.guild.id} failed to publish the formations draft in {channel!r}.")
             await interaction.followup.send("Erreur pendant la publication du message.", ephemeral=True)
-            return
+            return None
 
         # Saved before the reactions: a reaction counts from the first one, and a refused save leaves nothing to undo.
         try:
@@ -577,32 +644,17 @@ class FormationManagement(commands.Cog):
         except sqlite3.Error:
             logger.exception(f"Guild {interaction.guild.id} could not save the published message {msg.id}; retracting it.")
             await interaction.followup.send(await retract_unsaved_post(logger, msg))
+            return None
+        return msg, draft
+
+    async def _close_question(self, interaction: Interaction, text: str) -> None:
+        """Say how the publication ended on the "where to publish" question a Publier click came from."""
+        if interaction.type is not InteractionType.component:
             return
-
-        success_reactions = 0
-        for fm in draft.fms:
-            try:
-                await msg.add_reaction(fm.emoji)
-                success_reactions += 1
-            except Exception:
-                logger.exception(
-                    f"Guild {interaction.guild.id} failed to add reaction {fm.emoji!r} "
-                    f"for formation {fm.name!r} in published message.",
-                )
-
-        logger.info(f"Guild {interaction.guild.id} published the formations draft in {channel}.")
-        await interaction.followup.send(
-            f"Message publié dans {channel.mention} (ID: `{msg.id}`) avec "
-            f"{success_reactions}/{len(draft.fms)} "
-            + ("réactions ajoutées." if success_reactions > 1 else "réaction ajoutée."),
-        )
-
-        await asyncio.sleep(1.5 * 60 * 60)
-        with contextlib.suppress(Exception):
-            await msg.publish()
-
-        logger.info(f"Guild {interaction.guild.id} published the formations message as announcement.")
-        await interaction.followup.send("Message publié en mode annonce.")
+        try:
+            await interaction.edit_original_response(content=text, view=None, allowed_mentions=AllowedMentions.none())
+        except HTTPException:
+            logger.warning(f"Guild {interaction.guild_id} could not close the question of the publication.")
 
     @fm_group.command(
         name="export", description="Exporter la liste des membres ayant (dé)réagi aux émojis des FMs.", extras=access(_ACCESS)
