@@ -247,3 +247,15 @@ def test_a_check_failure_is_not_a_taken_name() -> None:
 
     assert not isinstance(raised.value, TemplateNameTakenError)
     assert catalogue.list_templates(GUILD_A) == []
+
+
+def test_a_name_is_unique_whatever_the_unicode_form_of_its_accents() -> None:
+    """A name typed with a composed accent and the same name with a combining accent are one name."""
+    composed, combining = "Électronique", "Électronique"
+    first = _srg(name=composed)
+
+    with pytest.raises(TemplateNameTakenError):
+        _srg(name=combining)
+
+    assert catalogue.find_by_name(GUILD_A, combining) == first
+    assert catalogue.search_templates(GUILD_A, "Élec") == [first]

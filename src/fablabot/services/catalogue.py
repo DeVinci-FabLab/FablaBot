@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 import sqlite3
 from typing import TYPE_CHECKING
+import unicodedata
 
 from fablabot import db
 from fablabot.models.catalogue import TemplateFields, TrainingTemplate
@@ -35,8 +36,8 @@ def _values(fields: TemplateFields) -> tuple[str, str, int, str, int]:
 
 
 def _key(name: str) -> str:
-    """Give the name a server compares templates by: casefolded, so "Électronique" and "électronique" are one name."""
-    return name.casefold()
+    """Give the name a server compares templates by: composed, then casefolded, whatever the accents' form or case."""
+    return unicodedata.normalize("NFC", name).casefold()
 
 
 def _stored(fields: TemplateFields) -> tuple[str, str, str, int, str, int]:
@@ -122,9 +123,9 @@ def search_templates(guild_id: int, text: str, *, limit: int = 25) -> list[Train
     Returns:
         list[TrainingTemplate]: The templates found.
     """
-    folded = text.strip().casefold()
+    folded = _key(text.strip())
     # Python folds accents' case, which SQLite's NOCASE does not; a server has tens of templates, not thousands.
-    return [template for template in list_templates(guild_id) if folded in template.fields.name.casefold()][:limit]
+    return [template for template in list_templates(guild_id) if folded in _key(template.fields.name)][:limit]
 
 
 def create_template(guild_id: int, fields: TemplateFields) -> TrainingTemplate:
