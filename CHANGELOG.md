@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.2](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.15.1...v0.15.2) (2026-11-06)
+
+
+### Bug Fixes
+
+* clearer refusals, tighter rights and steadier attendance after the last releases ([#176](https://github.com/DeVinci-FabLab/FablaBot/issues/176)) ([c9e1116](https://github.com/DeVinci-FabLab/FablaBot/commit/c9e1116ee1706f52b659ce0a61e28ef56dc28ca8))
+
 ## [0.15.1](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.15.0...v0.15.1) (2026-11-06)
 
 
