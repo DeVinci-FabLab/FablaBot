@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from functools import partial
 import logging
 import re
 from typing import TYPE_CHECKING, Final
@@ -130,10 +131,11 @@ def apply_retention(now: datetime, *, log_dir: Path, backups: Path) -> Retention
         log_files=_delete(old_log_files(log_dir, cutoff.astimezone(PARIS_TZ).date())),
         copies=_delete(old_copies(backups, cutoff)),
     )
+    english = partial(counted, zero_singular=False)
     logger.info(
-        f"Retention: {counted(report.summarised, 'training', 'trainings')} summarised; deleted "
-        f"{counted(report.messages, 'training message', 'training messages')}, "
-        f"{counted(report.reactions, 'reaction', 'reactions')}, {counted(report.log_files, 'log file', 'log files')} "
-        f"and {counted(report.copies, 'database copy', 'database copies')}."
+        f"Retention: {english(report.summarised, 'training', 'trainings')} summarised; deleted "
+        f"{english(report.messages, 'training message', 'training messages')}, "
+        f"{english(report.reactions, 'reaction', 'reactions')}, {english(report.log_files, 'log file', 'log files')} "
+        f"and {english(report.copies, 'database copy', 'database copies')}."
     )
     return report

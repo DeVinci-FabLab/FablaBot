@@ -481,18 +481,20 @@ def escape_md(text: str) -> str:
     return f"`{text}`"
 
 
-def counted(count: int, one: str, many: str) -> str:
+def counted(count: int, one: str, many: str, *, zero_singular: bool = True) -> str:
     """Write a count with its noun in the right number: ``1 action``, ``3 actions``, ``0 action``.
 
     Args:
         count (int): The count.
         one (str): The words for one, singular.
         many (str): The words for several, plural.
+        zero_singular (bool): French reads 0 in the singular; English (the logs) passes False to read ``0 actions``.
 
     Returns:
         str: The count followed by the matching words.
     """
-    return f"{count} {one if abs(count) <= 1 else many}"
+    singular = abs(count) <= 1 if zero_singular else abs(count) == 1
+    return f"{count} {one if singular else many}"
 
 
 def format_member_mention(member: Member) -> str:

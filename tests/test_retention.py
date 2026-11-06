@@ -565,6 +565,21 @@ def test_a_run_does_everything_and_names_nobody(caplog: pytest.LogCaptureFixture
     assert "1 training summarised" in caplog.text
 
 
+def test_an_empty_run_reads_in_the_english_plural(caplog: pytest.LogCaptureFixture) -> None:
+    """English reads 0 in the plural (``0 trainings``); the singular for 0 is the French rule."""
+    caplog.set_level(logging.INFO)
+    logs, backups = Path("logs"), Path("backups")
+    logs.mkdir()
+    backups.mkdir()
+
+    apply_retention(NOW, log_dir=logs, backups=backups)
+
+    assert (
+        "Retention: 0 trainings summarised; deleted 0 training messages, 0 reactions, 0 log files and 0 database copies."
+        in caplog.text
+    )
+
+
 async def test_the_bot_applies_the_retention_at_start_then_daily(simcord_bot: Any) -> None:
     """The start runs it at once, before any wait, and then it repeats every 24 hours."""
     old = Path("logs") / "2020-01-01.log"
