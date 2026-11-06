@@ -519,6 +519,10 @@ async def recover_relaunches(bot: Fablabot) -> None:
         if appel_id in _relaunching:
             continue
         appel = attendance.get(appel_id)
+        # A server no longer served gets no write and no edit; its mark goes all the same.
+        if appel is not None and not bot.guild_access.is_served(appel.guild_id):
+            bot_state.delete(key)
+            continue
         if appel is not None and appel.handled_action is AlertAction.RELAUNCH and appel.handled_by is not None:
             attendance.release(appel_id, appel.handled_by, AlertAction.RELAUNCH)
             with guild_log_context(appel.guild_id):
