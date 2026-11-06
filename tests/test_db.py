@@ -578,7 +578,7 @@ def test_main_stops_before_login_when_the_database_cannot_be_used(fablabot_main:
 
 def _open_as(release: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """Open the database as the given release would, then close it."""
-    monkeypatch.setattr(db, "_release", lambda: release)
+    monkeypatch.setattr(db, "release", lambda: release)
     db.open_database(DB_FILE)
     db.close_database()
 

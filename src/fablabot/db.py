@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 import hashlib
 from importlib.metadata import PackageNotFoundError, version
@@ -42,6 +43,37 @@ def connection() -> sqlite3.Connection:
         msg = "The database is not open."
         raise RuntimeError(msg)
     return _connection
+
+
+@dataclass(frozen=True)
+class Status:
+    """What the open database looks like from outside, for the staff to read.
+
+    Attributes:
+        schema_version (int): The schema version the file is at.
+        size (int): The file's size in bytes.
+        copies (int): The copies kept next to it in ``backups/``.
+    """
+
+    schema_version: int
+    size: int
+    copies: int
+
+
+def status() -> Status:
+    """Read the schema version, the size and the number of copies of the open database.
+
+    Returns:
+        Status: What was read.
+
+    Raises:
+        RuntimeError: If the database is not open.
+        OSError: If the file cannot be read.
+    """
+    conn = connection()
+    path = Path(conn.execute("PRAGMA database_list").fetchone()["file"])
+    schema: int = conn.execute("PRAGMA user_version").fetchone()[0]
+    return Status(schema, path.stat().st_size, sum(1 for _ in (path.parent / "backups").glob("*.db")))
 
 
 @contextmanager
@@ -182,7 +214,7 @@ def _apply(conn: sqlite3.Connection, path: Path, file: Path, number: int) -> Non
     logger.info(f"Database schema moved to version {number} ({file.name}).")
 
 
-def _release() -> str:
+def release() -> str:
     """Return the release of the running code, ``unknown`` outside an installed package."""
     try:
         return version("fablabot")
@@ -204,7 +236,7 @@ def _backup_on_release_change(conn: sqlite3.Connection, path: Path) -> None:
     """
     marker = _release_file(path)
     last = marker.read_text(encoding="utf-8").strip() if marker.is_file() else ""
-    if last != _release():
+    if last != release():
         # The name goes into a file name: anything but a version reads as unknown.
         _backup(conn, path, last if re.fullmatch(r"[0-9A-Za-z.+-]+", last) else "unknown")
 
@@ -218,7 +250,7 @@ def _note_release(path: Path) -> None:
     marker = _release_file(path)
     partial = marker.with_suffix(".release.partial")
     try:
-        partial.write_text(_release(), encoding="utf-8")
+        partial.write_text(release(), encoding="utf-8")
         partial.replace(marker)
     except OSError:
         logger.warning(f"{marker.as_posix()} not written: the next start copies the database again.")

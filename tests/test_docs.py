@@ -15,9 +15,17 @@ import pytest
 
 from fablabot.cogs import user_management
 from fablabot.helpers.access import EVERYONE, AnyRole, rule_of
-from fablabot.helpers.constants import ADMIN_ROLES, ANONYMOUS_MIN_REGISTERED, APPEL_EDIT_WINDOW, APPEL_ROLES, RoleNames
+from fablabot.helpers.constants import (
+    ADMIN_ROLES,
+    ANONYMOUS_MIN_REGISTERED,
+    APPEL_EDIT_WINDOW,
+    APPEL_ROLES,
+    INFO_ROLES,
+    RoleNames,
+)
 from fablabot.helpers.formation.attendance import MAX_BUTTONS, MAX_MENUS, MENU_SIZE
 from fablabot.helpers.help_page import leaf_commands
+from fablabot.helpers.info_page import REVISION_ENV
 
 ROOT = Path(__file__).resolve().parent.parent
 DOMAINS = (
@@ -28,6 +36,7 @@ DOMAINS = (
     "Members and roles",
     "Welcoming newcomers",
     "Bot logs",
+    "Bot status",
     "For everyone",
 )
 
@@ -78,7 +87,7 @@ def test_operator_guide_explains_the_server_language() -> None:
     for word in ("Community", "en-US", "src/fablabot/locales"):
         assert word in section, word
     assert text.index("## Commands channel") < text.index("## Server language")
-    assert "Commands synced (9, global)." in _section(text, '## "This command is outdated"')
+    assert "Commands synced (10, global)." in _section(text, '## "This command is outdated"')
 
 
 def test_operator_guide_slash_menu_names_help() -> None:
@@ -87,6 +96,35 @@ def test_operator_guide_slash_menu_names_help() -> None:
     section = _section(text, "## Staff commands in the slash menu")
     assert "`/suggest` and `/help` stay visible to everyone" in section
     assert "it sees `/suggest` and `/help` and no staff group" in section
+
+
+def test_user_guide_documents_info() -> None:
+    """The user guide says what /info shows, that it is private, in French, works anywhere and shows no other server."""
+    section = " ".join(_section(_read("docs/USERGUIDE.md"), "## Bot status").split())
+    for word in (
+        "`/info`",
+        "private message",
+        "in French",
+        "any channel",
+        "blocking ones first",
+        "counts only",
+        "no member",
+        "Integrations",
+    ):
+        assert word in section, word
+
+
+def test_operator_guide_documents_info() -> None:
+    """The operator guide names /info's log line and revision variable, and lists its roles with the staff commands."""
+    text = _read("docs/OPERATIONS.md")
+    section = " ".join(_section(text, "## Reading a server's state with /info").split())
+    for word in ("`Info: guild_id=<ID> blocking=<n> warnings=<n>`", f"`{REVISION_ENV}`", "any channel", "does not record it"):
+        assert word in section, word
+    menu = _section(text, "## Staff commands in the slash menu")
+    assert "`/info`)" in menu
+    (row,) = [line for line in menu.splitlines() if line.startswith("| `/info` |")]
+    assert set(row.strip("|").split("|")[1].strip().split(", ")) == INFO_ROLES
+    assert "so does `/info`" in _section(text, "## Commands channel")
 
 
 def _audiences(text: str) -> dict[str, frozenset[str] | str]:

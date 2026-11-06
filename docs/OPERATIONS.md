@@ -16,7 +16,7 @@ non-root image are in the [deployment guide](DEPLOYMENT.md). Commands for member
 - [Commands channel](#commands-channel)
 - [Health status](#health-status), [Server language](#server-language), [Temporary admin](#temporary-admin)
 - [When a database write fails](#when-a-database-write-fails)
-- [Server check at start](#server-check-at-start)
+- [Server check at start](#server-check-at-start) and [Reading a server's state with /info](#reading-a-servers-state-with-info)
 - [Stored data](#stored-data) and [Moving to the database](#moving-to-the-database)
 - ["This command is outdated"](#this-command-is-outdated)
 - [Troubleshooting](#troubleshooting)
@@ -426,7 +426,7 @@ checks the roles above when a command runs.
 
 ## Staff commands in the slash menu
 
-The staff command groups (`/text`, `/vocal`, `/fm`, `/log`, `/msg`, `/user`, `/welcome`) are hidden from the slash menu by default: only members with the Administrator permission see them. `/suggest` and `/help` stay visible to everyone. This changes what the menu shows, not who may run a command: each command still checks the caller's roles when it runs.
+The staff commands (`/text`, `/vocal`, `/fm`, `/log`, `/msg`, `/user`, `/welcome`, `/info`) are hidden from the slash menu by default: only members with the Administrator permission see them. `/suggest` and `/help` stay visible to everyone. This changes what the menu shows, not who may run a command: each command still checks the caller's roles when it runs.
 
 On each server, a member with the Administrator permission shows each group to the roles that use it:
 
@@ -443,6 +443,7 @@ On each server, a member with the Administrator permission shows each group to t
 | `/fm` | Administrateur, CoDir, Respo Formation, Admin -temp- |
 | `/msg` | Administrateur, Président, Vice-Président, Secrétaire Général, Bureau |
 | `/user` | Administrateur, Président, Vice-Président, Secrétaire Général, Bureau, Respo Communication, Respo Event, Respo Formation, Respo Numérique, Respo Partenariat, Respo Projet |
+| `/info` | Administrateur, Président, Vice-Président, Secrétaire Général, Respo Numérique |
 
 - These are the role names the bot checks today (`src/fablabot/helpers/constants.py`). Skip a role the server does not have, and a role that already has the Administrator permission.
 - `/vocal` allows Bureau for `/vocal create` of a temporary channel only: the bot still refuses `/vocal rename` and `/vocal delete` for Bureau at run time.
@@ -454,7 +455,7 @@ On each server, a member with the Administrator permission shows each group to t
 ## Commands channel
 
 Most commands only run in one text channel per server. `/suggest`, `/msg purge` and a private `/help` work
-outside it, `/msg clear` refuses it, and `/welcome approve` runs in a `welcome-…` channel.
+outside it, so does `/info`, `/msg clear` refuses it, and `/welcome approve` runs in a `welcome-…` channel.
 
 1. The bot reads the channel from the server's stored settings.
 2. If none is stored, it uses the text channel named `commandes_bot` (`helpers/utils.py:32`) and stores it.
@@ -609,6 +610,22 @@ Before the check, the first ready removes the commands registered on a served se
 and only when there are any, clears and syncs that server, then logs `Removed leftover commands` with the
 IDs and names. The global commands and their Integrations settings are untouched. With `DEV_GUILD_ID` set,
 nothing is removed. A failure is logged as a warning with the error type, and the next server goes on.
+
+## Reading a server's state with /info
+
+`/info` runs the checks of "Server check at start" again for the server where it is used, and shows the result
+to Respo Numérique and the admin roles in a private message, in French: each problem as a sentence, then
+`→` and the path to fix it, in place of the log codes. It reads Discord like the start does (the bot's global
+commands, then that server's commands and Integrations settings) and writes one log line,
+`Info: guild_id=<ID> blocking=<n> warnings=<n>`. It works in any channel, so a server with no commands
+channel can still run it. It needs the same Integrations setting as any staff command, in the table of
+"Staff commands in the slash menu".
+
+The embed also shows the bot's release, its uptime, the database schema version, the file size and the
+number of copies in `data/backups/`, and how many servers, commands and watched accounts the instance has. These are counts: no
+other server and no account is named. The footer carries the short commit of the running image, read from the
+`FABLABOT_REVISION` variable; with none, or a value that is not a commit, the footer shows no revision. The date of
+the last retention run is not shown: the bot does not record it, only its log line.
 
 ## Stored data
 
@@ -841,7 +858,7 @@ member data.
 The first start after the `/help` release syncs once, because the command list changed. Members reload
 Discord to see `/help` (or `/aide`, `/hilfe`).
 
-The log tells which case applies: `Commands synced (9, global).` after a sync, and
+The log tells which case applies: `Commands synced (10, global).` after a sync, and
 `Commands unchanged, sync skipped (global).` when nothing changed.
 
 ## Troubleshooting

@@ -16,6 +16,9 @@ if TYPE_CHECKING:
     from fablabot.helpers.i18n import Texts
 
 EVERYONE_DOMAIN: Final = "everyone"
+STATUS_DOMAIN: Final = "status"
+TOP_LEVEL_DOMAINS: Final = frozenset({EVERYONE_DOMAIN, STATUS_DOMAIN})
+"""The domains whose commands have no group: each name is the whole command, such as ``help`` or ``info``."""
 HELP_COMMAND: Final = "help"
 
 # Discord's per-message limits: https://discord.com/developers/docs/resources/message#embed-object-embed-limits
@@ -65,6 +68,7 @@ DOMAINS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
     ("user", ("op", "deop", "add_role", "remove_role", "add_roles", "remove_roles", "with_roles", "invite")),
     ("welcome", ("verify", "approve")),
     ("log", ("set", "export")),
+    (STATUS_DOMAIN, ("info",)),
     (EVERYONE_DOMAIN, ("suggest", HELP_COMMAND)),
 )
 """The help's domains in reply order, each with its commands in line order (names within the group)."""
@@ -189,7 +193,7 @@ def build_help(commands: Iterable[app_commands.Command[Any, ..., Any]], caller: 
     for domain, names in DOMAINS:
         lines: list[str] = []
         for name in names:
-            qualified = name if domain == EVERYONE_DOMAIN else f"{domain} {name}"
+            qualified = name if domain in TOP_LEVEL_DOMAINS else f"{domain} {name}"
             if qualified not in admitted:
                 continue
             if domain != EVERYONE_DOMAIN:

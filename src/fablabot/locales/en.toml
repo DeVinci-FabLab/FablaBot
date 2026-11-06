@@ -38,6 +38,7 @@ msg = "Bot messages"
 user = "Members and roles"
 welcome = "Welcoming newcomers"
 log = "Bot logs"
+status = "Bot status"
 everyone = "For everyone"
 
 [help.cmd.text]
@@ -101,3 +102,4 @@ export = "export the logs"
 [help.cmd]
 suggest = "send an idea or a problem to the staff, anonymously if you like"
 help = "show this list"
+info = "check the bot and what this server lacks"

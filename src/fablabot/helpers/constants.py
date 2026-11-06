@@ -141,6 +141,8 @@ FORMATION_ROLES = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN_TEMP, RoleNames.
 # Who may change the shared templates. A temporary role never reconfigures; its own constant though it equals
 # APPEL_COMMAND_ROLES, so one can move without the other.
 TEMPLATE_ROLES: Final = {RoleNames.TRAININGS_MANAGER, RoleNames.ADMIN}
+# Who may read how the bot and their server stand (`/info`): the people who keep the bot running, and the admin roles.
+INFO_ROLES: Final = ADMIN_ROLES | {RoleNames.DIGITAL_MANAGER}
 
 
 def staff_default_permissions() -> Permissions:

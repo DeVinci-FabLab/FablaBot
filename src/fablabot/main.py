@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import sqlite3
 import sys
+import time
 from typing import TYPE_CHECKING, override
 
 from discord import Intents, Message
@@ -23,6 +24,7 @@ from fablabot.cogs import (
     FormationManagement,
     GuildAccess,
     HelpManagement,
+    InfoManagement,
     LogManagement,
     MessageManagement,
     UserManagement,
@@ -124,6 +126,7 @@ class Fablabot(commands.Bot):
         self.discord_log_handler: DiscordLogHandler | None = None
         self.file_log_handler: DailyFileHandler | None = None
         self.heartbeat_file: Path = HEARTBEAT_FILE
+        self.started_at: float = time.monotonic()
         self.gateway_up: bool = False
         self._heartbeat_failed: bool = False
         logger.info("Bot initialized")
@@ -143,6 +146,7 @@ class Fablabot(commands.Bot):
             UserManagement(self),
             WelcomeManagement(self),
             HelpManagement(self),
+            InfoManagement(self),
             AuditWatch(self),
         ):
             await self.add_cog(cog)

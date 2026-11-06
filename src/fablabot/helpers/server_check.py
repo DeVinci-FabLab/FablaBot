@@ -167,7 +167,7 @@ def _check_suggestions(guild: Guild) -> list[Problem]:
     return [Problem("suggest_recipient_unreachable", ", ".join(unreachable))] if unreachable else []
 
 
-def _languages(guild: Guild) -> tuple[str, str]:
+def languages(guild: Guild) -> tuple[str, str]:
     """Return the language the server declares and the one the bot's texts will use."""
     locale = str(guild.preferred_locale)
     return locale, catalog().texts(locale).locale
@@ -175,7 +175,7 @@ def _languages(guild: Guild) -> tuple[str, str]:
 
 def _check_language(guild: Guild) -> list[Problem]:
     """Check that the declared language has a shipped file; the help is in English otherwise."""
-    locale, texts = _languages(guild)
+    locale, texts = languages(guild)
     if texts == REFERENCE and locale.split("-")[0] != REFERENCE:
         return [Problem("language_not_shipped", f"locale={locale}")]
     return []
@@ -366,7 +366,7 @@ def _problem_line(guild: Guild, problem: Problem) -> str:
 def _report(guild: Guild, problems: Sequence[Problem]) -> None:
     """Write the summary, the optional-roles note and one warning per problem, all tied to the server."""
     blocking = sum(FIXES[problem.code][0] == "blocking" for problem in problems)
-    locale, texts = ("unknown", "unknown") if guild.unavailable else _languages(guild)
+    locale, texts = ("unknown", "unknown") if guild.unavailable else languages(guild)
     with guild_log_context(guild.id):
         logger.info(
             f"Server check: guild_id={guild.id} blocking={blocking} warnings={len(problems) - blocking} "
@@ -378,6 +378,20 @@ def _report(guild: Guild, problems: Sequence[Problem]) -> None:
                 logger.info(f"Server check: optional roles absent (guild_id={guild.id}): {', '.join(sorted(optional))}")
         for problem in problems:
             logger.warning(_problem_line(guild, problem))
+
+
+async def check_guild(bot: Fablabot, guild: Guild) -> list[Problem]:
+    """Run every check on one server now, as the start does; nothing is logged, changed on Discord or stored.
+
+    Args:
+        bot (Fablabot): The bot, which holds the commands and the Discord reads.
+        guild (Guild): The server to read.
+
+    Returns:
+        list[Problem]: What the server lacks, in the order of the checks.
+    """
+    global_commands = None if bot.dev_guild_id is not None else await _read("global commands", bot.tree.fetch_commands())
+    return await _check_server(bot, guild, global_commands)
 
 
 async def check_servers(bot: Fablabot, guilds: Iterable[Guild]) -> None:

@@ -210,6 +210,24 @@ commands channel.
 
 `/log export` takes a date written `DD/MM/YYYY` (the bot's own prompt writes `JJ/MM/AAAA`), today by default.
 
+## Bot status
+
+| Command | What it does | Who can run it |
+| --- | --- | --- |
+| `/info` | Show how the bot runs and what this server needs fixed | Admin roles, Respo Numérique |
+
+`/info` runs the server's checks again, as the bot does once at start, and answers in a private message, in French. It works in any channel, since it is where a server finds out it has no commands channel. It reads Discord, so it can take a few seconds, and it changes nothing.
+
+The message holds:
+
+- A title and a colour that give the verdict: green for "tout va bien", orange when the points to fix are all warnings, red when at least one problem stops a function. The text says it too, so the colour is never the only sign.
+- Three blocks side by side: the bot (release, time since it started, Discord latency), the database (schema version, file size, number of copies kept in `data/backups/`) and the instance (how many servers it serves, how many commands it synced, how many accounts are watched).
+- The settings of this server: commands channel, log channel and language.
+- What to fix on this server, each problem as a sentence followed by an arrow and the path to follow, blocking ones first. The list is cut at Discord's limit and ends with how many are left out. Run `/info` again after a fix to see it go.
+- A footer with the commit of the running image, when the image carries it.
+
+It shows nothing from another server and no member: the servers and the watched accounts are counts only, and the channels and the problems are those of the server where it runs. Like the staff groups, it stays hidden from the slash menu until a server administrator allows its roles in Integrations, as the [operator guide](OPERATIONS.md#staff-commands-in-the-slash-menu) says.
+
 ## For everyone
 
 | Command | What it does | Who can run it |
