@@ -1000,6 +1000,7 @@ def test_user_guide_says_an_update_keeps_the_sign_ups_and_their_order() -> None:
         "the last to arrive go to the waiting list",
         "the first on the waiting list take the places",
         "gives that session its hour-before reminder again, sent once at the new time",
+        "at the next five-minute check even when the new start is already less than an hour away",
         "the draft is then rewritten to say what the announcement says",
         "changes nothing, with a private message saying why, when the draft or the announcement changed since the summary",
         "or when the published message no longer exists in its channel",

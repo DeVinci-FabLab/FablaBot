@@ -583,8 +583,9 @@ async def test_fewer_seats_move_the_last_arrived_to_the_waitlist_and_more_seats_
     assert len(_dms(lab.admin)) == waiting + 2
 
 
-async def test_a_new_start_gets_its_hour_before_reminder_once(lab: Lab) -> None:
-    """A session whose reminder went out for its old start gets one for the new start, and two ticks in that window send one."""
+@pytest.mark.parametrize("minutes_ahead", [60, 30], ids=["an-hour-ahead", "already-inside-the-hour"])
+async def test_a_new_start_gets_its_hour_before_reminder_once(lab: Lab, minutes_ahead: int) -> None:
+    """A moved session gets its reminder once, at the next tick even when the new start is already under an hour away."""
     await _announced(lab)
     _flag("🧡", notified_hour_before=True)
     _change("🧡", start=-60)
@@ -593,12 +594,27 @@ async def test_a_new_start_gets_its_hour_before_reminder_once(lab: Lab) -> None:
 
     moved = _session_of("🧡")
     assert not moved.notified_hour_before
-    tick = moved.start_dt - timedelta(hours=1)
+    tick = moved.start_dt - timedelta(minutes=minutes_ahead)
     await _cog(lab)._send_due_reminders(GUILD_ID, tick)  # pyright: ignore[reportPrivateUsage]
     await _cog(lab)._send_due_reminders(GUILD_ID, tick)  # pyright: ignore[reportPrivateUsage]
 
     assert len(_reminders(lab.codir, "Soudure")) == 1
     assert len(_reminders(lab.admin, "Soudure")) == 1
+
+
+async def test_a_new_trainer_inside_the_hour_gets_the_reminder_at_the_next_tick(lab: Lab) -> None:
+    """A trainer changed on a session already inside its hour is reminded at the next tick, and only once."""
+    await _announced(lab)
+    _flag("🧡", notified_hour_before=True)
+    _change("🧡", trainer_mention=f"<@{lab.president.id}>")
+
+    await _updated(lab)
+
+    tick = _session_of("🧡").start_dt - timedelta(minutes=40)
+    await _cog(lab)._send_due_reminders(GUILD_ID, tick)  # pyright: ignore[reportPrivateUsage]
+    await _cog(lab)._send_due_reminders(GUILD_ID, tick)  # pyright: ignore[reportPrivateUsage]
+
+    assert len([text for text in _dms(lab.president) if "Ta formation **Soudure** commence bientôt" in text]) == 1
 
 
 async def test_other_sessions_get_no_reminder_twice(lab: Lab) -> None:

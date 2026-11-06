@@ -1077,7 +1077,6 @@ class FormationManagement(commands.Cog):
             catch_up (bool): True for a message that is not the newest.
         """
         window_tolerance = timedelta(minutes=5)
-        notification_window_start = now + TRAINER_NOTIFICATION_ADVANCE - window_tolerance
         notification_window_end = now + TRAINER_NOTIFICATION_ADVANCE + window_tolerance
         start_window_end = now + window_tolerance
 
@@ -1096,7 +1095,9 @@ class FormationManagement(commands.Cog):
             if (
                 not catch_up
                 and not fm.notified_hour_before
-                and notification_window_start <= fm.start_dt <= notification_window_end
+                # Until the check opens, not only around the hour: a start moved to under an hour away, or a trainer
+                # changed inside the hour, still gets its reminder at the next tick instead of none.
+                and start_window_end < fm.start_dt <= notification_window_end
             ):
                 await notify_trainer_before_formation(guild, fm, send_contacts)
                 await notify_responsible_before_formation(guild, fm, moment="hour_before")
