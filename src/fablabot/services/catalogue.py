@@ -76,6 +76,10 @@ def list_templates(guild_id: int) -> list[TrainingTemplate]:
     return _rows(rows)
 
 
+_MAX_ID = 2**63 - 1
+"""The largest integer SQLite stores: an ID past it, as a forged button holds, names nothing."""
+
+
 def get_template(guild_id: int, template_id: int) -> TrainingTemplate | None:
     """Read one template of a server; another server's template reads as missing.
 
@@ -86,6 +90,8 @@ def get_template(guild_id: int, template_id: int) -> TrainingTemplate | None:
     Returns:
         TrainingTemplate | None: The template, or None.
     """
+    if template_id > _MAX_ID:
+        return None
     row = (
         db.connection()
         .execute("SELECT * FROM training_template WHERE guild_id = ? AND id = ?", (guild_id, template_id))

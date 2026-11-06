@@ -637,6 +637,27 @@ async def test_a_forged_menu_choice_of_another_servers_template_reads_as_missing
     assert interaction.response.send_message.await_args.args[0].startswith(GONE)
 
 
+@pytest.mark.parametrize("huge", ["9223372036854775808", "99999999999999999999999"])
+async def test_a_template_id_past_the_database_limit_reads_as_missing(lab: Lab, huge: str) -> None:
+    """A forged button or menu value holding an ID no database can store is answered as a missing template."""
+    _template("Soudure")
+    confirm = await _forged(lab, f"cat:del-ok:{huge}:0123456789ab")
+    interaction = make_interaction(user_id=lab.respo.id, guild_id=GUILD_ID)
+    interaction.client = lab.env.bot
+    interaction.user.roles = [make_role(RoleNames.TRAININGS_MANAGER)]
+    interaction.message = MagicMock()
+    item_class = next(cls for cls in CATALOGUE_ITEMS if cls.__discord_ui_compiled_template__.fullmatch("cat:pick:edit:0"))
+    match = item_class.__discord_ui_compiled_template__.fullmatch("cat:pick:edit:0")
+    item = await item_class.from_custom_id(interaction, MagicMock(), match)  # pyright: ignore[reportArgumentType]
+    item.item._values = [huge]  # pyright: ignore[reportAttributeAccessIssue]
+
+    await item.callback(interaction)
+
+    for answered in (confirm, interaction):
+        answered.response.send_modal.assert_not_awaited()
+        assert answered.response.send_message.await_args.args[0].startswith(GONE)
+
+
 async def test_the_template_buttons_work_after_a_restart(started_bot: Any) -> None:
     """A second bot on the same database answers the clicks on a list the first bot sent, from the database alone."""
     for number in range(12):
