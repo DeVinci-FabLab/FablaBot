@@ -1443,3 +1443,15 @@ async def test_the_text_form_keeps_the_header_the_draft_holds(lab: Lab) -> None:
     stored = formations.get_draft(GUILD_ID)
     assert stored is not None
     assert stored.header == "# Mon en-tête"
+
+
+async def test_apercu_shows_a_role_the_server_lost_as_publier_posts_it(lab: Lab) -> None:
+    """A role that no longer exists is no mention in Aperçu, as it is none in the post."""
+    draft = _stage(lab, _three(lab))
+    formations.save_draft(GUILD_ID, replace(draft, role_id=999_999))
+    listing = await lab.brouillon(lab.respo)
+
+    preview = await lab.respo.click(listing.response, custom_id="fmd:preview")
+
+    assert "<@&999999>" not in preview.response.content
+    assert preview.response.content == render_message(replace(draft, role_id=0))

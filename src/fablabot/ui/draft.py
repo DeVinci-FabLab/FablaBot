@@ -260,7 +260,7 @@ class DraftButton(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:(?P<action>
         if self.action == "text":
             await interaction.response.send_modal(DraftTextForm(guild, draft))
         elif self.action == "preview":
-            await self._preview(interaction, draft)
+            await self._preview(interaction, _live(guild, draft))
         elif self.action == "publish":
             await self._ask_channel(interaction, draft)
         else:
