@@ -2662,6 +2662,7 @@ async def test_the_session_menu_pages_past_twenty_five(lab: Lab) -> None:
     buttons = _buttons(first.response)
     assert buttons["Suivant ▶"]["custom_id"] == "fmd:snav:remove:1"
     assert buttons["◀ Précédent"]["disabled"]
+    assert buttons["Page 1/2"]["disabled"]
 
     second = await lab.respo.click(first.response, custom_id="fmd:snav:remove:1")
 
@@ -2670,6 +2671,7 @@ async def test_the_session_menu_pages_past_twenty_five(lab: Lab) -> None:
     assert _menu(second.response)["placeholder"] == "Sessions 26 à 30 sur 30…"
     assert _menu(second.response)["custom_id"] == "fmd:ses:remove:1"
     assert _buttons(second.response)["Suivant ▶"]["disabled"]
+    assert _buttons(second.response)["Page 2/2"]["disabled"]
 
     back = await lab.respo.click(second.response, custom_id="fmd:snav:remove:0")
 
