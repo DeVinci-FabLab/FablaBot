@@ -932,6 +932,21 @@ async def test_the_form_gives_a_draft_with_no_header_the_start_header(lab: Lab) 
     assert stored.header == announcement_header(_guild(lab)) != ""
 
 
+async def test_a_session_added_while_the_form_is_open_survives_its_submit(lab: Lab) -> None:
+    """The form saves onto the draft as stored when it is sent, so a session added meanwhile is not erased."""
+    draft = _stage(lab, _three(lab))
+    shown = await lab.respo.click((await lab.brouillon(lab.respo)).response, custom_id="fmd:text")
+    late = _session("💙", "Laser", days=5, trainer=lab.plain)
+    formations.save_draft(GUILD_ID, replace(draft, fms=[*draft.fms, late]))
+
+    await lab.respo.submit_modal(shown, _form(shown, {"Intro": "Après", "Rôle à notifier": [lab.notified]}))
+
+    stored = formations.get_draft(GUILD_ID)
+    assert stored is not None
+    assert stored.intro == "Après"
+    assert [fm.emoji for fm in stored.fms] == ["🧡", "💛", "💚", "💙"]
+
+
 async def test_a_blank_link_in_the_form_keeps_the_usual_one(lab: Lab) -> None:
     """Leaving the URL empty stores the usual forms link, as `/fm start` does."""
     draft = _stage(lab, _three(lab))
