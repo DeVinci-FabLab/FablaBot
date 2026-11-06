@@ -133,16 +133,17 @@ def create_template(guild_id: int, fields: TemplateFields) -> TrainingTemplate:
     return TrainingTemplate(id=template_id, guild_id=guild_id, fields=fields)
 
 
-def update_template(guild_id: int, template_id: int, fields: TemplateFields) -> bool:
-    """Replace what a stored template of a server holds.
+def update_template(guild_id: int, template_id: int, fields: TemplateFields, *, expected: TemplateFields) -> bool:
+    """Replace what a stored template of a server holds, if it still holds what the caller last read.
 
     Args:
         guild_id (int): The ID of the server.
         template_id (int): The template's ID.
         fields (TemplateFields): What it holds now.
+        expected (TemplateFields): What the caller read before editing; a template changed since is left alone.
 
     Returns:
-        bool: False when the server holds no such template any more.
+        bool: False when the server holds no such template any more, or it changed since `expected` was read.
 
     Raises:
         TemplateNameTakenError: If another template of the server has the new name, whatever the case.
@@ -151,8 +152,9 @@ def update_template(guild_id: int, template_id: int, fields: TemplateFields) -> 
         with db.transaction() as conn:
             changed = conn.execute(
                 "UPDATE training_template SET name = ?, duration = ?, seats = ?, description = ?, excusable = ? "
-                "WHERE guild_id = ? AND id = ?",
-                (*_values(fields), guild_id, template_id),
+                "WHERE guild_id = ? AND id = ? "
+                "AND name = ? AND duration = ? AND seats = ? AND description = ? AND excusable = ?",
+                (*_values(fields), guild_id, template_id, *_values(expected)),
             ).rowcount
     except sqlite3.IntegrityError as error:
         if "UNIQUE" not in str(error):

@@ -57,7 +57,10 @@ def test_a_server_never_reads_or_changes_another_servers_template() -> None:
     assert catalogue.list_templates(GUILD_A) == []
     assert catalogue.search_templates(GUILD_A, "") == []
     assert catalogue.find_by_name(GUILD_A, "SRG + Imp 3D") is None
-    assert catalogue.update_template(GUILD_A, theirs.id, TemplateFields("Pris", "1h", 1, "", False)) is False
+    assert (
+        catalogue.update_template(GUILD_A, theirs.id, TemplateFields("Pris", "1h", 1, "", False), expected=theirs.fields)
+        is False
+    )
     assert catalogue.delete_template(GUILD_A, theirs.id) is False
     assert catalogue.get_template(GUILD_B, theirs.id) == theirs
 
@@ -77,7 +80,9 @@ def test_renaming_onto_another_template_is_refused_and_changes_nothing() -> None
     github = _srg(name="Formation GitHub")
 
     with pytest.raises(TemplateNameTakenError):
-        catalogue.update_template(GUILD_A, github.id, TemplateFields("SRG + IMP 3D", "1h", 10, "", False))
+        catalogue.update_template(
+            GUILD_A, github.id, TemplateFields("SRG + IMP 3D", "1h", 10, "", False), expected=github.fields
+        )
 
     assert catalogue.get_template(GUILD_A, github.id) == github
     assert catalogue.get_template(GUILD_A, srg.id) == srg
@@ -88,7 +93,32 @@ def test_an_update_replaces_every_field() -> None:
     srg = _srg()
     changed = TemplateFields("SRG", "1 h", 6, "", False)
 
-    assert catalogue.update_template(GUILD_A, srg.id, changed) is True
+    assert catalogue.update_template(GUILD_A, srg.id, changed, expected=srg.fields) is True
+    assert catalogue.get_template(GUILD_A, srg.id) == TrainingTemplate(srg.id, GUILD_A, changed)
+
+
+def test_an_update_made_from_a_stale_copy_changes_nothing() -> None:
+    """A form prefilled before another change is refused, whichever field changed, and keeps the newer values."""
+    srg = _srg()
+    newer = TemplateFields("SRG", "1 h", 6, "", False)
+    catalogue.update_template(GUILD_A, srg.id, newer, expected=srg.fields)
+
+    assert (
+        catalogue.update_template(GUILD_A, srg.id, TemplateFields("Autre", "2 h", 7, "x", True), expected=srg.fields) is False
+    )
+
+    assert catalogue.get_template(GUILD_A, srg.id) == TrainingTemplate(srg.id, GUILD_A, newer)
+
+
+@pytest.mark.parametrize("field", ["name", "duration", "seats", "description", "excusable"])
+def test_an_update_checks_every_field_it_was_prefilled_with(field: str) -> None:
+    """A change to any single field since the prefill makes the update refuse."""
+    srg = _srg()
+    other = {"name": "SRG", "duration": "1 h", "seats": 9, "description": "", "excusable": False}[field]
+    changed = TemplateFields(**{**srg.fields.__dict__, field: other})
+    catalogue.update_template(GUILD_A, srg.id, changed, expected=srg.fields)
+
+    assert catalogue.update_template(GUILD_A, srg.id, srg.fields, expected=srg.fields) is False
     assert catalogue.get_template(GUILD_A, srg.id) == TrainingTemplate(srg.id, GUILD_A, changed)
 
 
