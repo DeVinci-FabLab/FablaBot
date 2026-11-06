@@ -32,6 +32,8 @@ At start, before connecting, the bot checks that it can read and write every fol
 
 The container reports `healthy` while the bot is connected to Discord, and `unhealthy` when its last heartbeat is more than 90 seconds old. It is a status only: nothing restarts the bot on its own. See "Health status" in the [operator guide](OPERATIONS.md#health-status).
 
+The image carries the commit it was built from in `FABLABOT_REVISION`, which `/info` shows in its footer. The release build sets it from the build argument `REVISION`; an image built by hand without `--build-arg REVISION=<commit>` has none, and `/info` then shows no revision.
+
 To check an image locally (needs Docker): `sh docker/check-image.sh`. It builds the image with planted secrets, then checks its user, its content, the start messages, and that nothing is written outside `data/`, `logs/` and `/tmp`.
 
 ## Releases

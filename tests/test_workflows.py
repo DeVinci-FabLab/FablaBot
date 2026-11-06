@@ -104,6 +104,13 @@ def test_no_step_can_hide_a_failure_or_force_a_run() -> None:
     assert not re.search(r"^    if:", build["body"], re.MULTILINE)
 
 
+def test_the_image_build_passes_the_commit_it_builds() -> None:
+    """The release build gives the image its commit, as the label already does, so /info can show it."""
+    build = re.search(r"^  build-and-push-image:\n(?P<body>(?:    .*\n|\n)*)", _read("CD.yml"), re.MULTILINE)
+    assert build
+    assert re.search(r"^\s+build-args: \|\n\s+REVISION=\$\{\{ github\.sha \}\}$", build["body"], re.MULTILINE)
+
+
 def test_every_checkout_drops_its_credentials() -> None:
     """Each actions/checkout step sets `persist-credentials: false`."""
     checkouts = [step for name in ("ci.yml", "CD.yml") for step in _steps(name) if "uses: actions/checkout@" in step]

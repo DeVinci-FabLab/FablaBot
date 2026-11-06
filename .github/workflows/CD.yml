@@ -95,6 +95,8 @@ jobs:
           target: production
           push: true
           tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            REVISION=${{ github.sha }}
           labels: |
             org.opencontainers.image.created=${{ steps.build-date.outputs.value }}
             org.opencontainers.image.revision=${{ github.sha }}

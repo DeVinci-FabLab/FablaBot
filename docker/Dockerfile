@@ -36,6 +36,9 @@ RUN uv sync --locked --no-dev --no-editable --no-cache
 FROM base AS production
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1
+# The commit the image is built from, which /info shows. The release build passes it; without it /info shows none.
+ARG REVISION=""
+ENV FABLABOT_REVISION=$REVISION
 COPY --from=build /app/.venv /app/.venv
 # A numeric user needs no passwd entry. data/ and logs/ come from volumes owned by it; the image
 # creates neither, so a missing volume stops the bot at start instead of writing into the container.

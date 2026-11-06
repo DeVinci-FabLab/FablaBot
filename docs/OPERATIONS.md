@@ -624,7 +624,8 @@ channel can still run it. It needs the same Integrations setting as any staff co
 The embed also shows the bot's release, its uptime, the database schema version, the file size and the
 number of copies in `data/backups/`, and how many servers, commands and watched accounts the instance has. These are counts: no
 other server and no account is named. The footer carries the short commit of the running image, read from the
-`FABLABOT_REVISION` variable; with none, or a value that is not a commit, the footer shows no revision. The date of
+`FABLABOT_REVISION` variable, which the image build sets (see the [deployment guide](DEPLOYMENT.md#the-production-image));
+with none, or a value that is not a commit, the footer shows no revision. The date of
 the last retention run is not shown: the bot does not record it, only its log line.
 
 ## Stored data
