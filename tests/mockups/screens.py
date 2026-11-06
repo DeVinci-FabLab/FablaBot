@@ -11,7 +11,7 @@ from discord import Locale, Member, Permissions, Role, TextChannel
 
 import fablabot.cogs as cogs_package
 from fablabot.cogs import formation_management, help_management, message_management
-from fablabot.helpers.constants import APPEL_EDIT_WINDOW, PARIS_TZ, RoleNames
+from fablabot.helpers.constants import APPEL_EDIT_WINDOW, PARIS_TZ, SESSION_EMOJIS, RoleNames
 from fablabot.helpers.formation.attendance import alert_message, appel_content, appel_view, log_line, respo_messages
 from fablabot.helpers.help_page import leaf_commands
 from fablabot.models import AlertAction, Appel, Registrant, TemplateFields, TrainingTemplate
@@ -382,7 +382,7 @@ async def session_added() -> Screen:
     capture = Capture()
     template = next(t for t in _templates() if t.fields.name == _TEMPLATES[0][0])
     session = Formation(
-        emoji="🩷",
+        emoji=SESSION_EMOJIS[5],  # the sixth, as the count says
         name=template.fields.name,
         trainer_mention="<@2222>",
         start_iso="2026-10-12T10:00:00+02:00",
