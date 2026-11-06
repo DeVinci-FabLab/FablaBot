@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta
+import re
 from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
@@ -16,7 +17,7 @@ from fablabot.helpers.utils import RIGHT_LOST_MESSAGE
 from fablabot.models import TemplateFields
 from fablabot.models.formation import FmMessageDraft, Formation, PublishedMessage
 from fablabot.services import catalogue, formations
-from fablabot.ui.catalogue import CATALOGUE_ITEMS, templates_message
+from fablabot.ui.catalogue import CATALOGUE_ITEMS, deletion_message, templates_message
 
 if TYPE_CHECKING:
     import simcord
@@ -144,6 +145,12 @@ async def _picked(who: Any, listing: Any, action: str, template: Any) -> Any:
     """Click Modifier or Supprimer on a list and choose a template in the menu that follows."""
     chosen = await who.click(listing.response, custom_id=f"cat:{action}")
     return await who.select(chosen.response, [str(template.id)], custom_id=f"cat:pick:{action}:0")
+
+
+def _confirm_id(template: Any) -> str:
+    """Give the custom ID of the button that confirms the deletion of a template as it is stored now."""
+    _, view = deletion_message(template)
+    return view.children[0].custom_id  # pyright: ignore[reportAttributeAccessIssue,reportReturnType]
 
 
 def _session_of(template: Any) -> Formation:
@@ -336,7 +343,7 @@ async def test_editing_a_template_deleted_meanwhile_is_refused(lab: Lab) -> None
     template = _template("Soudure")
     listing = await lab.modeles(lab.respo)
     shown = await _picked(lab.respo, listing, "edit", template)
-    catalogue.delete_template(GUILD_ID, template.id)
+    catalogue.delete_template(GUILD_ID, template.id, expected=template.fields)
 
     refused = await lab.respo.submit_modal(shown, _form(shown, {"Nom": "Soudure avancée"}))
 
@@ -371,9 +378,10 @@ async def test_deleting_a_template_asks_first_and_keeps_the_sessions(lab: Lab) -
     assert _stored() == [template]
     buttons = _buttons(asked.response)
     assert set(buttons) == {"🗑️ Supprimer", "Annuler"}
-    assert buttons["🗑️ Supprimer"]["custom_id"] == f"cat:del-ok:{template.id}"
+    assert buttons["🗑️ Supprimer"]["custom_id"] == _confirm_id(template)
+    assert re.fullmatch(rf"cat:del-ok:{template.id}:[0-9a-f]{{12}}", _confirm_id(template))
 
-    done = await lab.respo.click(asked.response, custom_id=f"cat:del-ok:{template.id}")
+    done = await lab.respo.click(asked.response, custom_id=_confirm_id(template))
 
     assert _stored() == []
     assert done.response.content == "Modèle **Soudure** supprimé."
@@ -382,6 +390,26 @@ async def test_deleting_a_template_asks_first_and_keeps_the_sessions(lab: Lab) -
     current = formations.current_published(GUILD_ID)
     assert current is not None
     assert current.message == published
+
+
+async def test_a_deletion_confirmed_after_the_template_changed_is_refused(lab: Lab) -> None:
+    """A confirmation asked for a template that another editor rewrote since deletes nothing and says it changed."""
+    template = _template("Soudure")
+    asking = await lab.modeles(lab.respo)
+    asked = await _picked(lab.respo, asking, "del", template)
+    editing = await lab.modeles(lab.admin)
+    shown = await _picked(lab.admin, editing, "edit", template)
+    await lab.admin.submit_modal(
+        shown, _form(shown, {"Nom": "Découpe laser", "Durée": "3 h", "Places": "8", "Description": "", "Excusable": "Non"})
+    )
+    rewritten = _stored()
+
+    refused = await lab.respo.click(asked.response, custom_id=_confirm_id(template))
+
+    assert refused.ephemeral
+    assert refused.response.content == "Ce modèle a changé depuis : rouvre la liste pour le supprimer. Rien n'a été modifié."
+    assert _stored() == rewritten
+    assert [t.fields.name for t in rewritten] == ["Découpe laser"]
 
 
 async def test_cancelling_a_deletion_keeps_the_template(lab: Lab) -> None:
@@ -460,7 +488,7 @@ async def test_a_member_who_lost_the_role_is_refused_at_the_click_and_nothing_is
     await asyncio.sleep(0)
 
     submitted = await lab.respo.submit_modal(shown, _form(shown, FORM))
-    confirmed = await lab.respo.click(asked.response, custom_id=f"cat:del-ok:{template.id}")
+    confirmed = await lab.respo.click(asked.response, custom_id=_confirm_id(template))
     clicked = await lab.respo.click(listing.response, custom_id="cat:new")
 
     for result in (submitted, confirmed, clicked):
@@ -480,7 +508,7 @@ async def test_a_server_no_longer_served_refuses_the_click(lab: Lab) -> None:
     bot.guild_access = GuildAccessPolicy(allowed=frozenset({OTHER_GUILD_ID}))
 
     clicked = await lab.respo.click(listing.response, custom_id="cat:new")
-    confirmed = await lab.respo.click(asked.response, custom_id=f"cat:del-ok:{template.id}")
+    confirmed = await lab.respo.click(asked.response, custom_id=_confirm_id(template))
 
     for result in (clicked, confirmed):
         assert result.ephemeral
@@ -513,7 +541,7 @@ EVERY_ITEM_ID = (
     "cat:pick:del:0",
     "cat:pnav:edit:0",
     "cat:pnav:del:0",
-    "cat:del-ok:{template}",
+    "cat:del-ok:{template}:0123456789ab",
     "cat:del-no",
 )
 """One custom ID of each button and menu of the template screens; ``{template}`` is the ID of a stored template."""
@@ -571,7 +599,7 @@ async def test_a_forged_template_id_from_another_server_reads_as_missing(lab: La
     """A confirmation built for another server's template answers like a missing one, and that template stays."""
     theirs = _template("Soudure", guild_id=OTHER_GUILD_ID)
 
-    interaction = await _forged(lab, f"cat:del-ok:{theirs.id}")
+    interaction = await _forged(lab, _confirm_id(theirs))
 
     interaction.response.send_message.assert_awaited_once()
     assert interaction.response.send_message.await_args.args[0].startswith(GONE)
@@ -620,7 +648,7 @@ async def test_the_template_buttons_work_after_a_restart(started_bot: Any) -> No
     assert {"cat:page:1", "cat:new", "cat:edit", "cat:del"} <= set(ids)
     page = await click("cat:page:1")
     new = await click("cat:new")
-    confirmed = await click(f"cat:del-ok:{last.id}")
+    confirmed = await click(_confirm_id(last))
 
     assert page.response.edit_message.await_args.kwargs["embed"].description.endswith("-# Page 2/2 · 12 modèles")
     assert new.response.send_modal.await_args.args[0].title == "Nouveau modèle"

@@ -61,7 +61,7 @@ def test_a_server_never_reads_or_changes_another_servers_template() -> None:
         catalogue.update_template(GUILD_A, theirs.id, TemplateFields("Pris", "1h", 1, "", False), expected=theirs.fields)
         is False
     )
-    assert catalogue.delete_template(GUILD_A, theirs.id) is False
+    assert catalogue.delete_template(GUILD_A, theirs.id, expected=theirs.fields) is False
     assert catalogue.get_template(GUILD_B, theirs.id) == theirs
 
 
@@ -126,12 +126,12 @@ def test_a_deleted_templates_id_is_never_given_to_a_new_template() -> None:
     """A button holding a deleted template's ID cannot reach the template created after it."""
     _srg(name="Soudure")
     gone = _srg()
-    catalogue.delete_template(GUILD_A, gone.id)
+    catalogue.delete_template(GUILD_A, gone.id, expected=gone.fields)
 
     later = _srg(name="Laser")
 
     assert later.id != gone.id
-    assert catalogue.delete_template(GUILD_A, gone.id) is False
+    assert catalogue.delete_template(GUILD_A, gone.id, expected=gone.fields) is False
     assert catalogue.get_template(GUILD_A, later.id) == later
 
 
@@ -139,9 +139,20 @@ def test_a_deleted_template_is_gone_and_a_second_delete_says_so() -> None:
     """Delete answers True once, then False."""
     srg = _srg()
 
-    assert catalogue.delete_template(GUILD_A, srg.id) is True
+    assert catalogue.delete_template(GUILD_A, srg.id, expected=srg.fields) is True
     assert catalogue.get_template(GUILD_A, srg.id) is None
-    assert catalogue.delete_template(GUILD_A, srg.id) is False
+    assert catalogue.delete_template(GUILD_A, srg.id, expected=srg.fields) is False
+
+
+def test_a_template_changed_since_it_was_read_is_not_deleted() -> None:
+    """A deletion made from a stale copy leaves the template that someone changed in the meantime."""
+    srg = _srg()
+    changed = TemplateFields("Découpe laser", "3 h", 8, "", False)
+    assert catalogue.update_template(GUILD_A, srg.id, changed, expected=srg.fields) is True
+
+    assert catalogue.delete_template(GUILD_A, srg.id, expected=srg.fields) is False
+    assert catalogue.get_template(GUILD_A, srg.id) == TrainingTemplate(srg.id, GUILD_A, changed)
+    assert catalogue.delete_template(GUILD_A, srg.id, expected=changed) is True
 
 
 def test_search_finds_a_part_of_the_name_whatever_the_case_and_stops_at_twenty_five() -> None:

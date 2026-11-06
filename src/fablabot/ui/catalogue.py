@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from hashlib import sha256
 import logging
 from typing import TYPE_CHECKING, Any, Final, Literal, override
 
@@ -33,6 +34,7 @@ _FOOTER: Final = "Un modèle pré-remplit /fm brouillon → Ajouter une session"
 _EMPTY: Final = "Aucun modèle pour l'instant. **Nouveau modèle** en crée un."
 _GONE: Final = "Ce modèle n'existe plus."
 _CHANGED: Final = "Ce modèle a changé depuis : rouvre-le pour le modifier."
+_CHANGED_DELETE: Final = "Ce modèle a changé depuis : rouvre la liste pour le supprimer."
 _NOT_STORED: Final = "Rien n'a été enregistré."
 _UNCHANGED: Final = "Rien n'a été modifié."
 _BUTTON_CHARS: Final = 80
@@ -58,6 +60,14 @@ def page_count(total: int, size: int) -> int:
 def _cut(text: str, limit: int) -> str:
     """Cut a text to Discord's limit, with an ellipsis where it stops."""
     return text if len(text) <= limit else f"{text[: limit - 1]}…"
+
+
+def _digest(fields: TemplateFields) -> str:
+    """Summarise what a template holds in 12 hex digits, so that a confirmation can tell it from a rewritten one."""
+    text = "\x1f".join(
+        str(value) for value in (fields.name, fields.duration, fields.seats, fields.description, fields.excusable)
+    )
+    return sha256(text.encode()).hexdigest()[:12]
 
 
 def _plain(text: str) -> str:
@@ -207,7 +217,7 @@ def deletion_message(template: TrainingTemplate) -> tuple[str, ui.View]:
         tuple[str, ui.View]: The question and its two buttons.
     """
     view = ui.View()
-    view.add_item(TemplateDelete(template.id))
+    view.add_item(TemplateDelete(template.id, _digest(template.fields)))
     view.add_item(TemplateKeep())
     content = (
         f"Supprimer le modèle **{_plain(template.fields.name)}** ? "
@@ -502,34 +512,48 @@ class TemplatePickPage(ui.DynamicItem[ui.Button[ui.View]], template=r"cat:pnav:(
         await _show(interaction, content, None, view)
 
 
-class TemplateDelete(ui.DynamicItem[ui.Button[ui.View]], template=r"cat:del-ok:(?P<template>[0-9]+)"):
-    """The button that confirms the deletion of a template."""
+class TemplateDelete(ui.DynamicItem[ui.Button[ui.View]], template=r"cat:del-ok:(?P<template>[0-9]+):(?P<digest>[0-9a-f]{12})"):
+    """The button that confirms the deletion of a template, as it was when the question was asked.
+
+    Attributes:
+        template_id (int): The template to delete.
+        digest (str): A summary of what the template held when the question was asked.
+    """
 
     interaction_check = click_check(COMMAND, TEMPLATE_ROLES)
 
-    def __init__(self, template_id: int) -> None:
+    def __init__(self, template_id: int, digest: str) -> None:
         """Build the button.
 
         Args:
             template_id (int): The template to delete.
+            digest (str): A summary of what it holds now; a template that holds something else when clicked is kept.
         """
-        super().__init__(ui.Button(label="🗑️ Supprimer", style=ButtonStyle.danger, custom_id=f"cat:del-ok:{template_id}"))
+        super().__init__(
+            ui.Button(label="🗑️ Supprimer", style=ButtonStyle.danger, custom_id=f"cat:del-ok:{template_id}:{digest}")
+        )
         self.template_id = template_id
+        self.digest = digest
 
     @override
     @classmethod
     async def from_custom_id(cls, interaction: Interaction[Any], item: ui.Item[Any], match: re.Match[str], /) -> TemplateDelete:
         """Rebuild the button from its custom ID."""
-        return cls(int(match["template"]))
+        return cls(int(match["template"]), match["digest"])
 
     @override
     async def callback(self, interaction: Interaction[Any]) -> None:
-        """Delete the template of this server and show the list; a missing or foreign one is told as gone."""
+        """Delete the template of this server if it is still as asked and show the list; else tell why it was kept."""
         assert interaction.guild is not None
         guild_id = interaction.guild.id
         template = catalogue.get_template(guild_id, self.template_id)
-        if template is None or not catalogue.delete_template(guild_id, self.template_id):
+        if template is None:
             await _refuse(interaction, f"{_GONE} {_UNCHANGED}", RefusalKind.TEMPLATE_UNKNOWN)
+            return
+        if _digest(template.fields) != self.digest or not catalogue.delete_template(
+            guild_id, self.template_id, expected=template.fields
+        ):
+            await _refuse(interaction, f"{_CHANGED_DELETE} {_UNCHANGED}", RefusalKind.TEMPLATE_CHANGED)
             return
         logger.info(f"[{COMMAND}] delete guild_id={guild_id} user_id={interaction.user.id} template_id={self.template_id}")
         await _show_list(interaction, note=f"Modèle **{_plain(template.fields.name)}** supprimé.")

@@ -23,7 +23,7 @@ from fablabot.models.formation import FmMessageDraft, Formation, PublishedMessag
 from fablabot.models.message import EasterEggTrigger
 from fablabot.services import attendance, catalogue, formations
 from fablabot.ui.attendance import AppelValidate
-from fablabot.ui.catalogue import TemplateDelete, TemplateForm
+from fablabot.ui.catalogue import TemplateForm, deletion_message
 
 NAME = "kevin_secret_name"
 
@@ -346,7 +346,8 @@ async def test_template_lines_name_templates_by_id_only(caplog: pytest.LogCaptur
     (stored,) = catalogue.list_templates(1234)
     interaction = make_interaction(user_name=NAME, guild_id=1234)
     interaction.user.roles = [make_role(RoleNames.TRAININGS_MANAGER)]
-    await TemplateDelete(stored.id).callback(interaction)
+    _, confirmation = deletion_message(stored)
+    await confirmation.children[0].callback(interaction)  # pyright: ignore[reportAttributeAccessIssue]
 
     assert catalogue.list_templates(1234) == []
     assert f"template_id={stored.id}" in caplog.text

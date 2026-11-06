@@ -181,19 +181,25 @@ def update_template(guild_id: int, template_id: int, fields: TemplateFields, *, 
     return changed == 1
 
 
-def delete_template(guild_id: int, template_id: int) -> bool:
-    """Delete a template of a server; sessions copied from it stay as they are.
+def delete_template(guild_id: int, template_id: int, *, expected: TemplateFields) -> bool:
+    """Delete a template of a server if it still holds what the caller last read; sessions copied from it stay as they are.
 
     Args:
         guild_id (int): The ID of the server.
         template_id (int): The template's ID.
+        expected (TemplateFields): What the caller read before asking to delete; a template changed since is left alone.
 
     Returns:
-        bool: False when the server held no such template.
+        bool: False when the server holds no such template any more, or it changed since `expected` was read.
     """
     with db.transaction() as conn:
         return (
-            conn.execute("DELETE FROM training_template WHERE guild_id = ? AND id = ?", (guild_id, template_id)).rowcount == 1
+            conn.execute(
+                "DELETE FROM training_template WHERE guild_id = ? AND id = ? "
+                "AND name = ? AND duration = ? AND seats = ? AND description = ? AND excusable = ?",
+                (guild_id, template_id, *_values(expected)),
+            ).rowcount
+            == 1
         )
 
 
