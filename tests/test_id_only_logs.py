@@ -25,7 +25,8 @@ from fablabot.models.message import EasterEggTrigger
 from fablabot.services import attendance, catalogue, formations
 from fablabot.ui.attendance import AppelValidate
 from fablabot.ui.catalogue import TemplateForm, deletion_message
-from fablabot.ui.session import SessionForm
+from fablabot.ui.draft import removal_message
+from fablabot.ui.session import SessionForm, open_edit_form
 
 NAME = "kevin_secret_name"
 
@@ -384,5 +385,30 @@ async def test_session_lines_name_no_training(caplog: pytest.LogCaptureFixture) 
     assert [fm.name for fm in draft.fms] == [NAME]
     assert f"template_id={template.id}" in caplog.text
     assert "sessions=1" in caplog.text
+    assert NAME not in caplog.text
+    assert "Kevin Secret" not in caplog.text
+
+    # Modifier and Retirer on that session log the server, member and count, never its name.
+    caplog.clear()
+    (session,) = draft.fms
+    await open_edit_form(interaction, session)
+    change = interaction.response.send_modal.await_args.args[0]
+    fill_text_input(change.date_input, (datetime.now(PARIS_TZ) + timedelta(days=3)).strftime("%d/%m"))
+    fill_text_input(change.hour_input, "19:00")
+    fill_text_input(change.seats_input, "5")
+    fill_text_input(change.description_input, f"{NAME} décrit encore")
+    change.trainer_select._values = [trainer]  # pyright: ignore[reportPrivateUsage]
+    await change.on_submit(interaction)
+    changed = formations.get_draft(1234)
+    assert changed is not None
+    assert [fm.seats for fm in changed.fms] == [5]
+    assert "change" in caplog.text
+
+    _, confirmation = removal_message(changed.fms[0])
+    await confirmation.children[0].callback(interaction)  # pyright: ignore[reportAttributeAccessIssue]
+    removed = formations.get_draft(1234)
+    assert removed is not None
+    assert removed.fms == []
+    assert "remove" in caplog.text
     assert NAME not in caplog.text
     assert "Kevin Secret" not in caplog.text
