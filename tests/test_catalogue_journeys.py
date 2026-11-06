@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import datetime, timedelta
 import re
 from typing import TYPE_CHECKING, Any
@@ -916,6 +917,19 @@ async def test_intro_and_conclusion_set_the_text_the_role_and_the_header(lab: La
     assert saved.response.content == "✅ Brouillon mis à jour."
     assert saved.response.embeds[0].title == "📝 Brouillon de la semaine · 3 sessions"
     assert _embed_lines(saved.response)[0] == "**Intro** : Après"
+
+
+async def test_the_form_gives_a_draft_with_no_header_the_start_header(lab: Lab) -> None:
+    """A draft that holds no header gets the line `/fm start` writes when the intro form is sent."""
+    draft = _stage(lab, _three(lab))
+    formations.save_draft(GUILD_ID, replace(draft, header=""))
+    shown = await lab.respo.click((await lab.brouillon(lab.respo)).response, custom_id="fmd:text")
+
+    await lab.respo.submit_modal(shown, _form(shown, {"Intro": "Bonjour", "Rôle à notifier": [lab.notified]}))
+
+    stored = formations.get_draft(GUILD_ID)
+    assert stored is not None
+    assert stored.header == announcement_header(_guild(lab)) != ""
 
 
 async def test_a_blank_link_in_the_form_keeps_the_usual_one(lab: Lab) -> None:
