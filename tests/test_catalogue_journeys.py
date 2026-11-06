@@ -2325,7 +2325,7 @@ async def test_a_free_session_is_added_from_its_own_form(lab: Lab) -> None:
         f"✅ **Tricot** ajoutée : <t:{int(_at().timestamp())}:F> avec <@{lab.plain.id}>, 7 places, émoji 🧡.\n"
         "-# Le brouillon compte maintenant 1 session."
     )
-    assert _ids(done.response) == ["ses:again:0:🧡", "fmd:add", "fmd:show"]
+    assert _ids(done.response) == ["ses:again:0:8de8ebcb:🧡", "fmd:add", "fmd:show"]
     assert next(iter(_buttons(done.response))) == "🔁 Encore une session de Tricot"
     assert _stored() == []
 
@@ -2335,7 +2335,7 @@ async def test_encore_after_a_free_session_keeps_its_name_duration_and_seats(lab
     shown = await _free_form(lab)
     done = await lab.respo.submit_modal(shown, _free_filled(lab, shown))
 
-    again = await lab.respo.click(done.response, custom_id="ses:again:0:🧡")
+    again = await lab.respo.click(done.response, custom_id="ses:again:0:8de8ebcb:🧡")
 
     assert again.modal["title"] == "Session libre"
     assert _values(again) == {"Nom": "Tricot", "Date et heure": f"{_jjmm()} ", "Durée": "2 h", "Places": "7"}
@@ -2357,10 +2357,24 @@ async def test_encore_after_a_free_session_gone_opens_an_empty_free_form(lab: La
     done = await lab.respo.submit_modal(shown, _free_filled(lab, shown))
     formations.save_draft(GUILD_ID, replace(formations.get_draft(GUILD_ID), fms=[]))  # pyright: ignore[reportArgumentType]
 
-    again = await lab.respo.click(done.response, custom_id="ses:again:0:🧡")
+    again = await lab.respo.click(done.response, custom_id="ses:again:0:8de8ebcb:🧡")
 
     assert again.modal["title"] == "Session libre"
     assert _values(again) == {"Nom": None, "Date et heure": None, "Durée": None, "Places": None}
+
+
+async def test_encore_after_a_free_session_whose_emoji_passed_to_another_opens_an_empty_free_form(lab: Lab) -> None:
+    """When the emoji of a free session went to a session of another name, Encore opens the free form empty."""
+    shown = await _free_form(lab)
+    done = await lab.respo.submit_modal(shown, _free_filled(lab, shown))
+    _stage(lab, [_session("🧡", "Brodeuse", days=2, trainer=lab.plain, seats=12)])
+
+    again = await lab.respo.click(done.response, custom_id="ses:again:0:8de8ebcb:🧡")
+
+    assert again.modal["title"] == "Session libre"
+    assert _values(again) == {"Nom": None, "Date et heure": None, "Durée": None, "Places": None}
+    (trainer,) = (i for i in again.modal["components"] if i["type"] == 18 and i["label"] == "Formateur")
+    assert not trainer["component"].get("default_values")
 
 
 @pytest.mark.parametrize(

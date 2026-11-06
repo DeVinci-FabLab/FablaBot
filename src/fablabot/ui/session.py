@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+import hashlib
 import logging
 from typing import TYPE_CHECKING, Any, Final, override
 
@@ -123,7 +124,12 @@ def added_message(session: Formation, count: int, template_id: int) -> tuple[str
     )
     view = ui.View()
     view.add_item(
-        SessionAgain(template_id, session.emoji, label=cut(f"🔁 Encore une session de {session.name}", _BUTTON_CHARS))
+        SessionAgain(
+            template_id,
+            session.emoji,
+            tag=name_tag(session.name) if template_id == 0 else "",
+            label=cut(f"🔁 Encore une session de {session.name}", _BUTTON_CHARS),
+        )
     )
     view.add_item(DraftButton("add", label="➕ Autre formation", style=ButtonStyle.secondary))  # noqa: RUF001 - the sign the copy asks for
     view.add_item(DraftButton("show"))
@@ -464,33 +470,44 @@ class SessionPickPage(ui.DynamicItem[ui.Button[ui.View]], template=r"ses:pnav:(?
         await show(interaction, content, None, view)
 
 
-class SessionAgain(ui.DynamicItem[ui.Button[ui.View]], template=r"ses:again:(?P<template>[0-9]+):(?P<emoji>.+)"):
+def name_tag(name: str) -> str:
+    """Shorten a session's name to eight hexadecimal digits, which a custom ID can carry to tell that name from another."""
+    return hashlib.blake2s(name.encode(), digest_size=4).hexdigest()
+
+
+class SessionAgain(
+    ui.DynamicItem[ui.Button[ui.View]], template=r"ses:again:(?P<template>[0-9]+):(?:(?P<tag>[0-9a-f]{8}):)?(?P<emoji>.+)"
+):
     """The "Encore une session" button: it reopens the form on the date and trainer of the session just added.
 
     Attributes:
         template_id (int): The template of the session just added, 0 for a free session.
         emoji (str): The emoji of that session, which finds it again in the stored draft.
+        tag (str): For a free session, the name's ``name_tag``: it tells the session from one that took its emoji since.
     """
 
     interaction_check = click_check(COMMAND, FORMATION_ROLES)
 
-    def __init__(self, template_id: int, emoji: str, *, label: str = "🔁 Encore une session") -> None:
+    def __init__(self, template_id: int, emoji: str, *, tag: str = "", label: str = "🔁 Encore une session") -> None:
         """Build the button.
 
         Args:
             template_id (int): The template of the session just added, 0 for a free session.
             emoji (str): The emoji of that session.
+            tag (str): For a free session, the ``name_tag`` of its name; empty for a template's session.
             label (str): The text of the button, which names the training.
         """
-        super().__init__(ui.Button(label=label, style=ButtonStyle.primary, custom_id=f"ses:again:{template_id}:{emoji}"))
+        custom_id = f"ses:again:{template_id}:{tag}:{emoji}" if tag else f"ses:again:{template_id}:{emoji}"
+        super().__init__(ui.Button(label=label, style=ButtonStyle.primary, custom_id=custom_id))
         self.template_id = template_id
         self.emoji = emoji
+        self.tag = tag
 
     @override
     @classmethod
     async def from_custom_id(cls, interaction: Interaction[Any], item: ui.Item[Any], match: re.Match[str], /) -> SessionAgain:
         """Rebuild the button from its custom ID."""
-        return cls(int(match["template"]), match["emoji"])
+        return cls(int(match["template"]), match["emoji"], tag=match["tag"] or "")
 
     @override
     async def callback(self, interaction: Interaction[Any]) -> None:
@@ -499,7 +516,9 @@ class SessionAgain(ui.DynamicItem[ui.Button[ui.View]], template=r"ses:again:(?P<
         draft = formations.get_draft(interaction.guild.id)
         session = next((fm for fm in draft.fms if fm.emoji == self.emoji), None) if draft else None
         if self.template_id == 0:
-            await open_free_form(interaction, session)
+            # The emoji may have passed to another session since, whose values are not the ones asked for.
+            same = session is not None and name_tag(session.name) == self.tag
+            await open_free_form(interaction, session if same else None)
             return
         template = _template_of(interaction, str(self.template_id))
         if template is None:
