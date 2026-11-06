@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import date, datetime, time
+from hashlib import sha256
 import re
 from typing import Final
 
@@ -219,6 +220,31 @@ def session_value(session: Formation) -> str:
     return f"{int(session.start_dt.timestamp())}:{session.emoji}"
 
 
+def session_digest(session: Formation) -> str:
+    """Summarise what a session holds in 12 hex digits, so that a form or a confirmation can tell it from a changed one.
+
+    Args:
+        session (Formation): The session, as the draft holds it.
+
+    Returns:
+        str: The digest of its emoji, name, trainer, start, duration, seats, description and excusable.
+    """
+    text = "\x1f".join(
+        str(value)
+        for value in (
+            session.emoji,
+            session.name,
+            session.trainer_mention,
+            int(session.start_dt.timestamp()),
+            session.duration,
+            session.seats,
+            session.description,
+            session.excusable,
+        )
+    )
+    return sha256(text.encode()).hexdigest()[:12]
+
+
 def find_session(draft: FmMessageDraft, start_unix: int, emoji: str) -> int | None:
     """Find a session of the draft by its start and its emoji, as a menu value or a custom ID names it.
 
@@ -237,27 +263,37 @@ def find_session(draft: FmMessageDraft, start_unix: int, emoji: str) -> int | No
 
 
 def replace_session(  # noqa: PLR0913 - the four values the form changes, by name
-    guild_id: int, start_unix: int, emoji: str, *, trainer_mention: str, start_iso: str, seats: int, description: str
+    guild_id: int,
+    start_unix: int,
+    emoji: str,
+    digest: str,
+    *,
+    trainer_mention: str,
+    start_iso: str,
+    seats: int,
+    description: str,
 ) -> Formation | None:
     """Change the trainer, start, seats and description of a session of the draft, the draft kept sorted by start.
 
-    The draft is read, changed and saved with no await in between. The emoji, name, duration and excusable stay.
+    The draft is read, changed and saved with no await in between. The emoji, name, duration and excusable stay. A
+    session that is not the one the form opened on, whatever changed in it since, is left as it is.
 
     Args:
         guild_id (int): The server's ID.
         start_unix (int): The start of the session to change, as the menu named it.
         emoji (str): The emoji of the session to change.
+        digest (str): The digest of the session as the form opened on it.
         trainer_mention (str): The new trainer's mention.
         start_iso (str): The new start.
         seats (int): The new seats.
         description (str): The new description.
 
     Returns:
-        Formation | None: The session as stored, or None when no session has that start and emoji any more.
+        Formation | None: The session as stored, or None when no session has that start, emoji and digest any more.
     """
     draft = formations.get_draft(guild_id)
     position = None if draft is None else find_session(draft, start_unix, emoji)
-    if draft is None or position is None:
+    if draft is None or position is None or session_digest(draft.fms[position]) != digest:
         return None
     changed = replace(
         draft.fms[position], trainer_mention=trainer_mention, start_iso=start_iso, seats=seats, description=description
@@ -267,22 +303,24 @@ def replace_session(  # noqa: PLR0913 - the four values the form changes, by nam
     return changed
 
 
-def remove_session(guild_id: int, start_unix: int, emoji: str) -> Formation | None:
+def remove_session(guild_id: int, start_unix: int, emoji: str, digest: str) -> Formation | None:
     """Take a session out of the draft, the rest kept as it is.
 
-    The draft is read, changed and saved with no await in between.
+    The draft is read, changed and saved with no await in between. A session that is not the one the confirmation named,
+    whatever changed in it since, is left in the draft.
 
     Args:
         guild_id (int): The server's ID.
         start_unix (int): The start of the session to remove, as the confirmation named it.
         emoji (str): The emoji of the session to remove.
+        digest (str): The digest of the session as the confirmation was asked.
 
     Returns:
-        Formation | None: The session removed, or None when no session has that start and emoji any more.
+        Formation | None: The session removed, or None when no session has that start, emoji and digest any more.
     """
     draft = formations.get_draft(guild_id)
     position = None if draft is None else find_session(draft, start_unix, emoji)
-    if draft is None or position is None:
+    if draft is None or position is None or session_digest(draft.fms[position]) != digest:
         return None
     removed = draft.fms[position]
     formations.save_draft(guild_id, replace(draft, fms=[*draft.fms[:position], *draft.fms[position + 1 :]]))

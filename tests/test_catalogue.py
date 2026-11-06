@@ -18,6 +18,7 @@ from fablabot.helpers.formation.catalogue import (
     read_date_time,
     read_hour,
     read_seats,
+    session_digest,
     session_value,
     starts_at,
     template_description,
@@ -240,3 +241,24 @@ def test_a_changed_or_removed_session_is_not_found() -> None:
     assert find_session(draft, start + 60, "🧡") is None
     assert find_session(draft, start, "💛") is None
     assert find_session(_draft(), start, "🧡") is None
+
+
+def test_a_session_digest_changes_with_anything_a_form_changes_or_a_confirmation_names() -> None:
+    """The digest is 12 hex digits, equal for equal sessions and different once any value of the session differs."""
+    session = _session("🧡")
+    digest = session_digest(session)
+
+    assert len(digest) == 12
+    assert int(digest, 16) >= 0
+    assert session_digest(replace(session)) == digest
+    for change in (
+        {"emoji": "💛"},
+        {"name": "Résine"},
+        {"trainer_mention": "<@2>"},
+        {"start_iso": "2026-11-10T19:00:00+01:00"},
+        {"duration": "2 h"},
+        {"seats": session.seats + 1},
+        {"description": "Gants fournis."},
+        {"excusable": not session.excusable},
+    ):
+        assert session_digest(replace(session, **change)) != digest, change

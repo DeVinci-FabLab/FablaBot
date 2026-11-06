@@ -21,6 +21,7 @@ from fablabot.helpers.formation.catalogue import (
     read_hour,
     read_seats,
     replace_session,
+    session_digest,
     starts_at,
     template_description,
     template_fields,
@@ -201,7 +202,7 @@ class SessionForm(ui.Modal):
 
     Attributes:
         template (TrainingTemplate): The template the form opened on; for Modifier, the session's own values in one.
-        replace (tuple[int, str] | None): The start and emoji of the session to change, None when the form adds one.
+        replace (tuple[int, str, str] | None): The start, emoji and digest of the session to change, or None.
         trainer_select (ui.UserSelect): The trainer, preset when the form comes from "Encore une session".
         date_input (ui.TextInput): The day, ``JJ/MM``.
         hour_input (ui.TextInput): The hour, ``HH:MM``.
@@ -219,7 +220,7 @@ class SessionForm(ui.Modal):
         day: date | None,
         description: str,
         hour: time | None = None,
-        replace: tuple[int, str] | None = None,
+        replace: tuple[int, str, str] | None = None,
     ) -> None:
         """Build the form.
 
@@ -229,7 +230,7 @@ class SessionForm(ui.Modal):
             day (date | None): The day to preset, or None for an empty date.
             description (str): The description to start with, empty for none.
             hour (time | None): The hour to preset, or None for an empty hour.
-            replace (tuple[int, str] | None): The start and emoji of the session to change, or None to add a session.
+            replace (tuple[int, str, str] | None): The start, emoji and digest of the session to change, or None to add one.
         """
         name = cut(template.fields.name, _TITLE_CHARS if replace is None else _TITLE_CHARS - len(_MODIFY))
         super().__init__(title=name if replace is None else f"{_MODIFY}{name}")
@@ -269,7 +270,7 @@ class SessionForm(ui.Modal):
             return
         await _add(interaction, self._session(guild, template), template.id)
 
-    async def _change(self, interaction: Interaction, start_unix: int, emoji: str) -> None:
+    async def _change(self, interaction: Interaction, start_unix: int, emoji: str, digest: str) -> None:
         """Change the session this form was opened on, in the draft as it is now, and show the brouillon."""
         assert interaction.guild is not None
         guild = interaction.guild
@@ -278,11 +279,12 @@ class SessionForm(ui.Modal):
             await _refuse(interaction, read, outcome=_NOT_CHANGED)
             return
         trainer, start, seats = read
-        # Read, changed and saved with no await in between: the session is found by its start and emoji or refused.
+        # Read, changed and saved with no await in between: the session is found by its start, emoji and digest or refused.
         changed = replace_session(
             guild.id,
             start_unix,
             emoji,
+            digest,
             trainer_mention=trainer.mention,
             start_iso=start.isoformat(),
             seats=seats,
@@ -446,7 +448,7 @@ async def open_edit_form(interaction: Interaction, session: Formation) -> None:
         day=start.date(),
         description=session.description,
         hour=start.time(),
-        replace=(int(session.start_dt.timestamp()), session.emoji),
+        replace=(int(session.start_dt.timestamp()), session.emoji, session_digest(session)),
     )
     await interaction.response.send_modal(form)
 

@@ -11,7 +11,7 @@ from discord import AllowedMentions, ButtonStyle, ChannelType, Embed, Interactio
 from fablabot.helpers.constants import ANNOUNCEMENT_MAX_CHARS, BRAND_COLOUR, FORMATION_ROLES
 from fablabot.helpers.formation import announcement_header, humanize_dt, is_past, render_message
 from fablabot.helpers.formation.attendance import trainer_id
-from fablabot.helpers.formation.catalogue import find_session, remove_session, session_value
+from fablabot.helpers.formation.catalogue import find_session, remove_session, session_digest, session_value
 from fablabot.helpers.formation.rendering import discord_timestamp
 from fablabot.helpers.utils import RefusalKind, counted, log_refusal
 from fablabot.models.formation import FmMessageDraft
@@ -213,7 +213,7 @@ def removal_message(session: Formation) -> tuple[str, ui.View]:
         tuple[str, ui.View]: The question and its two buttons.
     """
     view = ui.View()
-    view.add_item(SessionRemove(int(session.start_dt.timestamp()), session.emoji))
+    view.add_item(SessionRemove(int(session.start_dt.timestamp()), session.emoji, session_digest(session)))
     view.add_item(SessionKeep())
     content = (
         f"Retirer **{session.emoji} {plain(session.name)}** "
@@ -585,41 +585,46 @@ class SessionListPage(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:snav:(?
         await show(interaction, content, None, view)
 
 
-class SessionRemove(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:rm-ok:(?P<start>[0-9]+):(?P<emoji>.+)"):
-    """The button that confirms the removal of a session, named by its start and emoji.
+class SessionRemove(
+    ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:rm-ok:(?P<start>[0-9]+):(?P<emoji>[^:]+):(?P<digest>[0-9a-f]{12})"
+):
+    """The button that confirms the removal of a session, named by its start and emoji and the digest of what it held.
 
     Attributes:
         start_unix (int): The start of the session to remove, in seconds since the epoch.
         emoji (str): The emoji of the session to remove.
+        digest (str): The digest of the session when the question was asked, so a changed session is not removed.
     """
 
     interaction_check = click_check(COMMAND, FORMATION_ROLES)
 
-    def __init__(self, start_unix: int, emoji: str) -> None:
+    def __init__(self, start_unix: int, emoji: str, digest: str) -> None:
         """Build the button.
 
         Args:
             start_unix (int): The start of the session to remove.
             emoji (str): The emoji of the session to remove.
+            digest (str): The digest of the session as the question names it.
         """
         label, style = _BUTTONS["remove"]
-        super().__init__(ui.Button(label=label, style=style, custom_id=f"fmd:rm-ok:{start_unix}:{emoji}"))
+        super().__init__(ui.Button(label=label, style=style, custom_id=f"fmd:rm-ok:{start_unix}:{emoji}:{digest}"))
         self.start_unix = start_unix
         self.emoji = emoji
+        self.digest = digest
 
     @override
     @classmethod
     async def from_custom_id(cls, interaction: Interaction[Any], item: ui.Item[Any], match: re.Match[str], /) -> SessionRemove:
         """Rebuild the button from its custom ID."""
-        return cls(int(match["start"]), match["emoji"])
+        return cls(int(match["start"]), match["emoji"], match["digest"])
 
     @override
     async def callback(self, interaction: Interaction[Any]) -> None:
-        """Remove the session if the draft still holds it as it was named, and show the brouillon; else tell why it was kept."""
+        """Remove the session if the draft still holds it as asked about and show the brouillon; else tell why it was kept."""
         assert interaction.guild is not None
         guild = interaction.guild
-        # Read, changed and saved with no await in between: the session is found by its start and emoji or refused.
-        removed = remove_session(guild.id, self.start_unix, self.emoji)
+        # Read, changed and saved with no await in between: the session is found by its start, emoji and digest or refused.
+        removed = remove_session(guild.id, self.start_unix, self.emoji, self.digest)
         if removed is None:
             await _refuse(interaction, f"{_SESSION_CHANGED} {_NOT_CHANGED}", RefusalKind.SESSION_CHANGED)
             return

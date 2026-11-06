@@ -15,6 +15,7 @@ import pytest
 
 from fablabot.helpers.constants import PARIS_TZ, SESSION_EMOJIS, ErrorMessages, RoleNames
 from fablabot.helpers.formation import announcement_header, humanize_dt, render_message
+from fablabot.helpers.formation.catalogue import session_digest
 from fablabot.helpers.guild_access import GuildAccessPolicy
 from fablabot.helpers.utils import RIGHT_LOST_MESSAGE
 from fablabot.models import TemplateFields
@@ -1314,7 +1315,7 @@ EVERY_DRAFT_ITEM_ID = (
     "fmd:ses:remove:0",
     "fmd:snav:edit:0",
     "fmd:snav:remove:1",
-    "fmd:rm-ok:1:🧡",
+    "fmd:rm-ok:1:🧡:0123456789ab",
     "fmd:rm-no",
 )
 """One custom ID of each button and menu of the brouillon."""
@@ -2821,11 +2822,71 @@ async def test_a_session_changed_since_the_menu_is_refused_and_nothing_is_stored
     if surface == "modifier":
         refused = await lab.respo.submit_modal(chosen, _filled(lab, chosen, Places="9"))
     else:
-        refused = await lab.respo.click(chosen.response, custom_id=f"fmd:rm-ok:{int(_at(3).timestamp())}:🧡")
+        refused = await lab.respo.click(chosen.response, custom_id=_ids(chosen.response)[0])
 
     assert refused.ephemeral
     assert refused.response.content == NOT_CHANGED
     assert formations.get_draft(GUILD_ID) == after
+
+
+async def _changed_in_place(lab: Lab, how: str) -> None:
+    """Change the 🧡 session behind the menu's back, its start and emoji kept, as another member or a second tab would."""
+    draft = formations.get_draft(GUILD_ID)
+    assert draft is not None
+    first, rest = draft.fms[0], draft.fms[1:]
+    if how == "retrained":
+        first = replace(first, trainer_mention=f"<@{lab.admin.id}>")
+    elif how == "described":
+        first = replace(first, description="Nouvelle description importante.", seats=12)
+    else:
+        first = replace(first, name="Résine", duration="3 h")
+    formations.save_draft(GUILD_ID, replace(draft, fms=[first, *rest]))
+
+
+@pytest.mark.parametrize("surface", ["modifier", "retirer"])
+@pytest.mark.parametrize("how", ["retrained", "described", "replaced"])
+async def test_a_session_changed_in_place_since_the_menu_is_refused_and_nothing_is_overwritten(
+    lab: Lab, how: str, surface: str
+) -> None:
+    """A session changed under the same start and emoji, in its trainer, seats, description or name, is not overwritten."""
+    target = _planned("🧡", "Soudure", _at(3), trainer=lab.plain, description="Gants fournis.")
+    _stage(lab, [target, _planned("💛", "Brodeuse", _at(6), trainer=lab.plain)])
+    action = "edit" if surface == "modifier" else "remove"
+    asked = await _sessions_menu(lab, action)
+    chosen = await lab.respo.select(asked.response, [_value(target)], custom_id=f"fmd:ses:{action}:0")
+    await _changed_in_place(lab, how)
+    after = formations.get_draft(GUILD_ID)
+    assert after is not None
+    assert after.fms[0] != target
+
+    if surface == "modifier":
+        refused = await lab.respo.submit_modal(chosen, _filled(lab, chosen, Heure="09:15"))
+    else:
+        refused = await lab.respo.click(chosen.response, custom_id=_ids(chosen.response)[0])
+
+    assert refused.ephemeral
+    assert refused.response.content == NOT_CHANGED
+    assert formations.get_draft(GUILD_ID) == after
+
+
+async def test_a_session_added_in_the_place_of_a_removed_one_is_not_removed_by_the_old_confirmation(lab: Lab) -> None:
+    """A session that took the place of a removed one, same emoji and start, is not removed by a confirmation asked before."""
+    target = _planned("🧡", "Soudure", _at(3), trainer=lab.plain)
+    _stage(lab, [target])
+    asked = await _sessions_menu(lab, "remove")
+    question = await lab.respo.select(asked.response, [_value(target)], custom_id="fmd:ses:remove:0")
+    other_asked = await _sessions_menu(lab, "remove", lab.admin)
+    other_question = await lab.admin.select(other_asked.response, [_value(target)], custom_id="fmd:ses:remove:0")
+    await lab.respo.click(question.response, custom_id=_ids(question.response)[0])
+    newer = _planned("🧡", "Résine", _at(3), trainer=lab.admin)
+    draft = formations.get_draft(GUILD_ID)
+    assert draft is not None
+    formations.save_draft(GUILD_ID, replace(draft, fms=[newer]))
+
+    refused = await lab.admin.click(other_question.response, custom_id=_ids(other_question.response)[0])
+
+    assert refused.response.content == NOT_CHANGED
+    assert formations.get_draft(GUILD_ID) == replace(draft, fms=[newer])
 
 
 async def test_the_session_menu_works_after_a_restart(started_bot: Any) -> None:
@@ -2858,7 +2919,7 @@ async def test_the_session_menu_works_after_a_restart(started_bot: Any) -> None:
     question = await click("fmd:ses:remove:0", chosen=_value(target))
     kept = await click("fmd:rm-no")
     modifier = await click("fmd:ses:edit:0", chosen=_value(other))
-    done = await click(f"fmd:rm-ok:{int(_at(3).timestamp())}:🧡")
+    done = await click(f"fmd:rm-ok:{int(_at(3).timestamp())}:🧡:{session_digest(target)}")
 
     assert (
         asked.response.edit_message.await_args.kwargs["content"] == "**Quelle session retirer ?** 2 sessions, triées par date."
