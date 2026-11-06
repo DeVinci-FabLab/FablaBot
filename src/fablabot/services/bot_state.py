@@ -27,3 +27,27 @@ def put(key: str, value: str) -> None:
     """
     with db.transaction() as conn:
         conn.execute("INSERT OR REPLACE INTO bot_state (key, value) VALUES (?, ?)", (key, value))
+
+
+def delete(key: str) -> None:
+    """Forget a value, if there is one.
+
+    Args:
+        key (str): The name it was recorded under.
+    """
+    with db.transaction() as conn:
+        conn.execute("DELETE FROM bot_state WHERE key = ?", (key,))
+
+
+def keys(prefix: str) -> list[str]:
+    """List the names recorded under a prefix.
+
+    Args:
+        prefix (str): The start of the names.
+
+    Returns:
+        list[str]: The names, in order.
+    """
+    # substr rather than LIKE: a prefix may hold ``_`` or ``%``.
+    rows = db.connection().execute("SELECT key FROM bot_state WHERE substr(key, 1, ?) = ? ORDER BY key", (len(prefix), prefix))
+    return [row["key"] for row in rows]

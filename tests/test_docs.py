@@ -140,6 +140,13 @@ def test_operator_guide_says_a_role_allowed_for_the_whole_bot_counts_in_the_serv
     assert "a setting on the group wins" in text
 
 
+def test_user_guide_says_the_check_is_sent_once_and_a_restarted_relaunch_is_given_back() -> None:
+    """The guide tells the trainer gets the check once, and what a restart in the middle of a relaunch does."""
+    text = " ".join(_read("docs/USERGUIDE.md").split())
+    assert "it does not send it again" in text
+    assert "If the bot restarts in the middle of a relaunch, the next five-minute check gives the answer back" in text
+
+
 def test_user_guide_holds_welcome_approve_to_the_role_rank() -> None:
     """The guide says /welcome approve gives the roles only below the caller's highest, owner exempt, like /user add_role."""
     text = " ".join(_read("docs/USERGUIDE.md").split())

@@ -56,7 +56,7 @@ from fablabot.helpers.formation import (
     send_waitlist_dm,
     start_appel,
 )
-from fablabot.helpers.formation.attendance import appel_message, trainer_id
+from fablabot.helpers.formation.attendance import Start, appel_message, trainer_id
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.safe_discord_operations import retract_unsaved_post
 from fablabot.helpers.utils import RefusalKind, counted, ensure_command_context, is_valid_emoji, log_refusal
@@ -64,7 +64,7 @@ from fablabot.logging_handlers import guild_log_context
 from fablabot.models import FmCommand, FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
 from fablabot.services import attendance, catalogue, formations
 from fablabot.ui import fmui
-from fablabot.ui.attendance import DYNAMIC_ITEMS, OpenAppelPicker
+from fablabot.ui.attendance import DYNAMIC_ITEMS, OpenAppelPicker, recover_relaunches
 from fablabot.ui.catalogue import CATALOGUE_ITEMS, cut, plain, templates_message
 from fablabot.ui.draft import DRAFT_ITEMS, draft_message
 from fablabot.ui.session import SESSION_ITEMS, open_session_form
@@ -884,6 +884,7 @@ class FormationManagement(commands.Cog):
                 except sqlite3.Error:
                     logger.exception(f"Reminders of guild {guild_id} stopped by a storage failure; next tick tries again.")
         try:
+            await recover_relaunches(self.bot)
             await send_due_alerts(self.bot, now)
         except sqlite3.Error:
             logger.exception("Alerts stopped by a storage failure; next tick tries again.")
@@ -957,8 +958,12 @@ class FormationManagement(commands.Cog):
                 fm.notified_hour_before = True
                 continue
 
-            if now - APPEL_EDIT_WINDOW < fm.start_dt <= start_window_end and await start_appel(guild, pub, position):
-                if fm.start_dt >= now - window_tolerance:  # "starts now" is only true in the window
+            if now - APPEL_EDIT_WINDOW < fm.start_dt <= start_window_end:
+                started = await start_appel(guild, pub, position)
+                if started is Start.FAILED:
+                    continue
+                # A check kept from an earlier tick whose record failed was announced then: nothing goes out twice.
+                if started is Start.OPENED and fm.start_dt >= now - window_tolerance:  # "starts now" only holds in the window
                     await notify_responsible_before_formation(guild, fm, moment="start")
 
                 fm.notified_at_start = True  # only once the check exists: a failed opening is tried again at the next tick
