@@ -9,7 +9,7 @@ import re
 from typing import TYPE_CHECKING, Any, override
 from unittest.mock import MagicMock
 
-from conftest import LISTED_GUILD, OTHER_LISTED_GUILD, make_interaction, make_role
+from conftest import LISTED_GUILD, OTHER_LISTED_GUILD, fill_text_input, make_interaction, make_role
 import discord
 import pytest
 
@@ -2269,6 +2269,62 @@ async def test_fm_ajouter_refuses_a_name_no_template_has(lab: Lab, typed: str) -
     assert refused.response.content == _unknown(typed.replace("_", "\\_").replace("*", "\\*"))
     assert formations.get_draft(GUILD_ID) == before
     assert _stored() == [template]
+
+
+def _direct_form_interaction(guild_trainer: int = 7) -> MagicMock:
+    """An interaction on the server whose member lookup finds a trainer, to send a form without the simulated Discord."""
+    trainer = MagicMock(spec=discord.Member)
+    trainer.id = guild_trainer
+    trainer.bot = False
+    trainer.mention = f"<@{guild_trainer}>"
+    interaction = make_interaction(guild_id=GUILD_ID)
+    interaction.guild.get_member = MagicMock(return_value=trainer)
+    interaction.message = MagicMock()
+    return interaction
+
+
+def _fill_session_form(form: session_ui.SessionForm, description: str) -> None:
+    """Type a valid trainer, date, hour and seats in a session form, with this description, past what Discord would allow."""
+    fill_text_input(form.date_input, _jjmm())
+    fill_text_input(form.hour_input, "18:30")
+    fill_text_input(form.seats_input, "4")
+    fill_text_input(form.description_input, description)
+    form.trainer_select._values = [MagicMock(id=7)]  # pyright: ignore[reportPrivateUsage]
+
+
+async def test_a_session_form_refuses_a_description_past_500_characters() -> None:
+    """A description of 501 characters, which only a form altered past Discord's limit sends, is refused; 500 is kept."""
+    template = _soudure()
+    form = session_ui.SessionForm(template=template, trainer_id=None, day=None, description="")
+    interaction = _direct_form_interaction()
+
+    _fill_session_form(form, "x" * 501)
+    await form.on_submit(interaction)
+
+    interaction.response.send_message.assert_awaited_once()
+    assert interaction.response.send_message.await_args.args[0] == f"Description : 500 caractères au plus. {NOT_ADDED}"
+    assert _drafted() == []
+
+    _fill_session_form(form, "x" * 500)
+    await form.on_submit(interaction)
+
+    assert [fm.description for fm in _drafted()] == ["x" * 500]
+
+
+async def test_a_modifier_form_refuses_a_description_past_500_characters() -> None:
+    """The Modifier form refuses a description of 501 characters with the word that nothing was changed."""
+    target = _session("🧡", "Soudure", days=3, trainer=MagicMock(id=7))
+    draft = FmMessageDraft(header="h", role_id=0, intro="i", fms=[target], end="e")
+    formations.save_draft(GUILD_ID, draft)
+    interaction = _direct_form_interaction()
+    await session_ui.open_edit_form(interaction, target)
+    form = interaction.response.send_modal.await_args.args[0]
+
+    _fill_session_form(form, "x" * 501)
+    await form.on_submit(interaction)
+
+    assert interaction.response.send_message.await_args.args[0] == "Description : 500 caractères au plus. Rien n'a été modifié."
+    assert formations.get_draft(GUILD_ID) == draft
 
 
 async def test_fm_ajouter_refuses_another_servers_template_id(lab: Lab) -> None:

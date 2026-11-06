@@ -13,6 +13,7 @@ from fablabot.helpers.constants import FORMATION_ROLES, PARIS_TZ, ErrorMessages
 from fablabot.helpers.formation import is_past
 from fablabot.helpers.formation.attendance import trainer_id
 from fablabot.helpers.formation.catalogue import (
+    DESCRIPTION_CHARS,
     EXCUSABLE_YES,
     add_session,
     day_text,
@@ -63,6 +64,7 @@ _BAD_TRAINER: Final = "Choisis un formateur parmi les membres du serveur."
 _BAD_DATE: Final = "Date illisible : écris JJ/MM, par exemple 12/10."
 _BAD_HOUR: Final = "Heure illisible : écris HH:MM, par exemple 18:30."
 _BAD_SEATS: Final = "Places : un nombre entier de 1 à 500."
+_BAD_DESCRIPTION: Final = f"Description : {DESCRIPTION_CHARS} caractères au plus."
 _BAD_DATE_TIME: Final = "Date et heure illisibles : écris JJ/MM HH:MM, par exemple 12/10 18:30."
 _FREE: Final = "free"
 """The value of the menu's last option, which no template ID can equal."""
@@ -251,7 +253,11 @@ class SessionForm(ui.Modal):
         )
         self.seats_input = ui.TextInput(label="Places", max_length=20, default=str(template.fields.seats))
         self.description_input = ui.TextInput(
-            label="Description", style=TextStyle.paragraph, required=False, max_length=500, default=description or None
+            label="Description",
+            style=TextStyle.paragraph,
+            required=False,
+            max_length=DESCRIPTION_CHARS,
+            default=description or None,
         )
         self.add_item(ui.Label(text="Formateur", component=self.trainer_select))
         for item in (self.date_input, self.hour_input, self.seats_input, self.description_input):
@@ -309,7 +315,10 @@ class SessionForm(ui.Modal):
         if isinstance(start, str):
             return start
         seats = read_seats(self.seats_input.value)
-        return _BAD_SEATS if seats is None else (trainer, start, seats)
+        if seats is None:
+            return _BAD_SEATS
+        # The form caps the field at the same length; this holds when a form is sent past what Discord allows.
+        return _BAD_DESCRIPTION if len(self.description_input.value.strip()) > DESCRIPTION_CHARS else (trainer, start, seats)
 
     def _session(self, guild: Guild, template: TrainingTemplate) -> Formation | str:
         """Read the form into a session of the template as it is now, or give the text of the first refusal."""

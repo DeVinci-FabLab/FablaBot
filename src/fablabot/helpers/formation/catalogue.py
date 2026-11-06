@@ -17,7 +17,7 @@ MIN_SEATS: Final = 1
 MAX_SEATS: Final = 500
 _NAME_CHARS: Final = 100
 _DURATION_CHARS: Final = 50
-_DESCRIPTION_CHARS: Final = 500
+DESCRIPTION_CHARS: Final = 500
 _WHOLE_NUMBER: Final = re.compile(r"[0-9]+")
 _DAY_MONTH: Final = re.compile(r"([0-9]{1,2})/([0-9]{1,2})(?:/([0-9]{4}))?")
 _HOUR: Final = re.compile(r"([0-9]{1,2})(?::([0-9]{2})|h([0-9]{2})?)")
@@ -66,7 +66,7 @@ def template_fields(name: str, duration: str, seats: str, description: str, excu
         (not duration, "Durée : à remplir."),
         (len(duration) > _DURATION_CHARS, f"Durée : {_DURATION_CHARS} caractères au plus."),
         (count is None, f"Places : un nombre entier de {MIN_SEATS} à {MAX_SEATS}."),
-        (len(description) > _DESCRIPTION_CHARS, f"Description : {_DESCRIPTION_CHARS} caractères au plus."),
+        (len(description) > DESCRIPTION_CHARS, f"Description : {DESCRIPTION_CHARS} caractères au plus."),
         (excusable not in (EXCUSABLE_YES, EXCUSABLE_NO), "Excusable : à choisir."),
     )
     for failed, refusal in checks:
