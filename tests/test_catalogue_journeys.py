@@ -1043,6 +1043,22 @@ async def test_publier_posts_in_the_chosen_channel_like_fm_publish(lab: Lab) -> 
     assert (stored.message_id, stored.channel_id) == (by_button.id, lab.elsewhere.id)
 
 
+async def test_publier_pings_the_chosen_role_and_never_everyone(lab: Lab) -> None:
+    """A typed @everyone, @here or other role in the intro is posted as text; only the chosen role and trainers are pinged."""
+    other = lab.guild.create_role("Autre")
+    _stage(lab, _three(lab), intro=f"@everyone @here <@&{other.id}> venez")
+
+    await _published_via_publier(lab, lab.announce)
+
+    posted = lab.announce.last_message
+    assert posted is not None
+    assert "@everyone" in posted.content
+    sent = lab.env.backend.get_message(lab.announce.id, posted.id)
+    assert not sent.mention_everyone
+    assert sent.ping_role_ids == [lab.notified.id]
+    assert sent.ping_user_ids == [lab.plain.id]
+
+
 _BAD_DRAFTS = {
     "empty": ("Le brouillon ne contient aucune session. Rien n'a été publié."),
     "no-role": "Choisis d'abord le rôle à notifier : **Intro / conclusion**. Rien n'a été publié.",

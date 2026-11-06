@@ -19,6 +19,7 @@ from discord import (
     Interaction,
     Member,
     NotFound,
+    Object,
     RawReactionActionEvent,
     Role,
     TextChannel,
@@ -555,7 +556,9 @@ class FormationManagement(commands.Cog):
         content = render_message(draft)
 
         try:
-            msg = await channel.send(content, suppress_embeds=True)
+            # Staff type the intro, so it may not reach beyond the chosen role: the bot's own rights must not ping everyone.
+            mentions = AllowedMentions(everyone=False, roles=[Object(draft.role_id)] if draft.role_id else False, users=True)
+            msg = await channel.send(content, suppress_embeds=True, allowed_mentions=mentions)
         except Exception:
             logger.exception(f"Guild {interaction.guild.id} failed to publish the formations draft in {channel!r}.")
             await interaction.followup.send("Erreur pendant la publication du message.", ephemeral=True)
