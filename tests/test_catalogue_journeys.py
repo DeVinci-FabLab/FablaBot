@@ -488,11 +488,13 @@ async def test_a_server_no_longer_served_refuses_the_click(lab: Lab) -> None:
     assert _stored() == before
 
 
-async def _forged(lab: Lab, custom_id: str, *, client: Any | None = None) -> MagicMock:
-    """Send the click of a Respo Formation on a button this server never showed, and return the interaction the bot answered."""
+async def _forged(
+    lab: Lab, custom_id: str, *, client: Any | None = None, roles: tuple[str, ...] = (RoleNames.TRAININGS_MANAGER,)
+) -> MagicMock:
+    """Send a member's click (a Respo Formation by default) on an item and return the interaction the bot answered."""
     interaction = make_interaction(user_id=lab.respo.id, guild_id=GUILD_ID)
     interaction.client = client or lab.env.bot
-    interaction.user.roles = [make_role(RoleNames.TRAININGS_MANAGER)]
+    interaction.user.roles = [make_role(name) for name in roles]
     interaction.message = MagicMock()
     item_class = next(cls for cls in CATALOGUE_ITEMS if cls.__discord_ui_compiled_template__.fullmatch(custom_id))
     match = item_class.__discord_ui_compiled_template__.fullmatch(custom_id)
@@ -500,6 +502,69 @@ async def _forged(lab: Lab, custom_id: str, *, client: Any | None = None) -> Mag
     if await item.interaction_check(interaction):
         await item.callback(interaction)
     return interaction
+
+
+EVERY_ITEM_ID = (
+    "cat:page:1",
+    "cat:new",
+    "cat:edit",
+    "cat:del",
+    "cat:pick:edit:0",
+    "cat:pick:del:0",
+    "cat:pnav:edit:0",
+    "cat:pnav:del:0",
+    "cat:del-ok:{template}",
+    "cat:del-no",
+)
+"""One custom ID of each button and menu of the template screens; ``{template}`` is the ID of a stored template."""
+
+
+@pytest.mark.parametrize("custom_id", EVERY_ITEM_ID, ids=lambda custom_id: custom_id.split("{")[0].strip(":").replace(":", "-"))
+async def test_every_template_item_refuses_a_member_who_lost_the_role(lab: Lab, custom_id: str) -> None:
+    """A member holding no staff role is refused on each button and menu of the template screens, and nothing is stored."""
+    template = _template("Soudure")
+    before = _stored()
+
+    interaction = await _forged(lab, custom_id.format(template=template.id), roles=())
+
+    interaction.response.send_message.assert_awaited_once()
+    assert interaction.response.send_message.await_args.args[0] == RIGHT_LOST_MESSAGE
+    assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+    interaction.response.edit_message.assert_not_awaited()
+    interaction.response.send_modal.assert_not_awaited()
+    assert _stored() == before
+
+
+@pytest.mark.parametrize("custom_id", EVERY_ITEM_ID, ids=lambda custom_id: custom_id.split("{")[0].strip(":").replace(":", "-"))
+async def test_every_template_item_refuses_a_server_no_longer_served(lab: Lab, custom_id: str) -> None:
+    """On a server that left the bot's list, each button and menu of the template screens is refused before anything is read."""
+    template = _template("Soudure")
+    before = _stored()
+    bot: Any = lab.env.bot
+    bot.guild_access = GuildAccessPolicy(allowed=frozenset({OTHER_GUILD_ID}))
+
+    interaction = await _forged(lab, custom_id.format(template=template.id))
+
+    interaction.response.send_message.assert_awaited_once()
+    assert interaction.response.send_message.await_args.args[0] == NOT_SERVED
+    assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+    interaction.response.edit_message.assert_not_awaited()
+    interaction.response.send_modal.assert_not_awaited()
+    assert _stored() == before
+
+
+async def test_a_form_left_open_on_a_server_no_longer_served_stores_nothing(lab: Lab) -> None:
+    """When the server leaves the bot's list while a form is open, its submit is refused and stores nothing."""
+    listing = await lab.modeles(lab.respo)
+    shown = await lab.respo.click(listing.response, custom_id="cat:new")
+    bot: Any = lab.env.bot
+    bot.guild_access = GuildAccessPolicy(allowed=frozenset({OTHER_GUILD_ID}))
+
+    submitted = await lab.respo.submit_modal(shown, _form(shown, FORM))
+
+    assert submitted.ephemeral
+    assert submitted.response.content == NOT_SERVED
+    assert _stored() == []
 
 
 async def test_a_forged_template_id_from_another_server_reads_as_missing(lab: Lab) -> None:
