@@ -58,6 +58,8 @@ class RefusalKind(StrEnum):
     APPEL_CANCELLED = "appel_cancelled"
     APPEL_ANSWERED = "appel_answered"
     APPEL_RELAUNCHING = "appel_relaunching"
+    ANNOUNCEMENT_CHANGED = "announcement_changed"
+    ANNOUNCEMENT_GONE = "announcement_gone"
 
 
 def log_refusal(

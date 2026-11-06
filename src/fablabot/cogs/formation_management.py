@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import csv
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 import io
 import logging
 import sqlite3
@@ -59,6 +59,7 @@ from fablabot.helpers.formation import (
 )
 from fablabot.helpers.formation.attendance import Start, appel_message, trainer_id
 from fablabot.helpers.formation.catalogue import has_sessions_to_come
+from fablabot.helpers.formation.update import CHANGED_REFUSAL, UpdatePlan, as_draft, gone_refusal, plan_update
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.safe_discord_operations import retract_unsaved_post
 from fablabot.helpers.utils import RefusalKind, counted, ensure_command_context, is_valid_emoji, log_refusal
@@ -68,7 +69,7 @@ from fablabot.services import attendance, catalogue, formations
 from fablabot.ui import fmui
 from fablabot.ui.attendance import DYNAMIC_ITEMS, OpenAppelPicker, recover_relaunches
 from fablabot.ui.catalogue import CATALOGUE_ITEMS, cut, plain, templates_message
-from fablabot.ui.draft import DRAFT_ITEMS, draft_message
+from fablabot.ui.draft import DRAFT_ITEMS, done_message, draft_message, live_draft, stored_draft
 from fablabot.ui.session import SESSION_ITEMS, open_session_form
 
 if TYPE_CHECKING:
@@ -84,6 +85,8 @@ _REPUBLISH_REFUSED = (
     "Rien n'a été publié."
 )
 
+
+_UPDATE_RETRY = "L'annonce n'a pas pu être mise à jour pour l'instant : réessaie dans un instant. Rien n'a été modifié."
 
 _ACCESS = AnyRole(ALLOWED_ROLES)
 _CHOICE_CHARS = 100
@@ -675,6 +678,124 @@ class FormationManagement(commands.Cog):
 
         logger.info(f"Guild {guild_id} published the formations message as announcement.")
         await interaction.followup.send("Message publié en mode annonce.")
+
+    async def update_announcement(self, interaction: Interaction, message_id: int, digest: str) -> None:
+        """Rewrite the published announcement in place from the draft, keeping its sign-ups, as the summary showed.
+
+        The caller has checked the roles. The click is answered first; then, under the server's published lock, the
+        announcement and the draft are read again, the update planned and compared with the digest of the summary, the
+        posted message fetched, the announcement and the draft stored together and the message rebuilt from the
+        reactions. A plan that differs from the one shown, or a message that is gone, changes nothing.
+
+        Args:
+            interaction (Interaction): The click on Confirmer la mise à jour, on a server.
+            message_id (int): The published message the summary was made for.
+            digest (str): The digest of the plan the summary showed.
+        """
+        assert interaction.guild is not None
+        guild = interaction.guild
+        last = formations.current_published(guild.id)
+        if (
+            last is None or last.message_id != message_id
+        ):  # also a message of another server, whose ID is no one of this server's
+            await self._refuse_update(interaction, CHANGED_REFUSAL, RefusalKind.ANNOUNCEMENT_CHANGED, answered=False)
+            return
+        await interaction.response.edit_message(
+            content=f"🔄 Mise à jour de l'annonce dans <#{last.channel_id}>…",
+            embeds=[],
+            view=None,
+            allowed_mentions=AllowedMentions.none(),
+        )
+        async with self._published_lock(guild.id):
+            outcome = await self._rewrite_announcement(guild, message_id, digest)
+        if not isinstance(outcome, UpdatePlan):
+            await self._refuse_update(interaction, *outcome, answered=True)
+            return
+        logger.info(
+            f"[fm.brouillon] update guild_id={guild.id} user_id={interaction.user.id} message_id={message_id} "
+            f"changed={sum(step.kind == 'changed' for step in outcome.steps)} "
+            f"added={sum(step.kind == 'added' for step in outcome.steps)} "
+            f"removed={sum(step.kind == 'removed' for step in outcome.steps)} text_changes={len(outcome.text_changes)}"
+        )
+        content, view = done_message(outcome, last.channel_id)
+        await interaction.edit_original_response(content=content, view=view, allowed_mentions=AllowedMentions.none())
+
+    async def _refuse_update(self, interaction: Interaction, text: str, kind: RefusalKind, *, answered: bool) -> None:
+        """Tell the member privately why the update did nothing, and log the kind.
+
+        Args:
+            interaction (Interaction): The click.
+            text (str): The refusal, ending with the word that nothing was changed.
+            kind (RefusalKind): Why, for the log line.
+            answered (bool): Whether the click was answered already: the refusal then replaces that answer.
+        """
+        log_refusal(logger, "fm.brouillon", interaction, kind)
+        if answered:
+            await interaction.edit_original_response(
+                content=text, embeds=[], view=None, allowed_mentions=AllowedMentions.none()
+            )
+        else:
+            await interaction.response.send_message(text, ephemeral=True, allowed_mentions=AllowedMentions.none())
+
+    async def _rewrite_announcement(self, guild: Guild, message_id: int, digest: str) -> UpdatePlan | tuple[str, RefusalKind]:
+        """Do the update under the published lock: read, plan, compare, fetch, store, rebuild.
+
+        Args:
+            guild (Guild): The server.
+            message_id (int): The published message the summary was made for.
+            digest (str): The digest of the plan the summary showed.
+
+        Returns:
+            UpdatePlan | tuple[str, RefusalKind]: The plan that was done, or the refusal and its kind; nothing changed.
+        """
+        last = formations.current_published(guild.id)
+        if last is None or last.message_id != message_id:
+            return CHANGED_REFUSAL, RefusalKind.ANNOUNCEMENT_CHANGED
+        plan = self._confirmed_plan(guild, last, digest)
+        if not isinstance(plan, UpdatePlan):
+            return plan
+        if (refusal := await self._unreadable(guild, last)) is not None:
+            return refusal
+        try:
+            formations.save_update(
+                guild.id, PublishedMessage(message_id, last.channel_id, plan.message), as_draft(plan.message)
+            )
+        except sqlite3.Error:
+            logger.exception(f"Guild {guild.id} could not store the update of message {message_id}.")
+            return _UPDATE_RETRY, RefusalKind.DRAFT_NOT_READY
+        try:
+            await self._update_published_message_locked(guild.id)
+        except sqlite3.Error:
+            logger.exception(f"Guild {guild.id} stored the update of message {message_id} but could not rebuild it.")
+            self._stale_guilds.add(guild.id)
+        except Exception:
+            logger.exception(f"Guild {guild.id} stored the update of message {message_id} but could not rebuild it.")
+            self._retry_guilds.add(guild.id)
+        return plan
+
+    def _confirmed_plan(self, guild: Guild, last: PublishedMessage, digest: str) -> UpdatePlan | tuple[str, RefusalKind]:
+        """Plan the update from what is stored now, or give the refusal when it cannot be done or differs from the summary."""
+        plan = plan_update(last.message, live_draft(guild, stored_draft(guild.id)), now=datetime.now(UTC))
+        if isinstance(plan, str):
+            return plan, RefusalKind.DRAFT_NOT_READY
+        if plan.digest(last.message_id) != digest:
+            return CHANGED_REFUSAL, RefusalKind.ANNOUNCEMENT_CHANGED
+        return plan
+
+    async def _unreadable(self, guild: Guild, last: PublishedMessage) -> tuple[str, RefusalKind] | None:
+        """Fetch the posted message, or give the refusal when it is gone or Discord does not answer; None when it is there."""
+        channel = guild.get_channel(last.channel_id)
+        gone = gone_refusal(last.channel_id), RefusalKind.ANNOUNCEMENT_GONE
+        if not isinstance(channel, TextChannel):
+            return gone
+        try:
+            await channel.fetch_message(last.message_id)
+        except NotFound:
+            return gone
+        except HTTPException:
+            logger.exception(f"Guild {guild.id} could not read message {last.message_id} before updating it.")
+            return _UPDATE_RETRY, RefusalKind.DRAFT_NOT_READY
+        return None
 
     async def _post_draft(self, interaction: Interaction, channel: TextChannel) -> tuple[Message, FmMessageDraft] | None:
         """Send the draft to the channel and store it as the published message.

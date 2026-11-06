@@ -22,6 +22,7 @@ from fablabot.models.formation import FmMessageDraft, Formation
 from fablabot.ui.catalogue import TemplateForm, deletion_message
 from fablabot.ui.draft import (
     DraftTextForm,
+    done_message,
     draft_message,
     publish_message,
     removal_message,
@@ -370,8 +371,8 @@ def _signed(count: int) -> list[dict[str, int]]:
     return [{"user_id": 100 + n} for n in range(count)]
 
 
-async def update_summary() -> Screen:
-    """The summary of an update: a start moved and seats cut, with the session already started left as it is."""
+def _update_plan() -> UpdatePlan:
+    """The plan of an update: a start moved and seats cut, with the session already started left as it is."""
     held = Formation(
         emoji="🧡", name="SRG + Imp 3D", trainer_mention=f"<@{TRAINER}>", start_iso="2026-11-09T10:30:00+01:00",
         duration="45 min", seats=5, registered_users=_signed(3), notified_at_start=True,
@@ -392,9 +393,22 @@ async def update_summary() -> Screen:
     draft.fms[2] = replace(cut, seats=6, registered_users=[])
     plan = plan_update(published, draft, now=_UPDATE_NOW)
     assert isinstance(plan, UpdatePlan), plan
-    embeds, view = update_message(plan, ANNOUNCE_CHANNEL, 5000)
+    return plan
+
+
+async def update_summary() -> Screen:
+    """The summary of an update: a start moved and seats cut, with the session already started left as it is."""
+    embeds, view = update_message(_update_plan(), ANNOUNCE_CHANNEL, 5000)
     capture = Capture()
     await capture.interaction().response.send_message(None, embeds=embeds, view=view, ephemeral=True)
+    return Screen(capture.sent, dict(_DRAFT_NAMES))
+
+
+async def update_done() -> Screen:
+    """The answer to a confirmed update: how many sessions changed and the button to the draft."""
+    content, view = done_message(_update_plan(), ANNOUNCE_CHANNEL)
+    capture = Capture()
+    await capture.interaction().response.send_message(content, view=view, ephemeral=True)
     return Screen(capture.sent, dict(_DRAFT_NAMES))
 
 
@@ -639,6 +653,7 @@ SCREENS: dict[str, Callable[[], Coroutine[Any, Any, Screen]]] = {
     "draft-publish": draft_publish,
     "draft-republish": draft_republish,
     "update-summary": update_summary,
+    "update-done": update_done,
     "session-pick": session_pick,
     "session-form": session_form,
     "session-free-form": session_free_form,

@@ -990,11 +990,29 @@ def test_user_guide_says_publier_warns_before_a_second_announcement() -> None:
         assert detail in guide, detail
 
 
+def test_user_guide_says_an_update_keeps_the_sign_ups_and_their_order() -> None:
+    """The draft section says what Confirmer la mise à jour keeps, what a seat change does, and when it refuses."""
+    guide = " ".join(_section(_read("docs/USERGUIDE.md"), "### The draft").split())
+    for detail in (
+        "its **Confirmer la mise à jour** button applies it",
+        "rewrites the published announcement in place: the same message in the same channel, so its reactions stay",
+        "the sign-ups keep their place and their order of arrival",
+        "the last to arrive go to the waiting list",
+        "the first on the waiting list take the places",
+        "gives that session its hour-before reminder again, sent once at the new time",
+        "the draft is then rewritten to say what the announcement says",
+        "changes nothing, with a private message saying why, when the draft or the announcement changed since the summary",
+        "or when the published message no longer exists in its channel",
+    ):
+        assert detail in guide, detail
+    assert "does nothing yet" not in guide
+
+
 def test_user_guide_says_what_mettre_a_jour_l_annonce_shows_and_refuses() -> None:
     """The draft section says what the update summary lists, the sessions left as they are, the refusals and the length."""
     guide = _section(_read("docs/USERGUIDE.md"), "### The draft")
     for detail in (
-        "**Mettre à jour l'annonce** changes nothing either",
+        "**Mettre à jour l'annonce** changes nothing by itself",
         "A session is recognised by its emoji",
         "A session that has started, or starts within 5 minutes, is left as it is whatever the draft says",
         "a draft that already says what the announcement says",

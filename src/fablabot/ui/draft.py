@@ -20,7 +20,7 @@ from fablabot.helpers.formation.catalogue import (
     session_value,
 )
 from fablabot.helpers.formation.rendering import discord_timestamp
-from fablabot.helpers.formation.update import Step, UpdatePlan, plan_update
+from fablabot.helpers.formation.update import CHANGED_REFUSAL, Step, UpdatePlan, plan_update
 from fablabot.helpers.utils import RefusalKind, counted, log_refusal
 from fablabot.models.formation import FmMessageDraft
 from fablabot.services import formations
@@ -38,9 +38,14 @@ logger = logging.getLogger(__name__)
 
 COMMAND: Final = "fm.brouillon"
 _NOT_PUBLISHED: Final = "Rien n'a été publié."
-_UPDATE_CHANGED: Final = "L'annonce ou le brouillon a changé depuis ce résumé : presse de nouveau **Publier** pour le revoir."
 _EMBED_CHARS: Final = 4096
 """Discord's room for the description of one embed."""
+_MESSAGE_EMBED_CHARS: Final = 6000
+"""Discord's room for the titles and descriptions of all the embeds of one message; a summary past it cannot be sent."""
+_SUMMARY_TOO_LONG: Final = (
+    "Le résumé des changements dépasse les 6 000 caractères que Discord accepte dans un message : annule une partie des "
+    "changements du brouillon, puis presse de nouveau **Publier**. Rien n'a été modifié."
+)
 _GONE_CHANNEL: Final = "Ce salon n'existe plus : choisis-en un autre."
 _NOT_CHANGED: Final = "Rien n'a été modifié."
 _SESSION_CHANGED: Final = "Cette session a changé depuis : rouvre le brouillon."
@@ -74,7 +79,7 @@ def stored_draft(guild_id: int) -> FmMessageDraft:
     return formations.get_draft(guild_id) or FmMessageDraft(header="", role_id=0, intro="", fms=[], end="")
 
 
-def _live(guild: Guild, draft: FmMessageDraft) -> FmMessageDraft:
+def live_draft(guild: Guild, draft: FmMessageDraft) -> FmMessageDraft:
     """Give the draft as it would be posted: a role the server no longer has counts as none."""
     return draft if not draft.role_id or guild.get_role(draft.role_id) else replace(draft, role_id=0)
 
@@ -141,7 +146,7 @@ def draft_message(guild: Guild, draft: FmMessageDraft, *, note: str = "") -> tup
     Returns:
         tuple[str, Embed, ui.View]: The text above the brouillon (empty without a note), the brouillon and its buttons.
     """
-    draft = _live(guild, draft)
+    draft = live_draft(guild, draft)
     sessions = sorted(draft.fms, key=lambda fm: fm.start_dt)
     role = f"<@&{draft.role_id}>" if draft.role_id else "aucun"
     lines = [f"**Intro** : {draft.intro.strip() or '_(vide)_'}", ""]
@@ -351,15 +356,37 @@ def update_message(plan: UpdatePlan, channel_id: int, message_id: int) -> tuple[
         for n, chunk in enumerate(chunks)
     ]
     view = ui.View()
-    view.add_item(
-        ui.Button(
-            label="✅ Confirmer la mise à jour",
-            style=ButtonStyle.success,
-            custom_id=f"fmd:upd-ok:{message_id}:{plan.digest(message_id)}",
-        )
-    )
+    view.add_item(UpdateConfirm(message_id, plan.digest(message_id)))
     view.add_item(UpdateKeep())
     return embeds, view
+
+
+def done_message(plan: UpdatePlan, channel_id: int) -> tuple[str, ui.View]:
+    """Build the answer to a confirmed update: how much changed, and the way to the draft, which now says the same.
+
+    Args:
+        plan (UpdatePlan): The update that was done.
+        channel_id (int): The channel of the announcement.
+
+    Returns:
+        tuple[str, ui.View]: The text and the button that shows the draft.
+    """
+    kinds = [step.kind for step in plan.steps]
+    parts = [
+        counted(kinds.count("changed"), "session modifiée", "sessions modifiées"),
+        counted(kinds.count("added"), "ajoutée", "ajoutées"),
+        counted(kinds.count("removed"), "retirée", "retirées"),
+        "texte modifié",
+    ]
+    wanted = [kinds.count("changed"), kinds.count("added"), kinds.count("removed"), len(plan.text_changes)]
+    shown = ", ".join(part for part, count in zip(parts, wanted, strict=True) if count)
+    view = ui.View()
+    view.add_item(DraftButton("show"))
+    content = (
+        f"✅ **Annonce mise à jour** dans <#{channel_id}> : {shown}.\n"
+        "-# Le brouillon reprend l'annonce telle qu'elle est maintenant."
+    )
+    return content, view
 
 
 async def _refuse(interaction: Interaction, text: str, kind: RefusalKind) -> None:
@@ -383,9 +410,9 @@ async def _summarise_update(interaction: Interaction[Any]) -> None:
     guild = interaction.guild
     last = formations.current_published(guild.id)
     if last is None:
-        await _refuse(interaction, f"{_UPDATE_CHANGED} {_NOT_CHANGED}", RefusalKind.DRAFT_NOT_READY)
+        await _refuse(interaction, CHANGED_REFUSAL, RefusalKind.ANNOUNCEMENT_CHANGED)
         return
-    plan = plan_update(last.message, _live(guild, stored_draft(guild.id)), now=datetime.now(UTC))
+    plan = plan_update(last.message, live_draft(guild, stored_draft(guild.id)), now=datetime.now(UTC))
     if isinstance(plan, str):
         await _refuse(interaction, plan, RefusalKind.DRAFT_NOT_READY)
         return
@@ -394,6 +421,9 @@ async def _summarise_update(interaction: Interaction[Any]) -> None:
         f"steps={len(plan.steps)} text_changes={len(plan.text_changes)}"
     )
     embeds, view = update_message(plan, last.channel_id, last.message_id)
+    if sum(len(embed) for embed in embeds) > _MESSAGE_EMBED_CHARS:
+        await _refuse(interaction, _SUMMARY_TOO_LONG, RefusalKind.DRAFT_NOT_READY)
+        return
     await show(interaction, "", None, view, embeds=embeds)
 
 
@@ -514,7 +544,7 @@ class DraftButton(
         elif self.action == "text":
             await interaction.response.send_modal(DraftTextForm(guild, draft))
         elif self.action == "preview":
-            await self._preview(interaction, _live(guild, draft))
+            await self._preview(interaction, live_draft(guild, draft))
         elif self.action == "publish":
             await ask_channel(interaction, warn=True)
         elif self.action == "update":
@@ -549,7 +579,7 @@ async def ask_channel(interaction: Interaction[Any], *, warn: bool) -> None:
     """
     assert interaction.guild is not None
     guild = interaction.guild
-    live = _live(guild, stored_draft(guild.id))
+    live = live_draft(guild, stored_draft(guild.id))
     if (refusal := publish_refusal(live) or _published_refusal(guild.id, live)) is not None:
         await _refuse(interaction, refusal, RefusalKind.DRAFT_NOT_READY)
         return
@@ -636,7 +666,7 @@ class PublishGo(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:pub-go:(?P<ch
         """Publish the draft in the chosen channel as `/fm publish` does, unless it can no longer be published."""
         assert interaction.guild is not None
         guild = interaction.guild
-        draft = _live(guild, stored_draft(guild.id))
+        draft = live_draft(guild, stored_draft(guild.id))
         if (refusal := publish_refusal(draft) or _published_refusal(guild.id, draft)) is not None:
             await _refuse(interaction, refusal, RefusalKind.DRAFT_NOT_READY)
             return
@@ -717,6 +747,48 @@ class UpdateKeep(ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:upd-no"):
         assert interaction.guild is not None
         content, embed, view = draft_message(interaction.guild, stored_draft(interaction.guild.id), note=_NOT_CHANGED)
         await show(interaction, content, embed, view)
+
+
+class UpdateConfirm(
+    ui.DynamicItem[ui.Button[ui.View]], template=r"fmd:upd-ok:(?P<message>[0-9]{1,20}):(?P<digest>[0-9a-f]{12})"
+):
+    """The button that confirms the update of the published announcement, named by the message and the plan it was shown.
+
+    Attributes:
+        message_id (int): The published message the summary was made for.
+        digest (str): The digest of the plan the summary showed, so a plan that changed since is not applied.
+    """
+
+    interaction_check = click_check(COMMAND, FORMATION_ROLES)
+
+    def __init__(self, message_id: int, digest: str) -> None:
+        """Build the button.
+
+        Args:
+            message_id (int): The published message the summary was made for.
+            digest (str): The digest of the plan the summary showed.
+        """
+        super().__init__(
+            ui.Button(
+                label="✅ Confirmer la mise à jour",
+                style=ButtonStyle.success,
+                custom_id=f"fmd:upd-ok:{message_id}:{digest}",
+            )
+        )
+        self.message_id = message_id
+        self.digest = digest
+
+    @override
+    @classmethod
+    async def from_custom_id(cls, interaction: Interaction[Any], item: ui.Item[Any], match: re.Match[str], /) -> UpdateConfirm:
+        """Rebuild the button from its custom ID."""
+        return cls(int(match["message"]), match["digest"])
+
+    @override
+    async def callback(self, interaction: Interaction[Any]) -> None:
+        """Update the published announcement as the cog does, unless the plan or the announcement changed since the summary."""
+        cog = cast("FormationManagement", interaction.client.get_cog("FormationManagement"))
+        await cog.update_announcement(interaction, self.message_id, self.digest)
 
 
 class SessionList(ui.DynamicItem[ui.Select[ui.View]], template=r"fmd:ses:(?P<action>edit|remove):(?P<page>[0-9]+)"):
@@ -901,6 +973,7 @@ DRAFT_ITEMS: Final = (
     PublishConfirm,
     PublishKeep,
     UpdateKeep,
+    UpdateConfirm,
     SessionList,
     SessionListPage,
     SessionRemove,

@@ -230,6 +230,31 @@ def test_a_failed_save_keeps_the_previous_message() -> None:
     assert formations.get_draft(GUILD_A) == draft
 
 
+def test_an_update_writes_the_announcement_and_the_draft_together() -> None:
+    """A draft write that fails leaves the announcement as it was; with both writes sound, both are stored."""
+    published = PublishedMessage(message_id=FIRST, channel_id=7, message=message(full_formation("🅰"), intro="Avant"))
+    elsewhere = PublishedMessage(message_id=SECOND, channel_id=8, message=message(full_formation("🅱"), intro="Ailleurs"))
+    draft = message(full_formation("🅰"), intro="Avant")
+    formations.save_published(GUILD_A, published)
+    formations.save_published(GUILD_B, elsewhere)
+    formations.save_draft(GUILD_A, draft)
+    updated = PublishedMessage(message_id=FIRST, channel_id=7, message=message(full_formation("🅰"), intro="Après"))
+    broken = message(full_formation("🅰"))
+    broken.fms[0].registered_users[1]["user_id"] = None
+
+    with pytest.raises(sqlite3.IntegrityError):
+        formations.save_update(GUILD_A, updated, broken)
+
+    assert formations.current_published(GUILD_A) == published
+    assert formations.get_draft(GUILD_A) == draft
+
+    formations.save_update(GUILD_A, updated, message(full_formation("🅰"), intro="Après"))
+
+    assert formations.current_published(GUILD_A) == updated
+    assert (formations.get_draft(GUILD_A) or message()).intro == "Après"
+    assert formations.current_published(GUILD_B) == elsewhere
+
+
 @pytest.fixture
 async def cog() -> Any:
     """The formation cog over a stub bot, with its loop stopped."""

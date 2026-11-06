@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, replace
-from datetime import timedelta
+from datetime import datetime, timedelta
+import logging
 from typing import TYPE_CHECKING, Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from conftest import make_interaction, make_role
 import discord
@@ -25,12 +26,15 @@ from test_catalogue_journeys import (
     _three,
 )
 
+from fablabot.cogs import formation_management
 from fablabot.helpers.constants import SESSION_EMOJIS, RoleNames
 from fablabot.helpers.formation import render_message
+from fablabot.helpers.formation.update import as_draft
 from fablabot.helpers.guild_access import GuildAccessPolicy
 from fablabot.helpers.utils import RIGHT_LOST_MESSAGE
 from fablabot.models.formation import FmMessageDraft, PublishedMessage
 from fablabot.services import formations
+from fablabot.ui import draft as draft_ui
 from fablabot.ui.draft import DRAFT_ITEMS
 
 if TYPE_CHECKING:
@@ -38,6 +42,9 @@ if TYPE_CHECKING:
 
 NBSP = "\N{NO-BREAK SPACE}"
 UNCHANGED = "Rien n'a été modifié."
+CONFIRM = "✅ Confirmer la mise à jour"
+CHANGED = f"L'annonce ou le brouillon a changé depuis ce résumé : presse de nouveau **Publier** pour le revoir. {UNCHANGED}"
+NOTHING_TO_UPDATE = f"Le brouillon dit déjà ce que dit l'annonce publiée : rien à mettre à jour. {UNCHANGED}"
 
 
 @pytest.fixture
@@ -116,15 +123,15 @@ class Snapshot:
     dms: list[list[str]]
 
 
-def _snapshot(lab: Lab, posted: discord.Message) -> Snapshot:
-    """Read the stored announcement and draft, the posted message's text and reactions, and the DMs of every member."""
-    sent = lab.env.backend.get_message(lab.announce.id, posted.id)
+def _snapshot(lab: Lab, posted: discord.Message | None) -> Snapshot:
+    """Read the stored announcement and draft, the posted message (None once deleted) and the DMs."""
+    sent = lab.env.backend.get_message(lab.announce.id, posted.id) if posted else None
     members = (lab.respo, lab.admin, lab.codir, lab.temp, lab.president, lab.plain)
     return Snapshot(
         formations.current_published(GUILD_ID),
         formations.get_draft(GUILD_ID),
-        sent.content,
-        [(r.emoji, list(r.user_ids)) for r in sent.reactions],
+        sent.content if sent else "",
+        [(r.emoji, list(r.user_ids)) for r in sent.reactions] if sent else [],
         [[m.content for m in who.user.dm_channel.history()] if who.user.dm_channel else [] for who in members],
     )
 
@@ -377,3 +384,405 @@ async def test_a_long_summary_spans_several_embeds_without_cutting_a_line(lab: L
     assert lines[0].startswith("Dans <#")
     assert lines[-1].startswith("-# Annonce : ")
     assert not (embeds[1].description or "").startswith("\n")
+
+
+class Ticks:
+    """The clock the cog stamps reactions with, which a test moves on so that members react seconds apart."""
+
+    shift = timedelta()
+
+
+@pytest.fixture
+def ticks(monkeypatch: pytest.MonkeyPatch) -> type[Ticks]:
+    """Make the cog's clock tell the real time plus ``Ticks.shift``, which starts at zero."""
+    Ticks.shift = timedelta()
+
+    class Shifted(datetime):
+        @classmethod
+        def now(cls, tz: Any = None) -> Shifted:
+            return super().now(tz) + Ticks.shift
+
+    monkeypatch.setattr(formation_management, "datetime", Shifted)
+    return Ticks
+
+
+def _cog(lab: Lab) -> Any:
+    """The formation cog of the running bot."""
+    bot: Any = lab.env.bot
+    return bot.get_cog("FormationManagement")
+
+
+def _stored() -> PublishedMessage:
+    """The server's current announcement."""
+    published = formations.current_published(GUILD_ID)
+    assert published is not None
+    return published
+
+
+def _session_of(emoji: str) -> Any:
+    """One session of the stored announcement."""
+    return next(fm for fm in _stored().message.fms if fm.emoji == emoji)
+
+
+def _flag(emoji: str, **flags: bool) -> None:
+    """Set flags on one session of the stored announcement, as a reminder tick does."""
+    published = _stored()
+    fms = [replace(fm, **flags) if fm.emoji == emoji else fm for fm in published.message.fms]
+    formations.save_published(GUILD_ID, replace(published, message=replace(published.message, fms=fms)))
+
+
+async def _summary(lab: Lab) -> Any:
+    """Click Publier, then Mettre à jour l'annonce; return the summary."""
+    warning = await _publier(lab)
+    return await lab.respo.click(warning.response, custom_id="fmd:update")
+
+
+async def _confirm(lab: Lab, summary: Any) -> Any:
+    """Click Confirmer la mise à jour on a summary; return the answer."""
+    return await lab.respo.click(summary.response, custom_id=_buttons(summary.response)[CONFIRM]["custom_id"])
+
+
+async def _updated(lab: Lab) -> Any:
+    """Open the summary of the changed draft and confirm it; return the answer."""
+    return await _confirm(lab, await _summary(lab))
+
+
+def _done(lab: Lab, parts: str) -> str:
+    """The answer of a confirmed update with these parts."""
+    return (
+        f"✅ **Annonce mise à jour** dans <#{lab.announce.id}> : {parts}.\n"
+        "-# Le brouillon reprend l'annonce telle qu'elle est maintenant."
+    )
+
+
+def _dms(who: Any) -> list[str]:
+    """The private messages a member received, oldest first."""
+    return [m.content for m in who.user.dm_channel.history()] if who.user.dm_channel else []
+
+
+def _reminders(who: Any, name: str) -> list[str]:
+    """The hour-before reminders of a training a member received."""
+    return [text for text in _dms(who) if f"**{name}** commence bientôt" in text]
+
+
+async def _signed_up(lab: Lab, ticks: type[Ticks], members: list[Any], *, seats: int = 5) -> discord.Message:
+    """Publish the three sessions with ``seats`` places on 🧡, then let the members react to 🧡 in this order, seconds apart."""
+    sessions = _three(lab)
+    sessions[0] = replace(sessions[0], seats=seats)
+    _stage(lab, sessions)
+    await _published_via_publier(lab, lab.announce)
+    posted = lab.announce.last_message
+    assert posted is not None
+    for who in members:
+        await who.react(posted, "🧡")
+        ticks.shift += timedelta(seconds=10)
+    await lab.env.advance_time(120)
+    return posted
+
+
+def _lists(emoji: str = "🧡") -> tuple[list[int], list[int]]:
+    """The members registered and waiting on a session of the stored announcement, by ID, in order."""
+    fm = _session_of(emoji)
+    return [u["user_id"] for u in fm.registered_users], [u["user_id"] for u in fm.waitlisted_users]
+
+
+async def test_confirmer_changes_the_announcement_in_place_and_keeps_its_reactions(lab: Lab) -> None:
+    """Confirmer edits the posted message: same message and channel, the new start in its text, every reaction still there."""
+    posted = await _announced(lab)
+    before = _stored()
+    old = {fm.emoji: fm for fm in before.message.fms}
+    reactions = _snapshot(lab, posted).reactions
+    _change("🧡", start=24)
+
+    done = await _updated(lab)
+
+    assert done.response.content == _done(lab, "1 session modifiée")
+    assert not done.response.embeds
+    assert list(_buttons(done.response)) == ["📝 Voir le brouillon"]
+    assert len(lab.announce.history()) == 1
+    assert (last := lab.announce.last_message) is not None
+    assert last.id == posted.id
+    stored = _stored()
+    assert (stored.message_id, stored.channel_id) == (before.message_id, before.channel_id)
+    sent = lab.env.backend.get_message(lab.announce.id, posted.id)
+    new_start = int(old["🧡"].start_dt.timestamp()) + 24 * 3600
+    assert f"<t:{new_start}:F>" in sent.content
+    assert f"<t:{int(old['🧡'].start_dt.timestamp())}:F>" not in sent.content
+    assert sent.content == render_message(stored.message)
+    assert [(r.emoji, list(r.user_ids)) for r in sent.reactions] == reactions
+
+
+async def test_sign_ups_keep_their_place_and_order_through_an_update(lab: Lab, ticks: type[Ticks]) -> None:
+    """Three members react in turn, the last to arrive having the smallest ID: a description change keeps that order."""
+    await _signed_up(lab, ticks, [lab.temp, lab.codir, lab.admin])
+    arrival = [lab.temp.id, lab.codir.id, lab.admin.id]
+    assert _lists() == (arrival, [])
+    stamps = [u["ts_iso"] for u in _session_of("🧡").registered_users]
+    received = [_dms(who) for who in (lab.temp, lab.codir, lab.admin)]
+    _change("🧡", description="Apportez vos lunettes.")
+
+    done = await _updated(lab)
+
+    assert done.response.content == _done(lab, "1 session modifiée")
+    assert _lists() == (arrival, [])
+    assert [_dms(who) for who in (lab.temp, lab.codir, lab.admin)] == received
+    assert [u["ts_iso"] for u in _session_of("🧡").registered_users] == stamps
+    assert _session_of("🧡").description == "Apportez vos lunettes."
+
+
+async def test_fewer_seats_move_the_last_arrived_to_the_waitlist_and_more_seats_bring_them_back(
+    lab: Lab, ticks: type[Ticks]
+) -> None:
+    """Going from 3 to 2 places puts the last member to arrive on the waitlist; back to 3, they are seated again."""
+    posted = await _signed_up(lab, ticks, [lab.temp, lab.codir, lab.admin], seats=3)
+    arrival = [lab.temp.id, lab.codir.id, lab.admin.id]
+    assert _lists() == (arrival, [])
+    waiting = len(_dms(lab.admin))
+
+    _change("🧡", seats=2)
+    await _updated(lab)
+    await lab.env.advance_time(120)
+
+    assert _lists() == (arrival[:2], arrival[2:])
+    assert lab.env.backend.get_message(lab.announce.id, posted.id).content == render_message(_stored().message)
+    assert "liste d'attente" in _dms(lab.admin)[-1]
+    assert len(_dms(lab.admin)) == waiting + 1
+
+    _change("🧡", seats=3)
+    await _updated(lab)
+    await lab.env.advance_time(120)
+
+    assert _lists() == (arrival, [])
+    assert "une place s'est libérée" in _dms(lab.admin)[-1]
+    assert len(_dms(lab.admin)) == waiting + 2
+
+
+async def test_a_new_start_gets_its_hour_before_reminder_once(lab: Lab) -> None:
+    """A session whose reminder went out for its old start gets one for the new start, and two ticks in that window send one."""
+    await _announced(lab)
+    _flag("🧡", notified_hour_before=True)
+    _change("🧡", start=-60)
+
+    await _updated(lab)
+
+    moved = _session_of("🧡")
+    assert not moved.notified_hour_before
+    tick = moved.start_dt - timedelta(hours=1)
+    await _cog(lab)._send_due_reminders(GUILD_ID, tick)  # pyright: ignore[reportPrivateUsage]
+    await _cog(lab)._send_due_reminders(GUILD_ID, tick)  # pyright: ignore[reportPrivateUsage]
+
+    assert len(_reminders(lab.codir, "Soudure")) == 1
+    assert len(_reminders(lab.admin, "Soudure")) == 1
+
+
+async def test_other_sessions_get_no_reminder_twice(lab: Lab) -> None:
+    """A session left alone by the update keeps its flag: its reminder, already sent, does not go out again."""
+    await _announced(lab)
+    _flag("💛", notified_hour_before=True)
+    _change("🧡", description="Apportez vos lunettes.")
+
+    await _updated(lab)
+
+    assert _session_of("💛").notified_hour_before
+    tick = _session_of("💛").start_dt - timedelta(hours=1)
+    await _cog(lab)._send_due_reminders(GUILD_ID, tick)  # pyright: ignore[reportPrivateUsage]
+
+    assert _reminders(lab.temp, "Brodeuse") == []
+    assert _reminders(lab.president, "Brodeuse") == []
+
+
+async def test_the_draft_says_what_the_announcement_says_after_an_update(lab: Lab) -> None:
+    """The draft is written back as the announcement, so Publier then refuses it as already published."""
+    await _announced(lab)
+    _flag("💛", notified_at_start=True)
+    _change("🧡", start=24)
+    _change("💚", seats=2)
+    _change("💛", seats=9)  # a session left as it is: the draft takes the announcement's values back
+
+    await _updated(lab)
+
+    assert _session_of("💛").seats == 1
+    assert formations.get_draft(GUILD_ID) == as_draft(_stored().message)
+    refused = await _publier(lab)
+    assert refused.response.content == (
+        f"Cette annonce est déjà publiée dans <#{lab.announce.id}> : change le brouillon pour en publier une autre. "
+        "Rien n'a été publié."
+    )
+
+
+async def test_a_second_confirm_finds_nothing_to_update(lab: Lab) -> None:
+    """With two summaries of one change, confirming the first leaves the second nothing to update."""
+    posted = await _announced(lab)
+    _change("🧡", start=24)
+    first = await _summary(lab)
+    second = await _summary(lab)
+    await _confirm(lab, first)
+    before = _snapshot(lab, posted)
+
+    refused = await _confirm(lab, second)
+
+    assert refused.response.content == NOTHING_TO_UPDATE
+    assert _snapshot(lab, posted) == before
+
+
+@pytest.mark.parametrize("since", ["draft", "frozen", "newer"])
+async def test_a_change_since_the_summary_is_refused_and_nothing_changes(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, since: str
+) -> None:
+    """A draft changed, a session frozen or a newer announcement since the summary: the click is refused, nothing moves."""
+    posted = await _announced(lab)
+    _change("🧡", seats=2)
+    _change("💚", seats=1)
+    summary = await _summary(lab)
+    cog = _cog(lab)
+    if since == "draft":
+        _change("💛", seats=3)
+    elif since == "newer":
+        newer = replace(_stored(), message_id=_stored().message_id + 1)
+        formations.save_published(GUILD_ID, newer)
+    else:
+        # A reminder tick takes the lock first and flags the session as started, between the click and its turn.
+        real = cog._published_lock  # pyright: ignore[reportPrivateUsage]
+        ticked = False
+
+        def lock(guild_id: int) -> Any:
+            inner = real(guild_id)
+
+            class TickFirst:
+                async def __aenter__(self) -> None:
+                    nonlocal ticked
+                    if not ticked:
+                        ticked = True
+                        _flag("🧡", notified_at_start=True)
+                    await inner.__aenter__()
+
+                async def __aexit__(self, *error: object) -> None:
+                    await inner.__aexit__(*error)
+
+            return TickFirst()
+
+        monkeypatch.setattr(cog, "_published_lock", lock)
+    before = _snapshot(lab, posted)
+
+    refused = await _confirm(lab, summary)
+
+    assert refused.response.content == CHANGED
+    if since == "frozen":  # the tick's own flag is the one change
+        assert before.published is not None
+        fms = [replace(fm, notified_at_start=True) if fm.emoji == "🧡" else fm for fm in before.published.message.fms]
+        before = replace(before, published=replace(before.published, message=replace(before.published.message, fms=fms)))
+    assert _snapshot(lab, posted) == before
+
+
+async def test_a_deleted_announcement_is_refused_and_nothing_changes(lab: Lab) -> None:
+    """Confirming once the posted message is gone says so and keeps the stored announcement and the draft."""
+    posted = await _announced(lab)
+    _change("🧡", start=24)
+    summary = await _summary(lab)
+    lab.env.backend.delete_message(lab.announce.id, posted.id)
+    before = _snapshot(lab, None)
+
+    refused = await _confirm(lab, summary)
+
+    assert refused.response.content == (
+        f"L'annonce publiée n'existe plus dans <#{lab.announce.id}> : publie une nouvelle annonce. {UNCHANGED}"
+    )
+    assert _snapshot(lab, None) == before
+
+
+async def test_a_message_id_of_another_server_reads_as_changed(lab: Lab) -> None:
+    """A confirmation naming another server's announcement is refused as changed, and neither server's data moves."""
+    _stage(lab, _three(lab))
+    published = formations.get_draft(GUILD_ID)
+    assert published is not None
+    formations.save_published(GUILD_ID, PublishedMessage(message_id=5000, channel_id=lab.announce.id, message=published))
+    foreign = PublishedMessage(message_id=9000, channel_id=77, message=replace(published, intro="Ailleurs"))
+    formations.save_published(OTHER_GUILD_ID, foreign)
+    formations.save_draft(OTHER_GUILD_ID, as_draft(foreign.message))
+    _change("🧡", start=24)
+    before = (formations.current_published(GUILD_ID), formations.get_draft(GUILD_ID))
+    elsewhere = (formations.current_published(OTHER_GUILD_ID), formations.get_draft(OTHER_GUILD_ID))
+
+    interaction = await _forged(lab, f"fmd:upd-ok:9000:{'0' * 12}", items=DRAFT_ITEMS)
+
+    interaction.response.send_message.assert_awaited_once()
+    assert interaction.response.send_message.await_args.args[0] == CHANGED
+    assert interaction.response.send_message.await_args.kwargs["ephemeral"]
+    interaction.response.edit_message.assert_not_awaited()
+    assert (formations.current_published(GUILD_ID), formations.get_draft(GUILD_ID)) == before
+    assert (formations.current_published(OTHER_GUILD_ID), formations.get_draft(OTHER_GUILD_ID)) == elsewhere
+
+
+async def test_the_confirm_button_works_after_a_restart(started_bot: Any) -> None:
+    """A second bot on the same database answers the Confirmer button of a summary the first bot sent."""
+    draft = FmMessageDraft(header="h", role_id=77, intro="Salut", fms=[_session("🧡", "Soudure", days=2)], end="Fin")
+    formations.save_published(GUILD_ID, PublishedMessage(message_id=5000, channel_id=9, message=draft))
+    formations.save_draft(GUILD_ID, replace(draft, fms=[replace(draft.fms[0], seats=9)]))
+    store = started_bot._connection._view_store
+    channel = MagicMock(spec=discord.TextChannel)
+    channel.fetch_message = AsyncMock(return_value=MagicMock())
+
+    async def click(custom_id: str) -> MagicMock:
+        interaction = make_interaction(user_id=7, guild_id=GUILD_ID)
+        interaction.client = started_bot
+        interaction.user.roles = [make_role(RoleNames.CODIR)]
+        interaction.message = MagicMock()
+        interaction.guild.get_role.return_value = make_role("Formations", role_id=77)
+        interaction.guild.get_channel.return_value = channel
+        pattern, item_class = next((p, c) for p, c in store._dynamic_items.items() if p.fullmatch(custom_id))
+        item = await item_class.from_custom_id(interaction, MagicMock(), pattern.fullmatch(custom_id))
+        assert await item.interaction_check(interaction)
+        await item.callback(interaction)
+        return interaction
+
+    summary = await click("fmd:update")
+    view = summary.response.edit_message.await_args.kwargs["view"]
+    confirm = next(c.custom_id for c in view.children if (c.custom_id or "").startswith("fmd:upd-ok:"))
+    done = await click(confirm)
+
+    done.response.edit_message.assert_awaited_once()
+    done.edit_original_response.assert_awaited_once()
+    assert done.edit_original_response.await_args.kwargs["content"].startswith(
+        "✅ **Annonce mise à jour** dans <#9> : 1 session modifiée."
+    )
+    stored = _stored()
+    assert stored.message.fms[0].seats == 9
+    assert formations.get_draft(GUILD_ID) == as_draft(stored.message)
+
+
+async def test_a_refused_summary_is_private_logged_by_kind_and_changes_nothing(
+    lab: Lab, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A draft saying what the announcement says gets a private refusal, logged by kind, and nothing is stored or sent."""
+    posted = await _announced(lab)
+    warning = await _warned(lab)
+    formations.save_draft(GUILD_ID, as_draft(_stored().message))
+    before = _snapshot(lab, posted)
+    caplog.set_level(logging.INFO)
+
+    shown = await lab.respo.click(warning.response, custom_id="fmd:update")
+
+    assert shown.ephemeral
+    assert shown.response.content == NOTHING_TO_UPDATE
+    assert f"refused kind=draft_not_ready guild_id={GUILD_ID} user_id={lab.respo.id}" in caplog.text
+    assert _snapshot(lab, posted) == before
+
+
+async def test_a_summary_past_the_room_of_a_message_is_refused_and_changes_nothing(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A summary whose embeds together pass what Discord accepts in a message is refused in private, with nothing changed."""
+    posted = await _announced(lab)
+    warning = await _warned(lab)
+    # Today's 2 000-character rule keeps a summary under 6 000 characters: the guard is lowered to reach it.
+    monkeypatch.setattr(draft_ui, "_MESSAGE_EMBED_CHARS", 100)
+    before = _snapshot(lab, posted)
+
+    shown = await lab.respo.click(warning.response, custom_id="fmd:update")
+
+    assert shown.response.content == (
+        "Le résumé des changements dépasse les 6 000 caractères que Discord accepte dans un message : annule une partie des "
+        f"changements du brouillon, puis presse de nouveau **Publier**. {UNCHANGED}"
+    )
+    assert not shown.response.embeds
+    assert _snapshot(lab, posted) == before

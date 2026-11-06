@@ -21,6 +21,9 @@ if TYPE_CHECKING:
 # The reminder tick opens a session's check up to 5 minutes before its start, so from then on the session stays as posted.
 APPEL_OPENS_BEFORE: Final = timedelta(minutes=5)
 _UNCHANGED: Final = "Rien n'a été modifié."
+CHANGED_REFUSAL: Final = (
+    f"L'annonce ou le brouillon a changé depuis ce résumé : presse de nouveau **Publier** pour le revoir. {_UNCHANGED}"
+)
 
 StepKind = Literal["changed", "added", "removed", "frozen"]
 
@@ -72,6 +75,11 @@ class UpdatePlan:
             parts.append(step.kind)
             parts.extend(session_digest(session) if session else "" for session in (step.before, step.after))
         return sha256("\x1f".join(parts).encode()).hexdigest()[:12]
+
+
+def gone_refusal(channel_id: int) -> str:
+    """Say that the published message no longer exists in its channel, and what to do instead."""
+    return f"L'annonce publiée n'existe plus dans <#{channel_id}> : publie une nouvelle annonce. {_UNCHANGED}"
 
 
 def is_frozen(session: Formation, now: datetime) -> bool:
@@ -148,10 +156,31 @@ def _refusal(draft: FmMessageDraft, sessions: list[Formation], now: datetime) ->
         return "Choisis d'abord le rôle à notifier : **Intro / conclusion**."
     if not draft.intro.strip() or not draft.end.strip():
         return "Écris d'abord l'intro et la conclusion : **Intro / conclusion**."
-    if started := next((fm for fm in sorted(sessions, key=_moment) if fm.start_dt < now), None):
-        name = escape_mentions(escape_markdown(started.name))
-        return f"La session **{started.emoji} {name}** commence avant maintenant : change sa date ou retire-la."
+    if soon := next((fm for fm in sorted(sessions, key=_moment) if fm.start_dt <= now + APPEL_OPENS_BEFORE), None):
+        when = "avant maintenant" if soon.start_dt < now else "dans moins de 5 minutes"
+        return f"La session **{soon.emoji} {_plain(soon)}** commence {when} : change sa date ou retire-la."
     return None
+
+
+def _plain(session: Formation) -> str:
+    """Write a session's name so that it shows as typed: no formatting, no mention."""
+    return escape_mentions(escape_markdown(session.name))
+
+
+def _held_back(published: FmMessageDraft, draft: FmMessageDraft, now: datetime) -> str | None:
+    """Tell that the draft differs from the announcement only on a session left as published, naming the first, or None."""
+    wanted = {fm.emoji: fm for fm in draft.fms}
+    held = (
+        fm
+        for fm in sorted(published.fms, key=_moment)
+        if is_frozen(fm, now) and (fm.emoji not in wanted or session_digest(wanted[fm.emoji]) != session_digest(fm))
+    )
+    if (first := next(held, None)) is None:
+        return None
+    return (
+        f"La session **{first.emoji} {_plain(first)}** a déjà commencé ou commence dans moins de 5 minutes : "
+        "elle reste telle quelle."
+    )
 
 
 def _sort_out(published: FmMessageDraft, draft: FmMessageDraft, now: datetime) -> tuple[dict[str, Formation], list[Formation]]:
@@ -207,7 +236,10 @@ def plan_update(published: FmMessageDraft, draft: FmMessageDraft, *, now: dateti
     text_changes = _text_changes(published, draft)
 
     if not (changed or text_changes or fresh or removed):
-        return f"Le brouillon dit déjà ce que dit l'annonce publiée : rien à mettre à jour. {_UNCHANGED}"
+        reason = (
+            _held_back(published, draft, now) or "Le brouillon dit déjà ce que dit l'annonce publiée : rien à mettre à jour."
+        )
+        return f"{reason} {_UNCHANGED}"
     if reason := _refusal(draft, [*wanted.values(), *fresh], now):
         return f"{reason} {_UNCHANGED}"
     if fresh or removed:

@@ -146,6 +146,37 @@ def test_a_session_to_change_with_a_past_start_is_refused() -> None:
     assert refusal == f"La session **💛 Brodeuse** commence avant maintenant : change sa date ou retire-la. {UNCHANGED}"
 
 
+def test_a_draft_differing_only_on_a_started_session_says_so() -> None:
+    """When the only difference is on a session left as published, the refusal names it instead of saying nothing differs."""
+    frozen = _fm("🧡", hours=-1, signed=2)
+    published = _message(frozen, _fm("💛", hours=72, name="Brodeuse", signed=1))
+    draft = as_draft(published)
+    draft.fms[0] = replace(draft.fms[0], name="Autre nom", seats=9)
+
+    refusal = plan_update(published, draft, now=NOW)
+
+    assert refusal == (
+        f"La session **🧡 Soudure** a déjà commencé ou commence dans moins de 5 minutes : elle reste telle quelle. {UNCHANGED}"
+    )
+
+
+@pytest.mark.parametrize(("minutes", "refused"), [(4, True), (5, True), (6, False)])
+def test_a_session_moved_to_start_within_5_minutes_is_refused(minutes: int, refused: bool) -> None:
+    """A session cannot be moved to a start the freeze already covers: 5 minutes from now or less."""
+    published = _published()
+    draft = as_draft(published)
+    draft.fms[1] = replace(draft.fms[1], start_iso=(NOW + timedelta(minutes=minutes)).isoformat())
+
+    result = plan_update(published, draft, now=NOW)
+
+    if refused:
+        assert (
+            result == f"La session **💛 Brodeuse** commence dans moins de 5 minutes : change sa date ou retire-la. {UNCHANGED}"
+        )
+    else:
+        assert isinstance(result, UpdatePlan)
+
+
 @pytest.mark.parametrize(
     ("field", "refusal"),
     [

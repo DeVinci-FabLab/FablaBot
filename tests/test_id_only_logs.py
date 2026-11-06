@@ -3,20 +3,24 @@
 from __future__ import annotations
 
 import ast
+from dataclasses import replace
 from datetime import datetime, timedelta
 import logging
 from pathlib import Path
 import re
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from conftest import fill_text_input, make_guild, make_interaction, make_member, make_role
 from discord import Forbidden, HTTPException, Member, TextChannel, ui
 import pytest
+from test_catalogue_journeys import GUILD_ID, Lab, _published_via_publier, _stage, _three
 
 from fablabot.cogs import message_management
 from fablabot.cogs.channel_management import ChannelManagement
 from fablabot.cogs.message_management import MessageManagement
 from fablabot.helpers.constants import PARIS_TZ, RoleNames
+from fablabot.helpers.formation.update import as_draft
 from fablabot.helpers.safe_discord_operations import safe_add_roles, safe_remove_roles
 from fablabot.helpers.utils import log_request, send_dm_to_member
 from fablabot.models import TemplateFields
@@ -27,6 +31,9 @@ from fablabot.ui.attendance import AppelValidate
 from fablabot.ui.catalogue import TemplateForm, deletion_message
 from fablabot.ui.draft import removal_message
 from fablabot.ui.session import SessionForm, open_edit_form
+
+if TYPE_CHECKING:
+    import simcord
 
 NAME = "kevin_secret_name"
 
@@ -412,3 +419,31 @@ async def test_session_lines_name_no_training(caplog: pytest.LogCaptureFixture) 
     assert "remove" in caplog.text
     assert NAME not in caplog.text
     assert "Kevin Secret" not in caplog.text
+
+
+async def test_update_lines_name_no_training(simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture) -> None:
+    """The summary and the confirmation of an update log the server, member and message by ID and counts: no training name."""
+    lab = Lab(simcord_env)
+    sessions = [replace(fm, name=f"{NAME} {fm.name}") for fm in _three(lab)]
+    _stage(lab, sessions)
+    await _published_via_publier(lab, lab.announce)
+    published = formations.current_published(GUILD_ID)
+    assert published is not None
+    formations.save_draft(
+        GUILD_ID, replace(as_draft(published.message), fms=[replace(fm, description=f"{NAME} décrit") for fm in sessions])
+    )
+    caplog.set_level(logging.DEBUG)
+    caplog.clear()
+    listing = await lab.brouillon(lab.respo)
+    warning = await lab.respo.click(listing.response, custom_id="fmd:publish")
+
+    summary = await lab.respo.click(warning.response, custom_id="fmd:update")
+    confirm = next(
+        c["custom_id"] for row in summary.response.components for c in row["components"] if "upd-ok" in c["custom_id"]
+    )
+    await lab.respo.click(summary.response, custom_id=confirm)
+
+    assert f"update summary guild_id={GUILD_ID} user_id={lab.respo.id} message_id={published.message_id}" in caplog.text
+    assert f"update guild_id={GUILD_ID} user_id={lab.respo.id} message_id={published.message_id}" in caplog.text
+    assert NAME not in caplog.text
+    assert "Soudure" not in caplog.text

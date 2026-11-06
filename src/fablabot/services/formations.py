@@ -166,6 +166,19 @@ def save_published(guild_id: int, published: PublishedMessage) -> None:
         write_message(conn, guild_id, published.message_id, published.channel_id, published.message)
 
 
+def save_update(guild_id: int, published: PublishedMessage, draft: FmMessageDraft) -> None:
+    """Store an updated announcement and the draft that now says the same, both or neither.
+
+    Args:
+        guild_id (int): The ID of the guild.
+        published (PublishedMessage): The published message as updated, under its own ID.
+        draft (FmMessageDraft): The draft to write back.
+    """
+    with db.transaction() as conn:
+        write_message(conn, guild_id, published.message_id, published.channel_id, published.message)
+        write_message(conn, guild_id, None, None, draft)
+
+
 def guilds_with_published() -> list[int]:
     """List the guilds that have published a message.
 
