@@ -1801,6 +1801,30 @@ async def test_an_emoji_set_by_fm_add_is_never_taken_again(lab: Lab) -> None:
     assert "émoji 💙" in again.response.content
 
 
+async def test_adding_a_session_keeps_the_rest_of_the_draft(lab: Lab) -> None:
+    """A session added from a template changes only the sessions: header, role, intro, conclusion and link stay."""
+    staged = replace(
+        _stage(lab, [_session("💛", "Brodeuse", days=2)], intro="Au programme", end="À bientôt"),
+        header="# Cette semaine",
+        request_forms_url="https://example.org/propose",
+    )
+    formations.save_draft(GUILD_ID, staged)
+
+    await _add(lab, _soudure())
+
+    stored = formations.get_draft(GUILD_ID)
+    assert stored is not None
+    assert replace(stored, fms=[]) == replace(staged, fms=[])
+    assert (stored.header, stored.role_id, stored.intro, stored.end, stored.request_forms_url) == (
+        "# Cette semaine",
+        lab.notified.id,
+        "Au programme",
+        "À bientôt",
+        "https://example.org/propose",
+    )
+    assert [fm.name for fm in stored.fms] == ["Brodeuse", "Soudure"]
+
+
 async def test_an_fm_add_form_open_while_a_template_session_takes_its_emoji_is_refused(lab: Lab) -> None:
     """`/fm add` checks the emoji when it runs; the form sent later checks it again against the draft as stored."""
     await lab.show()
