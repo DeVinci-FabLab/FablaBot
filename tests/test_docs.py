@@ -1061,6 +1061,8 @@ def test_user_guide_says_what_mettre_a_jour_l_annonce_shows_and_refuses() -> Non
     guide = _section(_read("docs/USERGUIDE.md"), "### The draft")
     for detail in (
         "**Mettre à jour l'annonce** changes nothing by itself",
+        "a session that has started never stops **Mettre à jour l'annonce**, "
+        "while **Nouvelle annonce** still refuses a draft that holds one",
         "A session is recognised by its emoji",
         "A session that has started, or starts within 5 minutes, is left as it is whatever the draft says",
         "a draft that already says what the announcement says",

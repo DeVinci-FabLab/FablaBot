@@ -91,11 +91,13 @@ def _line(session: Formation) -> str:
     return f"{session.emoji} **{plain(session.name)}** — {start} · {session.trainer_mention} · {seats}"
 
 
-def publish_refusal(draft: FmMessageDraft) -> str | None:
+def publish_refusal(draft: FmMessageDraft, *, started_ok: bool = False) -> str | None:
     """Tell why a draft cannot be published, checking in this order: empty, no role, a started session, too long.
 
     Args:
         draft (FmMessageDraft): The draft as it would be posted.
+        started_ok (bool): Whether a started session passes, as when the draft is only the way to update the published
+            announcement, which leaves a started session as it is.
 
     Returns:
         str | None: The refusal, ending with the word that nothing was published, or None when it can be posted.
@@ -104,7 +106,9 @@ def publish_refusal(draft: FmMessageDraft) -> str | None:
         reason = "Le brouillon ne contient aucune session."
     elif not draft.role_id:
         reason = "Choisis d'abord le rôle à notifier : **Intro / conclusion**."
-    elif started := next((fm for fm in sorted(draft.fms, key=lambda fm: fm.start_dt) if is_past(fm.start_dt)), None):
+    elif not started_ok and (
+        started := next((fm for fm in sorted(draft.fms, key=lambda fm: fm.start_dt) if is_past(fm.start_dt)), None)
+    ):
         reason = f"La session **{started.emoji} {plain(started.name)}** a déjà commencé : retire-la ou change sa date."
     elif announcement_length(draft) > ANNOUNCEMENT_MAX_CHARS:
         reason = (
@@ -684,12 +688,15 @@ async def ask_channel(interaction: Interaction[Any], *, warn: bool) -> None:
     assert interaction.guild is not None
     guild = interaction.guild
     live = live_draft(guild, stored_draft(guild.id))
-    if (refusal := publish_refusal(live) or _published_refusal(guild.id, live)) is not None:
-        await _refuse(interaction, refusal, RefusalKind.DRAFT_NOT_READY)
-        return
     last = formations.current_published(guild.id)
     # Only an announcement with sessions still to come loses sign-ups: last week's, all held, is no cause to warn.
-    if warn and last is not None and has_sessions_to_come(guild.id):
+    warning = warn and last is not None and has_sessions_to_come(guild.id)
+    # The draft holds the sessions of the announcement, started ones too: the update leaves them as they are, so only a
+    # new announcement refuses them.
+    if (refusal := publish_refusal(live, started_ok=warning) or _published_refusal(guild.id, live)) is not None:
+        await _refuse(interaction, refusal, RefusalKind.DRAFT_NOT_READY)
+        return
+    if warning and last is not None:
         content, view = republish_message(last.channel_id)
     else:
         content, view = publish_message(_channel_of(guild, last.channel_id) if last else None)

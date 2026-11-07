@@ -224,6 +224,62 @@ async def test_mettre_a_jour_shows_what_would_change_and_changes_nothing(lab: La
     assert len(lab.announce.history()) == 1
 
 
+def _started(emoji: str) -> None:
+    """Make a session really start three days ago, in the announcement and in the draft, flagged as the reminder tick does."""
+    published = _stored()
+    past = (_session_of(emoji).start_dt - timedelta(days=3)).isoformat()
+    fms = [replace(fm, start_iso=past, notified_at_start=True) if fm.emoji == emoji else fm for fm in published.message.fms]
+    formations.save_published(GUILD_ID, replace(published, message=replace(published.message, fms=fms)))
+    _change(emoji, start=-72)
+
+
+async def test_a_session_that_has_started_does_not_stop_the_update_offer(lab: Lab) -> None:
+    """With a session started and another moved, Publier warns, the summary names the started one, Confirmer moves the other."""
+    posted = await _announced(lab)
+    _started("💛")
+    _change("🧡", start=24)
+    old = {fm.emoji: fm for fm in _stored().message.fms}
+
+    warning = await _publier(lab)
+
+    assert warning.response.content == _warning_text(lab)
+    shown = await lab.respo.click(warning.response, custom_id="fmd:update")
+    new_start = int(old["🧡"].start_dt.timestamp()) + 24 * 3600
+    assert _embed_lines(shown.response)[2:] == [
+        f"✏️ 🧡 **Soudure** : <t:{int(old['🧡'].start_dt.timestamp())}:F> → <t:{new_start}:F>",
+        "-# À prévenir : 2 inscrits, 0 en attente",
+        "",
+        "-# Déjà commencée, laissée telle quelle : 💛 Brodeuse",
+        _embed_lines(shown.response)[-1],
+    ]
+    done = await _confirm(lab, shown)
+
+    assert done.response.content == _done(lab, "1 session modifiée", told=2)
+    stored = {fm.emoji: fm for fm in _stored().message.fms}
+    assert stored["💛"].start_dt == old["💛"].start_dt
+    assert stored["💛"].notified_at_start
+    assert stored["🧡"].start_dt == old["🧡"].start_dt + timedelta(days=1)
+    sent = lab.env.backend.get_message(lab.announce.id, posted.id)
+    assert sent.content == render_message(_stored().message)
+    assert len(lab.announce.history()) == 1
+
+
+async def test_nouvelle_annonce_still_refuses_a_session_that_has_started(lab: Lab) -> None:
+    """A second announcement is refused while the draft holds a session that has started; nothing is published."""
+    await _announced(lab)
+    _started("💛")
+    _change("🧡", start=24)
+    warning = await _publier(lab)
+    before = _snapshot(lab, lab.announce.last_message)
+
+    refused = await lab.respo.click(warning.response, custom_id="fmd:pub-ok")
+
+    assert refused.response.content == (
+        "La session **💛 Brodeuse** a déjà commencé : retire-la ou change sa date. Rien n'a été publié."
+    )
+    assert _snapshot(lab, lab.announce.last_message) == before
+
+
 async def test_annuler_keeps_everything(lab: Lab) -> None:
     """Annuler on the summary shows the brouillon again with the word that nothing was changed."""
     posted = await _announced(lab)
