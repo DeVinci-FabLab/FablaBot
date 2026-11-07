@@ -1396,7 +1396,7 @@ async def test_a_second_update_waits_for_the_reactions_of_the_first_to_be_cleare
         _stored().message,
         live_draft(_guild(lab), stored_draft(GUILD_ID)),
         now=datetime.now(UTC),
-        retired=formations.reacted_emojis(GUILD_ID, posted.id),
+        retired=frozenset(formations.reacted_emojis(GUILD_ID, posted.id)),
     )
     assert isinstance(plan, UpdatePlan)
     interaction = make_interaction(user_id=lab.respo.id, guild_id=GUILD_ID)
