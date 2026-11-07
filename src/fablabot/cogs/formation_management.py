@@ -745,7 +745,7 @@ class FormationManagement(commands.Cog):
             return None
         try:
             return await channel.fetch_message(last.message_id)
-        except HTTPException:
+        except Exception:  # not only HTTPException: a dropped connection must not cost the steps after the save
             logger.exception(f"Guild {guild.id} could not read message {last.message_id} to {purpose}.")
             return None
 
@@ -774,14 +774,14 @@ class FormationManagement(commands.Cog):
         for emoji in emojis:
             try:
                 await msg.clear_reaction(emoji)
-            except HTTPException:  # Forbidden without Manage Messages, or Discord failing
+            except Exception:  # Forbidden without Manage Messages, Discord failing, or a dropped connection
                 logger.exception(
                     f"Guild {guild.id} could not clear the reactions {emoji!r} of updated message {last.message_id}."
                 )
                 refused.append(emoji)
                 try:
                     await msg.remove_reaction(emoji, guild.me)
-                except HTTPException:
+                except Exception:
                     logger.exception(
                         f"Guild {guild.id} could not remove its own reaction {emoji!r} from message {last.message_id}."
                     )
@@ -810,7 +810,7 @@ class FormationManagement(commands.Cog):
         for emoji in emojis:
             try:
                 await msg.add_reaction(emoji)
-            except HTTPException:
+            except Exception:  # a dropped connection must not cost the new trainer's reminder
                 logger.exception(f"Guild {guild.id} failed to add reaction {emoji!r} to the updated message {last.message_id}.")
                 failed.append(emoji)
         return tuple(failed)

@@ -10,6 +10,7 @@ import sqlite3
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
+import aiohttp
 from conftest import make_interaction, make_role
 import discord
 import pytest
@@ -1362,6 +1363,43 @@ async def test_without_manage_messages_the_bot_takes_its_own_reaction_and_says_s
     assert _reacted_by(lab, posted, "💛") == [lab.temp.id, lab.president.id]
     assert [fm.emoji for fm in _stored().message.fms] == ["🧡", "💚"]
     assert f"Guild {GUILD_ID} could not clear the reactions" in caplog.text
+
+
+async def test_a_transport_error_clearing_reactions_still_reminds_the_new_trainer(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A dropped connection while clearing a removed session's reactions does not cost the new trainer their reminder."""
+    await _announced(lab)
+    _flag("🧡", notified_hour_before=True)
+    _change("🧡", trainer_mention=f"<@{lab.president.id}>")
+    _remove("💛")
+    monkeypatch.setattr(discord.Message, "clear_reaction", AsyncMock(side_effect=aiohttp.ServerDisconnectedError()))
+
+    done = await _updated(lab)
+
+    assert [fm.emoji for fm in _stored().message.fms] == ["🧡", "💚"]
+    assert len(_reminders(lab.president, "Soudure")) == 1
+    assert done.response.content.startswith(
+        f"✅ **Annonce mise à jour** dans <#{lab.announce.id}> : 1 session modifiée, 1 retirée."
+    )
+    assert "réactions 💛" in done.response.content
+
+
+async def test_a_transport_error_adding_a_reaction_still_reminds_the_new_trainer(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A dropped connection while adding a session's reaction does not cost the new trainer their reminder."""
+    await _announced(lab)
+    _flag("🧡", notified_hour_before=True)
+    _change("🧡", trainer_mention=f"<@{lab.president.id}>")
+    _add(lab, "💜", "Découpe laser")
+    monkeypatch.setattr(discord.Message, "add_reaction", AsyncMock(side_effect=aiohttp.ServerDisconnectedError()))
+
+    done = await _updated(lab)
+
+    assert [fm.emoji for fm in _stored().message.fms][-1] == "💜"
+    assert len(_reminders(lab.president, "Soudure")) == 1
+    assert "La réaction 💜 n'a pas pu être ajoutée" in done.response.content
 
 
 async def test_a_removed_sessions_reactor_reacting_again_counts_for_nothing(lab: Lab) -> None:
