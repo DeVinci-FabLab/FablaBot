@@ -18,6 +18,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+DmOutcome = Literal["sent", "closed", "gone"]
+"""What became of one message: Discord took it, the member's private messages are closed (or nothing was to be sent), or
+the member could not be found on the server."""
+
 
 @dataclass
 class DmTally:
@@ -25,20 +29,34 @@ class DmTally:
 
     Attributes:
         told (set[int]): The members to whom Discord took at least one message.
-        failed (set[int]): The members at least one of whose messages could not be sent.
+        failed (set[int]): The members at least one of whose messages Discord refused.
+        missing (set[int]): The members at least one of whose messages found no member on the server.
+        rebuilt (bool): Whether the rebuild of the posted message ran far enough to tell the members a seat cut moved.
     """
 
     told: set[int] = field(default_factory=set)
     failed: set[int] = field(default_factory=set)
+    missing: set[int] = field(default_factory=set)
+    rebuilt: bool = False
 
-    def record(self, user_id: int, sent: bool) -> None:
+    def record(self, user_id: int, outcome: DmOutcome) -> None:
         """Note the outcome of one message to a member."""
-        (self.told if sent else self.failed).add(user_id)
+        if outcome == "sent":
+            self.told.add(user_id)
+        elif outcome == "gone":
+            self.missing.add(user_id)
+        else:
+            self.failed.add(user_id)
 
     @property
     def refused(self) -> int:
-        """Count the members that no message reached."""
+        """Count the members that no message reached because their private messages are closed."""
         return len(self.failed - self.told)
+
+    @property
+    def gone(self) -> int:
+        """Count the members that no message reached because they could not be found on the server."""
+        return len(self.missing - self.told)
 
 
 def _footer(contacts: str) -> str:
@@ -59,8 +77,8 @@ def changes_members_plans(before: Formation, after: Formation) -> bool:
     return before.start_dt.timestamp() != after.start_dt.timestamp() or before.trainer_mention != after.trainer_mention
 
 
-async def _send_update_dm(guild: Guild, user_id: int, body: str, contacts: str, dm_type: str) -> bool:
-    """Send a member the body of an update message with the greeting and the footer; say whether it went through.
+async def _send_update_dm(guild: Guild, user_id: int, body: str, contacts: str, dm_type: str) -> DmOutcome:
+    """Send a member the body of an update message with the greeting and the footer; say what became of it.
 
     Args:
         guild (Guild): The server.
@@ -70,19 +88,21 @@ async def _send_update_dm(guild: Guild, user_id: int, body: str, contacts: str, 
         dm_type (str): What the message is, for the log lines: no training name.
 
     Returns:
-        bool: True when Discord took the message, False when the member is gone or closed their private messages.
+        DmOutcome: ``sent`` when Discord took the message, ``gone`` when the member cannot be found on the server,
+            ``closed`` when they closed their private messages.
     """
     member = await get_or_fetch_member(guild, user_id)
     if member is None:
         logger.error(f"Failed to fetch member {user_id} for {dm_type} DM in guild {guild.id}.")
-        return False
+        return "gone"
     message = f"Salut {member.display_name} !\n{body}{_footer(contacts)}"
-    return await send_dm_to_member(logger, guild, member, message, dm_type=dm_type) is not None
+    sent = await send_dm_to_member(logger, guild, member, message, dm_type=dm_type)
+    return "closed" if sent is None else "sent"
 
 
 async def send_change_dm(  # noqa: PLR0913 - the two sessions, who and how; one message each
     guild: Guild, user_id: int, before: Formation, after: Formation, *, waitlisted: bool, contacts: str
-) -> bool:
+) -> DmOutcome:
     """Tell a member of a session that its start or trainer changed, naming only what changed.
 
     Args:
@@ -94,10 +114,10 @@ async def send_change_dm(  # noqa: PLR0913 - the two sessions, who and how; one 
         contacts (str): The contact string for formation managers.
 
     Returns:
-        bool: True when a message was sent; False when nothing they care about changed or it could not be sent.
+        DmOutcome: What became of the message; ``closed`` too when nothing they care about changed and none was sent.
     """
     if not changes_members_plans(before, after):
-        return False
+        return "closed"
     new_start, old_start = discord_timestamp(after.start_dt), discord_timestamp(before.start_dt)
     start_moved = new_start != old_start
     trainer_moved = before.trainer_mention != after.trainer_mention
@@ -124,7 +144,7 @@ async def send_change_dm(  # noqa: PLR0913 - the two sessions, who and how; one 
     return await _send_update_dm(guild, user_id, f"{what}\n{kept}", contacts, "change of a published session")
 
 
-async def send_cancel_dm(guild: Guild, user_id: int, session: Formation, *, waitlisted: bool, contacts: str) -> bool:
+async def send_cancel_dm(guild: Guild, user_id: int, session: Formation, *, waitlisted: bool, contacts: str) -> DmOutcome:
     """Tell a member that their session was removed from the announcement and no longer counts.
 
     Args:
@@ -135,7 +155,7 @@ async def send_cancel_dm(guild: Guild, user_id: int, session: Formation, *, wait
         contacts (str): The contact string for formation managers.
 
     Returns:
-        bool: True when a message was sent.
+        DmOutcome: What became of the message.
     """
     ends = "ta place en liste d'attente ne compte plus" if waitlisted else "ton inscription ne compte plus"
     body = (
@@ -145,7 +165,7 @@ async def send_cancel_dm(guild: Guild, user_id: int, session: Formation, *, wait
     return await _send_update_dm(guild, user_id, body, contacts, "removal of a published session")
 
 
-async def send_demotion_dm(guild: Guild, user_id: int, session: Formation, position: int, contacts: str) -> bool:
+async def send_demotion_dm(guild: Guild, user_id: int, session: Formation, position: int, contacts: str) -> DmOutcome:
     """Tell a member who held a seat that fewer places moved them to the waitlist.
 
     Args:
@@ -156,7 +176,7 @@ async def send_demotion_dm(guild: Guild, user_id: int, session: Formation, posit
         contacts (str): The contact string for formation managers.
 
     Returns:
-        bool: True when a message was sent.
+        DmOutcome: What became of the message.
     """
     places = counted(session.seats, "place", "places")
     rank = f"{position}{'re' if position == 1 else 'e'}"
@@ -167,7 +187,7 @@ async def send_demotion_dm(guild: Guild, user_id: int, session: Formation, posit
     return await _send_update_dm(guild, user_id, body, contacts, "move to the waitlist of a published session")
 
 
-async def send_trainer_dm(guild: Guild, session: Formation, channel_id: int, contacts: str) -> bool:
+async def send_trainer_dm(guild: Guild, session: Formation, channel_id: int, contacts: str) -> DmOutcome:
     """Tell the trainer of an added session, or the new trainer of a kept one, that they lead it.
 
     Args:
@@ -177,11 +197,11 @@ async def send_trainer_dm(guild: Guild, session: Formation, channel_id: int, con
         contacts (str): The contact string for formation managers.
 
     Returns:
-        bool: True when a message was sent; False when the trainer field holds no member or the message could not be sent.
+        DmOutcome: What became of the message; ``gone`` when the trainer field holds no member.
     """
     user_id = trainer_id(session.trainer_mention)
     if user_id is None:
-        return False
+        return "gone"
     body = (
         f"Tu animes la formation **{session.name}** le {discord_timestamp(session.start_dt)} : "
         f"l'annonce de <#{channel_id}> vient d'être mise à jour."

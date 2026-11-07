@@ -426,7 +426,7 @@ async def update_done() -> Screen:
     return Screen(capture.sent, dict(_DRAFT_NAMES))
 
 
-async def _update_dm(send: Callable[[Any, int], Coroutine[Any, Any, bool]], who: str = "hugo3d") -> Screen:
+async def _update_dm(send: Callable[[Any, int], Coroutine[Any, Any, str]], who: str = "hugo3d") -> Screen:
     """Show the private message an update sends to a member (hugo3d unless told), as the bot writes it, Camille as contact."""
     texts: list[str] = []
 
@@ -440,7 +440,7 @@ async def _update_dm(send: Callable[[Any, int], Coroutine[Any, Any, bool]], who:
         patch(f"{target}.get_or_fetch_member", AsyncMock(return_value=member)),
         patch(f"{target}.send_dm_to_member", take),
     ):
-        assert await send(MagicMock(), 3333)
+        assert await send(MagicMock(), 3333) == "sent"
     capture = Capture()
     await capture.interaction().response.send_message(texts[0])
     return Screen(capture.sent, dict(_DRAFT_NAMES))
@@ -479,7 +479,7 @@ async def update_dm_trainer() -> Screen:
     """The message to the trainer of a session the update added."""
     session = _dm_session("Découpe laser", TRAINER, "2026-11-13T14:00:00+01:00")
 
-    async def tell(guild: Any, _uid: int) -> bool:
+    async def tell(guild: Any, _uid: int) -> str:
         return await send_trainer_dm(guild, session, ANNOUNCE_CHANNEL, _CONTACTS)
 
     return await _update_dm(tell, who="lea.mkr")

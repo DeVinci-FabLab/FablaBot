@@ -585,7 +585,9 @@ an added session or the new trainer of a kept one, and to a member a lost seat p
 stored. If the bot restarts while an update is sending them, the members not yet reached are never told, and nothing
 sends them again: the announcement itself is right, and the Respo can tell them by hand. The update's line in the
 bot's log gives the counts (`members_told` and `dms_refused`, the members whose private messages are closed), and the
-answer to the staff shows the same two numbers.
+answer to the staff shows the same two numbers, and a third for the members the bot could not find on the server. When the
+stored announcement cannot be read back, or the message could not be rebuilt, the answer says which members were not
+told yet instead of counting them as zero, and the Respo tells them by hand.
 
 ## Server check at start
 

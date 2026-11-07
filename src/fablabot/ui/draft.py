@@ -397,6 +397,9 @@ def done_message(  # noqa: PLR0913 - one keyword per line of the answer
     left: tuple[str, ...] = (),
     told: int = 0,
     dms_refused: int = 0,
+    missing: int = 0,
+    unread: tuple[str, ...] = (),
+    moves_unsent: bool = False,
 ) -> tuple[str, ui.View]:
     """Build the answer to a confirmed update: how much changed, and the way to the draft, which now says the same.
 
@@ -411,6 +414,10 @@ def done_message(  # noqa: PLR0913 - one keyword per line of the answer
         left (tuple[str, ...]): The emojis of removed sessions the bot could not take any reaction off, for the staff.
         told (int): The members a private message reached.
         dms_refused (int): The members none of whose messages Discord took, their private messages being closed.
+        missing (int): The members who could not be found on the server, so that no message was sent to them.
+        unread (tuple[str, ...]): The emojis of changed sessions whose members could not be read, so none was told.
+        moves_unsent (bool): True when seats were cut but the message was not rebuilt, so the members the cut moves to
+            the waitlist are not told yet.
 
     Returns:
         tuple[str, ui.View]: The text and the button that shows the draft.
@@ -438,7 +445,7 @@ def done_message(  # noqa: PLR0913 - one keyword per line of the answer
         if left
         else ""
     )
-    missing = (
+    missing_reaction = (
         f"⚠️ La réaction {' '.join(unreacted)} n'a pas pu être ajoutée : ajoute-la à la main sur l'annonce.\n"
         if unreacted
         else ""
@@ -448,10 +455,31 @@ def done_message(  # noqa: PLR0913 - one keyword per line of the answer
         if dms_refused
         else ""
     )
+    absent = (
+        f" {counted(missing, 'membre introuvable sur le serveur', 'membres introuvables sur le serveur')}." if missing else ""
+    )
+    cannot_tell = bool(unread) or moves_unsent
+    told_line = (
+        ""
+        if cannot_tell and not (told or dms_refused or missing)
+        else f" {counted(told, 'membre prévenu', 'membres prévenus')} par message privé.{closed}{absent}"
+    )
+    unreadable = (
+        f"⚠️ Les membres de la session {' '.join(unread)} n'ont pas pu être prévenus : "
+        "l'annonce enregistrée n'a pas pu être relue. Préviens-les à la main.\n"
+        if unread
+        else ""
+    )
+    unsent = (
+        "⚠️ Les membres que la baisse des places fait passer en liste d'attente ne sont pas encore prévenus : "
+        "le message n'a pas pu être refait.\n"
+        if moves_unsent
+        else ""
+    )
     content = (
-        f"✅ **Annonce mise à jour** dans <#{channel_id}> : {shown}. "
-        f"{counted(told, 'membre prévenu', 'membres prévenus')} par message privé.{closed}\n"
-        f"{late}{refused}{stuck}{missing}-# Le brouillon reprend l'annonce telle qu'elle est maintenant."
+        f"✅ **Annonce mise à jour** dans <#{channel_id}> : {shown}.{told_line}\n"
+        f"{late}{refused}{stuck}{missing_reaction}{unreadable}{unsent}"
+        "-# Le brouillon reprend l'annonce telle qu'elle est maintenant."
     )
     return content, view
 

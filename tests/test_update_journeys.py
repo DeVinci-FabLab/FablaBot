@@ -31,7 +31,7 @@ from test_catalogue_journeys import (
 
 from fablabot.cogs import formation_management
 from fablabot.helpers.constants import SESSION_EMOJIS, RoleNames
-from fablabot.helpers.formation import format_respo_contacts, render_message
+from fablabot.helpers.formation import DmTally, format_respo_contacts, notifications, render_message
 from fablabot.helpers.formation.rendering import discord_timestamp
 from fablabot.helpers.formation.update import UpdatePlan, as_draft, plan_update
 from fablabot.helpers.guild_access import GuildAccessPolicy
@@ -1705,3 +1705,117 @@ async def test_the_result_counts_a_member_told_twice_once(lab: Lab, ticks: type[
     assert "passe à 2 places" in _since(lab.admin, seen[lab.admin])[0]
     assert "Ta place en liste d'attente est gardée." in _since(lab.admin, seen[lab.admin])[1]
     assert done.response.content == _done(lab, "1 session modifiée", told=3)
+
+
+async def test_a_member_who_took_back_their_reaction_before_the_confirmation_is_not_told(lab: Lab) -> None:
+    """A waitlisted member who removed their reaction after the summary is told nothing, and is no longer counted."""
+    await _announced(lab)
+    seen = {who: _dms(who) for who in (lab.temp, lab.president)}
+    _change("💛", start=24)
+    summary = await _summary(lab)
+    await lab.president.unreact(lab.announce.last_message, "💛")
+    await lab.env.advance_time(120)
+    seen_after = {who: _dms(who) for who in (lab.temp, lab.president)}
+
+    done = await _confirm(lab, summary)
+
+    assert _lists("💛") == ([lab.temp.id], [])
+    assert _since(lab.president, seen_after[lab.president]) == []
+    assert len(_since(lab.temp, seen_after[lab.temp])) == 1
+    assert _dms(lab.president) == seen[lab.president]
+    assert done.response.content == _done(lab, "1 session modifiée", told=1)
+
+
+def test_a_member_reached_by_one_message_and_refused_another_counts_as_told() -> None:
+    """A member Discord took one message for is told, whatever happened to their other messages; the others are refused."""
+    tally = DmTally()
+    tally.record(1, "closed")
+    tally.record(1, "sent")
+    tally.record(2, "sent")
+    tally.record(2, "closed")
+    tally.record(3, "closed")
+    tally.record(4, "gone")
+
+    assert tally.told == {1, 2}
+    assert tally.refused == 1
+    assert tally.gone == 1
+
+
+async def test_the_members_are_not_counted_as_zero_told_when_the_announcement_cannot_be_read_back(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the stored announcement cannot be read to tell the members of a changed session, the answer says so, not 0 told."""
+    await _announced(lab)
+    cog = _cog(lab)
+    broken = {"on": False}
+    real_react = cog._react_to_added  # pyright: ignore[reportPrivateUsage]
+    real_read = formations.current_published
+
+    async def after_save(*args: Any) -> Any:
+        broken["on"] = True
+        return await real_react(*args)
+
+    def read(guild_id: int) -> Any:
+        if broken["on"]:
+            raise sqlite3.OperationalError("disk")
+        return real_read(guild_id)
+
+    monkeypatch.setattr(cog, "_react_to_added", after_save)
+    monkeypatch.setattr(formations, "current_published", read)
+    seen = {who: _dms(who) for who in (lab.temp, lab.president)}
+    _change("💛", start=24)
+
+    done = await _updated(lab)
+
+    monkeypatch.setattr(formations, "current_published", real_read)
+    assert [_since(who, seen[who]) for who in (lab.temp, lab.president)] == [[], []]
+    assert done.response.content == (
+        f"✅ **Annonce mise à jour** dans <#{lab.announce.id}> : 1 session modifiée.\n"
+        "⚠️ Les membres de la session 💛 n'ont pas pu être prévenus : l'annonce enregistrée n'a pas pu être relue. "
+        "Préviens-les à la main.\n"
+        "-# Le brouillon reprend l'annonce telle qu'elle est maintenant."
+    )
+
+
+async def test_the_members_moved_by_fewer_seats_are_not_called_told_when_the_message_could_not_be_rebuilt(
+    lab: Lab, ticks: type[Ticks], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the rebuild did not run, the members a seat cut moves are not told yet, and the answer says so, not 0 told."""
+    await _signed_up(lab, ticks, [lab.temp, lab.codir, lab.admin], seats=3)
+    seen = {who: _dms(who) for who in (lab.temp, lab.codir, lab.admin)}
+    monkeypatch.setattr(_cog(lab), "_update_published_message_locked", AsyncMock(side_effect=RuntimeError("discord")))
+    _change("🧡", seats=2)
+
+    done = await _updated(lab)
+
+    assert [_since(who, seen[who]) for who in (lab.temp, lab.codir, lab.admin)] == [[], [], []]
+    assert done.response.content == (
+        f"✅ **Annonce mise à jour** dans <#{lab.announce.id}> : 1 session modifiée.\n"
+        "⚠️ Discord n'a pas accepté la modification du message : elle sera refaite d'ici 5 minutes.\n"
+        "⚠️ Les membres que la baisse des places fait passer en liste d'attente ne sont pas encore prévenus : "
+        "le message n'a pas pu être refait.\n"
+        "-# Le brouillon reprend l'annonce telle qu'elle est maintenant."
+    )
+
+
+async def test_a_member_missing_from_the_server_is_counted_apart_from_closed_messages(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A member who cannot be found on the server is counted apart from one whose private messages are closed."""
+    await _announced(lab)
+    real = notifications.get_or_fetch_member
+
+    async def find(guild: Any, user_id: int) -> Any:
+        return None if user_id == lab.temp.id else await real(guild, user_id)
+
+    monkeypatch.setattr(notifications, "get_or_fetch_member", find)
+    seen = {who: _dms(who) for who in (lab.temp, lab.president)}
+    _change("💛", start=24)
+
+    done = await _updated(lab)
+
+    assert _since(lab.temp, seen[lab.temp]) == []
+    assert len(_since(lab.president, seen[lab.president])) == 1
+    assert done.response.content == _done(lab, "1 session modifiée", told=1).replace(
+        "par message privé.\n", "par message privé. 1 membre introuvable sur le serveur.\n"
+    )

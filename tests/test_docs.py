@@ -1005,7 +1005,13 @@ def test_user_guide_says_who_an_update_tells() -> None:
     ):
         assert detail in guide, detail
     operations = " ".join(_section(_read("docs/OPERATIONS.md"), "## Private messages of an announcement update").split())
-    for detail in ("They are not stored", "the members not yet reached are never told", "`members_told` and `dms_refused`"):
+    for detail in (
+        "They are not stored",
+        "the members not yet reached are never told",
+        "`members_told` and `dms_refused`",
+        "could not find on the server",
+        "the answer says which members were not told yet",
+    ):
         assert detail in operations, detail
 
 
