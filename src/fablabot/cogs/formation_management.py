@@ -36,6 +36,7 @@ from fablabot.helpers.constants import (
     APPEL_EDIT_WINDOW,
     MAX_SESSIONS,
     PARIS_TZ,
+    SESSION_EMOJIS,
     TEMPLATE_ROLES,
     ErrorMessages,
     retention_cutoff,
@@ -1271,7 +1272,7 @@ class FormationManagement(commands.Cog):
         formations.save_published(guild_id, published)
 
     def _reaction_counts(self, guild_id: int, event: ReactionEvent) -> bool:
-        """Tell whether a reaction is on a server's published message, on one of its emojis, and not an add past the deadline.
+        """Tell whether a reaction is on a server's published message, on an emoji of the pool, and not a late sign-up.
 
         The deadline is judged at the reaction's own time, so a check that runs late does not change the answer. It
         closes sign-ups only: a removal is always logged on a served server, or the member who left would take their
@@ -1291,7 +1292,9 @@ class FormationManagement(commands.Cog):
         if not pub or event.message_id != pub.message_id:
             return False
         fm_emojis = {fm.emoji for fm in pub.message.fms}
-        if fm_emojis and event.emoji not in fm_emojis:
+        # An emoji of the pool no session wears is logged too, with no effect on a sign-up: a session added later must
+        # never take an emoji a member already reacted with on this message.
+        if fm_emojis and event.emoji not in fm_emojis and event.emoji not in SESSION_EMOJIS:
             return False
 
         formation = next((fm for fm in pub.message.fms if fm.emoji == event.emoji), None)

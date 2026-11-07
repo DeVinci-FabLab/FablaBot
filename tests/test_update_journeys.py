@@ -1113,3 +1113,39 @@ async def test_a_restart_leaves_the_announcement_of_a_server_outside_the_allow_l
 
     assert lab.env.backend.get_message(lab.announce.id, posted.id).content == stale
     assert _snapshot(lab, posted) == before
+
+
+async def test_a_reaction_on_an_emoji_no_session_wears_is_never_a_sign_up_on_a_session_added_later(lab: Lab) -> None:
+    """A member's like on the announcement stays out of the new session wearing that emoji, even after a storage failure."""
+    posted = await _announced(lab)
+    await lab.plain.react(posted, "💜")
+    await lab.plain.react(posted, "👍")
+    await lab.env.advance_time(120)
+    assert formations.reacted_emojis(GUILD_ID, posted.id) >= {"💜"}
+    assert "👍" not in formations.reacted_emojis(GUILD_ID, posted.id)
+    _add(lab, "💜", "Découpe laser")
+
+    summary = await _summary(lab)
+    lines = _embed_lines(summary.response)
+    await _confirm(lab, summary)
+
+    assert any(line.startswith(f"{ADDED} {SESSION_EMOJIS[3]} **Découpe laser**") for line in lines)
+    assert [fm.emoji for fm in _stored().message.fms] == ["🧡", "💛", "💚", SESSION_EMOJIS[3]]
+    cog = _cog(lab)
+    cog._stale_guilds.add(GUILD_ID)  # pyright: ignore[reportPrivateUsage]
+    await cog._update_published_message(GUILD_ID)  # pyright: ignore[reportPrivateUsage]
+    assert _lists(SESSION_EMOJIS[3]) == ([], [])
+    assert not [text for text in _dms(lab.plain) if "inscription" in text]
+
+
+async def test_a_member_who_took_back_a_reaction_on_an_unworn_emoji_still_retires_it(lab: Lab) -> None:
+    """An emoji a member reacted with and then removed on this message is not given to a session added later."""
+    posted = await _announced(lab)
+    await lab.plain.react(posted, "💜")
+    await lab.plain.unreact(posted, "💜")
+    await lab.env.advance_time(120)
+    _add(lab, "💜", "Découpe laser")
+
+    await _updated(lab)
+
+    assert [fm.emoji for fm in _stored().message.fms] == ["🧡", "💛", "💚", SESSION_EMOJIS[3]]
