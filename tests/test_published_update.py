@@ -466,6 +466,20 @@ def test_more_than_twenty_sessions_is_refused() -> None:
     )
 
 
+def test_exactly_twenty_sessions_is_planned_with_the_added_one_last(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nineteen published sessions and one added make twenty: planned, the added session last."""
+    # Twenty sessions never fit in 2 000 characters, so the length limit is lifted to reach the count limit alone.
+    monkeypatch.setattr("fablabot.helpers.formation.update.ANNOUNCEMENT_MAX_CHARS", 10**6)
+    kept = [_fm(emoji, hours=48 + n, name=f"S{n}") for n, emoji in enumerate(SESSION_EMOJIS[: MAX_SESSIONS - 1])]
+    published = _message(*kept)
+
+    plan = _plan(published, _with_added(published, _fm(SESSION_EMOJIS[-1], hours=90, name="La vingtième")))
+
+    assert len(plan.message.fms) == MAX_SESSIONS
+    assert plan.message.fms[-1].name == "La vingtième"
+    assert [s.kind for s in plan.steps].count("added") == 1
+
+
 def test_no_free_emoji_is_refused() -> None:
     """When every emoji of the pool is held or retired, a new session that cannot keep its own is refused."""
     published = _published()
