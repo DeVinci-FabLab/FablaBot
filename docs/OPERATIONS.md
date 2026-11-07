@@ -576,6 +576,16 @@ A restart does not leave a stored update unposted: at start, once the bot is rea
 served server's announcement that still has sessions to come, whatever the retry flags said before (the log shows
 `Rebuilt the announcements of N servers at start`). A failure there is logged and left to the 5-minute tick.
 
+## Private messages of an announcement update
+
+An update of the published announcement sends its private messages once, after it is saved and the message is
+rebuilt: to the members of a session whose start or trainer changed, to those of a removed session, to the trainer of
+an added session or the new trainer of a kept one, and to a member a lost seat puts on the waiting list. They are not
+stored. If the bot restarts while an update is sending them, the members not yet reached are never told, and nothing
+sends them again: the announcement itself is right, and the Respo can tell them by hand. The update's line in the
+bot's log gives the counts (`members_told` and `dms_refused`, the members whose private messages are closed), and the
+answer to the staff shows the same two numbers.
+
 ## Server check at start
 
 At the first start of the process, once the allow-list is applied, the bot reads each server it serves

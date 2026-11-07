@@ -387,13 +387,15 @@ def update_message(plan: UpdatePlan, channel_id: int, message_id: int) -> tuple[
     return embeds, view
 
 
-def done_message(
+def done_message(  # noqa: PLR0913 - one keyword per line of the answer
     plan: UpdatePlan,
     channel_id: int,
     *,
     posted: bool = True,
     unreacted: tuple[str, ...] = (),
     uncleared: tuple[str, ...] = (),
+    told: int = 0,
+    dms_refused: int = 0,
 ) -> tuple[str, ui.View]:
     """Build the answer to a confirmed update: how much changed, and the way to the draft, which now says the same.
 
@@ -404,6 +406,8 @@ def done_message(
             which the next five-minute check retries.
         unreacted (tuple[str, ...]): The emojis of added sessions the bot could not react with, for the staff to add.
         uncleared (tuple[str, ...]): The emojis of removed sessions whose reactions Discord refused to clear.
+        told (int): The members a private message reached.
+        dms_refused (int): The members none of whose messages Discord took, their private messages being closed.
 
     Returns:
         tuple[str, ui.View]: The text and the button that shows the draft.
@@ -431,8 +435,14 @@ def done_message(
         if unreacted
         else ""
     )
+    closed = (
+        f" {counted(dms_refused, 'message privé refusé', 'messages privés refusés')} (messages privés fermés)."
+        if dms_refused
+        else ""
+    )
     content = (
-        f"✅ **Annonce mise à jour** dans <#{channel_id}> : {shown}.\n"
+        f"✅ **Annonce mise à jour** dans <#{channel_id}> : {shown}. "
+        f"{counted(told, 'membre prévenu', 'membres prévenus')} par message privé.{closed}\n"
         f"{late}{refused}{missing}-# Le brouillon reprend l'annonce telle qu'elle est maintenant."
     )
     return content, view

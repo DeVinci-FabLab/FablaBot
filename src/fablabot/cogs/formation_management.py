@@ -44,6 +44,8 @@ from fablabot.helpers.constants import (
 )
 from fablabot.helpers.constants import FORMATION_ROLES as ALLOWED_ROLES
 from fablabot.helpers.formation import (
+    DmTally,
+    changes_members_plans,
     format_current_registrations,
     format_respo_contacts,
     is_past,
@@ -52,9 +54,13 @@ from fablabot.helpers.formation import (
     notify_trainer_before_formation,
     parse_date_time,
     render_message,
+    send_cancel_dm,
+    send_change_dm,
+    send_demotion_dm,
     send_due_alerts,
     send_promotion_dm,
     send_registration_dm,
+    send_trainer_dm,
     send_waitlist_dm,
     start_appel,
 )
@@ -99,6 +105,16 @@ _UNKNOWN_CHARS = 100
 _ID_DIGITS = 18
 TRAINER_NOTIFICATION_ADVANCE = timedelta(hours=1)
 REGISTRATION_WINDOW = timedelta(minutes=20)
+
+
+def _members_of(session: Formation) -> list[tuple[int, bool]]:
+    """List the members signed up on a session, registered first then waiting, as ``(user ID, waitlisted)``."""
+    listed = [
+        (entry.get("user_id"), waitlisted)
+        for waitlisted, entries in ((False, session.registered_users), (True, session.waitlisted_users))
+        for entry in entries
+    ]
+    return [(user_id, waitlisted) for user_id, waitlisted in listed if isinstance(user_id, int)]
 
 
 def _parse_ts(ts_iso: Any) -> datetime:
@@ -711,8 +727,9 @@ class FormationManagement(commands.Cog):
             view=None,
             allowed_mentions=AllowedMentions.none(),
         )
+        tally = DmTally()
         async with self._published_lock(guild.id):
-            outcome = await self._rewrite_announcement(guild, message_id, digest)
+            outcome = await self._rewrite_announcement(guild, message_id, digest, tally)
             behind = guild.id in self._retry_guilds or guild.id in self._stale_guilds
         if not isinstance(outcome, UpdatePlan):
             await self._refuse_update(interaction, *outcome, answered=True)
@@ -720,13 +737,23 @@ class FormationManagement(commands.Cog):
         uncleared = await self._clear_removed(guild, last, outcome)
         unreacted = await self._react_to_added(guild, last, outcome)
         await self._remind_new_trainers(guild, message_id, outcome.trainers_to_remind)
+        await self._tell_members(guild, last, outcome, tally)
         logger.info(
             f"[fm.brouillon] update guild_id={guild.id} user_id={interaction.user.id} message_id={message_id} "
             f"changed={sum(step.kind == 'changed' for step in outcome.steps)} "
             f"added={sum(step.kind == 'added' for step in outcome.steps)} "
-            f"removed={sum(step.kind == 'removed' for step in outcome.steps)} text_changes={len(outcome.text_changes)}"
+            f"removed={sum(step.kind == 'removed' for step in outcome.steps)} text_changes={len(outcome.text_changes)} "
+            f"members_told={len(tally.told)} dms_refused={tally.refused}"
         )
-        content, view = done_message(outcome, last.channel_id, posted=not behind, unreacted=unreacted, uncleared=uncleared)
+        content, view = done_message(
+            outcome,
+            last.channel_id,
+            posted=not behind,
+            unreacted=unreacted,
+            uncleared=uncleared,
+            told=len(tally.told),
+            dms_refused=tally.refused,
+        )
         await interaction.edit_original_response(content=content, view=view, allowed_mentions=AllowedMentions.none())
 
     async def _posted_message(self, guild: Guild, last: PublishedMessage, purpose: str) -> Message | None:
@@ -840,6 +867,58 @@ class FormationManagement(commands.Cog):
             if fm.emoji in emojis:
                 await notify_trainer_before_formation(guild, fm, contacts)
 
+    async def _tell_members(self, guild: Guild, last: PublishedMessage, plan: UpdatePlan, tally: DmTally) -> None:
+        """Send the private messages an update owes, once, outside the lock and after the rebuild.
+
+        A session whose start or trainer changed tells the members who are still registered or waiting on it once the
+        message is rebuilt, and its new trainer; a removed session tells the members it had; an added session tells its
+        trainer. Nothing is stored: a restart in the middle leaves the next members untold (see the operations guide). A
+        member whose messages are closed is counted and the next one is told all the same.
+
+        Args:
+            guild (Guild): The server.
+            last (PublishedMessage): The published message the update was made on.
+            plan (UpdatePlan): The update that was done.
+            tally (DmTally): The members already told by the rebuild, which this adds to.
+        """
+        try:
+            stored = formations.current_published(guild.id)
+        except sqlite3.Error:
+            logger.exception(f"Guild {guild.id} updated message {last.message_id} but could not read it to tell members.")
+            stored = None
+        rebuilt = (
+            {fm.emoji: fm for fm in stored.message.fms} if stored is not None and stored.message_id == last.message_id else {}
+        )
+        contacts = format_respo_contacts(guild)
+        for step in plan.steps:
+            before, after = step.before, step.after
+            if step.kind == "removed" and before is not None:
+                for user_id, waitlisted in _members_of(before):
+                    tally.record(
+                        user_id, await send_cancel_dm(guild, user_id, before, waitlisted=waitlisted, contacts=contacts)
+                    )
+            elif step.kind == "changed" and before is not None and after is not None and changes_members_plans(before, after):
+                if (kept := rebuilt.get(after.emoji)) is None:
+                    logger.warning(f"Guild {guild.id} could not tell the members of a changed session: it is no longer stored.")
+                else:
+                    still = dict(_members_of(kept))
+                    for user_id, _ in _members_of(before):
+                        if user_id in still:
+                            sent = await send_change_dm(
+                                guild, user_id, before, after, waitlisted=still[user_id], contacts=contacts
+                            )
+                            tally.record(user_id, sent)
+                if before.trainer_mention != after.trainer_mention:
+                    await self._tell_trainer(guild, last.channel_id, after, contacts, tally)
+            elif step.kind == "added" and after is not None:
+                await self._tell_trainer(guild, last.channel_id, after, contacts, tally)
+
+    async def _tell_trainer(self, guild: Guild, channel_id: int, session: Formation, contacts: str, tally: DmTally) -> None:
+        """Tell a session's trainer they lead it, and note the outcome by their ID."""
+        sent = await send_trainer_dm(guild, session, channel_id, contacts)
+        if (user_id := trainer_id(session.trainer_mention)) is not None:
+            tally.record(user_id, sent)
+
     async def _refuse_update(self, interaction: Interaction, text: str, kind: RefusalKind, *, answered: bool) -> None:
         """Tell the member privately why the update did nothing, and log the kind.
 
@@ -857,13 +936,16 @@ class FormationManagement(commands.Cog):
         else:
             await interaction.response.send_message(text, ephemeral=True, allowed_mentions=AllowedMentions.none())
 
-    async def _rewrite_announcement(self, guild: Guild, message_id: int, digest: str) -> UpdatePlan | tuple[str, RefusalKind]:
+    async def _rewrite_announcement(
+        self, guild: Guild, message_id: int, digest: str, tally: DmTally
+    ) -> UpdatePlan | tuple[str, RefusalKind]:
         """Do the update under the published lock: fetch, then read, plan, compare and store without waiting, rebuild.
 
         Args:
             guild (Guild): The server.
             message_id (int): The published message the summary was made for.
             digest (str): The digest of the plan the summary showed.
+            tally (DmTally): Filled with the members the rebuild moved to the waitlist and told.
 
         Returns:
             UpdatePlan | tuple[str, RefusalKind]: The plan that was done, or the refusal and its kind; nothing changed.
@@ -894,7 +976,7 @@ class FormationManagement(commands.Cog):
             return RETRY_REFUSAL, RefusalKind.UPDATE_STORAGE_FAILED
         self._retry_guilds.discard(guild.id)  # as a scheduled update does: what is left after the rebuild is its own failure
         try:
-            await self._update_published_message_locked(guild.id)
+            await self._update_published_message_locked(guild.id, tally)
         except sqlite3.Error:
             logger.exception(f"Guild {guild.id} stored the update of message {message_id} but could not rebuild it.")
             self._stale_guilds.add(guild.id)
@@ -1461,8 +1543,15 @@ class FormationManagement(commands.Cog):
         async with self._published_lock(guild_id):
             await self._update_published_message_locked(guild_id)
 
-    async def _update_published_message_locked(self, guild_id: int) -> None:  # noqa: PLR0912, PLR0915 - split once formations have tests
-        """Reload the published message, rebuild registrations from reactions, save and notify."""
+    async def _update_published_message_locked(  # noqa: PLR0912, PLR0915 - split once formations have tests
+        self, guild_id: int, tally: DmTally | None = None
+    ) -> None:
+        """Reload the published message, rebuild registrations from reactions, save and notify.
+
+        Args:
+            guild_id (int): The ID of the guild.
+            tally (DmTally | None): Where an update notes the members told that a lost seat put them on the waitlist.
+        """
         pub = self._get_last_published_in_guild(guild_id)
         if not pub:
             logger.debug(f"No published formations message recorded for guild {guild_id}; skipping update.")
@@ -1549,6 +1638,7 @@ class FormationManagement(commands.Cog):
             self._log_missed_reactions(guild_id, message_id, reactions_snapshot, last_add)
 
         waitlist_notifications: list[tuple[int, str, int]] = []
+        demotion_notifications: list[tuple[int, Formation, int]] = []
         promotion_notifications: list[tuple[int, Formation]] = []
         registration_notifications: list[tuple[int, Formation]] = []
 
@@ -1583,7 +1673,9 @@ class FormationManagement(commands.Cog):
                         registration_notifications.append((uid, fm))
                 else:
                     waitlisted.append(entry)
-                    if uid not in prev_waitlisted_ids:
+                    if uid in prev_registered_ids:
+                        demotion_notifications.append((uid, fm, len(waitlisted)))
+                    elif uid not in prev_waitlisted_ids:
                         waitlist_notifications.append((uid, fm.name, len(waitlisted)))
             fm.registered_users = registered
             fm.waitlisted_users = waitlisted
@@ -1630,6 +1722,11 @@ class FormationManagement(commands.Cog):
                 await send_registration_dm(guild, user_id, fm, contacts)
         else:
             logger.debug(f"No new registration notifications for guild {guild_id}.")
+
+        for user_id, fm, position in demotion_notifications:
+            sent = await send_demotion_dm(guild, user_id, fm, position, contacts)
+            if tally is not None:
+                tally.record(user_id, bool(sent))
 
         if waitlist_notifications:
             logger.info(f"Dispatching {len(waitlist_notifications)} waitlist notification(s) for guild {guild_id}.")

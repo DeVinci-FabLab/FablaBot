@@ -22,6 +22,7 @@ from test_catalogue_journeys import (
     _buttons,
     _embed_lines,
     _forged,
+    _guild,
     _published_via_publier,
     _session,
     _stage,
@@ -30,11 +31,12 @@ from test_catalogue_journeys import (
 
 from fablabot.cogs import formation_management
 from fablabot.helpers.constants import SESSION_EMOJIS, RoleNames
-from fablabot.helpers.formation import render_message
+from fablabot.helpers.formation import format_respo_contacts, render_message
+from fablabot.helpers.formation.rendering import discord_timestamp
 from fablabot.helpers.formation.update import as_draft
 from fablabot.helpers.guild_access import GuildAccessPolicy
 from fablabot.helpers.reaction_log import ReactionLogManager
-from fablabot.helpers.utils import RIGHT_LOST_MESSAGE
+from fablabot.helpers.utils import RIGHT_LOST_MESSAGE, counted
 from fablabot.models import ReactionAction, ReactionEvent
 from fablabot.models.formation import FmMessageDraft, PublishedMessage
 from fablabot.services import attendance, formations
@@ -472,10 +474,14 @@ async def _updated(lab: Lab) -> Any:
     return await _confirm(lab, await _summary(lab))
 
 
-def _done(lab: Lab, parts: str) -> str:
-    """The answer of a confirmed update with these parts."""
+def _done(lab: Lab, parts: str, told: int = 0, refused: int = 0) -> str:
+    """The answer of a confirmed update with these parts, the members told and the private messages refused."""
+    closed = (
+        f" {counted(refused, 'message privé refusé', 'messages privés refusés')} (messages privés fermés)." if refused else ""
+    )
     return (
-        f"✅ **Annonce mise à jour** dans <#{lab.announce.id}> : {parts}.\n"
+        f"✅ **Annonce mise à jour** dans <#{lab.announce.id}> : {parts}. "
+        f"{counted(told, 'membre prévenu', 'membres prévenus')} par message privé.{closed}\n"
         "-# Le brouillon reprend l'annonce telle qu'elle est maintenant."
     )
 
@@ -521,7 +527,7 @@ async def test_confirmer_changes_the_announcement_in_place_and_keeps_its_reactio
 
     done = await _updated(lab)
 
-    assert done.response.content == _done(lab, "1 session modifiée")
+    assert done.response.content == _done(lab, "1 session modifiée", told=2)
     assert not done.response.embeds
     assert list(_buttons(done.response)) == ["📝 Voir le brouillon"]
     assert len(lab.announce.history()) == 1
@@ -550,7 +556,7 @@ async def test_a_refused_edit_of_the_posted_message_is_said_and_retried(lab: Lab
 
     sent = lab.env.backend.get_message(lab.announce.id, posted.id)
     assert sent.content != render_message(_stored().message)
-    assert done.response.content == _done(lab, "1 session modifiée").replace(
+    assert done.response.content == _done(lab, "1 session modifiée", told=2).replace(
         "\n-# Le brouillon",
         "\n⚠️ Discord n'a pas accepté la modification du message : elle sera refaite d'ici 5 minutes.\n-# Le brouillon",
     )
@@ -931,7 +937,7 @@ async def test_an_added_session_appears_with_the_bots_reaction(lab: Lab) -> None
 
     assert any(line.startswith(f"{ADDED} 💜 **Découpe laser** — <t:") and line.endswith(" · 5 places") for line in lines)
     assert f"-# À prévenir : <@{lab.plain.id}>" in lines
-    assert done.response.content == _done(lab, "1 ajoutée")
+    assert done.response.content == _done(lab, "1 ajoutée", told=1)
     stored = _stored()
     assert [fm.emoji for fm in stored.message.fms] == ["🧡", "💛", "💚", "💜"]
     assert (stored.message.fms[3].registered_users, stored.message.fms[3].waitlisted_users) == ([], [])
@@ -1031,7 +1037,7 @@ async def test_a_reaction_the_bot_cannot_add_is_named_in_the_answer(lab: Lab, mo
         )
         done = await _confirm(lab, summary)
 
-    assert done.response.content == _done(lab, "1 ajoutée").replace(
+    assert done.response.content == _done(lab, "1 ajoutée", told=1).replace(
         "\n-# Le brouillon",
         "\n⚠️ La réaction 💜 n'a pas pu être ajoutée : ajoute-la à la main sur l'annonce.\n-# Le brouillon",
     )
@@ -1321,7 +1327,7 @@ async def test_a_removed_session_leaves_the_text_and_its_reactions(lab: Lab) -> 
     assert title == "🔄 Mettre à jour l'annonce · 1 changement"
     assert any(line.startswith(f"{REMOVED} 💛 **Brodeuse** — <t:") and line.endswith(f" · <@{lab.plain.id}>") for line in lines)
     assert "-# À prévenir : 1 inscrit, 1 en attente · réactions 💛 retirées" in lines
-    assert done.response.content == _done(lab, "1 retirée")
+    assert done.response.content == _done(lab, "1 retirée", told=2)
     assert [fm.emoji for fm in _stored().message.fms] == ["🧡", "💚"]
     sent = lab.env.backend.get_message(lab.announce.id, posted.id)
     assert sent.content == render_message(_stored().message)
@@ -1355,7 +1361,7 @@ async def test_without_manage_messages_the_bot_takes_its_own_reaction_and_says_s
     done = await _updated(lab)
 
     assert done.response.content == (
-        f"✅ **Annonce mise à jour** dans <#{lab.announce.id}> : 1 retirée.\n"
+        f"✅ **Annonce mise à jour** dans <#{lab.announce.id}> : 1 retirée. 2 membres prévenus par message privé.\n"
         "⚠️ Discord a refusé de retirer les réactions 💛 : le bot a retiré les siennes, "
         "celles des membres restent visibles mais ne comptent plus.\n"
         "-# Le brouillon reprend l'annonce telle qu'elle est maintenant."
@@ -1450,9 +1456,165 @@ async def test_a_started_session_after_a_removed_one_keeps_its_check(lab: Lab) -
 
     done = await _updated(lab)
 
-    assert done.response.content == _done(lab, "1 retirée")
+    assert done.response.content == _done(lab, "1 retirée", told=2)
     assert [fm.emoji for fm in _stored().message.fms] == ["🧡", "💚"]
     assert attendance.registrants(appel_id) == registrants
     checked = attendance.get(appel_id)
     assert checked is not None
     assert (checked.name, checked.position, checked.message_id) == ("Résine", 1, _stored().message_id)
+
+
+def _footer(lab: Lab) -> str:
+    """The end of every private message the bot sends: who to ask."""
+    contacts = format_respo_contacts(_guild(lab))
+    return f"\n\n*Ce message a été envoyé par un bot. Pour plus d'informations merci de contacter {contacts}.*"
+
+
+def _since(who: Any, before: list[str]) -> list[str]:
+    """The private messages a member received after ``before`` was read."""
+    return _dms(who)[len(before) :]
+
+
+async def test_a_new_date_tells_each_registered_and_waitlisted_member_once(lab: Lab) -> None:
+    """Moving a session tells its registered and its waitlisted members once each, and nobody else."""
+    await _announced(lab)
+    session = _session_of("💛")
+    members = (lab.temp, lab.president)
+    others = (lab.codir, lab.admin, lab.plain, lab.respo)
+    seen = {who: _dms(who) for who in (*members, *others)}
+    _change("💛", start=24)
+
+    done = await _updated(lab)
+
+    new = discord_timestamp(session.start_dt + timedelta(hours=24))
+    head = (
+        f"La formation **Brodeuse** change de date : elle a lieu le {new} (au lieu du {discord_timestamp(session.start_dt)}), "
+    )
+    registered = f"Salut temp !\n{head}toujours avec <@{lab.plain.id}>.\n"
+    registered += "Ton inscription est gardée. Si tu ne peux plus venir, retire ta réaction pour libérer la place."
+    waiting = f"Salut president !\n{head}toujours avec <@{lab.plain.id}>.\nTa place en liste d'attente est gardée."
+    assert _since(lab.temp, seen[lab.temp]) == [registered + _footer(lab)]
+    assert _since(lab.president, seen[lab.president]) == [waiting + _footer(lab)]
+    assert [_since(who, seen[who]) for who in others] == [[]] * 4
+    assert done.response.content == _done(lab, "1 session modifiée", told=2)
+
+
+@pytest.mark.parametrize("what", ["start", "trainer", "both"])
+async def test_only_what_changed_is_named(lab: Lab, what: str) -> None:
+    """The message names the new start, the new trainer or both, each with the old value, and nothing else."""
+    await _announced(lab)
+    old = _session_of("🧡")
+    seen = _dms(lab.codir)
+    new_trainer = f"<@{lab.respo.id}>"
+    old_start, new_start = discord_timestamp(old.start_dt), discord_timestamp(old.start_dt + timedelta(hours=24))
+    values: dict[str, Any] = {}
+    if what != "trainer":
+        values["start"] = 24
+    if what != "start":
+        values["trainer_mention"] = new_trainer
+    _change("🧡", **values)
+
+    await _updated(lab)
+
+    expected = {
+        "start": f"La formation **Soudure** change de date : elle a lieu le {new_start} (au lieu du {old_start}), "
+        f"toujours avec {old.trainer_mention}.",
+        "trainer": f"La formation **Soudure** change de formateur : {new_trainer} l'anime (au lieu de {old.trainer_mention}), "
+        f"toujours le {old_start}.",
+        "both": f"La formation **Soudure** change : elle a lieu le {new_start} avec {new_trainer} "
+        f"(au lieu du {old_start} avec {old.trainer_mention}).",
+    }[what]
+    keep = "Ton inscription est gardée. Si tu ne peux plus venir, retire ta réaction pour libérer la place."
+    assert _since(lab.codir, seen) == [f"Salut codir !\n{expected}\n{keep}{_footer(lab)}"]
+
+
+async def test_a_seats_or_description_change_sends_no_change_message(lab: Lab) -> None:
+    """A name, seats or description change, with no seat lost, tells nobody."""
+    await _announced(lab)
+    everyone = (lab.temp, lab.president, lab.codir, lab.admin, lab.plain, lab.respo)
+    seen = {who: _dms(who) for who in everyone}
+    _change("🧡", name="Soudure fine", seats=7, description="Apportez vos lunettes.")
+
+    done = await _updated(lab)
+
+    assert [_since(who, seen[who]) for who in everyone] == [[]] * 6
+    assert done.response.content == _done(lab, "1 session modifiée", told=0)
+
+
+async def test_a_removed_session_tells_its_members(lab: Lab) -> None:
+    """Removing a session tells its registered and its waitlisted members, in the words of each."""
+    await _announced(lab)
+    session = _session_of("💛")
+    seen = {who: _dms(who) for who in (lab.temp, lab.president, lab.codir)}
+    _remove("💛")
+
+    done = await _updated(lab)
+
+    start = discord_timestamp(session.start_dt)
+    cancelled = f"La formation **Brodeuse** du {start} est annulée et retirée de l'annonce"
+    assert _since(lab.temp, seen[lab.temp]) == [f"Salut temp !\n{cancelled} : ton inscription ne compte plus.{_footer(lab)}"]
+    assert _since(lab.president, seen[lab.president]) == [
+        f"Salut president !\n{cancelled} : ta place en liste d'attente ne compte plus.{_footer(lab)}"
+    ]
+    assert _since(lab.codir, seen[lab.codir]) == []
+    assert done.response.content == _done(lab, "1 retirée", told=2)
+
+
+async def test_the_trainer_of_an_added_session_and_a_new_trainer_are_told(lab: Lab) -> None:
+    """The trainer of an added session and the new trainer of a kept one hear the announcement was updated."""
+    await _announced(lab)
+    seen = {who: _dms(who) for who in (lab.respo, lab.president)}
+    _add(lab, "💜", "Découpe laser", trainer_mention=f"<@{lab.respo.id}>")
+    draft = formations.get_draft(GUILD_ID)
+    assert draft is not None
+    start = discord_timestamp(next(fm for fm in draft.fms if fm.emoji == "💜").start_dt)
+    _change("🧡", trainer_mention=f"<@{lab.president.id}>")
+
+    done = await _updated(lab)
+
+    told = f"l'annonce de <#{lab.announce.id}> vient d'être mise à jour."
+    assert _since(lab.respo, seen[lab.respo]) == [
+        f"Salut respo !\nTu animes la formation **Découpe laser** le {start} : {told}{_footer(lab)}"
+    ]
+    soudure = discord_timestamp(_session_of("🧡").start_dt)
+    assert _since(lab.president, seen[lab.president]) == [
+        f"Salut president !\nTu animes la formation **Soudure** le {soudure} : {told}{_footer(lab)}"
+    ]
+    assert done.response.content == _done(lab, "1 session modifiée, 1 ajoutée", told=4)
+
+
+async def test_a_closed_dm_is_counted_apart_and_the_others_are_sent(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A member whose private messages are closed is counted apart, and the members after them are told."""
+    await _announced(lab)
+    real = discord.Member.send
+    closed = lab.temp.id
+
+    async def send(self: Any, *args: Any, **kwargs: Any) -> Any:
+        if self.id == closed:
+            raise discord.Forbidden(MagicMock(status=403, reason="Cannot send messages to this user"), "closed")
+        return await real(self, *args, **kwargs)
+
+    monkeypatch.setattr(discord.Member, "send", send)
+    seen = {who: _dms(who) for who in (lab.temp, lab.president)}
+    _change("💛", start=24)
+
+    done = await _updated(lab)
+
+    assert _since(lab.temp, seen[lab.temp]) == []
+    assert len(_since(lab.president, seen[lab.president])) == 1
+    assert done.response.content == _done(lab, "1 session modifiée", told=1, refused=1)
+
+
+async def test_the_result_counts_a_member_told_twice_once(lab: Lab, ticks: type[Ticks]) -> None:
+    """A member told of a new date and of a lost seat is two messages and one member in the count."""
+    await _signed_up(lab, ticks, [lab.temp, lab.codir, lab.admin], seats=3)
+    seen = {who: _dms(who) for who in (lab.temp, lab.codir, lab.admin)}
+    _change("🧡", start=24, seats=2)
+
+    done = await _updated(lab)
+
+    assert _lists() == ([lab.temp.id, lab.codir.id], [lab.admin.id])
+    assert [len(_since(who, seen[who])) for who in (lab.temp, lab.codir, lab.admin)] == [1, 1, 2]
+    assert "passe à 2 places" in _since(lab.admin, seen[lab.admin])[0]
+    assert "Ta place en liste d'attente est gardée." in _since(lab.admin, seen[lab.admin])[1]
+    assert done.response.content == _done(lab, "1 session modifiée", told=3)

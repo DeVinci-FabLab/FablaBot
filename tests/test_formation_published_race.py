@@ -442,6 +442,35 @@ async def test_seats_taken_before_the_journal_retention_keep_their_order_and_a_l
     waitlist_dm.assert_not_awaited()
 
 
+async def test_a_member_moved_to_the_waitlist_gets_the_seats_message_not_the_full_one(
+    started_bot: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A member who held a seat and loses it to fewer places is told the seats changed, not that the session was full."""
+    env = _Env(started_bot.get_cog("FormationManagement"), monkeypatch, seats=1, reactors=(MEMBER_ID, OTHER_MEMBER_ID))
+    waitlist_dm = AsyncMock()
+    demotion_dm = AsyncMock()
+    monkeypatch.setattr(fm_cog, "send_waitlist_dm", waitlist_dm)
+    monkeypatch.setattr(fm_cog, "send_demotion_dm", demotion_dm)
+    _log_events(env, (MEMBER_ID, ReactionAction.ADD, 10), (OTHER_MEMBER_ID, ReactionAction.ADD, 5))
+    pub = env.cog._get_last_published_in_guild(GUILD_ID)
+    assert pub is not None
+    stamp = datetime.now(PARIS_TZ).isoformat(timespec="seconds")
+    pub.message.fms[0].registered_users = [
+        {"user_id": MEMBER_ID, "username": "alice", "ts_iso": stamp},
+        {"user_id": OTHER_MEMBER_ID, "username": "bob", "ts_iso": stamp},
+    ]
+    env.cog._set_last_published_in_guild(GUILD_ID, pub)
+
+    await env.cog._update_published_message(GUILD_ID)
+
+    assert _seats(env) == ([MEMBER_ID], [OTHER_MEMBER_ID])
+    waitlist_dm.assert_not_awaited()
+    assert demotion_dm.await_count == 1
+    assert demotion_dm.await_args is not None
+    args = demotion_dm.await_args.args
+    assert (args[1], args[3]) == (OTHER_MEMBER_ID, 1)
+
+
 async def test_a_stored_seat_without_a_reaction_on_discord_is_dropped_past_the_retention(
     started_bot: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:

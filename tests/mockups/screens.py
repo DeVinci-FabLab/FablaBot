@@ -13,6 +13,7 @@ import fablabot.cogs as cogs_package
 from fablabot.cogs import formation_management, help_management, message_management
 from fablabot.helpers.constants import APPEL_EDIT_WINDOW, PARIS_TZ, SESSION_EMOJIS, RoleNames
 from fablabot.helpers.formation.attendance import alert_message, appel_content, appel_view, log_line, respo_messages
+from fablabot.helpers.formation.notifications import send_cancel_dm, send_change_dm, send_demotion_dm, send_trainer_dm
 from fablabot.helpers.formation.update import UpdatePlan, as_draft, plan_update
 from fablabot.helpers.help_page import leaf_commands
 from fablabot.helpers.info_page import Facts, build_info
@@ -419,10 +420,69 @@ async def update_summary() -> Screen:
 
 async def update_done() -> Screen:
     """The answer to a confirmed update: how many sessions changed, the reactions Discord refused to clear, the draft button."""
-    content, view = done_message(_update_plan(), ANNOUNCE_CHANNEL, uncleared=("💙",))
+    content, view = done_message(_update_plan(), ANNOUNCE_CHANNEL, uncleared=("💙",), told=12)
     capture = Capture()
     await capture.interaction().response.send_message(content, view=view, ephemeral=True)
     return Screen(capture.sent, dict(_DRAFT_NAMES))
+
+
+async def _update_dm(send: Callable[[Any, int], Coroutine[Any, Any, bool]], who: str = "hugo3d") -> Screen:
+    """Show the private message an update sends to a member (hugo3d unless told), as the bot writes it, Camille as contact."""
+    texts: list[str] = []
+
+    async def take(_logger: object, _guild: object, _member: object, message: str, **_options: object) -> MagicMock:
+        texts.append(message)
+        return MagicMock()
+
+    member = MagicMock(display_name=who)
+    target = "fablabot.helpers.formation.notifications"
+    with (
+        patch(f"{target}.get_or_fetch_member", AsyncMock(return_value=member)),
+        patch(f"{target}.send_dm_to_member", take),
+    ):
+        assert await send(MagicMock(), 3333)
+    capture = Capture()
+    await capture.interaction().response.send_message(texts[0])
+    return Screen(capture.sent, dict(_DRAFT_NAMES))
+
+
+def _dm_session(name: str, trainer: int, start_iso: str, seats: int = 5) -> Formation:
+    """A session as the private messages of an update name it."""
+    return Formation(
+        emoji="💛", name=name, trainer_mention=f"<@{trainer}>", start_iso=start_iso, duration="45 min", seats=seats
+    )
+
+
+_CONTACTS = "<@4444>"
+
+
+async def update_dm_change() -> Screen:
+    """The message to a registered member of a session whose start moved by a day, the trainer unchanged."""
+    before = _dm_session("SRG + Imp 3D", TRAINER, "2026-11-10T18:00:00+01:00")
+    after = replace(before, start_iso="2026-11-11T18:00:00+01:00")
+    return await _update_dm(lambda guild, uid: send_change_dm(guild, uid, before, after, waitlisted=False, contacts=_CONTACTS))
+
+
+async def update_dm_cancel() -> Screen:
+    """The message to a registered member of a session the update removed."""
+    session = _dm_session("Impression résine", 4444, "2026-11-12T13:45:00+01:00")
+    return await _update_dm(lambda guild, uid: send_cancel_dm(guild, uid, session, waitlisted=False, contacts=_CONTACTS))
+
+
+async def update_dm_waitlist() -> Screen:
+    """The message to the first member put on the waitlist by fewer places."""
+    session = _dm_session("Formation GitHub", 3333, "2026-11-11T11:45:00+01:00", seats=6)
+    return await _update_dm(lambda guild, uid: send_demotion_dm(guild, uid, session, 1, _CONTACTS))
+
+
+async def update_dm_trainer() -> Screen:
+    """The message to the trainer of a session the update added."""
+    session = _dm_session("Découpe laser", TRAINER, "2026-11-13T14:00:00+01:00")
+
+    async def tell(guild: Any, _uid: int) -> bool:
+        return await send_trainer_dm(guild, session, ANNOUNCE_CHANNEL, _CONTACTS)
+
+    return await _update_dm(tell, who="lea.mkr")
 
 
 class _October(datetime):
@@ -667,6 +727,10 @@ SCREENS: dict[str, Callable[[], Coroutine[Any, Any, Screen]]] = {
     "draft-republish": draft_republish,
     "update-summary": update_summary,
     "update-done": update_done,
+    "update-dm-change": update_dm_change,
+    "update-dm-cancel": update_dm_cancel,
+    "update-dm-waitlist": update_dm_waitlist,
+    "update-dm-trainer": update_dm_trainer,
     "session-pick": session_pick,
     "session-form": session_form,
     "session-free-form": session_free_form,

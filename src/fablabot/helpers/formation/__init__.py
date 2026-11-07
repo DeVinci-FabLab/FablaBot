@@ -2,11 +2,17 @@
 
 from fablabot.helpers.formation.attendance import send_due_alerts, start_appel
 from fablabot.helpers.formation.notifications import (
+    DmTally,
+    changes_members_plans,
     notify_participants_before_formation,
     notify_responsible_before_formation,
     notify_trainer_before_formation,
+    send_cancel_dm,
+    send_change_dm,
+    send_demotion_dm,
     send_promotion_dm,
     send_registration_dm,
+    send_trainer_dm,
     send_waitlist_dm,
 )
 from fablabot.helpers.formation.rendering import (
@@ -25,9 +31,11 @@ from fablabot.helpers.formation.rendering import (
 )
 
 __all__ = [
+    "DmTally",
     "Emojis",
     "announcement_header",
     "announcement_length",
+    "changes_members_plans",
     "format_current_registrations",
     "format_formation_export",
     "format_respo_contacts",
@@ -40,9 +48,13 @@ __all__ = [
     "parse_date_time",
     "render_formation",
     "render_message",
+    "send_cancel_dm",
+    "send_change_dm",
+    "send_demotion_dm",
     "send_due_alerts",
     "send_promotion_dm",
     "send_registration_dm",
+    "send_trainer_dm",
     "send_waitlist_dm",
     "start_appel",
 ]

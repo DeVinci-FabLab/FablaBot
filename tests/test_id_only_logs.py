@@ -447,3 +447,43 @@ async def test_update_lines_name_no_training(simcord_env: simcord.Env, caplog: p
     assert f"update guild_id={GUILD_ID} user_id={lab.respo.id} message_id={published.message_id}" in caplog.text
     assert NAME not in caplog.text
     assert "Soudure" not in caplog.text
+
+
+async def test_update_dms_name_no_training(simcord_env: simcord.Env, caplog: pytest.LogCaptureFixture) -> None:
+    """The private messages an update sends are logged by member and server ID: no training name, no pseudo."""
+    lab = Lab(simcord_env)
+    sessions = [replace(fm, name=f"{NAME} {fm.name}") for fm in _three(lab)]
+    _stage(lab, sessions)
+    await _published_via_publier(lab, lab.announce)
+    posted = lab.announce.last_message
+    assert posted is not None
+    await lab.codir.react(posted, "🧡")
+    await lab.temp.react(posted, "💛")
+    await lab.president.react(posted, "💛")
+    await lab.env.advance_time(120)
+    published = formations.current_published(GUILD_ID)
+    assert published is not None
+    draft = as_draft(published.message)
+    fms = [
+        replace(fm, start_iso=(fm.start_dt + timedelta(hours=24)).isoformat()) if fm.emoji == "🧡" else fm for fm in draft.fms
+    ]
+    fms = [fm for fm in fms if fm.emoji != "💛"]
+    fms.append(replace(sessions[2], emoji="💜", name=f"{NAME} laser", trainer_mention=f"<@{lab.respo.id}>"))
+    formations.save_draft(GUILD_ID, replace(draft, fms=fms))
+    caplog.set_level(logging.DEBUG)
+    caplog.clear()
+    listing = await lab.brouillon(lab.respo)
+    warning = await lab.respo.click(listing.response, custom_id="fmd:publish")
+    summary = await lab.respo.click(warning.response, custom_id="fmd:update")
+    confirm = next(
+        c["custom_id"] for row in summary.response.components for c in row["components"] if "upd-ok" in c["custom_id"]
+    )
+
+    await lab.respo.click(summary.response, custom_id=confirm)
+
+    assert f"to user {lab.codir.id} in guild {GUILD_ID}" in caplog.text
+    assert f"to user {lab.temp.id} in guild {GUILD_ID}" in caplog.text
+    assert f"to user {lab.respo.id} in guild {GUILD_ID}" in caplog.text
+    assert NAME not in caplog.text
+    assert "Soudure" not in caplog.text
+    assert "Brodeuse" not in caplog.text

@@ -990,6 +990,25 @@ def test_user_guide_says_publier_warns_before_a_second_announcement() -> None:
         assert detail in guide, detail
 
 
+def test_user_guide_says_who_an_update_tells() -> None:
+    """The draft section says who an update tells by private message and when, and that a seats change tells nobody."""
+    guide = " ".join(_section(_read("docs/USERGUIDE.md"), "### The draft").split())
+    for detail in (
+        "told the session now has N places and their position on the waiting list, not that the session was full",
+        "every registered and waiting member of a session whose start or trainer changed, naming only what changed",
+        "every registered and waiting member of a session that was removed, saying it no longer counts",
+        "the trainer of an added session and the new trainer of a kept one",
+        "A change of seats, of name, of description or of any other value tells nobody, unless a seat moves",
+        "counts once in the answer",
+        "counted apart and the others are told all the same",
+        "how many members were told by private message and how many private messages Discord refused",
+    ):
+        assert detail in guide, detail
+    operations = " ".join(_section(_read("docs/OPERATIONS.md"), "## Private messages of an announcement update").split())
+    for detail in ("They are not stored", "the members not yet reached are never told", "`members_told` and `dms_refused`"):
+        assert detail in operations, detail
+
+
 def test_user_guide_says_an_update_keeps_the_sign_ups_and_their_order() -> None:
     """The draft section says what Confirmer la mise à jour keeps, what a seat change does, and when it refuses."""
     guide = " ".join(_section(_read("docs/USERGUIDE.md"), "### The draft").split())
