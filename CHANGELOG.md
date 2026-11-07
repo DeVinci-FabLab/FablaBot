@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.15.2...v0.16.0) (2026-11-07)
+
+
+### Features
+
+* **fm:** update a published announcement in place, sign-ups kept ([#178](https://github.com/DeVinci-FabLab/FablaBot/issues/178)) ([db7f2d2](https://github.com/DeVinci-FabLab/FablaBot/commit/db7f2d24b34e2a4c16dced67cd0e2bd684371764))
+
 ## [0.15.2](https://github.com/DeVinci-FabLab/FablaBot/compare/v0.15.1...v0.15.2) (2026-11-06)
 
 
