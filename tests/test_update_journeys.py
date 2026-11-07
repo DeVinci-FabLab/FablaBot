@@ -6,6 +6,7 @@ import asyncio
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 import logging
+import sqlite3
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -1026,3 +1027,36 @@ async def test_a_reaction_the_bot_cannot_add_is_named_in_the_answer(lab: Lab, mo
     )
     assert [fm.emoji for fm in _stored().message.fms][-1] == "💜"
     assert _reacted_by(lab, posted, "💜") == []
+
+
+RETRY = "L'annonce n'a pas pu être mise à jour pour l'instant : réessaie dans un instant. Rien n'a été modifié."
+
+
+@pytest.mark.parametrize(
+    ("failing", "kind"),
+    [("storage", "update_storage_failed"), ("discord", "discord_unreadable")],
+)
+async def test_a_failed_update_is_logged_by_its_real_kind(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, failing: str, kind: str
+) -> None:
+    """A refused save and a refused read of the posted message each log their own kind, and nothing is changed."""
+    posted = await _announced(lab)
+    _change("🧡", start=24)
+    summary = await _summary(lab)
+    if failing == "storage":
+        monkeypatch.setattr(formations, "save_update", MagicMock(side_effect=sqlite3.OperationalError("disk")))
+    else:
+        monkeypatch.setattr(
+            discord.TextChannel,
+            "fetch_message",
+            AsyncMock(side_effect=discord.HTTPException(MagicMock(status=500, reason="x"), "x")),
+        )
+    before = _snapshot(lab, posted)
+    caplog.set_level(logging.INFO)
+
+    refused = await _confirm(lab, summary)
+
+    assert refused.response.content == RETRY
+    assert f"refused kind={kind} guild_id={GUILD_ID} user_id={lab.respo.id}" in caplog.text
+    assert "kind=draft_not_ready" not in caplog.text
+    assert _snapshot(lab, posted) == before

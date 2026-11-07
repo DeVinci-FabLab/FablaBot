@@ -60,6 +60,8 @@ class RefusalKind(StrEnum):
     APPEL_RELAUNCHING = "appel_relaunching"
     ANNOUNCEMENT_CHANGED = "announcement_changed"
     ANNOUNCEMENT_GONE = "announcement_gone"
+    UPDATE_STORAGE_FAILED = "update_storage_failed"
+    DISCORD_UNREADABLE = "discord_unreadable"
 
 
 def log_refusal(

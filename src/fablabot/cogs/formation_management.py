@@ -829,7 +829,7 @@ class FormationManagement(commands.Cog):
             )
         except sqlite3.Error:
             logger.exception(f"Guild {guild.id} could not store the update of message {message_id}.")
-            return _UPDATE_RETRY, RefusalKind.DRAFT_NOT_READY
+            return _UPDATE_RETRY, RefusalKind.UPDATE_STORAGE_FAILED
         self._retry_guilds.discard(guild.id)  # as a scheduled update does: what is left after the rebuild is its own failure
         try:
             await self._update_published_message_locked(guild.id)
@@ -867,7 +867,7 @@ class FormationManagement(commands.Cog):
             return gone
         except HTTPException:
             logger.exception(f"Guild {guild.id} could not read message {last.message_id} before updating it.")
-            return _UPDATE_RETRY, RefusalKind.DRAFT_NOT_READY
+            return _UPDATE_RETRY, RefusalKind.DISCORD_UNREADABLE
         return None
 
     async def _post_draft(self, interaction: Interaction, channel: TextChannel) -> tuple[Message, FmMessageDraft] | None:
