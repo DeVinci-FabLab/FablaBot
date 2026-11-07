@@ -234,6 +234,12 @@ async def test_annuler_keeps_everything(lab: Lab) -> None:
     assert _snapshot(lab, posted) == before
 
 
+@pytest.fixture
+def posted_unreacted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stand in for the posted message, which a stubbed click on a stubbed server cannot fetch: there, with no reaction."""
+    monkeypatch.setattr(draft_ui, "posted_reacted_emojis", AsyncMock(return_value=frozenset()))
+
+
 async def _clicked(lab: Lab, custom_id: str, roles: tuple[str, ...]) -> MagicMock:
     """Click an item of the update screens as a member holding these roles, on a stored announcement and a changed draft."""
     _stage(lab, _three(lab))
@@ -244,6 +250,7 @@ async def _clicked(lab: Lab, custom_id: str, roles: tuple[str, ...]) -> MagicMoc
     return await _forged(lab, custom_id, roles=roles, items=DRAFT_ITEMS)
 
 
+@pytest.mark.usefixtures("posted_unreacted")
 @pytest.mark.parametrize(
     ("role", "may"),
     [
@@ -317,6 +324,7 @@ async def test_a_server_no_longer_served_refuses_the_click(lab: Lab) -> None:
     assert _snapshot(lab, posted) == before
 
 
+@pytest.mark.usefixtures("posted_unreacted")
 async def test_the_update_buttons_work_after_a_restart(started_bot: Any) -> None:
     """A second bot on the same database answers the update buttons of a message the first bot sent."""
     draft = FmMessageDraft(header="h", role_id=77, intro="Salut", fms=[_session("🧡", "Soudure", days=2)], end="Fin")
@@ -359,8 +367,9 @@ async def test_a_long_summary_spans_several_embeds_without_cutting_a_line(lab: L
         replace(fm, registered_users=[_member(100 + k) for k in range(fm.seats)], waitlisted_users=[_member(200)]) for fm in old
     ]
     draft = _stage(lab, old, intro="a", end="b")
+    posted = await lab.respo.send(lab.announce, "L'annonce")
     formations.save_published(
-        GUILD_ID, PublishedMessage(message_id=5000, channel_id=lab.announce.id, message=replace(draft, fms=signed))
+        GUILD_ID, PublishedMessage(message_id=posted.id, channel_id=lab.announce.id, message=replace(draft, fms=signed))
     )
     new = [
         replace(
@@ -755,8 +764,7 @@ async def test_a_change_while_the_message_is_fetched_is_refused_and_not_overwrit
     posted = await _announced(lab)
     _change("🧡", start=24)
     summary = await _summary(lab)
-    cog = _cog(lab)
-    real = cog._unreadable  # pyright: ignore[reportPrivateUsage]
+    real = formation_management.posted_reacted_emojis
     newer = replace(_stored(), message_id=_stored().message_id + 1)
 
     async def unreadable(*args: Any) -> Any:
@@ -766,7 +774,7 @@ async def test_a_change_while_the_message_is_fetched_is_refused_and_not_overwrit
             formations.save_published(GUILD_ID, newer)
         return await real(*args)
 
-    monkeypatch.setattr(cog, "_unreadable", unreadable)
+    monkeypatch.setattr(formation_management, "posted_reacted_emojis", unreadable)
     before = _snapshot(lab, posted)
 
     refused = await _confirm(lab, summary)
@@ -1149,3 +1157,105 @@ async def test_a_member_who_took_back_a_reaction_on_an_unworn_emoji_still_retire
     await _updated(lab)
 
     assert [fm.emoji for fm in _stored().message.fms] == ["🧡", "💛", "💚", SESSION_EMOJIS[3]]
+
+
+def _deaf_to(lab: Lab, monkeypatch: pytest.MonkeyPatch, emoji: str) -> None:
+    """Make the bot drop every reaction on one emoji, as it does while it is down or cut off from the gateway."""
+    cog = _cog(lab)
+    heard = cog._reaction_counts  # pyright: ignore[reportPrivateUsage]
+    monkeypatch.setattr(cog, "_reaction_counts", lambda guild_id, event: event.emoji != emoji and heard(guild_id, event))
+
+
+async def test_a_reaction_the_bot_never_logged_is_never_a_sign_up_on_a_session_added_later(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A like the bot never heard of, on an emoji no session wears, stays out of the session added later on that emoji."""
+    posted = await _announced(lab)
+    _deaf_to(lab, monkeypatch, "💜")
+    await lab.plain.react(posted, "💜")
+    await lab.env.advance_time(120)
+    assert "💜" not in formations.reacted_emojis(GUILD_ID, posted.id)
+    _add(lab, "💜", "Découpe laser")
+
+    summary = await _summary(lab)
+    lines = _embed_lines(summary.response)
+    await _confirm(lab, summary)
+
+    assert any(line.startswith(f"{ADDED} {SESSION_EMOJIS[3]} **Découpe laser**") for line in lines)
+    assert [fm.emoji for fm in _stored().message.fms] == ["🧡", "💛", "💚", SESSION_EMOJIS[3]]
+    cog = _cog(lab)
+    cog._stale_guilds.add(GUILD_ID)  # pyright: ignore[reportPrivateUsage]
+    await cog._update_published_message(GUILD_ID)  # pyright: ignore[reportPrivateUsage]
+    assert _lists(SESSION_EMOJIS[3]) == ([], [])
+    assert not [text for text in _dms(lab.plain) if "inscription" in text]
+
+
+async def test_a_reaction_placed_after_the_summary_makes_the_confirmation_refuse_and_change_nothing(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A like on the draft's emoji that lands once the summary is shown is read at the confirmation: refused as changed."""
+    posted = await _announced(lab)
+    _add(lab, "💜", "Découpe laser")
+    summary = await _summary(lab)
+    _deaf_to(lab, monkeypatch, "💜")
+    await lab.plain.react(posted, "💜")
+    await lab.env.advance_time(120)
+    before = _snapshot(lab, posted)
+
+    refused = await _confirm(lab, summary)
+
+    assert refused.response.content == CHANGED
+    assert _snapshot(lab, posted) == before
+
+
+async def test_the_bots_own_reaction_does_not_retire_an_emoji(lab: Lab) -> None:
+    """An emoji only the bot reacted with is still free: the session added on it keeps it."""
+    posted = await _announced(lab)
+    bot: Any = lab.env.bot
+    lab.env.backend.set_reaction(lab.announce.id, posted.id, "💜", bot.user.id, True)
+    await lab.env.advance_time(120)
+    _add(lab, "💜", "Découpe laser")
+
+    await _updated(lab)
+
+    assert [fm.emoji for fm in _stored().message.fms] == ["🧡", "💛", "💚", "💜"]
+
+
+async def test_the_summary_is_refused_when_the_posted_message_is_gone(lab: Lab, caplog: pytest.LogCaptureFixture) -> None:
+    """Asking for the summary once the posted message is gone says so, logs its kind and changes nothing."""
+    posted = await _announced(lab)
+    _change("🧡", start=24)
+    lab.env.backend.delete_message(lab.announce.id, posted.id)
+    before = _snapshot(lab, None)
+    caplog.set_level(logging.INFO)
+
+    refused = await _summary(lab)
+
+    assert refused.response.content == (
+        f"L'annonce publiée n'existe plus dans <#{lab.announce.id}> : publie une nouvelle annonce. {UNCHANGED}"
+    )
+    assert not refused.response.embeds
+    assert f"refused kind=announcement_gone guild_id={GUILD_ID} user_id={lab.respo.id}" in caplog.text
+    assert _snapshot(lab, None) == before
+
+
+async def test_the_summary_is_refused_when_discord_does_not_let_the_bot_read_the_message(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A refused read of the posted message gives the summary no answer to plan from: refused, kind logged, nothing changed."""
+    posted = await _announced(lab)
+    _change("🧡", start=24)
+    monkeypatch.setattr(
+        discord.TextChannel,
+        "fetch_message",
+        AsyncMock(side_effect=discord.HTTPException(MagicMock(status=500, reason="x"), "x")),
+    )
+    before = _snapshot(lab, posted)
+    caplog.set_level(logging.INFO)
+
+    refused = await _summary(lab)
+
+    assert refused.response.content == RETRY
+    assert not refused.response.embeds
+    assert f"refused kind=discord_unreadable guild_id={GUILD_ID} user_id={lab.respo.id}" in caplog.text
+    assert _snapshot(lab, posted) == before

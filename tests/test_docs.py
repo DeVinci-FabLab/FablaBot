@@ -1020,6 +1020,9 @@ def test_user_guide_says_how_a_session_is_added_to_the_published_announcement() 
         "it goes last in the announcement, after the others, with no sign-up",
         "The bot adds the session's reaction on the message once it is rewritten",
         "no member ever reacted with it on this message",
+        "also read the reactions on the posted message itself",
+        "a published message that is gone from its channel (publish a new announcement) "
+        "or that Discord does not let the bot read",
         "it gets the first free emoji of the bot's list",
         "the draft then takes that emoji back with the rest of the announcement",
         "An announcement holds at most 20 sessions",

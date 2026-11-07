@@ -5,18 +5,25 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from hashlib import sha256
+import logging
 from typing import TYPE_CHECKING, Final, Literal
 
+from discord import HTTPException, NotFound, TextChannel
 from discord.utils import escape_markdown, escape_mentions
 
 from fablabot.helpers.constants import ANNOUNCEMENT_MAX_CHARS, MAX_SESSIONS, SESSION_EMOJIS
 from fablabot.helpers.formation.catalogue import session_digest
 from fablabot.helpers.formation.rendering import announcement_length, grouped
+from fablabot.helpers.utils import RefusalKind
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from fablabot.models.formation import FmMessageDraft, Formation
+    from discord import Guild
+
+    from fablabot.models.formation import FmMessageDraft, Formation, PublishedMessage
+
+logger = logging.getLogger(__name__)
 
 # The reminder tick opens a session's check up to 5 minutes before its start, so from then on the session stays as posted.
 APPEL_OPENS_BEFORE: Final = timedelta(minutes=5)
@@ -24,6 +31,7 @@ _UNCHANGED: Final = "Rien n'a été modifié."
 CHANGED_REFUSAL: Final = (
     f"L'annonce ou le brouillon a changé depuis ce résumé : presse de nouveau **Publier** pour le revoir. {_UNCHANGED}"
 )
+RETRY_REFUSAL: Final = f"L'annonce n'a pas pu être mise à jour pour l'instant : réessaie dans un instant. {_UNCHANGED}"
 
 StepKind = Literal["changed", "added", "removed", "frozen"]
 
@@ -101,6 +109,36 @@ class UpdatePlan:
 def gone_refusal(channel_id: int) -> str:
     """Say that the published message no longer exists in its channel, and what to do instead."""
     return f"L'annonce publiée n'existe plus dans <#{channel_id}> : publie une nouvelle annonce. {_UNCHANGED}"
+
+
+async def posted_reacted_emojis(guild: Guild, published: PublishedMessage) -> frozenset[str] | tuple[str, RefusalKind]:
+    """Read the posted message and name the emojis that carry a reaction other than the bot's, whatever session wears them.
+
+    The reaction log misses what the bot did not hear: reactions made before it noted the emojis no session wears, while it
+    was down or cut off from the gateway, or refused by a storage failure. Discord keeps them all, so the summary and the
+    confirmation both read them here before they give an emoji to an added session. Another bot's reaction counts too, at
+    the cost of one emoji of the pool left unused.
+
+    Args:
+        guild (Guild): The server.
+        published (PublishedMessage): The announcement whose message is read.
+
+    Returns:
+        frozenset[str] | tuple[str, RefusalKind]: The emojis, or the refusal and its kind when the message is gone or
+            Discord does not answer.
+    """
+    gone = gone_refusal(published.channel_id), RefusalKind.ANNOUNCEMENT_GONE
+    channel = guild.get_channel(published.channel_id)
+    if not isinstance(channel, TextChannel):
+        return gone
+    try:
+        message = await channel.fetch_message(published.message_id)
+    except NotFound:
+        return gone
+    except HTTPException:
+        logger.exception(f"Guild {guild.id} could not read message {published.message_id} before updating it.")
+        return RETRY_REFUSAL, RefusalKind.DISCORD_UNREADABLE
+    return frozenset(str(reaction.emoji) for reaction in message.reactions if reaction.count > int(reaction.me))
 
 
 def is_frozen(session: Formation, now: datetime) -> bool:
@@ -299,8 +337,9 @@ def plan_update(
         published (FmMessageDraft): The announcement as stored, with its sign-ups.
         draft (FmMessageDraft): The draft, with the role to notify as the server still has it.
         now (datetime): The time to judge at, timezone-aware.
-        retired (frozenset[str]): The emojis members reacted with on the published message: none is given to a session
-            added by the update, since the reactions still on the message would count for it.
+        retired (frozenset[str]): The emojis members reacted with on the published message, from the reaction log and from
+            the message itself: none is given to a session added by the update, since the reactions still on the message
+            would count for it.
 
     Returns:
         UpdatePlan | str: The plan, or the reason it cannot be made, ending with the word that nothing was changed.

@@ -60,7 +60,14 @@ from fablabot.helpers.formation import (
 )
 from fablabot.helpers.formation.attendance import Start, appel_message, trainer_id
 from fablabot.helpers.formation.catalogue import has_sessions_to_come
-from fablabot.helpers.formation.update import CHANGED_REFUSAL, UpdatePlan, as_draft, gone_refusal, plan_update
+from fablabot.helpers.formation.update import (
+    CHANGED_REFUSAL,
+    RETRY_REFUSAL,
+    UpdatePlan,
+    as_draft,
+    plan_update,
+    posted_reacted_emojis,
+)
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.safe_discord_operations import retract_unsaved_post
 from fablabot.helpers.utils import RefusalKind, counted, ensure_command_context, is_valid_emoji, log_refusal
@@ -85,9 +92,6 @@ _REPUBLISH_REFUSED = (
     "compter les inscriptions de la première. Utilise `/fm brouillon` pour publier : il demande confirmation. "
     "Rien n'a été publié."
 )
-
-
-_UPDATE_RETRY = "L'annonce n'a pas pu être mise à jour pour l'instant : réessaie dans un instant. Rien n'a été modifié."
 
 _ACCESS = AnyRole(ALLOWED_ROLES)
 _CHOICE_CHARS = 100
@@ -814,14 +818,15 @@ class FormationManagement(commands.Cog):
         last = formations.current_published(guild.id)
         if last is None or last.message_id != message_id:
             return CHANGED_REFUSAL, RefusalKind.ANNOUNCEMENT_CHANGED
-        if (refusal := await self._unreadable(guild, last)) is not None:
-            return refusal
+        reacted = await posted_reacted_emojis(guild, last)
+        if not isinstance(reacted, frozenset):
+            return reacted
         # The draft is not under the lock, and the fetch above waits on Discord: read it and plan only now, with no await
         # between the plan and the save, so an edit saved meanwhile is compared with the summary and never overwritten.
         last = formations.current_published(guild.id)
         if last is None or last.message_id != message_id:
             return CHANGED_REFUSAL, RefusalKind.ANNOUNCEMENT_CHANGED
-        plan = self._confirmed_plan(guild, last, digest)
+        plan = self._confirmed_plan(guild, last, digest, reacted)
         if not isinstance(plan, UpdatePlan):
             return plan
         try:
@@ -830,7 +835,7 @@ class FormationManagement(commands.Cog):
             )
         except sqlite3.Error:
             logger.exception(f"Guild {guild.id} could not store the update of message {message_id}.")
-            return _UPDATE_RETRY, RefusalKind.UPDATE_STORAGE_FAILED
+            return RETRY_REFUSAL, RefusalKind.UPDATE_STORAGE_FAILED
         self._retry_guilds.discard(guild.id)  # as a scheduled update does: what is left after the rebuild is its own failure
         try:
             await self._update_published_message_locked(guild.id)
@@ -842,34 +847,31 @@ class FormationManagement(commands.Cog):
             self._retry_guilds.add(guild.id)
         return plan
 
-    def _confirmed_plan(self, guild: Guild, last: PublishedMessage, digest: str) -> UpdatePlan | tuple[str, RefusalKind]:
-        """Plan the update from what is stored now, or give the refusal when it cannot be done or differs from the summary."""
+    def _confirmed_plan(
+        self, guild: Guild, last: PublishedMessage, digest: str, reacted: frozenset[str]
+    ) -> UpdatePlan | tuple[str, RefusalKind]:
+        """Plan the update from what is stored now, or give the refusal when it cannot be done or differs from the summary.
+
+        Args:
+            guild (Guild): The server.
+            last (PublishedMessage): The announcement as stored now.
+            digest (str): The digest of the plan the summary showed.
+            reacted (frozenset[str]): The emojis with a reaction other than the bot's on the message as fetched.
+
+        Returns:
+            UpdatePlan | tuple[str, RefusalKind]: The plan, or the refusal and its kind.
+        """
         plan = plan_update(
             last.message,
             live_draft(guild, stored_draft(guild.id)),
             now=datetime.now(UTC),
-            retired=frozenset(formations.reacted_emojis(guild.id, last.message_id)),
+            retired=frozenset(formations.reacted_emojis(guild.id, last.message_id)) | reacted,
         )
         if isinstance(plan, str):
             return plan, RefusalKind.DRAFT_NOT_READY
         if plan.digest(last.message_id) != digest:
             return CHANGED_REFUSAL, RefusalKind.ANNOUNCEMENT_CHANGED
         return plan
-
-    async def _unreadable(self, guild: Guild, last: PublishedMessage) -> tuple[str, RefusalKind] | None:
-        """Fetch the posted message, or give the refusal when it is gone or Discord does not answer; None when it is there."""
-        channel = guild.get_channel(last.channel_id)
-        gone = gone_refusal(last.channel_id), RefusalKind.ANNOUNCEMENT_GONE
-        if not isinstance(channel, TextChannel):
-            return gone
-        try:
-            await channel.fetch_message(last.message_id)
-        except NotFound:
-            return gone
-        except HTTPException:
-            logger.exception(f"Guild {guild.id} could not read message {last.message_id} before updating it.")
-            return _UPDATE_RETRY, RefusalKind.DISCORD_UNREADABLE
-        return None
 
     async def _post_draft(self, interaction: Interaction, channel: TextChannel) -> tuple[Message, FmMessageDraft] | None:
         """Send the draft to the channel and store it as the published message.

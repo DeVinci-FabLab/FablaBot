@@ -20,7 +20,7 @@ from fablabot.helpers.formation.catalogue import (
     session_value,
 )
 from fablabot.helpers.formation.rendering import discord_timestamp
-from fablabot.helpers.formation.update import CHANGED_REFUSAL, Step, UpdatePlan, plan_update
+from fablabot.helpers.formation.update import CHANGED_REFUSAL, Step, UpdatePlan, plan_update, posted_reacted_emojis
 from fablabot.helpers.utils import RefusalKind, counted, log_refusal
 from fablabot.models.formation import FmMessageDraft
 from fablabot.services import formations
@@ -434,11 +434,15 @@ async def _summarise_update(interaction: Interaction[Any]) -> None:
     if last is None:
         await _refuse(interaction, CHANGED_REFUSAL, RefusalKind.ANNOUNCEMENT_CHANGED)
         return
+    reacted = await posted_reacted_emojis(guild, last)
+    if not isinstance(reacted, frozenset):
+        await _refuse(interaction, *reacted)
+        return
     plan = plan_update(
         last.message,
         live_draft(guild, stored_draft(guild.id)),
         now=datetime.now(UTC),
-        retired=frozenset(formations.reacted_emojis(guild.id, last.message_id)),
+        retired=frozenset(formations.reacted_emojis(guild.id, last.message_id)) | reacted,
     )
     if isinstance(plan, str):
         await _refuse(interaction, plan, RefusalKind.DRAFT_NOT_READY)
