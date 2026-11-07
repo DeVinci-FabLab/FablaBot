@@ -731,10 +731,12 @@ class FormationManagement(commands.Cog):
         async with self._published_lock(guild.id):
             outcome = await self._rewrite_announcement(guild, message_id, digest, tally)
             behind = guild.id in self._retry_guilds or guild.id in self._stale_guilds
+            # Still under the lock: a second update confirmed meanwhile could give a removed emoji to a new session, whose
+            # sign-ups the clear would then wipe.
+            uncleared = await self._clear_removed(guild, last, outcome) if isinstance(outcome, UpdatePlan) else ()
         if not isinstance(outcome, UpdatePlan):
             await self._refuse_update(interaction, *outcome, answered=True)
             return
-        uncleared = await self._clear_removed(guild, last, outcome)
         unreacted = await self._react_to_added(guild, last, outcome)
         await self._remind_new_trainers(guild, message_id, outcome.trainers_to_remind)
         await self._tell_members(guild, last, outcome, tally)
@@ -779,7 +781,7 @@ class FormationManagement(commands.Cog):
     async def _clear_removed(self, guild: Guild, last: PublishedMessage, plan: UpdatePlan) -> tuple[str, ...]:
         """Clear the reactions of each removed session from the posted message, so that nobody keeps a seat on it.
 
-        Done outside the lock, after the rebuild. Clearing a member's reaction needs Manage Messages: when Discord refuses,
+        Done under the lock, after the rebuild. Clearing a member's reaction needs Manage Messages: when Discord refuses,
         the bot removes its own reaction instead, the refusal is logged and the emoji is kept to be named in the answer.
         The members' reactions that stay count for nothing, since no session wears the emoji.
 

@@ -33,7 +33,7 @@ from fablabot.cogs import formation_management
 from fablabot.helpers.constants import SESSION_EMOJIS, RoleNames
 from fablabot.helpers.formation import format_respo_contacts, render_message
 from fablabot.helpers.formation.rendering import discord_timestamp
-from fablabot.helpers.formation.update import as_draft
+from fablabot.helpers.formation.update import UpdatePlan, as_draft, plan_update
 from fablabot.helpers.guild_access import GuildAccessPolicy
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.utils import RIGHT_LOST_MESSAGE, counted
@@ -41,7 +41,7 @@ from fablabot.models import ReactionAction, ReactionEvent
 from fablabot.models.formation import FmMessageDraft, PublishedMessage
 from fablabot.services import attendance, formations
 from fablabot.ui import draft as draft_ui
-from fablabot.ui.draft import DRAFT_ITEMS
+from fablabot.ui.draft import DRAFT_ITEMS, live_draft, stored_draft
 
 if TYPE_CHECKING:
     import simcord
@@ -1369,6 +1369,54 @@ async def test_without_manage_messages_the_bot_takes_its_own_reaction_and_says_s
     assert _reacted_by(lab, posted, "💛") == [lab.temp.id, lab.president.id]
     assert [fm.emoji for fm in _stored().message.fms] == ["🧡", "💚"]
     assert f"Guild {GUILD_ID} could not clear the reactions" in caplog.text
+
+
+async def test_a_second_update_waits_for_the_reactions_of_the_first_to_be_cleared(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """While a removed session's reactions are being cleared, a second update waits, so its new session keeps its sign-ups."""
+    _stage(lab, _three(lab))
+    await _published_via_publier(lab, lab.announce)
+    posted = lab.announce.last_message
+    assert posted is not None
+    real = discord.Message.clear_reaction
+    clearing, release = asyncio.Event(), asyncio.Event()
+
+    async def slow(self: Any, emoji: Any) -> None:
+        clearing.set()
+        await release.wait()
+        await real(self, emoji)
+
+    monkeypatch.setattr(discord.Message, "clear_reaction", slow)
+    _remove("💚")
+    first = asyncio.ensure_future(_updated(lab))
+    await clearing.wait()
+    _add(lab, "💚", "Découpe laser")
+    plan = plan_update(
+        _stored().message,
+        live_draft(_guild(lab), stored_draft(GUILD_ID)),
+        now=datetime.now(UTC),
+        retired=formations.reacted_emojis(GUILD_ID, posted.id),
+    )
+    assert isinstance(plan, UpdatePlan)
+    interaction = make_interaction(user_id=lab.respo.id, guild_id=GUILD_ID)
+    interaction.guild = _guild(lab)
+    second = asyncio.ensure_future(_cog(lab).update_announcement(interaction, posted.id, plan.digest(posted.id)))
+    for _ in range(20):
+        await asyncio.sleep(0)
+
+    assert [fm.emoji for fm in _stored().message.fms] == ["🧡", "💛"]
+    release.set()
+    await first
+    await second
+    await lab.codir.react(posted, "💚")
+    await lab.env.advance_time(120)
+
+    answer = interaction.edit_original_response.await_args.kwargs["content"]
+    assert answer.startswith(f"✅ **Annonce mise à jour** dans <#{lab.announce.id}> : 1 ajoutée.")
+    assert [fm.emoji for fm in _stored().message.fms] == ["🧡", "💛", "💚"]
+    assert _lists("💚") == ([lab.codir.id], [])
+    assert _reacted_by(lab, posted, "💚") == [_bot_id(lab), lab.codir.id]
 
 
 async def test_a_transport_error_clearing_reactions_still_reminds_the_new_trainer(
