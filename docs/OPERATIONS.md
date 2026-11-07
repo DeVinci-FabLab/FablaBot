@@ -569,6 +569,10 @@ may not read (403): an admin can repair the right, and the log gets one line per
 deleted or a channel that is gone (`is gone for guild` in the log) is not asked for again at the tick, unless a
 failed write left the server marked: the next reaction runs the update. A restart forgets the retry, as above.
 
+A restart does not leave a stored update unposted: at start, once the bot is ready, it rebuilds the posted text of each
+served server's announcement that still has sessions to come, whatever the retry flags said before (the log shows
+`Rebuilt the announcements of N servers at start`). A failure there is logged and left to the 5-minute tick.
+
 ## Server check at start
 
 At the first start of the process, once the allow-list is applied, the bot reads each server it serves

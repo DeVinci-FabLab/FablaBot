@@ -1203,7 +1203,36 @@ class FormationManagement(commands.Cog):
     async def _before_check_upcoming_formations(self) -> None:
         """Wait for the bot to be ready before starting the background task."""
         await self.bot.wait_until_ready()
+        await self._rebuild_posted_announcements()
         logger.info("Formation notification task started")
+
+    async def _rebuild_posted_announcements(self) -> None:
+        """Rebuild the posted text of each server's announcement that still has sessions to come, once, at start.
+
+        An update is stored before the message is edited, and the flags that retry a refused edit live in memory: a
+        restart between the two would leave the posted text behind what is stored. Nothing here may stop the task from
+        starting, so a failure is logged and handed to the tick's retry.
+        """
+        try:
+            guild_ids = [
+                guild_id
+                for guild_id in formations.guilds_with_published()
+                if self.bot.guild_access.is_served(guild_id) and has_sessions_to_come(guild_id)
+            ]
+        except sqlite3.Error:
+            logger.exception("Start-up rebuild of the announcements skipped: storage failure.")
+            return
+        for guild_id in guild_ids:
+            with guild_log_context(guild_id):
+                try:
+                    await self._update_published_message(guild_id)
+                except sqlite3.Error:
+                    logger.exception(f"Start-up rebuild of guild {guild_id} stopped by a storage failure; the tick retries.")
+                    self._stale_guilds.add(guild_id)
+                except Exception:
+                    logger.exception(f"Start-up rebuild of guild {guild_id} failed; the tick retries.")
+                    self._retry_guilds.add(guild_id)
+        logger.info(f"Rebuilt the announcements of {len(guild_ids)} servers at start.")
 
     # endregion Background Tasks
 

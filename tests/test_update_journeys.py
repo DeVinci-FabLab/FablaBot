@@ -1060,3 +1060,40 @@ async def test_a_failed_update_is_logged_by_its_real_kind(
     assert f"refused kind={kind} guild_id={GUILD_ID} user_id={lab.respo.id}" in caplog.text
     assert "kind=draft_not_ready" not in caplog.text
     assert _snapshot(lab, posted) == before
+
+
+def _rename_stored(name: str, *, hours: float = 0) -> None:
+    """Store the announcement with its first session renamed (and moved by ``hours``), as an update stored before its edit."""
+    published = _stored()
+    first, *others = published.message.fms
+    moved = replace(first, name=name, start_iso=(first.start_dt + timedelta(hours=hours)).isoformat())
+    formations.save_published(GUILD_ID, replace(published, message=replace(published.message, fms=[moved, *others])))
+
+
+async def test_a_restart_rebuilds_the_posted_text_of_an_announcement_stored_ahead_of_its_message(lab: Lab) -> None:
+    """At start the posted text is rebuilt from what is stored, so an update stored before its edit is not left stale."""
+    posted = await _announced(lab)
+    _rename_stored("Soudure à l'étain")
+    sent = lab.env.backend.get_message(lab.announce.id, posted.id)
+    assert sent.content != render_message(_stored().message)
+
+    await _cog(lab)._before_check_upcoming_formations()  # pyright: ignore[reportPrivateUsage]
+
+    sent = lab.env.backend.get_message(lab.announce.id, posted.id)
+    assert sent.content == render_message(_stored().message)
+    assert "Soudure à l'étain" in sent.content
+    assert _lists("🧡")[0] == [lab.codir.id, lab.admin.id]
+
+
+async def test_a_restart_leaves_an_announcement_with_no_session_to_come_alone(lab: Lab) -> None:
+    """An announcement whose sessions have all started is not rebuilt at start: its posted text stays as it is."""
+    posted = await _announced(lab)
+    _rename_stored("Soudure à l'étain", hours=-24 * 30)
+    published = _stored()
+    past = [replace(fm, start_iso=(fm.start_dt - timedelta(days=30)).isoformat()) for fm in published.message.fms]
+    formations.save_published(GUILD_ID, replace(published, message=replace(published.message, fms=past)))
+    before = lab.env.backend.get_message(lab.announce.id, posted.id).content
+
+    await _cog(lab)._before_check_upcoming_formations()  # pyright: ignore[reportPrivateUsage]
+
+    assert lab.env.backend.get_message(lab.announce.id, posted.id).content == before

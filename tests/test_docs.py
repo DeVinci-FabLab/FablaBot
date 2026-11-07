@@ -1040,3 +1040,14 @@ def test_user_guide_says_what_mettre_a_jour_l_annonce_shows_and_refuses() -> Non
         "counted with every seat taken",
     ):
         assert detail in guide, detail
+
+
+def test_operations_says_a_restart_rebuilds_the_posted_announcements() -> None:
+    """The operations guide says the start rebuilds the posted text of the announcements that still have sessions to come."""
+    text = " ".join(_read("docs/OPERATIONS.md").split())
+    for detail in (
+        "at start, once the bot is ready, it rebuilds the posted text of each served server's announcement "
+        "that still has sessions to come",
+        "`Rebuilt the announcements of N servers at start`",
+    ):
+        assert detail in text, detail
