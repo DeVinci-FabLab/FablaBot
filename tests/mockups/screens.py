@@ -372,7 +372,7 @@ def _signed(count: int) -> list[dict[str, int]]:
 
 
 def _update_plan() -> UpdatePlan:
-    """The plan of an update: a start moved, seats cut and a session added, the session already started left as it is."""
+    """The plan of an update: a start moved, seats cut, a session added and one removed, the started session left as it is."""
     held = Formation(
         emoji="🧡", name="SRG + Imp 3D", trainer_mention=f"<@{TRAINER}>", start_iso="2026-11-09T10:30:00+01:00",
         duration="45 min", seats=5, registered_users=_signed(3), notified_at_start=True,
@@ -385,12 +385,21 @@ def _update_plan() -> UpdatePlan:
         emoji="💚", name="Formation GitHub", trainer_mention="<@3333>", start_iso="2026-11-12T11:45:00+01:00",
         duration="45 min", seats=10, registered_users=_signed(8),
     )  # fmt: skip
+    dropped = Formation(
+        emoji="💙", name="Impression résine", trainer_mention="<@4444>", start_iso="2026-11-12T13:45:00+01:00",
+        duration="45 min", seats=5, registered_users=_signed(3), waitlisted_users=_signed(1),
+    )  # fmt: skip
     published = FmMessageDraft(
-        header="# [FORMATIONS]", role_id=ROLE_FORMATIONS, intro=_DRAFT_INTRO, fms=[held, moved, cut], end="À très vite !"
+        header="# [FORMATIONS]",
+        role_id=ROLE_FORMATIONS,
+        intro=_DRAFT_INTRO,
+        fms=[held, moved, cut, dropped],
+        end="À très vite !",
     )
     draft = as_draft(published)
     draft.fms[1] = replace(moved, start_iso="2026-11-11T18:00:00+01:00", registered_users=[], waitlisted_users=[])
     draft.fms[2] = replace(cut, seats=6, registered_users=[])
+    draft.fms.pop()
     draft.fms.append(
         Formation(emoji="💜", name="Découpe laser", trainer_mention="<@2222>", start_iso="2026-11-13T14:00:00+01:00",
         duration="45 min", seats=5)
@@ -401,7 +410,7 @@ def _update_plan() -> UpdatePlan:
 
 
 async def update_summary() -> Screen:
-    """The summary of an update: a start moved, seats cut and a session added, the started session left as it is."""
+    """The summary of an update: a start moved, seats cut, a session added and one removed, the started one left as it is."""
     embeds, view = update_message(_update_plan(), ANNOUNCE_CHANNEL, 5000)
     capture = Capture()
     await capture.interaction().response.send_message(None, embeds=embeds, view=view, ephemeral=True)
@@ -409,8 +418,8 @@ async def update_summary() -> Screen:
 
 
 async def update_done() -> Screen:
-    """The answer to a confirmed update: how many sessions changed and the button to the draft."""
-    content, view = done_message(_update_plan(), ANNOUNCE_CHANNEL)
+    """The answer to a confirmed update: how many sessions changed, the reactions Discord refused to clear, the draft button."""
+    content, view = done_message(_update_plan(), ANNOUNCE_CHANNEL, uncleared=("💙",))
     capture = Capture()
     await capture.interaction().response.send_message(content, view=view, ephemeral=True)
     return Screen(capture.sent, dict(_DRAFT_NAMES))

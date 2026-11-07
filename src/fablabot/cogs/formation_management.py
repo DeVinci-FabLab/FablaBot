@@ -717,6 +717,7 @@ class FormationManagement(commands.Cog):
         if not isinstance(outcome, UpdatePlan):
             await self._refuse_update(interaction, *outcome, answered=True)
             return
+        uncleared = await self._clear_removed(guild, last, outcome)
         unreacted = await self._react_to_added(guild, last, outcome)
         await self._remind_new_trainers(guild, message_id, outcome.trainers_to_remind)
         logger.info(
@@ -725,8 +726,66 @@ class FormationManagement(commands.Cog):
             f"added={sum(step.kind == 'added' for step in outcome.steps)} "
             f"removed={sum(step.kind == 'removed' for step in outcome.steps)} text_changes={len(outcome.text_changes)}"
         )
-        content, view = done_message(outcome, last.channel_id, posted=not behind, unreacted=unreacted)
+        content, view = done_message(outcome, last.channel_id, posted=not behind, unreacted=unreacted, uncleared=uncleared)
         await interaction.edit_original_response(content=content, view=view, allowed_mentions=AllowedMentions.none())
+
+    async def _posted_message(self, guild: Guild, last: PublishedMessage, purpose: str) -> Message | None:
+        """Fetch the posted announcement to act on its reactions, or None, logged, when it cannot be read.
+
+        Args:
+            guild (Guild): The server.
+            last (PublishedMessage): The published message the update was made on.
+            purpose (str): What the message is read for, for the log line.
+
+        Returns:
+            Message | None: The message, or None when the channel or the message is out of reach.
+        """
+        channel = guild.get_channel(last.channel_id)
+        if not isinstance(channel, TextChannel):
+            return None
+        try:
+            return await channel.fetch_message(last.message_id)
+        except HTTPException:
+            logger.exception(f"Guild {guild.id} could not read message {last.message_id} to {purpose}.")
+            return None
+
+    async def _clear_removed(self, guild: Guild, last: PublishedMessage, plan: UpdatePlan) -> tuple[str, ...]:
+        """Clear the reactions of each removed session from the posted message, so that nobody keeps a seat on it.
+
+        Done outside the lock, after the rebuild. Clearing a member's reaction needs Manage Messages: when Discord refuses,
+        the bot removes its own reaction instead, the refusal is logged and the emoji is kept to be named in the answer.
+        The members' reactions that stay count for nothing, since no session wears the emoji.
+
+        Args:
+            guild (Guild): The server.
+            last (PublishedMessage): The published message the update was made on.
+            plan (UpdatePlan): The update that was done.
+
+        Returns:
+            tuple[str, ...]: The emojis whose reactions could not be cleared.
+        """
+        emojis = [step.before.emoji for step in plan.steps if step.kind == "removed" and step.before is not None]
+        if not emojis:
+            return ()
+        msg = await self._posted_message(guild, last, "clear the reactions")
+        if msg is None:
+            return tuple(emojis)
+        refused: list[str] = []
+        for emoji in emojis:
+            try:
+                await msg.clear_reaction(emoji)
+            except HTTPException:  # Forbidden without Manage Messages, or Discord failing
+                logger.exception(
+                    f"Guild {guild.id} could not clear the reactions {emoji!r} of updated message {last.message_id}."
+                )
+                refused.append(emoji)
+                try:
+                    await msg.remove_reaction(emoji, guild.me)
+                except HTTPException:
+                    logger.exception(
+                        f"Guild {guild.id} could not remove its own reaction {emoji!r} from message {last.message_id}."
+                    )
+        return tuple(refused)
 
     async def _react_to_added(self, guild: Guild, last: PublishedMessage, plan: UpdatePlan) -> tuple[str, ...]:
         """React with the emoji of each added session on the posted message, so that members can sign up from the first.
@@ -744,13 +803,7 @@ class FormationManagement(commands.Cog):
         emojis = [step.after.emoji for step in plan.steps if step.kind == "added" and step.after is not None]
         if not emojis:
             return ()
-        channel = guild.get_channel(last.channel_id)
-        msg: Message | None = None
-        if isinstance(channel, TextChannel):
-            try:
-                msg = await channel.fetch_message(last.message_id)
-            except HTTPException:
-                logger.exception(f"Guild {guild.id} could not read message {last.message_id} to add the reactions.")
+        msg = await self._posted_message(guild, last, "add the reactions")
         if msg is None:
             return tuple(emojis)
         failed: list[str] = []
@@ -831,7 +884,10 @@ class FormationManagement(commands.Cog):
             return plan
         try:
             formations.save_update(
-                guild.id, PublishedMessage(message_id, last.channel_id, plan.message), as_draft(plan.message)
+                guild.id,
+                PublishedMessage(message_id, last.channel_id, plan.message),
+                as_draft(plan.message),
+                moves=plan.moves,
             )
         except sqlite3.Error:
             logger.exception(f"Guild {guild.id} could not store the update of message {message_id}.")
@@ -1222,20 +1278,22 @@ class FormationManagement(commands.Cog):
                 for guild_id in formations.guilds_with_published()
                 if self.bot.guild_access.is_served(guild_id) and has_sessions_to_come(guild_id)
             ]
-        except sqlite3.Error:
-            logger.exception("Start-up rebuild of the announcements skipped: storage failure.")
+        except Exception:
+            logger.exception("Start-up rebuild of the announcements skipped: the servers to rebuild could not be chosen.")
             return
+        rebuilt = 0
         for guild_id in guild_ids:
             with guild_log_context(guild_id):
                 try:
                     await self._update_published_message(guild_id)
+                    rebuilt += 1
                 except sqlite3.Error:
                     logger.exception(f"Start-up rebuild of guild {guild_id} stopped by a storage failure; the tick retries.")
                     self._stale_guilds.add(guild_id)
                 except Exception:
                     logger.exception(f"Start-up rebuild of guild {guild_id} failed; the tick retries.")
                     self._retry_guilds.add(guild_id)
-        logger.info(f"Rebuilt the announcements of {len(guild_ids)} servers at start.")
+        logger.info(f"Rebuilt the announcements of {rebuilt} servers at start.")
 
     # endregion Background Tasks
 

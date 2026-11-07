@@ -273,10 +273,10 @@ def _appended(fresh: list[Formation], taken: set[str]) -> list[Formation] | None
     ]
 
 
-def _unfit(count: int, *, removed: int, has_emoji: bool) -> str | None:
-    """Tell why the sessions the update leaves cannot make an announcement: a removal, too many, or no emoji left."""
-    if removed:
-        return "Retirer une session d'une annonce publiée arrive bientôt : pour l'instant, publie une nouvelle annonce."
+def _unfit(count: int, *, has_emoji: bool) -> str | None:
+    """Tell why the sessions the update leaves cannot make an announcement: none, too many, or no emoji left."""
+    if count == 0:
+        return "L'annonce n'aurait plus aucune session : publie plutôt une nouvelle annonce."
     if count > MAX_SESSIONS:
         return f"L'annonce compterait {count} sessions : Discord n'accepte pas plus de 20 réactions sur un message."
     if not has_emoji:
@@ -331,7 +331,8 @@ def plan_update(
     """Work out what an update of the published announcement by the draft would do, without doing it.
 
     A session is known by its emoji, the key of its sign-ups. A session started or about to start is left as published
-    whatever the draft says.
+    whatever the draft says. A session of the announcement that the draft lacks is removed, unless it is frozen; the kept
+    sessions close the gap, and ``moves`` says where each one that moved goes.
 
     Args:
         published (FmMessageDraft): The announcement as stored, with its sign-ups.
@@ -348,18 +349,22 @@ def plan_update(
     kept: list[Formation] = []
     changed: list[Step] = []
     frozen: list[Step] = []
-    removed = 0
-    for session in published.fms:
+    removed: list[Step] = []
+    moves: dict[int, int] = {}
+    for place, session in enumerate(published.fms):
         if is_frozen(session, now):
-            kept.append(session)
             frozen.append(Step("frozen", session, session))
+            moves[place] = len(kept)
+            kept.append(session)
         elif session.emoji in wanted:
             retouched = _retouched(session, wanted[session.emoji])
+            moves[place] = len(kept)
             kept.append(retouched)
             if session_digest(retouched) != session_digest(session):
                 changed.append(Step("changed", session, retouched))
         else:
-            removed += 1
+            removed.append(Step("removed", session, None))
+    moves = {old: new for old, new in moves.items() if old != new}
     text_changes = _text_changes(published, draft)
 
     if not (changed or text_changes or fresh or removed):
@@ -370,7 +375,7 @@ def plan_update(
     if reason := _refusal(draft, [*wanted.values(), *fresh], now):
         return f"{reason} {_UNCHANGED}"
     added = _appended(fresh, {fm.emoji for fm in published.fms} | retired)
-    if reason := _unfit(len(kept) + len(fresh), removed=removed, has_emoji=added is not None):
+    if reason := _unfit(len(kept) + len(fresh), has_emoji=added is not None):
         return f"{reason} {_UNCHANGED}"
     assert added is not None  # _unfit refused the lack of an emoji
     kept.extend(added)
@@ -389,5 +394,5 @@ def plan_update(
             f"retire une session ou raccourcis une description. {_UNCHANGED}"
         )
     appended = [Step("added", None, session) for session in added]
-    steps = (*sorted(changed, key=_by_start), *appended, *sorted(frozen, key=_by_start))
-    return UpdatePlan(message, steps, text_changes, moves={})
+    steps = (*sorted(changed, key=_by_start), *appended, *sorted(removed, key=_by_start), *sorted(frozen, key=_by_start))
+    return UpdatePlan(message, steps, text_changes, moves)

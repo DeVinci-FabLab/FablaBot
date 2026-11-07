@@ -1054,3 +1054,25 @@ def test_operations_says_a_restart_rebuilds_the_posted_announcements() -> None:
         "`Rebuilt the announcements of N servers at start`",
     ):
         assert detail in text, detail
+
+
+def test_operator_guide_says_an_update_uses_manage_messages_to_clear_reactions() -> None:
+    """The invite section says what Manage Messages does for a removed session, and what happens without it."""
+    text = " ".join(_read("docs/OPERATIONS.md").split())
+    assert "Manage Messages is also what lets an announcement update clear the reactions of a session removed from it" in text
+    assert "without it, the bot removes its own reaction, the members' reactions stay visible but count for nothing" in text
+
+
+def test_user_guide_says_how_a_session_is_removed_from_the_published_announcement() -> None:
+    """The draft section says what the removal summary lists, what is cleared, what follows and what is never removed."""
+    guide = " ".join(_section(_read("docs/USERGUIDE.md"), "### The draft").split())
+    for detail in (
+        "the summary lists it with a 🗑️ line",
+        "clears its reactions from the message, those of the members included",
+        "keep their sign-ups, their attendance check and their anonymous counts, which follow their training",
+        "is never removed, whatever the draft says",
+        "the bot removes its own reaction instead and the answer names the emoji",
+        "a draft that would leave the announcement with no session at all",
+    ):
+        assert detail in guide, detail
+    assert "for now it also refuses" not in guide

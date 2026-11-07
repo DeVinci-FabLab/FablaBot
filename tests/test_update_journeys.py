@@ -45,6 +45,7 @@ if TYPE_CHECKING:
 
 NBSP = "\N{NO-BREAK SPACE}"
 ADDED = "➕"  # noqa: RUF001 - the sign the copy asks for
+REMOVED = "🗑️"
 UNCHANGED = "Rien n'a été modifié."
 CONFIRM = "✅ Confirmer la mise à jour"
 CHANGED = f"L'annonce ou le brouillon a changé depuis ce résumé : presse de nouveau **Publier** pour le revoir. {UNCHANGED}"
@@ -1123,6 +1124,37 @@ async def test_a_restart_leaves_the_announcement_of_a_server_outside_the_allow_l
     assert _snapshot(lab, posted) == before
 
 
+async def test_a_failure_choosing_the_servers_to_rebuild_does_not_stop_the_start(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A server filter that fails, whatever the error, is logged and lets the start go on to the reminder loop."""
+    await _announced(lab)
+    bot: Any = lab.env.bot
+    monkeypatch.setattr(bot.guild_access, "is_served", MagicMock(side_effect=RuntimeError("policy")))
+    caplog.set_level(logging.INFO)
+
+    await _cog(lab)._before_check_upcoming_formations()  # pyright: ignore[reportPrivateUsage]
+
+    assert "Start-up rebuild of the announcements skipped" in caplog.text
+    assert "Formation notification task started" in caplog.text
+
+
+@pytest.mark.parametrize(("fails", "rebuilt"), [(False, 1), (True, 0)])
+async def test_the_start_up_log_counts_only_the_servers_rebuilt(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, fails: bool, rebuilt: int
+) -> None:
+    """The line that says how many servers were rebuilt at start leaves out a server whose rebuild failed."""
+    await _announced(lab)
+    cog = _cog(lab)
+    if fails:
+        monkeypatch.setattr(cog, "_update_published_message", AsyncMock(side_effect=RuntimeError("discord")))
+    caplog.set_level(logging.INFO)
+
+    await cog._rebuild_posted_announcements()  # pyright: ignore[reportPrivateUsage]
+
+    assert f"Rebuilt the announcements of {rebuilt} servers at start." in caplog.text
+
+
 async def test_a_reaction_on_an_emoji_no_session_wears_is_never_a_sign_up_on_a_session_added_later(lab: Lab) -> None:
     """A member's like on the announcement stays out of the new session wearing that emoji, even after a storage failure."""
     posted = await _announced(lab)
@@ -1259,3 +1291,130 @@ async def test_the_summary_is_refused_when_discord_does_not_let_the_bot_read_the
     assert not refused.response.embeds
     assert f"refused kind=discord_unreadable guild_id={GUILD_ID} user_id={lab.respo.id}" in caplog.text
     assert _snapshot(lab, posted) == before
+
+
+def _remove(emoji: str) -> None:
+    """Take a session out of the stored draft."""
+    draft = formations.get_draft(GUILD_ID)
+    assert draft is not None
+    formations.save_draft(GUILD_ID, replace(draft, fms=[fm for fm in draft.fms if fm.emoji != emoji]))
+
+
+def _refused_clearing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make Discord refuse to clear a reaction from the message, as it does a bot without Manage Messages."""
+    refusal = discord.Forbidden(MagicMock(status=403, reason="Missing Permissions"), "Missing Permissions")
+    monkeypatch.setattr(discord.Message, "clear_reaction", AsyncMock(side_effect=refusal))
+
+
+async def test_a_removed_session_leaves_the_text_and_its_reactions(lab: Lab) -> None:
+    """Confirming a draft without a session drops it from the text and clears its reactions; the others keep theirs."""
+    posted = await _announced(lab)
+    before = _snapshot(lab, posted)
+    _remove("💛")
+
+    summary = await _summary(lab)
+    lines = _embed_lines(summary.response)
+    title = summary.response.embeds[0].title
+    done = await _confirm(lab, summary)
+
+    assert title == "🔄 Mettre à jour l'annonce · 1 changement"
+    assert any(line.startswith(f"{REMOVED} 💛 **Brodeuse** — <t:") and line.endswith(f" · <@{lab.plain.id}>") for line in lines)
+    assert "-# À prévenir : 1 inscrit, 1 en attente · réactions 💛 retirées" in lines
+    assert done.response.content == _done(lab, "1 retirée")
+    assert [fm.emoji for fm in _stored().message.fms] == ["🧡", "💚"]
+    sent = lab.env.backend.get_message(lab.announce.id, posted.id)
+    assert sent.content == render_message(_stored().message)
+    assert "Brodeuse" not in sent.content
+    assert _reacted_by(lab, posted, "💛") == []
+    assert [r for r in _snapshot(lab, posted).reactions if r[0] != "💛"] == [r for r in before.reactions if r[0] != "💛"]
+    assert formations.get_draft(GUILD_ID) == as_draft(_stored().message)
+    assert len(lab.announce.history()) == 1
+
+
+async def test_a_removed_session_with_nobody_signed_up_says_only_its_reactions(lab: Lab) -> None:
+    """A removed session nobody signed up on has the short line, with no one to tell."""
+    _stage(lab, _three(lab))
+    await _published_via_publier(lab, lab.announce)
+    _remove("💚")
+
+    summary = await _summary(lab)
+
+    assert "-# Réactions 💚 retirées" in _embed_lines(summary.response)
+
+
+async def test_without_manage_messages_the_bot_takes_its_own_reaction_and_says_so(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """When Discord refuses to clear a reaction, the bot removes its own, the members' stay, and the answer names the emoji."""
+    posted = await _announced(lab)
+    _refused_clearing(monkeypatch)
+    _remove("💛")
+    caplog.set_level(logging.INFO)
+
+    done = await _updated(lab)
+
+    assert done.response.content == (
+        f"✅ **Annonce mise à jour** dans <#{lab.announce.id}> : 1 retirée.\n"
+        "⚠️ Discord a refusé de retirer les réactions 💛 : le bot a retiré les siennes, "
+        "celles des membres restent visibles mais ne comptent plus.\n"
+        "-# Le brouillon reprend l'annonce telle qu'elle est maintenant."
+    )
+    assert _reacted_by(lab, posted, "💛") == [lab.temp.id, lab.president.id]
+    assert [fm.emoji for fm in _stored().message.fms] == ["🧡", "💚"]
+    assert f"Guild {GUILD_ID} could not clear the reactions" in caplog.text
+
+
+async def test_a_removed_sessions_reactor_reacting_again_counts_for_nothing(lab: Lab) -> None:
+    """A member who reacts again on the emoji of a removed session signs up nowhere and is told nothing."""
+    posted = await _announced(lab)
+    _remove("💛")
+    await _updated(lab)
+    before = (_lists("🧡"), _lists("💚"), _snapshot(lab, posted).dms)
+
+    await lab.temp.react(posted, "💛")
+    await lab.env.advance_time(120)
+
+    assert (_lists("🧡"), _lists("💚"), _snapshot(lab, posted).dms) == before
+    assert [fm.emoji for fm in _stored().message.fms] == ["🧡", "💚"]
+    sent = lab.env.backend.get_message(lab.announce.id, posted.id)
+    assert sent.content == render_message(_stored().message)
+
+
+async def test_an_emoji_left_with_member_reactions_is_not_given_to_a_session_added_later(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the reactions of a removed session could not be cleared, no session added later takes that emoji."""
+    await _announced(lab)
+    _refused_clearing(monkeypatch)
+    _remove("💛")
+    await _updated(lab)
+    _add(lab, "💛", "Découpe laser")
+
+    await _updated(lab)
+
+    assert [fm.emoji for fm in _stored().message.fms] == ["🧡", "💚", SESSION_EMOJIS[3]]
+
+
+async def test_a_started_session_after_a_removed_one_keeps_its_check(lab: Lab) -> None:
+    """A check open on the third session still has its registrants and training once the second session is removed."""
+    await _announced(lab)
+    _flag("💚", notified_at_start=True)
+    start = _session_of("💚").start_dt
+    appel_id = attendance.open_appel(
+        GUILD_ID, _stored().message_id, 2, trainer_id=lab.plain.id, starts_at=start, ends_at=start + timedelta(hours=1)
+    )
+    registrants = attendance.registrants(appel_id)
+    assert [r.user_id for r in registrants] == [lab.codir.id]
+    before = attendance.get(appel_id)
+    assert before is not None
+    assert before.name == "Résine"
+    _remove("💛")
+
+    done = await _updated(lab)
+
+    assert done.response.content == _done(lab, "1 retirée")
+    assert [fm.emoji for fm in _stored().message.fms] == ["🧡", "💚"]
+    assert attendance.registrants(appel_id) == registrants
+    checked = attendance.get(appel_id)
+    assert checked is not None
+    assert (checked.name, checked.position, checked.message_id) == ("Résine", 1, _stored().message_id)

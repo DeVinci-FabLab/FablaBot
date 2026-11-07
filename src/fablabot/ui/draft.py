@@ -328,6 +328,20 @@ def _added_block(step: Step) -> list[str]:
     ]
 
 
+def _removed_block(step: Step) -> list[str]:
+    """Write a removed session of the summary: its line, then who is told and whose reactions the bot clears."""
+    before = step.before
+    assert before is not None
+    registered, waiting = len(before.registered_users), len(before.waitlisted_users)
+    block = [f"🗑️ {before.emoji} **{plain(before.name)}** — {discord_timestamp(before.start_dt)} · {before.trainer_mention}"]
+    if registered + waiting:
+        told = f"{counted(registered, 'inscrit', 'inscrits')}, {waiting} en attente"
+        block.append(f"-# À prévenir : {told} · réactions {before.emoji} retirées")
+    else:
+        block.append(f"-# Réactions {before.emoji} retirées")
+    return block
+
+
 def update_message(plan: UpdatePlan, channel_id: int, message_id: int) -> tuple[list[Embed], ui.View]:
     """Build the summary of an update: what changes, who is told, the sessions left as they are, and the way to confirm.
 
@@ -343,7 +357,8 @@ def update_message(plan: UpdatePlan, channel_id: int, message_id: int) -> tuple[
     """
     steps = [step for step in plan.steps if step.kind != "frozen"]
     blocks = [[f"Dans <#{channel_id}>. Les inscriptions et leur ordre d'arrivée restent.", ""]]
-    blocks += [_added_block(step) if step.kind == "added" else _changed_block(step) for step in steps]
+    block_of = {"added": _added_block, "removed": _removed_block, "changed": _changed_block}
+    blocks += [block_of[step.kind](step) for step in steps]
     if plan.text_changes:
         blocks.append([f"💬 Texte de l'annonce : {', '.join(plan.text_changes)}"])
     footer = [""]
@@ -373,7 +388,12 @@ def update_message(plan: UpdatePlan, channel_id: int, message_id: int) -> tuple[
 
 
 def done_message(
-    plan: UpdatePlan, channel_id: int, *, posted: bool = True, unreacted: tuple[str, ...] = ()
+    plan: UpdatePlan,
+    channel_id: int,
+    *,
+    posted: bool = True,
+    unreacted: tuple[str, ...] = (),
+    uncleared: tuple[str, ...] = (),
 ) -> tuple[str, ui.View]:
     """Build the answer to a confirmed update: how much changed, and the way to the draft, which now says the same.
 
@@ -383,6 +403,7 @@ def done_message(
         posted (bool): False when the announcement is stored but Discord has not taken the edit of its message yet,
             which the next five-minute check retries.
         unreacted (tuple[str, ...]): The emojis of added sessions the bot could not react with, for the staff to add.
+        uncleared (tuple[str, ...]): The emojis of removed sessions whose reactions Discord refused to clear.
 
     Returns:
         tuple[str, ui.View]: The text and the button that shows the draft.
@@ -399,6 +420,12 @@ def done_message(
     view = ui.View()
     view.add_item(DraftButton("show"))
     late = "" if posted else "⚠️ Discord n'a pas accepté la modification du message : elle sera refaite d'ici 5 minutes.\n"
+    refused = (
+        f"⚠️ Discord a refusé de retirer les réactions {' '.join(uncleared)} : le bot a retiré les siennes, "
+        "celles des membres restent visibles mais ne comptent plus.\n"
+        if uncleared
+        else ""
+    )
     missing = (
         f"⚠️ La réaction {' '.join(unreacted)} n'a pas pu être ajoutée : ajoute-la à la main sur l'annonce.\n"
         if unreacted
@@ -406,7 +433,7 @@ def done_message(
     )
     content = (
         f"✅ **Annonce mise à jour** dans <#{channel_id}> : {shown}.\n"
-        f"{late}{missing}-# Le brouillon reprend l'annonce telle qu'elle est maintenant."
+        f"{late}{refused}{missing}-# Le brouillon reprend l'annonce telle qu'elle est maintenant."
     )
     return content, view
 

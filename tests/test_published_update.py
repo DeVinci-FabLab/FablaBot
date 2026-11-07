@@ -16,7 +16,6 @@ from fablabot.models.formation import FmMessageDraft, Formation
 NOW = datetime(2026, 11, 10, 12, 0, tzinfo=PARIS_TZ)
 NBSP = "\N{NO-BREAK SPACE}"
 UNCHANGED = "Rien n'a été modifié."
-INTERIM = f"Retirer une session d'une annonce publiée arrive bientôt : pour l'instant, publie une nouvelle annonce. {UNCHANGED}"
 
 
 def _fm(emoji: str, *, hours: float = 48, name: str = "Soudure", seats: int = 5, signed: int = 0, **values: Any) -> Formation:
@@ -340,13 +339,87 @@ def test_the_digest_sees_a_session_that_became_frozen() -> None:
     assert after.digest(10) != before.digest(10)
 
 
-def test_a_removed_session_is_refused_for_now() -> None:
-    """A draft that drops a session that is not frozen is refused for the moment."""
+def test_a_removed_session_is_planned_with_its_members() -> None:
+    """A draft that drops a session that has not started plans it as removed, with its sign-ups, and the rest as published."""
     published = _published()
     removed = as_draft(published)
     removed.fms.pop()
 
-    assert plan_update(published, removed, now=NOW, retired=frozenset()) == INTERIM
+    plan = _plan(published, removed)
+
+    (step,) = plan.steps
+    assert (step.kind, step.before, step.after) == ("removed", published.fms[1], None)
+    assert step.before is not None
+    assert len(step.before.registered_users) == 1
+    assert plan.message.fms == [published.fms[0]]
+    assert plan.moves == {}
+
+
+def test_removing_closes_the_gap_and_maps_each_moved_place() -> None:
+    """The kept sessions keep their order, a removal closes the gap, and each place that moves is mapped old to new."""
+    published = _message(
+        _fm("🧡", hours=48), _fm("💛", hours=72), _fm("💚", hours=96), _fm("💙", hours=120), _fm("💜", hours=144)
+    )
+    draft = as_draft(published)
+    draft.fms = [fm for fm in draft.fms if fm.emoji not in {"💛", "💙"}]
+
+    plan = _plan(published, draft)
+
+    assert [fm.emoji for fm in plan.message.fms] == ["🧡", "💚", "💜"]
+    assert plan.moves == {2: 1, 4: 2}
+    assert sorted(s.before.emoji for s in plan.steps if s.before and s.kind == "removed") == ["💙", "💛"]
+
+
+def test_adding_with_a_removal_leaves_the_added_session_last_and_unmapped() -> None:
+    """A session added in the same update goes after the kept ones and is not in the moves."""
+    published = _published()
+    draft = as_draft(published)
+    draft.fms = [draft.fms[1], _fm("💜", hours=90, name="Résine")]
+
+    plan = _plan(published, draft)
+
+    assert [fm.emoji for fm in plan.message.fms] == ["💛", "💜"]
+    assert plan.moves == {1: 0}
+    assert sorted(s.kind for s in plan.steps) == ["added", "removed"]
+
+
+def test_a_frozen_session_is_never_removed() -> None:
+    """A started or imminent session missing from the draft stays in the announcement, as a frozen step, and keeps its place."""
+    published = _message(_fm("🧡", hours=-1, signed=2), _fm("💛", hours=72), _fm("💚", hours=96))
+    draft = as_draft(published)
+    draft.fms = [replace(draft.fms[2], seats=9)]
+
+    plan = _plan(published, draft)
+
+    assert [fm.emoji for fm in plan.message.fms] == ["🧡", "💚"]
+    assert plan.message.fms[0] == published.fms[0]
+    assert plan.moves == {2: 1}
+    kinds = {s.before.emoji: s.kind for s in plan.steps if s.before}
+    assert kinds == {"🧡": "frozen", "💛": "removed", "💚": "changed"}
+
+
+def test_a_draft_missing_only_a_frozen_session_says_it_stays() -> None:
+    """When the draft differs from the announcement only by dropping a started session, nothing is planned and it is named."""
+    published = _message(_fm("🧡", hours=-1), _fm("💛", hours=72))
+    draft = as_draft(published)
+    draft.fms.pop(0)
+
+    refusal = plan_update(published, draft, now=NOW, retired=frozenset())
+
+    assert isinstance(refusal, str)
+    assert "🧡" in refusal
+    assert refusal.endswith(UNCHANGED)
+
+
+def test_removing_every_session_is_refused() -> None:
+    """A draft with no session left for the announcement is refused: publish a new announcement instead."""
+    published = _published()
+    draft = as_draft(published)
+    draft.fms = []
+
+    assert plan_update(published, draft, now=NOW, retired=frozenset()) == (
+        f"L'annonce n'aurait plus aucune session : publie plutôt une nouvelle annonce. {UNCHANGED}"
+    )
 
 
 def _with_added(published: FmMessageDraft, *added: Formation) -> FmMessageDraft:
