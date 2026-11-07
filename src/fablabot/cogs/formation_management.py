@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import csv
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 import io
 import logging
 import sqlite3
@@ -36,6 +36,7 @@ from fablabot.helpers.constants import (
     APPEL_EDIT_WINDOW,
     MAX_SESSIONS,
     PARIS_TZ,
+    SESSION_EMOJIS,
     TEMPLATE_ROLES,
     ErrorMessages,
     retention_cutoff,
@@ -43,6 +44,8 @@ from fablabot.helpers.constants import (
 )
 from fablabot.helpers.constants import FORMATION_ROLES as ALLOWED_ROLES
 from fablabot.helpers.formation import (
+    DmTally,
+    changes_members_plans,
     format_current_registrations,
     format_respo_contacts,
     is_past,
@@ -51,14 +54,27 @@ from fablabot.helpers.formation import (
     notify_trainer_before_formation,
     parse_date_time,
     render_message,
+    send_cancel_dm,
+    send_change_dm,
+    send_demotion_dm,
     send_due_alerts,
     send_promotion_dm,
     send_registration_dm,
+    send_trainer_dm,
     send_waitlist_dm,
     start_appel,
 )
 from fablabot.helpers.formation.attendance import Start, appel_message, trainer_id
 from fablabot.helpers.formation.catalogue import has_sessions_to_come
+from fablabot.helpers.formation.update import (
+    CHANGED_REFUSAL,
+    RETRY_REFUSAL,
+    Step,
+    UpdatePlan,
+    as_draft,
+    plan_update,
+    posted_reacted_emojis,
+)
 from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.safe_discord_operations import retract_unsaved_post
 from fablabot.helpers.utils import RefusalKind, counted, ensure_command_context, is_valid_emoji, log_refusal
@@ -68,7 +84,7 @@ from fablabot.services import attendance, catalogue, formations
 from fablabot.ui import fmui
 from fablabot.ui.attendance import DYNAMIC_ITEMS, OpenAppelPicker, recover_relaunches
 from fablabot.ui.catalogue import CATALOGUE_ITEMS, cut, plain, templates_message
-from fablabot.ui.draft import DRAFT_ITEMS, draft_message
+from fablabot.ui.draft import DRAFT_ITEMS, done_message, draft_message, live_draft, stored_draft
 from fablabot.ui.session import SESSION_ITEMS, open_session_form
 
 if TYPE_CHECKING:
@@ -84,13 +100,29 @@ _REPUBLISH_REFUSED = (
     "Rien n'a été publié."
 )
 
-
 _ACCESS = AnyRole(ALLOWED_ROLES)
 _CHOICE_CHARS = 100
 _UNKNOWN_CHARS = 100
 _ID_DIGITS = 18
 TRAINER_NOTIFICATION_ADVANCE = timedelta(hours=1)
 REGISTRATION_WINDOW = timedelta(minutes=20)
+
+
+def _members_of(session: Formation) -> list[tuple[int, bool]]:
+    """List the members signed up on a session, registered first then waiting, as ``(user ID, waitlisted)``."""
+    listed = [
+        (entry.get("user_id"), waitlisted)
+        for waitlisted, entries in ((False, session.registered_users), (True, session.waitlisted_users))
+        for entry in entries
+    ]
+    return [(user_id, waitlisted) for user_id, waitlisted in listed if isinstance(user_id, int)]
+
+
+def _cuts_seats(step: Step) -> bool:
+    """Tell whether an update step gives a kept session fewer seats."""
+    return (
+        step.kind == "changed" and step.before is not None and step.after is not None and step.after.seats < step.before.seats
+    )
 
 
 def _parse_ts(ts_iso: Any) -> datetime:
@@ -676,6 +708,339 @@ class FormationManagement(commands.Cog):
         logger.info(f"Guild {guild_id} published the formations message as announcement.")
         await interaction.followup.send("Message publié en mode annonce.")
 
+    async def update_announcement(self, interaction: Interaction, message_id: int, digest: str) -> None:
+        """Rewrite the published announcement in place from the draft, keeping its sign-ups, as the summary showed.
+
+        The caller has checked the roles. The click is answered first; then, under the server's published lock, the
+        posted message is fetched, then the announcement and the draft are read again, the update planned and compared with
+        the digest of the summary, and both stored together, with no wait between; the message is then rebuilt from the
+        reactions. A plan that differs from the one shown, or a message that is gone, changes nothing.
+
+        Args:
+            interaction (Interaction): The click on Confirmer la mise à jour, on a server.
+            message_id (int): The published message the summary was made for.
+            digest (str): The digest of the plan the summary showed.
+        """
+        assert interaction.guild is not None
+        guild = interaction.guild
+        last = formations.current_published(guild.id)
+        if (
+            last is None or last.message_id != message_id
+        ):  # also a message of another server, whose ID is no one of this server's
+            await self._refuse_update(interaction, CHANGED_REFUSAL, RefusalKind.ANNOUNCEMENT_CHANGED, answered=False)
+            return
+        await interaction.response.edit_message(
+            content=f"🔄 Mise à jour de l'annonce dans <#{last.channel_id}>…",
+            embeds=[],
+            view=None,
+            allowed_mentions=AllowedMentions.none(),
+        )
+        tally = DmTally()
+        async with self._published_lock(guild.id):
+            outcome = await self._rewrite_announcement(guild, message_id, digest, tally)
+            behind = guild.id in self._retry_guilds or guild.id in self._stale_guilds
+            # Still under the lock: a second update confirmed meanwhile could give a removed emoji to a new session, whose
+            # sign-ups the clear would then wipe.
+            uncleared, left = await self._clear_removed(guild, last, outcome) if isinstance(outcome, UpdatePlan) else ((), ())
+        if not isinstance(outcome, UpdatePlan):
+            await self._refuse_update(interaction, *outcome, answered=True)
+            return
+        unreacted = await self._react_to_added(guild, last, outcome)
+        await self._remind_new_trainers(guild, message_id, outcome.trainers_to_remind)
+        unread = await self._tell_members(guild, last, outcome, tally)
+        logger.info(
+            f"[fm.brouillon] update guild_id={guild.id} user_id={interaction.user.id} message_id={message_id} "
+            f"changed={sum(step.kind == 'changed' for step in outcome.steps)} "
+            f"added={sum(step.kind == 'added' for step in outcome.steps)} "
+            f"removed={sum(step.kind == 'removed' for step in outcome.steps)} text_changes={len(outcome.text_changes)} "
+            f"members_told={len(tally.told)} dms_refused={tally.refused} members_missing={tally.gone} "
+            f"unread_sessions={len(unread)} rebuilt={tally.rebuilt}"
+        )
+        content, view = done_message(
+            outcome,
+            last.channel_id,
+            posted=not behind,
+            unreacted=unreacted,
+            uncleared=uncleared,
+            left=left,
+            told=len(tally.told),
+            dms_refused=tally.refused,
+            missing=tally.gone,
+            unread=unread,
+            moves_unsent=not tally.rebuilt and any(_cuts_seats(step) for step in outcome.steps),
+        )
+        await interaction.edit_original_response(content=content, view=view, allowed_mentions=AllowedMentions.none())
+
+    async def _posted_message(self, guild: Guild, last: PublishedMessage, purpose: str) -> Message | None:
+        """Fetch the posted announcement to act on its reactions, or None, logged, when it cannot be read.
+
+        Args:
+            guild (Guild): The server.
+            last (PublishedMessage): The published message the update was made on.
+            purpose (str): What the message is read for, for the log line.
+
+        Returns:
+            Message | None: The message, or None when the channel or the message is out of reach.
+        """
+        channel = guild.get_channel(last.channel_id)
+        if not isinstance(channel, TextChannel):
+            return None
+        try:
+            return await channel.fetch_message(last.message_id)
+        except Exception:  # not only HTTPException: a dropped connection must not cost the steps after the save
+            logger.exception(f"Guild {guild.id} could not read message {last.message_id} to {purpose}.")
+            return None
+
+    async def _clear_removed(
+        self, guild: Guild, last: PublishedMessage, plan: UpdatePlan
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        """Clear the reactions of each removed session from the posted message, so that nobody keeps a seat on it.
+
+        Done under the lock, after the rebuild. Clearing a member's reaction needs Manage Messages: when Discord refuses,
+        the bot removes its own reaction instead, the refusal is logged and the emoji is kept to be named in the answer.
+        The members' reactions that stay count for nothing, since no session wears the emoji.
+
+        Args:
+            guild (Guild): The server.
+            last (PublishedMessage): The published message the update was made on.
+            plan (UpdatePlan): The update that was done.
+
+        Returns:
+            tuple[tuple[str, ...], tuple[str, ...]]: The emojis whose members' reactions could not be cleared but whose
+                bot reaction was taken off, then the emojis the bot could not take anything off (the message could not be
+                read, or Discord refused its own removal too).
+        """
+        emojis = [step.before.emoji for step in plan.steps if step.kind == "removed" and step.before is not None]
+        if not emojis:
+            return (), ()
+        msg = await self._posted_message(guild, last, "clear the reactions")
+        if msg is None:
+            return (), tuple(emojis)
+        refused: list[str] = []
+        left: list[str] = []
+        for emoji in emojis:
+            try:
+                await msg.clear_reaction(emoji)
+            except Exception:  # Forbidden without Manage Messages, Discord failing, or a dropped connection
+                logger.exception(
+                    f"Guild {guild.id} could not clear the reactions {emoji!r} of updated message {last.message_id}."
+                )
+                refused.append(emoji)
+                try:
+                    await msg.remove_reaction(emoji, guild.me)
+                except Exception:
+                    logger.exception(
+                        f"Guild {guild.id} could not remove its own reaction {emoji!r} from message {last.message_id}."
+                    )
+                    refused.pop()
+                    left.append(emoji)
+        return tuple(refused), tuple(left)
+
+    async def _react_to_added(self, guild: Guild, last: PublishedMessage, plan: UpdatePlan) -> tuple[str, ...]:
+        """React with the emoji of each added session on the posted message, so that members can sign up from the first.
+
+        Done outside the lock, after the rebuild. A refusal is logged and the emoji kept to be named in the answer.
+
+        Args:
+            guild (Guild): The server.
+            last (PublishedMessage): The published message the update was made on.
+            plan (UpdatePlan): The update that was done.
+
+        Returns:
+            tuple[str, ...]: The emojis the bot could not add, which the staff adds by hand.
+        """
+        emojis = [step.after.emoji for step in plan.steps if step.kind == "added" and step.after is not None]
+        if not emojis:
+            return ()
+        msg = await self._posted_message(guild, last, "add the reactions")
+        if msg is None:
+            return tuple(emojis)
+        failed: list[str] = []
+        for emoji in emojis:
+            try:
+                await msg.add_reaction(emoji)
+            except Exception:  # a dropped connection must not cost the new trainer's reminder
+                logger.exception(f"Guild {guild.id} failed to add reaction {emoji!r} to the updated message {last.message_id}.")
+                failed.append(emoji)
+        return tuple(failed)
+
+    async def _remind_new_trainers(self, guild: Guild, message_id: int, emojis: tuple[str, ...]) -> None:
+        """Send the hour-before reminder to the new trainer alone of each session whose reminder already went out.
+
+        The sessions are read as stored once the message is rebuilt, so the list in the reminder is the one the update
+        left. Their flag stays set: the participants and the Respo are not reminded a second time.
+
+        Args:
+            guild (Guild): The server.
+            message_id (int): The published message the update was made on.
+            emojis (tuple[str, ...]): The sessions whose trainer changed alone after their reminder.
+        """
+        if not emojis:
+            return
+        try:
+            last = formations.current_published(guild.id)
+        except sqlite3.Error:
+            logger.exception(f"Guild {guild.id} updated message {message_id} but could not read it to remind new trainers.")
+            return
+        if last is None or last.message_id != message_id:
+            return
+        contacts = format_respo_contacts(guild)
+        for fm in last.message.fms:
+            if fm.emoji in emojis:
+                await notify_trainer_before_formation(guild, fm, contacts)
+
+    async def _tell_members(self, guild: Guild, last: PublishedMessage, plan: UpdatePlan, tally: DmTally) -> tuple[str, ...]:
+        """Send the private messages an update owes, once, outside the lock and after the rebuild.
+
+        A session whose start or trainer changed tells the members who are still registered or waiting on it once the
+        message is rebuilt, and its new trainer; a removed session tells the members it had; an added session tells its
+        trainer. Nothing is stored: a restart in the middle leaves the next members untold (see the operations guide). A
+        member whose messages are closed is counted and the next one is told all the same.
+
+        Args:
+            guild (Guild): The server.
+            last (PublishedMessage): The published message the update was made on.
+            plan (UpdatePlan): The update that was done.
+            tally (DmTally): The members already told by the rebuild, which this adds to.
+
+        Returns:
+            tuple[str, ...]: The emojis of the changed sessions whose members could not be read, so none was told.
+        """
+        try:
+            stored = formations.current_published(guild.id)
+        except sqlite3.Error:
+            logger.exception(f"Guild {guild.id} updated message {last.message_id} but could not read it to tell members.")
+            stored = None
+        rebuilt = (
+            {fm.emoji: fm for fm in stored.message.fms} if stored is not None and stored.message_id == last.message_id else {}
+        )
+        contacts = format_respo_contacts(guild)
+        unread: list[str] = []
+        for step in plan.steps:
+            before, after = step.before, step.after
+            if step.kind == "removed" and before is not None:
+                for user_id, waitlisted in _members_of(before):
+                    tally.record(
+                        user_id, await send_cancel_dm(guild, user_id, before, waitlisted=waitlisted, contacts=contacts)
+                    )
+            elif step.kind == "changed" and before is not None and after is not None and changes_members_plans(before, after):
+                if (kept := rebuilt.get(after.emoji)) is None:
+                    logger.warning(f"Guild {guild.id} could not tell the members of a changed session: it is no longer stored.")
+                    if _members_of(before):
+                        unread.append(after.emoji)
+                else:
+                    still = dict(_members_of(kept))
+                    for user_id, _ in _members_of(before):
+                        if user_id in still:
+                            sent = await send_change_dm(
+                                guild, user_id, before, after, waitlisted=still[user_id], contacts=contacts
+                            )
+                            tally.record(user_id, sent)
+                if before.trainer_mention != after.trainer_mention:
+                    await self._tell_trainer(guild, last.channel_id, after, contacts, tally)
+            elif step.kind == "added" and after is not None:
+                await self._tell_trainer(guild, last.channel_id, after, contacts, tally)
+        return tuple(unread)
+
+    async def _tell_trainer(self, guild: Guild, channel_id: int, session: Formation, contacts: str, tally: DmTally) -> None:
+        """Tell a session's trainer they lead it, and note the outcome by their ID."""
+        sent = await send_trainer_dm(guild, session, channel_id, contacts)
+        if (user_id := trainer_id(session.trainer_mention)) is not None:
+            tally.record(user_id, sent)
+
+    async def _refuse_update(self, interaction: Interaction, text: str, kind: RefusalKind, *, answered: bool) -> None:
+        """Tell the member privately why the update did nothing, and log the kind.
+
+        Args:
+            interaction (Interaction): The click.
+            text (str): The refusal, ending with the word that nothing was changed.
+            kind (RefusalKind): Why, for the log line.
+            answered (bool): Whether the click was answered already: the refusal then replaces that answer.
+        """
+        log_refusal(logger, "fm.brouillon", interaction, kind)
+        if answered:
+            await interaction.edit_original_response(
+                content=text, embeds=[], view=None, allowed_mentions=AllowedMentions.none()
+            )
+        else:
+            await interaction.response.send_message(text, ephemeral=True, allowed_mentions=AllowedMentions.none())
+
+    async def _rewrite_announcement(
+        self, guild: Guild, message_id: int, digest: str, tally: DmTally
+    ) -> UpdatePlan | tuple[str, RefusalKind]:
+        """Do the update under the published lock: fetch, then read, plan, compare and store without waiting, rebuild.
+
+        Args:
+            guild (Guild): The server.
+            message_id (int): The published message the summary was made for.
+            digest (str): The digest of the plan the summary showed.
+            tally (DmTally): Filled with the members the rebuild moved to the waitlist and told.
+
+        Returns:
+            UpdatePlan | tuple[str, RefusalKind]: The plan that was done, or the refusal and its kind; nothing changed.
+        """
+        last = formations.current_published(guild.id)
+        if last is None or last.message_id != message_id:
+            return CHANGED_REFUSAL, RefusalKind.ANNOUNCEMENT_CHANGED
+        reacted = await posted_reacted_emojis(guild, last)
+        if not isinstance(reacted, frozenset):
+            return reacted
+        # The draft is not under the lock, and the fetch above waits on Discord: read it and plan only now, with no await
+        # between the plan and the save, so an edit saved meanwhile is compared with the summary and never overwritten.
+        last = formations.current_published(guild.id)
+        if last is None or last.message_id != message_id:
+            return CHANGED_REFUSAL, RefusalKind.ANNOUNCEMENT_CHANGED
+        plan = self._confirmed_plan(guild, last, digest, reacted)
+        if not isinstance(plan, UpdatePlan):
+            return plan
+        try:
+            formations.save_update(
+                guild.id,
+                PublishedMessage(message_id, last.channel_id, plan.message),
+                as_draft(plan.message),
+                moves=plan.moves,
+            )
+        except sqlite3.Error:
+            logger.exception(f"Guild {guild.id} could not store the update of message {message_id}.")
+            return RETRY_REFUSAL, RefusalKind.UPDATE_STORAGE_FAILED
+        self._retry_guilds.discard(guild.id)  # as a scheduled update does: what is left after the rebuild is its own failure
+        try:
+            lowered = frozenset(step.after.emoji for step in plan.steps if _cuts_seats(step) and step.after is not None)
+            await self._update_published_message_locked(guild.id, tally, lowered)
+        except sqlite3.Error:
+            logger.exception(f"Guild {guild.id} stored the update of message {message_id} but could not rebuild it.")
+            self._stale_guilds.add(guild.id)
+        except Exception:
+            logger.exception(f"Guild {guild.id} stored the update of message {message_id} but could not rebuild it.")
+            self._retry_guilds.add(guild.id)
+        return plan
+
+    def _confirmed_plan(
+        self, guild: Guild, last: PublishedMessage, digest: str, reacted: frozenset[str]
+    ) -> UpdatePlan | tuple[str, RefusalKind]:
+        """Plan the update from what is stored now, or give the refusal when it cannot be done or differs from the summary.
+
+        Args:
+            guild (Guild): The server.
+            last (PublishedMessage): The announcement as stored now.
+            digest (str): The digest of the plan the summary showed.
+            reacted (frozenset[str]): The emojis with a reaction other than the bot's on the message as fetched.
+
+        Returns:
+            UpdatePlan | tuple[str, RefusalKind]: The plan, or the refusal and its kind.
+        """
+        plan = plan_update(
+            last.message,
+            live_draft(guild, stored_draft(guild.id)),
+            now=datetime.now(UTC),
+            retired=frozenset(formations.reacted_emojis(guild.id, last.message_id)) | reacted,
+        )
+        if isinstance(plan, str):
+            return plan, RefusalKind.DRAFT_NOT_READY
+        if plan.digest(last.message_id) != digest:
+            return CHANGED_REFUSAL, RefusalKind.ANNOUNCEMENT_CHANGED
+        return plan
+
     async def _post_draft(self, interaction: Interaction, channel: TextChannel) -> tuple[Message, FmMessageDraft] | None:
         """Send the draft to the channel and store it as the published message.
 
@@ -949,7 +1314,6 @@ class FormationManagement(commands.Cog):
             catch_up (bool): True for a message that is not the newest.
         """
         window_tolerance = timedelta(minutes=5)
-        notification_window_start = now + TRAINER_NOTIFICATION_ADVANCE - window_tolerance
         notification_window_end = now + TRAINER_NOTIFICATION_ADVANCE + window_tolerance
         start_window_end = now + window_tolerance
 
@@ -968,7 +1332,9 @@ class FormationManagement(commands.Cog):
             if (
                 not catch_up
                 and not fm.notified_hour_before
-                and notification_window_start <= fm.start_dt <= notification_window_end
+                # Until the check opens, not only around the hour: a start moved to under an hour away still gets its
+                # reminder at the next tick instead of none.
+                and start_window_end < fm.start_dt <= notification_window_end
             ):
                 await notify_trainer_before_formation(guild, fm, send_contacts)
                 await notify_responsible_before_formation(guild, fm, moment="hour_before")
@@ -1008,7 +1374,38 @@ class FormationManagement(commands.Cog):
     async def _before_check_upcoming_formations(self) -> None:
         """Wait for the bot to be ready before starting the background task."""
         await self.bot.wait_until_ready()
+        await self._rebuild_posted_announcements()
         logger.info("Formation notification task started")
+
+    async def _rebuild_posted_announcements(self) -> None:
+        """Rebuild the posted text of each server's announcement that still has sessions to come, once, at start.
+
+        An update is stored before the message is edited, and the flags that retry a refused edit live in memory: a
+        restart between the two would leave the posted text behind what is stored. Nothing here may stop the task from
+        starting, so a failure is logged and handed to the tick's retry.
+        """
+        try:
+            guild_ids = [
+                guild_id
+                for guild_id in formations.guilds_with_published()
+                if self.bot.guild_access.is_served(guild_id) and has_sessions_to_come(guild_id)
+            ]
+        except Exception:
+            logger.exception("Start-up rebuild of the announcements skipped: the servers to rebuild could not be chosen.")
+            return
+        rebuilt = 0
+        for guild_id in guild_ids:
+            with guild_log_context(guild_id):
+                try:
+                    await self._update_published_message(guild_id)
+                    rebuilt += 1
+                except sqlite3.Error:
+                    logger.exception(f"Start-up rebuild of guild {guild_id} stopped by a storage failure; the tick retries.")
+                    self._stale_guilds.add(guild_id)
+                except Exception:
+                    logger.exception(f"Start-up rebuild of guild {guild_id} failed; the tick retries.")
+                    self._retry_guilds.add(guild_id)
+        logger.info(f"Rebuilt the announcements of {rebuilt} servers at start.")
 
     # endregion Background Tasks
 
@@ -1047,7 +1444,7 @@ class FormationManagement(commands.Cog):
         formations.save_published(guild_id, published)
 
     def _reaction_counts(self, guild_id: int, event: ReactionEvent) -> bool:
-        """Tell whether a reaction is on a server's published message, on one of its emojis, and not an add past the deadline.
+        """Tell whether a reaction is on a server's published message, on an emoji of the pool, and not a late sign-up.
 
         The deadline is judged at the reaction's own time, so a check that runs late does not change the answer. It
         closes sign-ups only: a removal is always logged on a served server, or the member who left would take their
@@ -1067,7 +1464,9 @@ class FormationManagement(commands.Cog):
         if not pub or event.message_id != pub.message_id:
             return False
         fm_emojis = {fm.emoji for fm in pub.message.fms}
-        if fm_emojis and event.emoji not in fm_emojis:
+        # An emoji of the pool no session wears is logged too, with no effect on a sign-up: a session added later must
+        # never take an emoji a member already reacted with on this message.
+        if fm_emojis and event.emoji not in fm_emojis and event.emoji not in SESSION_EMOJIS:
             return False
 
         formation = next((fm for fm in pub.message.fms if fm.emoji == event.emoji), None)
@@ -1174,8 +1573,18 @@ class FormationManagement(commands.Cog):
         async with self._published_lock(guild_id):
             await self._update_published_message_locked(guild_id)
 
-    async def _update_published_message_locked(self, guild_id: int) -> None:  # noqa: PLR0912, PLR0915 - split once formations have tests
-        """Reload the published message, rebuild registrations from reactions, save and notify."""
+    async def _update_published_message_locked(  # noqa: PLR0912, PLR0915 - split once formations have tests
+        self, guild_id: int, tally: DmTally | None = None, lowered: frozenset[str] = frozenset()
+    ) -> None:
+        """Reload the published message, rebuild registrations from reactions, save and notify.
+
+        Args:
+            guild_id (int): The ID of the guild.
+            tally (DmTally | None): Where an update notes the members told that a lost seat put them on the waitlist.
+            lowered (frozenset[str]): The sessions whose seats this update cut: only their members moved to the waitlist
+                by the cut are told the session has fewer places; any other member who lands there is told the usual
+                waitlist place.
+        """
         pub = self._get_last_published_in_guild(guild_id)
         if not pub:
             logger.debug(f"No published formations message recorded for guild {guild_id}; skipping update.")
@@ -1262,12 +1671,21 @@ class FormationManagement(commands.Cog):
             self._log_missed_reactions(guild_id, message_id, reactions_snapshot, last_add)
 
         waitlist_notifications: list[tuple[int, str, int]] = []
+        demotion_notifications: list[tuple[int, Formation, int]] = []
         promotion_notifications: list[tuple[int, Formation]] = []
         registration_notifications: list[tuple[int, Formation]] = []
 
         for fm in fms:
             prev_registered_ids = {entry.get("user_id") for entry in fm.registered_users if entry.get("user_id") is not None}
             prev_waitlisted_ids = {entry.get("user_id") for entry in fm.waitlisted_users if entry.get("user_id") is not None}
+            # Seats cut below the stored order: those registered past the new count lose their place by the cut itself, in
+            # their stored order. A member who lands on the waitlist otherwise (a reaction taken back and put again) was
+            # not demoted by the seats, and is told the session is full.
+            cut_ids = {
+                entry.get("user_id")
+                for index, entry in enumerate(fm.registered_users)
+                if index >= max(fm.seats, 0) and entry.get("user_id") is not None
+            }
 
             current_users = reactions_snapshot.get(fm.emoji, {})
             current_logged_user = {uid: username for uid, username in current_users.items() if (fm.emoji, uid) in last_add}
@@ -1296,7 +1714,9 @@ class FormationManagement(commands.Cog):
                         registration_notifications.append((uid, fm))
                 else:
                     waitlisted.append(entry)
-                    if uid not in prev_waitlisted_ids:
+                    if uid in cut_ids and fm.emoji in lowered:
+                        demotion_notifications.append((uid, fm, len(waitlisted)))
+                    elif uid not in prev_waitlisted_ids:
                         waitlist_notifications.append((uid, fm.name, len(waitlisted)))
             fm.registered_users = registered
             fm.waitlisted_users = waitlisted
@@ -1324,6 +1744,7 @@ class FormationManagement(commands.Cog):
             await msg.edit(content=content, suppress=True)
         except Exception:
             logger.exception(f"Failed to edit message {msg.id} in channel {msg.channel.id}.")
+            self._retry_guilds.add(guild_id)  # the stored message is ahead of the posted one until an edit goes through
         else:
             logger.info(f"Updated published formations message {msg.id} in channel {channel_id} for guild {guild_id}.")
 
@@ -1342,6 +1763,13 @@ class FormationManagement(commands.Cog):
                 await send_registration_dm(guild, user_id, fm, contacts)
         else:
             logger.debug(f"No new registration notifications for guild {guild_id}.")
+
+        if tally is not None:
+            tally.rebuilt = True
+        for user_id, fm, position in demotion_notifications:
+            sent = await send_demotion_dm(guild, user_id, fm, position, contacts)
+            if tally is not None:
+                tally.record(user_id, sent)
 
         if waitlist_notifications:
             logger.info(f"Dispatching {len(waitlist_notifications)} waitlist notification(s) for guild {guild_id}.")

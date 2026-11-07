@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 import io
 import logging
@@ -209,6 +210,34 @@ def render_message(draft: FmMessageDraft) -> str:
     if lines and not lines[-1]:
         lines.pop()
     return "\n".join(lines)
+
+
+def announcement_length(message: FmMessageDraft) -> int:
+    """Count the characters of the announcement with every seat taken, the most a session's sign-ups can make it.
+
+    A session shows ``registered/seats``, so a post that fits with nobody signed up can pass Discord's limit once the
+    seats fill; the length is judged at that worst case.
+
+    Args:
+        message (FmMessageDraft): The announcement, as a draft holds it or as posted.
+
+    Returns:
+        int: The length of its rendering with each session's registered count equal to its seats.
+    """
+    full = [replace(fm, registered_users=[{"user_id": 0}] * fm.seats) for fm in message.fms]
+    return len(render_message(replace(message, fms=full)))
+
+
+def grouped(count: int) -> str:
+    """Write a count with a no-break space as thousands separator, as the copy shows a length.
+
+    Args:
+        count (int): The count.
+
+    Returns:
+        str: The count, such as ``2 345`` with a no-break space.
+    """
+    return f"{count:,}".replace(",", "\N{NO-BREAK SPACE}")
 
 
 def announcement_header(guild: Guild) -> str:

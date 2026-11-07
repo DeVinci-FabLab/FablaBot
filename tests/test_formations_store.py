@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 import sqlite3
 from typing import Any
@@ -15,9 +16,11 @@ from fablabot import db
 from fablabot.cogs import formation_management
 from fablabot.cogs.formation_management import FormationManagement
 from fablabot.helpers.constants import PARIS_TZ, ErrorMessages
+from fablabot.helpers.formation.update import as_draft
 from fablabot.helpers.guild_access import GuildAccessPolicy
-from fablabot.models import FmMessageDraft, Formation, PublishedMessage
-from fablabot.services import formations
+from fablabot.helpers.reaction_log import ReactionLogManager
+from fablabot.models import FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
+from fablabot.services import attendance, formations
 
 GUILD_A = 111111111111111111
 GUILD_B = 222222222222222222
@@ -228,6 +231,160 @@ def test_a_failed_save_keeps_the_previous_message() -> None:
         formations.save_draft(GUILD_A, broken)
 
     assert formations.get_draft(GUILD_A) == draft
+
+
+def test_an_update_writes_the_announcement_and_the_draft_together() -> None:
+    """A draft write that fails leaves the announcement as it was; with both writes sound, both are stored."""
+    published = PublishedMessage(message_id=FIRST, channel_id=7, message=message(full_formation("🅰"), intro="Avant"))
+    elsewhere = PublishedMessage(message_id=SECOND, channel_id=8, message=message(full_formation("🅱"), intro="Ailleurs"))
+    draft = message(full_formation("🅰"), intro="Avant")
+    formations.save_published(GUILD_A, published)
+    formations.save_published(GUILD_B, elsewhere)
+    formations.save_draft(GUILD_A, draft)
+    updated = PublishedMessage(message_id=FIRST, channel_id=7, message=message(full_formation("🅰"), intro="Après"))
+    broken = message(full_formation("🅰"))
+    broken.fms[0].registered_users[1]["user_id"] = None
+
+    with pytest.raises(sqlite3.IntegrityError):
+        formations.save_update(GUILD_A, updated, broken, moves={})
+
+    assert formations.current_published(GUILD_A) == published
+    assert formations.get_draft(GUILD_A) == draft
+
+    formations.save_update(GUILD_A, updated, message(full_formation("🅰"), intro="Après"), moves={})
+
+    assert formations.current_published(GUILD_A) == updated
+    assert (formations.get_draft(GUILD_A) or message()).intro == "Après"
+    assert formations.current_published(GUILD_B) == elsewhere
+
+
+def _four(message_id: int, guild_id: int) -> PublishedMessage:
+    """A published message of four sessions, each with its own emoji, stored under the server."""
+    emojis = ("🅰", "🅱", "🇨", "🇩")
+    published = PublishedMessage(message_id, 7, message(*(full_formation(emoji) for emoji in emojis)))
+    formations.save_published(guild_id, published)
+    return published
+
+
+def _checked(guild_id: int, message_id: int, *places: int) -> dict[int, int]:
+    """Open a check at each place of a message and return the check's ID by place."""
+    start = datetime(2026, 12, 1, 18, 30, tzinfo=PARIS_TZ)
+    return {
+        place: attendance.open_appel(
+            guild_id, message_id, place, trainer_id=place + 1, starts_at=start, ends_at=start + timedelta(hours=1)
+        )
+        for place in places
+    }
+
+
+def _summarised(guild_id: int, message_id: int, *places: int) -> None:
+    """Keep an anonymous summary at each place of a message, named after the place."""
+    with db.transaction() as conn:
+        for place in places:
+            conn.execute(
+                "INSERT INTO training_summary VALUES (?, ?, ?, ?, '2026-12-01T18:30+01:00', 4, 0, 0, NULL, NULL, 'not_asked')",
+                (guild_id, message_id, place, f"summary {place}"),
+            )
+
+
+def _checks_by_place(guild_id: int, message_id: int) -> dict[int, int]:
+    """The check's ID at each place of a message."""
+    rows = db.connection().execute(
+        "SELECT a.position, a.id FROM appel a JOIN fm_message m ON m.id = a.fm_message_id "
+        "WHERE m.guild_id = ? AND m.message_id = ?",
+        (guild_id, message_id),
+    )
+    return {row["position"]: row["id"] for row in rows}
+
+
+def _summaries_by_place(guild_id: int, message_id: int) -> dict[int, str]:
+    """The name of the summary at each place of a message."""
+    rows = db.connection().execute(
+        "SELECT position, name FROM training_summary WHERE guild_id = ? AND message_id = ?", (guild_id, message_id)
+    )
+    return {row["position"]: row["name"] for row in rows}
+
+
+def _without(published: PublishedMessage, *emojis: str) -> PublishedMessage:
+    """The published message with the sessions wearing these emojis left out."""
+    kept = [fm for fm in published.message.fms if fm.emoji not in emojis]
+    return PublishedMessage(published.message_id, published.channel_id, replace(published.message, fms=kept))
+
+
+def test_moving_places_keeps_each_check_and_summary_with_its_training() -> None:
+    """With the session at place 1 gone, the checks at 2 and 3 and the summary at 3 follow their trainings to 1 and 2."""
+    published = _four(FIRST, GUILD_A)
+    checks = _checked(GUILD_A, FIRST, 2, 3)
+    _summarised(GUILD_A, FIRST, 3)
+    after = _without(published, "🅱")
+
+    formations.save_update(GUILD_A, after, as_draft(after.message), moves={2: 1, 3: 2})
+
+    assert _checks_by_place(GUILD_A, FIRST) == {1: checks[2], 2: checks[3]}
+    assert _summaries_by_place(GUILD_A, FIRST) == {2: "summary 3"}
+    assert [fm.emoji for fm in (formations.current_published(GUILD_A) or published).message.fms] == ["🅰", "🇨", "🇩"]
+
+
+def test_moving_places_on_one_server_leaves_another_alone() -> None:
+    """The same places on another server, and on another message of the same server, keep their checks and summaries."""
+    published = _four(FIRST, GUILD_A)
+    _four(SECOND, GUILD_A)
+    _four(FIRST, GUILD_B)
+    checks_a = _checked(GUILD_A, FIRST, 2, 3)
+    other_message = _checked(GUILD_A, SECOND, 2, 3)
+    other_server = _checked(GUILD_B, FIRST, 2, 3)
+    for guild_id, message_id in ((GUILD_A, FIRST), (GUILD_A, SECOND), (GUILD_B, FIRST)):
+        _summarised(guild_id, message_id, 2, 3)
+    after = _without(published, "🅱")
+
+    formations.save_update(GUILD_A, after, as_draft(after.message), moves={2: 1, 3: 2})
+
+    assert _checks_by_place(GUILD_A, FIRST) == {1: checks_a[2], 2: checks_a[3]}
+    assert _summaries_by_place(GUILD_A, FIRST) == {1: "summary 2", 2: "summary 3"}
+    assert _checks_by_place(GUILD_A, SECOND) == other_message
+    assert _summaries_by_place(GUILD_A, SECOND) == {2: "summary 2", 3: "summary 3"}
+    assert _checks_by_place(GUILD_B, FIRST) == other_server
+    assert _summaries_by_place(GUILD_B, FIRST) == {2: "summary 2", 3: "summary 3"}
+
+
+def test_a_failed_move_changes_nothing() -> None:
+    """A move that meets a check already at its new place fails whole: the announcement, draft, checks and summaries stay."""
+    published = _four(FIRST, GUILD_A)
+    draft = message(*(full_formation(emoji) for emoji in ("🅰", "🅱", "🇨", "🇩")))
+    formations.save_draft(GUILD_A, draft)
+    checks = _checked(GUILD_A, FIRST, 1, 2)
+    _summarised(GUILD_A, FIRST, 2)
+    after = _without(published, "🅰")
+
+    with pytest.raises(sqlite3.IntegrityError):
+        formations.save_update(GUILD_A, after, as_draft(after.message), moves={2: 1})
+
+    assert formations.current_published(GUILD_A) == published
+    assert formations.get_draft(GUILD_A) == draft
+    assert _checks_by_place(GUILD_A, FIRST) == checks
+    assert _summaries_by_place(GUILD_A, FIRST) == {2: "summary 2"}
+
+
+def test_reacted_emojis_are_read_for_one_message_of_one_server() -> None:
+    """The emojis members reacted with on a message are listed for that message of that server only, formation scope only."""
+    logs = ReactionLogManager("formation", lambda now: now - timedelta(days=30), MagicMock())
+    other_scope = ReactionLogManager("message", lambda now: now - timedelta(days=30), MagicMock())
+    stamp = datetime.now(PARIS_TZ).isoformat(timespec="seconds")
+
+    def event(message_id: int, emoji: str, action: ReactionAction = ReactionAction.ADD) -> ReactionEvent:
+        return ReactionEvent(message_id=message_id, user_id=5, user_name="a", emoji=emoji, action=action, ts_iso=stamp)
+
+    logs.append(GUILD_A, event(FIRST, "💜"))
+    logs.append(GUILD_A, event(FIRST, "💜"))
+    logs.append(GUILD_A, event(FIRST, "💙", ReactionAction.REMOVE))
+    logs.append(GUILD_A, event(SECOND, "💚"))
+    logs.append(GUILD_B, event(FIRST, "🧡"))
+    other_scope.append(GUILD_A, event(FIRST, "🟥"))
+
+    assert formations.reacted_emojis(GUILD_A, FIRST) == {"💜", "💙"}
+    assert formations.reacted_emojis(GUILD_A, SECOND) == {"💚"}
+    assert formations.reacted_emojis(GUILD_B, FIRST) == {"🧡"}
+    assert formations.reacted_emojis(GUILD_B, SECOND) == set()
 
 
 @pytest.fixture

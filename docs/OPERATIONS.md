@@ -342,7 +342,11 @@ Order matters: the allow-list comes before the invite, otherwise the bot joins a
 
    The permission integer `343865945297` grants: Manage Roles, Manage Channels, View Audit Log, Create
    Invite, View Channels, Send Messages, Manage Messages, Embed Links, Attach Files, Read Message History,
-   Add Reactions, Create Private Threads and Send Messages in Threads. It does not include Administrator. A bot
+   Add Reactions, Create Private Threads and Send Messages in Threads. It does not include Administrator. Manage
+   Messages is also what lets an announcement update clear the reactions of a session removed from it: without it,
+   the bot removes its own reaction, the members' reactions stay visible but count for nothing, and the answer to
+   the update says so. When the bot cannot take its own reaction off either, or cannot read the message, the answer
+   names the reactions to remove by hand in the announcement's channel. A bot
    invited before `/user invite` existed lacks Create Invite: give it to the bot's role in Server Settings, Roles.
    To have invites go through `/user invite`
    only, take Create Invite off `@everyone` and every other role: the bot's own role keeps it. Members with
@@ -568,6 +572,22 @@ message`, and a member whose reaction is logged gets their place then, with thei
 may not read (403): an admin can repair the right, and the log gets one line per tick until then. A post that was
 deleted or a channel that is gone (`is gone for guild` in the log) is not asked for again at the tick, unless a
 failed write left the server marked: the next reaction runs the update. A restart forgets the retry, as above.
+
+A restart does not leave a stored update unposted: at start, once the bot is ready, it rebuilds the posted text of each
+served server's announcement that still has sessions to come, whatever the retry flags said before (the log shows
+`Rebuilt the announcements of N servers at start`). A failure there is logged and left to the 5-minute tick.
+
+## Private messages of an announcement update
+
+An update of the published announcement sends its private messages once, after it is saved and the message is
+rebuilt: to the members of a session whose start or trainer changed, to those of a removed session, to the trainer of
+an added session or the new trainer of a kept one, and to a member a lost seat puts on the waiting list. They are not
+stored. If the bot restarts while an update is sending them, the members not yet reached are never told, and nothing
+sends them again: the announcement itself is right, and the Respo can tell them by hand. The update's line in the
+bot's log gives the counts (`members_told` and `dms_refused`, the members whose private messages are closed), and the
+answer to the staff shows the same two numbers, and a third for the members the bot could not find on the server. When the
+stored announcement cannot be read back, or the message could not be rebuilt, the answer says which members were not
+told yet instead of counting them as zero, and the Respo tells them by hand.
 
 ## Server check at start
 

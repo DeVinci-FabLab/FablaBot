@@ -8,6 +8,7 @@ from fablabot import db
 from fablabot.models.formation import FmMessageDraft, Formation, PublishedMessage
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from datetime import datetime
     import sqlite3
 
@@ -166,6 +167,56 @@ def save_published(guild_id: int, published: PublishedMessage) -> None:
         write_message(conn, guild_id, published.message_id, published.channel_id, published.message)
 
 
+def _move_places(conn: sqlite3.Connection, guild_id: int, message_id: int, moves: Mapping[int, int]) -> None:
+    """Move the checks and the anonymous summaries of one published message to their trainings' new places.
+
+    SQLite checks a unique key row by row while an UPDATE runs, so a plain shift fails or passes by the order the rows come
+    in. Each moved row goes first to a negative place, then all of them come back positive: no row meets another.
+
+    Args:
+        conn (sqlite3.Connection): The connection, inside a transaction.
+        guild_id (int): The ID of the guild.
+        message_id (int): The published message whose places move.
+        moves (Mapping[int, int]): The new place of each old place that changes.
+    """
+    if not moves:
+        return
+    owner = (guild_id, message_id)
+    conn.executemany(
+        "UPDATE appel SET position = -1 - ? WHERE position = ? "
+        "AND fm_message_id = (SELECT id FROM fm_message WHERE guild_id = ? AND message_id = ?)",
+        [(new, old, *owner) for old, new in moves.items()],
+    )
+    conn.execute(
+        "UPDATE appel SET position = -position - 1 WHERE position < 0 "
+        "AND fm_message_id = (SELECT id FROM fm_message WHERE guild_id = ? AND message_id = ?)",
+        owner,
+    )
+    conn.executemany(
+        "UPDATE training_summary SET position = -1 - ? WHERE position = ? AND guild_id = ? AND message_id = ?",
+        [(new, old, *owner) for old, new in moves.items()],
+    )
+    conn.execute(
+        "UPDATE training_summary SET position = -position - 1 WHERE position < 0 AND guild_id = ? AND message_id = ?", owner
+    )
+
+
+def save_update(guild_id: int, published: PublishedMessage, draft: FmMessageDraft, *, moves: Mapping[int, int]) -> None:
+    """Store an updated announcement and the draft that now says the same, with the places that moved: all or nothing.
+
+    Args:
+        guild_id (int): The ID of the guild.
+        published (PublishedMessage): The published message as updated, under its own ID.
+        draft (FmMessageDraft): The draft to write back.
+        moves (Mapping[int, int]): The new place of each training of the message whose place changed, old to new: the
+            checks and the anonymous summaries of the message follow their trainings.
+    """
+    with db.transaction() as conn:
+        write_message(conn, guild_id, published.message_id, published.channel_id, published.message)
+        write_message(conn, guild_id, None, None, draft)
+        _move_places(conn, guild_id, published.message_id, moves)
+
+
 def guilds_with_published() -> list[int]:
     """List the guilds that have published a message.
 
@@ -222,3 +273,20 @@ def reissued_positions(guild_id: int, message_id: int) -> set[int]:
         (guild_id, message_id),
     )
     return {row["position"] for row in rows}
+
+
+def reacted_emojis(guild_id: int, message_id: int) -> set[str]:
+    """List the emojis members reacted with on a published message, from the reaction log.
+
+    Args:
+        guild_id (int): The ID of the guild.
+        message_id (int): The ID of the published message.
+
+    Returns:
+        set[str]: Every emoji the log holds an add or a removal for on that message, whatever session wore it.
+    """
+    rows = db.connection().execute(
+        "SELECT DISTINCT emoji FROM reaction_event WHERE scope = 'formation' AND guild_id = ? AND message_id = ?",
+        (guild_id, message_id),
+    )
+    return {row["emoji"] for row in rows}

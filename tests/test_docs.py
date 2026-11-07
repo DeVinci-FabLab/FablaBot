@@ -979,12 +979,129 @@ def test_user_guide_says_publier_warns_before_a_second_announcement() -> None:
     guide = _section(_read("docs/USERGUIDE.md"), "### The draft")
     for detail in (
         "still has sessions to come and the draft has changed since",
-        "first warns that posting creates a new announcement",
+        "first warns, naming the channel of the announcement, with three buttons",
         "the sign-ups on the old one stop counting",
-        "**Publier quand même** goes on to the channel question",
+        "**Nouvelle annonce** goes on to the channel question",
         "**Annuler** posts nothing and changes nothing",
         "A new week's draft, once every session of the last announcement has started, gets no warning",
         "`/fm publish` does not ask: while the published announcement still has sessions to come, "
         "it posts nothing and points to `/fm brouillon`",
     ):
         assert detail in guide, detail
+
+
+def test_user_guide_says_who_an_update_tells() -> None:
+    """The draft section says who an update tells by private message and when, and that a seats change tells nobody."""
+    guide = " ".join(_section(_read("docs/USERGUIDE.md"), "### The draft").split())
+    for detail in (
+        "told the session now has N places and their position on the waiting list, not that the session was full",
+        "every registered and waiting member of a session whose start or trainer changed, naming only what changed",
+        "every registered and waiting member of a session that was removed, saying it no longer counts",
+        "the trainer of an added session and the new trainer of a kept one",
+        "A change of seats, of name, of description or of any other value tells nobody, unless a seat moves",
+        "counts once in the answer",
+        "counted apart and the others are told all the same",
+        "how many members were told by private message and how many private messages Discord refused",
+    ):
+        assert detail in guide, detail
+    operations = " ".join(_section(_read("docs/OPERATIONS.md"), "## Private messages of an announcement update").split())
+    for detail in (
+        "They are not stored",
+        "the members not yet reached are never told",
+        "`members_told` and `dms_refused`",
+        "could not find on the server",
+        "the answer says which members were not told yet",
+    ):
+        assert detail in operations, detail
+
+
+def test_user_guide_says_an_update_keeps_the_sign_ups_and_their_order() -> None:
+    """The draft section says what Confirmer la mise à jour keeps, what a seat change does, and when it refuses."""
+    guide = " ".join(_section(_read("docs/USERGUIDE.md"), "### The draft").split())
+    for detail in (
+        "its **Confirmer la mise à jour** button applies it",
+        "rewrites the published announcement in place: the same message in the same channel, so its reactions stay",
+        "the sign-ups keep their place and their order of arrival",
+        "the last to arrive go to the waiting list",
+        "the first on the waiting list take the places",
+        "A new start gives that session its hour-before reminder again, sent once at the new time",
+        "at the next five-minute check even when the new start is already less than an hour away",
+        "A new trainer alone does not remind the participants and the Respo again",
+        "the new trainer is sent it at once and nobody else",
+        "it goes out to everyone at the hour, the new trainer included",
+        "that the edit will be retried within 5 minutes",
+        "the draft is then rewritten to say what the announcement says",
+        "changes nothing, with a private message saying why, when the draft or the announcement changed since the summary",
+        "or when the published message no longer exists in its channel",
+    ):
+        assert detail in guide, detail
+    assert "does nothing yet" not in guide
+
+
+def test_user_guide_says_how_a_session_is_added_to_the_published_announcement() -> None:
+    """The draft section says where an added session goes, which emoji it gets and why, and the limit of 20."""
+    guide = " ".join(_section(_read("docs/USERGUIDE.md"), "### The draft").split())
+    for detail in (
+        "it goes last in the announcement, after the others, with no sign-up",
+        "The bot adds the session's reaction on the message once it is rewritten",
+        "no member ever reacted with it on this message",
+        "also read the reactions on the posted message itself",
+        "a published message that is gone from its channel (publish a new announcement) "
+        "or that Discord does not let the bot read",
+        "it gets the first free emoji of the bot's list",
+        "the draft then takes that emoji back with the rest of the announcement",
+        "An announcement holds at most 20 sessions",
+        "or when no free emoji is left",
+    ):
+        assert detail in guide, detail
+
+
+def test_user_guide_says_what_mettre_a_jour_l_annonce_shows_and_refuses() -> None:
+    """The draft section says what the update summary lists, the sessions left as they are, the refusals and the length."""
+    guide = _section(_read("docs/USERGUIDE.md"), "### The draft")
+    for detail in (
+        "**Mettre à jour l'annonce** changes nothing by itself",
+        "a session that has started never stops **Mettre à jour l'annonce**, "
+        "while **Nouvelle annonce** still refuses a draft that holds one",
+        "A session is recognised by its emoji",
+        "A session that has started, or starts within 5 minutes, is left as it is whatever the draft says",
+        "a draft that already says what the announcement says",
+        "a result past 2 000 characters",
+        "counted with every seat taken",
+    ):
+        assert detail in guide, detail
+
+
+def test_operations_says_a_restart_rebuilds_the_posted_announcements() -> None:
+    """The operations guide says the start rebuilds the posted text of the announcements that still have sessions to come."""
+    text = " ".join(_read("docs/OPERATIONS.md").split())
+    for detail in (
+        "at start, once the bot is ready, it rebuilds the posted text of each served server's announcement "
+        "that still has sessions to come",
+        "`Rebuilt the announcements of N servers at start`",
+    ):
+        assert detail in text, detail
+
+
+def test_operator_guide_says_an_update_uses_manage_messages_to_clear_reactions() -> None:
+    """The invite section says what Manage Messages does for a removed session, and what happens without it."""
+    text = " ".join(_read("docs/OPERATIONS.md").split())
+    assert "Manage Messages is also what lets an announcement update clear the reactions of a session removed from it" in text
+    assert "without it, the bot removes its own reaction, the members' reactions stay visible but count for nothing" in text
+    assert "the answer names the reactions to remove by hand in the announcement's channel" in text
+
+
+def test_user_guide_says_how_a_session_is_removed_from_the_published_announcement() -> None:
+    """The draft section says what the removal summary lists, what is cleared, what follows and what is never removed."""
+    guide = " ".join(_section(_read("docs/USERGUIDE.md"), "### The draft").split())
+    for detail in (
+        "the summary lists it with a 🗑️ line",
+        "clears its reactions from the message, those of the members included",
+        "keep their sign-ups, their attendance check and their anonymous counts, which follow their training",
+        "is never removed, whatever the draft says",
+        "the bot removes its own reaction instead and the answer names the emoji",
+        "the answer names the reactions to remove by hand in the announcement's channel",
+        "a draft that would leave the announcement with no session at all",
+    ):
+        assert detail in guide, detail
+    assert "for now it also refuses" not in guide

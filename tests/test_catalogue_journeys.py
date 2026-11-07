@@ -809,14 +809,20 @@ def _grouped(length: int) -> str:
     return f"{length:,}".replace(",", THIN)
 
 
+def _every_seat_taken(draft: FmMessageDraft) -> int:
+    """Count the announcement with every seat taken, by rendering a copy of the draft whose sessions are all full."""
+    full = [replace(fm, registered_users=[{"user_id": n} for n in range(fm.seats)]) for fm in draft.fms]
+    return len(render_message(replace(draft, fms=full)))
+
+
 def _too_long(lab: Lab, *, extra: int = 1) -> FmMessageDraft:
-    """Store a draft whose announcement is ``extra`` characters past Discord's limit and return it."""
-    draft = _stage(lab, [_session("🧡", "Soudure", days=2, trainer=lab.plain)])
+    """Store a draft whose announcement, every seat taken, is ``extra`` characters past Discord's limit and return it."""
+    draft = _stage(lab, [_session("🧡", "Soudure", days=2, trainer=lab.plain, seats=10)])
     draft.fms[0].description = "x"
-    base = len(render_message(draft))
+    base = _every_seat_taken(draft)
     draft.fms[0].description = "x" * (1 + 2000 + extra - base)
     formations.save_draft(GUILD_ID, draft)
-    assert len(render_message(draft)) == 2000 + extra
+    assert _every_seat_taken(draft) == 2000 + extra
     return draft
 
 
@@ -840,8 +846,7 @@ async def test_fm_brouillon_shows_the_draft_sorted_by_start(lab: Lab) -> None:
             for fm in ordered
         ],
         "",
-        f"-# Triées par date · rôle notifié : <@&{lab.notified.id}> · "
-        f"annonce : {len(render_message(draft))} / 2 000 caractères",
+        f"-# Triées par date · rôle notifié : <@&{lab.notified.id}> · annonce : {_every_seat_taken(draft)} / 2 000 caractères",
     ]
     assert not any(b["disabled"] for b in _buttons(result.response).values())
 
@@ -865,13 +870,13 @@ async def test_the_brouillon_counts_the_announcement_and_warns_past_2000(lab: La
     fine = _stage(lab, _three(lab))
     shown = await lab.brouillon(lab.respo)
     assert not any(line.startswith("⚠️") for line in _embed_lines(shown.response))
-    assert _embed_lines(shown.response)[-1].endswith(f"annonce : {len(render_message(fine))} / 2 000 caractères")
+    assert _embed_lines(shown.response)[-1].endswith(f"annonce : {_every_seat_taken(fine)} / 2 000 caractères")
 
-    long = _too_long(lab, extra=345)
+    _too_long(lab, extra=345)
     shown = await lab.brouillon(lab.respo)
 
     lines = _embed_lines(shown.response)
-    length = _grouped(len(render_message(long)))
+    length = _grouped(2345)
     assert length == f"2{THIN}345"
     assert lines[-2] == f"⚠️ **L'annonce fait {length} caractères**, {TOO_LONG}"
     assert lines[-1].endswith(f"annonce : {length} / 2 000 caractères")
@@ -986,7 +991,7 @@ async def test_apercu_of_a_too_long_announcement_shows_the_warning(lab: Lab) -> 
     preview = await lab.respo.click(listing.response, custom_id="fmd:preview")
 
     assert preview.ephemeral
-    length = _grouped(len(render_message(draft)))
+    length = _grouped(_every_seat_taken(draft))
     assert preview.response.content == (
         f"L'annonce fait {length} caractères, Discord en accepte 2 000 : elle ne peut pas être publiée ainsi."
     )
@@ -1011,7 +1016,7 @@ async def test_publier_starts_on_the_last_announcement_channel(lab: Lab) -> None
     formations.save_published(GUILD_ID, PublishedMessage(message_id=5000, channel_id=lab.announce.id, message=published))
     listing = await lab.brouillon(lab.respo)
     warning = await lab.respo.click(listing.response, custom_id="fmd:publish")
-    assert warning.response.content == REPUBLISH_WARNING
+    assert (warning.response.content or "").startswith(REPUBLISH_WARNING)
     preset = await lab.respo.click(warning.response, custom_id="fmd:pub-ok")
 
     (menu,) = (c for row in preset.response.components for c in row["components"] if c["type"] == 8)
@@ -1021,11 +1026,8 @@ async def test_publier_starts_on_the_last_announcement_channel(lab: Lab) -> None
     assert not go["disabled"]
 
 
-REPUBLISH_WARNING = (
-    "⚠️ Une annonce de formations est déjà publiée. Publier crée une nouvelle annonce : "
-    "les inscriptions de l'ancienne ne compteront plus. Rien n'a encore été publié."
-)
-"""The warning Publier gives when the server already has an announcement and the draft changed since."""
+REPUBLISH_WARNING = "⚠️ Une annonce de formations est déjà publiée dans <#"
+"""The start of the warning Publier gives when the server already has an announcement and the draft changed since."""
 
 
 async def _warned(lab: Lab) -> Any:
@@ -1041,7 +1043,7 @@ async def _published_via_publier(lab: Lab, channel: Any) -> Any:
     """Open the brouillon, click Publier, choose the channel and click Publier again; return the last result."""
     listing = await lab.brouillon(lab.respo)
     asked = await lab.respo.click(listing.response, custom_id="fmd:publish")
-    if asked.response.content == REPUBLISH_WARNING:
+    if (asked.response.content or "").startswith(REPUBLISH_WARNING):
         asked = await lab.respo.click(asked.response, custom_id="fmd:pub-ok")
     chosen = await lab.respo.select(asked.response, [channel], custom_id="fmd:pub-ch")
     return await lab.respo.click(chosen.response, custom_id=f"fmd:pub-go:{channel.id}")
@@ -1090,7 +1092,7 @@ async def _asked_where(lab: Lab, channel: Any, who: Any = None) -> Any:
     who = who or lab.respo
     listing = await lab.brouillon(who)
     asked = await who.click(listing.response, custom_id="fmd:publish")
-    if asked.response.content == REPUBLISH_WARNING:
+    if (asked.response.content or "").startswith(REPUBLISH_WARNING):
         asked = await who.click(asked.response, custom_id="fmd:pub-ok")
     return (await who.select(asked.response, [channel], custom_id="fmd:pub-ch")).response
 
@@ -1199,16 +1201,16 @@ async def test_publier_warns_when_an_announcement_is_published_and_the_draft_cha
     """With an announcement published and the draft changed since, Publier warns first and posts nothing."""
     first = await _warned(lab)
 
-    assert first.response.content == REPUBLISH_WARNING
+    assert (first.response.content or "").startswith(REPUBLISH_WARNING)
     assert not first.response.embeds
     buttons = _buttons(first.response)
-    assert list(buttons) == ["Publier quand même", "Annuler"]
-    assert buttons["Publier quand même"]["style"] == discord.ButtonStyle.danger.value
+    assert list(buttons) == ["🔄 Mettre à jour l'annonce", "📣 Nouvelle annonce", "Annuler"]
+    assert buttons["📣 Nouvelle annonce"]["style"] == discord.ButtonStyle.danger.value
     assert buttons["Annuler"]["style"] == discord.ButtonStyle.secondary.value
     assert len(lab.announce.history()) == 1
 
 
-async def test_publier_quand_meme_goes_on_to_the_channel_and_posts_again(lab: Lab) -> None:
+async def test_nouvelle_annonce_goes_on_to_the_channel_and_posts_again(lab: Lab) -> None:
     """Confirming the warning asks for the channel as usual, and Publier then posts a second announcement."""
     warning = await _warned(lab)
     before = formations.current_published(GUILD_ID)
@@ -1365,7 +1367,7 @@ def _bad_draft(lab: Lab, case: str) -> str:
         _stage(lab, [_session("🧡", "Soudure", days=-0.1, trainer=lab.plain), *_three(lab)[1:]])
     else:
         long = _too_long(lab, extra=1)
-        return f"L'annonce fait {_grouped(len(render_message(long)))} caractères, {TOO_LONG} Rien n'a été publié."
+        return f"L'annonce fait {_grouped(_every_seat_taken(long))} caractères, {TOO_LONG} Rien n'a été publié."
     refusal = _BAD_DRAFTS[case]
     assert refusal is not None
     return refusal
@@ -1406,14 +1408,14 @@ def test_publish_refusal_orders_its_checks_and_says_nothing_of_a_good_draft() ->
 
 
 async def test_an_announcement_of_exactly_2000_characters_publishes(lab: Lab) -> None:
-    """Discord accepts 2 000 characters, so an announcement of exactly that length is posted."""
+    """Counted with every seat taken, an announcement of exactly 2 000 characters is posted."""
     _too_long(lab, extra=0)
 
     done = await _published_via_publier(lab, lab.announce)
 
     posted = lab.announce.last_message
     assert posted is not None
-    assert len(posted.content) == 2000
+    assert 1990 < len(posted.content) <= 2000
     assert not done.response.content.startswith("L'annonce fait")
 
 

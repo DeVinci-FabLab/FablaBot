@@ -13,6 +13,8 @@ import fablabot.cogs as cogs_package
 from fablabot.cogs import formation_management, help_management, message_management
 from fablabot.helpers.constants import APPEL_EDIT_WINDOW, PARIS_TZ, SESSION_EMOJIS, RoleNames
 from fablabot.helpers.formation.attendance import alert_message, appel_content, appel_view, log_line, respo_messages
+from fablabot.helpers.formation.notifications import send_cancel_dm, send_change_dm, send_demotion_dm, send_trainer_dm
+from fablabot.helpers.formation.update import UpdatePlan, as_draft, plan_update
 from fablabot.helpers.help_page import leaf_commands
 from fablabot.helpers.info_page import Facts, build_info
 from fablabot.helpers.server_check import Problem
@@ -21,11 +23,13 @@ from fablabot.models.formation import FmMessageDraft, Formation
 from fablabot.ui.catalogue import TemplateForm, deletion_message
 from fablabot.ui.draft import (
     DraftTextForm,
+    done_message,
     draft_message,
     publish_message,
     removal_message,
     republish_message,
     sessions_message,
+    update_message,
 )
 from fablabot.ui.formation import StartFmModal
 from fablabot.ui.message import SuggestionView
@@ -355,9 +359,130 @@ async def draft_publish() -> Screen:
 async def draft_republish() -> Screen:
     """The warning that Publier gives when an announcement is already published and the draft changed since."""
     capture = Capture()
-    content, view = republish_message()
+    content, view = republish_message(ANNOUNCE_CHANNEL)
     await capture.interaction().response.send_message(content, view=view, ephemeral=True)
     return Screen(capture.sent, dict(_DRAFT_NAMES))
+
+
+_UPDATE_NOW = datetime(2026, 11, 9, 12, 0, tzinfo=PARIS_TZ)
+
+
+def _signed(count: int) -> list[dict[str, int]]:
+    """The sign-ups of a session: ``count`` members, as many as the summary says."""
+    return [{"user_id": 100 + n} for n in range(count)]
+
+
+def _update_plan() -> UpdatePlan:
+    """The plan of an update: a start moved, seats cut, a session added and one removed, the started session left as it is."""
+    held = Formation(
+        emoji="🧡", name="SRG + Imp 3D", trainer_mention=f"<@{TRAINER}>", start_iso="2026-11-09T10:30:00+01:00",
+        duration="45 min", seats=5, registered_users=_signed(3), notified_at_start=True,
+    )  # fmt: skip
+    moved = Formation(
+        emoji="💛", name="SRG + Imp 3D", trainer_mention=f"<@{TRAINER}>", start_iso="2026-11-10T18:00:00+01:00",
+        duration="45 min", seats=5, registered_users=_signed(4), waitlisted_users=_signed(1),
+    )  # fmt: skip
+    cut = Formation(
+        emoji="💚", name="Formation GitHub", trainer_mention="<@3333>", start_iso="2026-11-12T11:45:00+01:00",
+        duration="45 min", seats=10, registered_users=_signed(8),
+    )  # fmt: skip
+    dropped = Formation(
+        emoji="💙", name="Impression résine", trainer_mention="<@4444>", start_iso="2026-11-12T13:45:00+01:00",
+        duration="45 min", seats=5, registered_users=_signed(3), waitlisted_users=_signed(1),
+    )  # fmt: skip
+    published = FmMessageDraft(
+        header="# [FORMATIONS]",
+        role_id=ROLE_FORMATIONS,
+        intro=_DRAFT_INTRO,
+        fms=[held, moved, cut, dropped],
+        end="À très vite !",
+    )
+    draft = as_draft(published)
+    draft.fms[1] = replace(moved, start_iso="2026-11-11T18:00:00+01:00", registered_users=[], waitlisted_users=[])
+    draft.fms[2] = replace(cut, seats=6, registered_users=[])
+    draft.fms.pop()
+    draft.fms.append(
+        Formation(emoji="💜", name="Découpe laser", trainer_mention="<@2222>", start_iso="2026-11-13T14:00:00+01:00",
+        duration="45 min", seats=5)
+    )  # fmt: skip
+    plan = plan_update(published, draft, now=_UPDATE_NOW, retired=frozenset())
+    assert isinstance(plan, UpdatePlan), plan
+    return plan
+
+
+async def update_summary() -> Screen:
+    """The summary of an update: a start moved, seats cut, a session added and one removed, the started one left as it is."""
+    embeds, view = update_message(_update_plan(), ANNOUNCE_CHANNEL, 5000)
+    capture = Capture()
+    await capture.interaction().response.send_message(None, embeds=embeds, view=view, ephemeral=True)
+    return Screen(capture.sent, dict(_DRAFT_NAMES))
+
+
+async def update_done() -> Screen:
+    """The answer to a confirmed update: how many sessions changed, the reactions Discord refused to clear, the draft button."""
+    content, view = done_message(_update_plan(), ANNOUNCE_CHANNEL, uncleared=("💙",), told=12)
+    capture = Capture()
+    await capture.interaction().response.send_message(content, view=view, ephemeral=True)
+    return Screen(capture.sent, dict(_DRAFT_NAMES))
+
+
+async def _update_dm(send: Callable[[Any, int], Coroutine[Any, Any, str]], who: str = "hugo3d") -> Screen:
+    """Show the private message an update sends to a member (hugo3d unless told), as the bot writes it, Camille as contact."""
+    texts: list[str] = []
+
+    async def take(_logger: object, _guild: object, _member: object, message: str, **_options: object) -> MagicMock:
+        texts.append(message)
+        return MagicMock()
+
+    member = MagicMock(display_name=who)
+    target = "fablabot.helpers.formation.notifications"
+    with (
+        patch(f"{target}.get_or_fetch_member", AsyncMock(return_value=member)),
+        patch(f"{target}.send_dm_to_member", take),
+    ):
+        assert await send(MagicMock(), 3333) == "sent"
+    capture = Capture()
+    await capture.interaction().response.send_message(texts[0])
+    return Screen(capture.sent, dict(_DRAFT_NAMES))
+
+
+def _dm_session(name: str, trainer: int, start_iso: str, seats: int = 5) -> Formation:
+    """A session as the private messages of an update name it."""
+    return Formation(
+        emoji="💛", name=name, trainer_mention=f"<@{trainer}>", start_iso=start_iso, duration="45 min", seats=seats
+    )
+
+
+_CONTACTS = "<@4444>"
+
+
+async def update_dm_change() -> Screen:
+    """The message to a registered member of a session whose start moved by a day, the trainer unchanged."""
+    before = _dm_session("SRG + Imp 3D", TRAINER, "2026-11-10T18:00:00+01:00")
+    after = replace(before, start_iso="2026-11-11T18:00:00+01:00")
+    return await _update_dm(lambda guild, uid: send_change_dm(guild, uid, before, after, waitlisted=False, contacts=_CONTACTS))
+
+
+async def update_dm_cancel() -> Screen:
+    """The message to a registered member of a session the update removed."""
+    session = _dm_session("Impression résine", 4444, "2026-11-12T13:45:00+01:00")
+    return await _update_dm(lambda guild, uid: send_cancel_dm(guild, uid, session, waitlisted=False, contacts=_CONTACTS))
+
+
+async def update_dm_waitlist() -> Screen:
+    """The message to the first member put on the waitlist by fewer places."""
+    session = _dm_session("Formation GitHub", 3333, "2026-11-11T11:45:00+01:00", seats=6)
+    return await _update_dm(lambda guild, uid: send_demotion_dm(guild, uid, session, 1, _CONTACTS))
+
+
+async def update_dm_trainer() -> Screen:
+    """The message to the trainer of a session the update added."""
+    session = _dm_session("Découpe laser", TRAINER, "2026-11-13T14:00:00+01:00")
+
+    async def tell(guild: Any, _uid: int) -> str:
+        return await send_trainer_dm(guild, session, ANNOUNCE_CHANNEL, _CONTACTS)
+
+    return await _update_dm(tell, who="lea.mkr")
 
 
 class _October(datetime):
@@ -600,6 +725,12 @@ SCREENS: dict[str, Callable[[], Coroutine[Any, Any, Screen]]] = {
     "draft-text-form": draft_text_form,
     "draft-publish": draft_publish,
     "draft-republish": draft_republish,
+    "update-summary": update_summary,
+    "update-done": update_done,
+    "update-dm-change": update_dm_change,
+    "update-dm-cancel": update_dm_cancel,
+    "update-dm-waitlist": update_dm_waitlist,
+    "update-dm-trainer": update_dm_trainer,
     "session-pick": session_pick,
     "session-form": session_form,
     "session-free-form": session_free_form,
