@@ -1080,6 +1080,7 @@ def test_operator_guide_says_an_update_uses_manage_messages_to_clear_reactions()
     text = " ".join(_read("docs/OPERATIONS.md").split())
     assert "Manage Messages is also what lets an announcement update clear the reactions of a session removed from it" in text
     assert "without it, the bot removes its own reaction, the members' reactions stay visible but count for nothing" in text
+    assert "the answer names the reactions to remove by hand in the announcement's channel" in text
 
 
 def test_user_guide_says_how_a_session_is_removed_from_the_published_announcement() -> None:
@@ -1091,6 +1092,7 @@ def test_user_guide_says_how_a_session_is_removed_from_the_published_announcemen
         "keep their sign-ups, their attendance check and their anonymous counts, which follow their training",
         "is never removed, whatever the draft says",
         "the bot removes its own reaction instead and the answer names the emoji",
+        "the answer names the reactions to remove by hand in the announcement's channel",
         "a draft that would leave the announcement with no session at all",
     ):
         assert detail in guide, detail

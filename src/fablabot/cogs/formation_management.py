@@ -733,7 +733,7 @@ class FormationManagement(commands.Cog):
             behind = guild.id in self._retry_guilds or guild.id in self._stale_guilds
             # Still under the lock: a second update confirmed meanwhile could give a removed emoji to a new session, whose
             # sign-ups the clear would then wipe.
-            uncleared = await self._clear_removed(guild, last, outcome) if isinstance(outcome, UpdatePlan) else ()
+            uncleared, left = await self._clear_removed(guild, last, outcome) if isinstance(outcome, UpdatePlan) else ((), ())
         if not isinstance(outcome, UpdatePlan):
             await self._refuse_update(interaction, *outcome, answered=True)
             return
@@ -753,6 +753,7 @@ class FormationManagement(commands.Cog):
             posted=not behind,
             unreacted=unreacted,
             uncleared=uncleared,
+            left=left,
             told=len(tally.told),
             dms_refused=tally.refused,
         )
@@ -778,7 +779,9 @@ class FormationManagement(commands.Cog):
             logger.exception(f"Guild {guild.id} could not read message {last.message_id} to {purpose}.")
             return None
 
-    async def _clear_removed(self, guild: Guild, last: PublishedMessage, plan: UpdatePlan) -> tuple[str, ...]:
+    async def _clear_removed(
+        self, guild: Guild, last: PublishedMessage, plan: UpdatePlan
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
         """Clear the reactions of each removed session from the posted message, so that nobody keeps a seat on it.
 
         Done under the lock, after the rebuild. Clearing a member's reaction needs Manage Messages: when Discord refuses,
@@ -791,15 +794,18 @@ class FormationManagement(commands.Cog):
             plan (UpdatePlan): The update that was done.
 
         Returns:
-            tuple[str, ...]: The emojis whose reactions could not be cleared.
+            tuple[tuple[str, ...], tuple[str, ...]]: The emojis whose members' reactions could not be cleared but whose
+                bot reaction was taken off, then the emojis the bot could not take anything off (the message could not be
+                read, or Discord refused its own removal too).
         """
         emojis = [step.before.emoji for step in plan.steps if step.kind == "removed" and step.before is not None]
         if not emojis:
-            return ()
+            return (), ()
         msg = await self._posted_message(guild, last, "clear the reactions")
         if msg is None:
-            return tuple(emojis)
+            return (), tuple(emojis)
         refused: list[str] = []
+        left: list[str] = []
         for emoji in emojis:
             try:
                 await msg.clear_reaction(emoji)
@@ -814,7 +820,9 @@ class FormationManagement(commands.Cog):
                     logger.exception(
                         f"Guild {guild.id} could not remove its own reaction {emoji!r} from message {last.message_id}."
                     )
-        return tuple(refused)
+                    refused.pop()
+                    left.append(emoji)
+        return tuple(refused), tuple(left)
 
     async def _react_to_added(self, guild: Guild, last: PublishedMessage, plan: UpdatePlan) -> tuple[str, ...]:
         """React with the emoji of each added session on the posted message, so that members can sign up from the first.

@@ -1419,6 +1419,45 @@ async def test_a_second_update_waits_for_the_reactions_of_the_first_to_be_cleare
     assert _reacted_by(lab, posted, "💚") == [_bot_id(lab), lab.codir.id]
 
 
+async def test_an_unreadable_posted_message_leaves_the_removed_reactions_for_the_staff_to_take_off(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the posted message cannot be read to clear the reactions, the answer says nothing was removed, not the bot's own."""
+    posted = await _announced(lab)
+    monkeypatch.setattr(_cog(lab), "_posted_message", AsyncMock(return_value=None))
+    _remove("💛")
+
+    done = await _updated(lab)
+
+    assert done.response.content == (
+        f"✅ **Annonce mise à jour** dans <#{lab.announce.id}> : 1 retirée. 2 membres prévenus par message privé.\n"
+        "⚠️ Le bot n'a pas pu retirer les réactions 💛 : retire-les à la main dans le salon de l'annonce.\n"
+        "-# Le brouillon reprend l'annonce telle qu'elle est maintenant."
+    )
+    assert _reacted_by(lab, posted, "💛") == [_bot_id(lab), lab.temp.id, lab.president.id]
+    assert [fm.emoji for fm in _stored().message.fms] == ["🧡", "💚"]
+
+
+async def test_a_refused_removal_of_the_bots_own_reaction_is_said_as_not_removed(
+    lab: Lab, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When Discord refuses both the clear and the bot's own removal, the answer does not claim the bot took its own off."""
+    posted = await _announced(lab)
+    _refused_clearing(monkeypatch)
+    refusal = discord.Forbidden(MagicMock(status=403, reason="Missing Permissions"), "Missing Permissions")
+    monkeypatch.setattr(discord.Message, "remove_reaction", AsyncMock(side_effect=refusal))
+    _remove("💛")
+
+    done = await _updated(lab)
+
+    assert done.response.content == (
+        f"✅ **Annonce mise à jour** dans <#{lab.announce.id}> : 1 retirée. 2 membres prévenus par message privé.\n"
+        "⚠️ Le bot n'a pas pu retirer les réactions 💛 : retire-les à la main dans le salon de l'annonce.\n"
+        "-# Le brouillon reprend l'annonce telle qu'elle est maintenant."
+    )
+    assert _reacted_by(lab, posted, "💛") == [_bot_id(lab), lab.temp.id, lab.president.id]
+
+
 async def test_a_transport_error_clearing_reactions_still_reminds_the_new_trainer(
     lab: Lab, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -394,6 +394,7 @@ def done_message(  # noqa: PLR0913 - one keyword per line of the answer
     posted: bool = True,
     unreacted: tuple[str, ...] = (),
     uncleared: tuple[str, ...] = (),
+    left: tuple[str, ...] = (),
     told: int = 0,
     dms_refused: int = 0,
 ) -> tuple[str, ui.View]:
@@ -405,7 +406,9 @@ def done_message(  # noqa: PLR0913 - one keyword per line of the answer
         posted (bool): False when the announcement is stored but Discord has not taken the edit of its message yet,
             which the next five-minute check retries.
         unreacted (tuple[str, ...]): The emojis of added sessions the bot could not react with, for the staff to add.
-        uncleared (tuple[str, ...]): The emojis of removed sessions whose reactions Discord refused to clear.
+        uncleared (tuple[str, ...]): The emojis of removed sessions whose reactions Discord refused to clear, the bot
+            having taken its own off.
+        left (tuple[str, ...]): The emojis of removed sessions the bot could not take any reaction off, for the staff.
         told (int): The members a private message reached.
         dms_refused (int): The members none of whose messages Discord took, their private messages being closed.
 
@@ -430,6 +433,11 @@ def done_message(  # noqa: PLR0913 - one keyword per line of the answer
         if uncleared
         else ""
     )
+    stuck = (
+        f"⚠️ Le bot n'a pas pu retirer les réactions {' '.join(left)} : retire-les à la main dans le salon de l'annonce.\n"
+        if left
+        else ""
+    )
     missing = (
         f"⚠️ La réaction {' '.join(unreacted)} n'a pas pu être ajoutée : ajoute-la à la main sur l'annonce.\n"
         if unreacted
@@ -443,7 +451,7 @@ def done_message(  # noqa: PLR0913 - one keyword per line of the answer
     content = (
         f"✅ **Annonce mise à jour** dans <#{channel_id}> : {shown}. "
         f"{counted(told, 'membre prévenu', 'membres prévenus')} par message privé.{closed}\n"
-        f"{late}{refused}{missing}-# Le brouillon reprend l'annonce telle qu'elle est maintenant."
+        f"{late}{refused}{stuck}{missing}-# Le brouillon reprend l'annonce telle qu'elle est maintenant."
     )
     return content, view
 

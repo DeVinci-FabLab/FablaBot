@@ -345,7 +345,8 @@ Order matters: the allow-list comes before the invite, otherwise the bot joins a
    Add Reactions, Create Private Threads and Send Messages in Threads. It does not include Administrator. Manage
    Messages is also what lets an announcement update clear the reactions of a session removed from it: without it,
    the bot removes its own reaction, the members' reactions stay visible but count for nothing, and the answer to
-   the update says so. A bot
+   the update says so. When the bot cannot take its own reaction off either, or cannot read the message, the answer
+   names the reactions to remove by hand in the announcement's channel. A bot
    invited before `/user invite` existed lacks Create Invite: give it to the bot's role in Server Settings, Roles.
    To have invites go through `/user invite`
    only, take Create Invite off `@everyone` and every other role: the bot's own role keeps it. Members with
