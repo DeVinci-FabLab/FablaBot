@@ -1645,6 +1645,14 @@ class FormationManagement(commands.Cog):
         for fm in fms:
             prev_registered_ids = {entry.get("user_id") for entry in fm.registered_users if entry.get("user_id") is not None}
             prev_waitlisted_ids = {entry.get("user_id") for entry in fm.waitlisted_users if entry.get("user_id") is not None}
+            # Seats cut below the stored order: those registered past the new count lose their place by the cut itself, in
+            # their stored order. A member who lands on the waitlist otherwise (a reaction taken back and put again) was
+            # not demoted by the seats, and is told the session is full.
+            cut_ids = {
+                entry.get("user_id")
+                for index, entry in enumerate(fm.registered_users)
+                if index >= max(fm.seats, 0) and entry.get("user_id") is not None
+            }
 
             current_users = reactions_snapshot.get(fm.emoji, {})
             current_logged_user = {uid: username for uid, username in current_users.items() if (fm.emoji, uid) in last_add}
@@ -1673,7 +1681,7 @@ class FormationManagement(commands.Cog):
                         registration_notifications.append((uid, fm))
                 else:
                     waitlisted.append(entry)
-                    if uid in prev_registered_ids:
+                    if uid in cut_ids:
                         demotion_notifications.append((uid, fm, len(waitlisted)))
                     elif uid not in prev_waitlisted_ids:
                         waitlist_notifications.append((uid, fm.name, len(waitlisted)))
