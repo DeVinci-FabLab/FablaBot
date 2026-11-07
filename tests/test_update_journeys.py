@@ -1097,3 +1097,19 @@ async def test_a_restart_leaves_an_announcement_with_no_session_to_come_alone(la
     await _cog(lab)._before_check_upcoming_formations()  # pyright: ignore[reportPrivateUsage]
 
     assert lab.env.backend.get_message(lab.announce.id, posted.id).content == before
+
+
+async def test_a_restart_leaves_the_announcement_of_a_server_outside_the_allow_list_alone(lab: Lab) -> None:
+    """At start the posted text of a server this instance does not serve is not touched, though it is stale."""
+    posted = await _announced(lab)
+    _rename_stored("Soudure à l'étain")
+    before = _snapshot(lab, posted)
+    stale = lab.env.backend.get_message(lab.announce.id, posted.id).content
+    assert stale != render_message(_stored().message)
+    bot: Any = lab.env.bot
+    bot.guild_access = GuildAccessPolicy(allowed=frozenset({OTHER_GUILD_ID}))
+
+    await _cog(lab)._before_check_upcoming_formations()  # pyright: ignore[reportPrivateUsage]
+
+    assert lab.env.backend.get_message(lab.announce.id, posted.id).content == stale
+    assert _snapshot(lab, posted) == before
