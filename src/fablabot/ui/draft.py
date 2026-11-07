@@ -317,6 +317,17 @@ def _changed_block(step: Step) -> list[str]:
     return block
 
 
+def _added_block(step: Step) -> list[str]:
+    """Write an added session of the summary: its line, then the trainer, who is told."""
+    after = step.after
+    assert after is not None
+    return [
+        f"➕ {after.emoji} **{plain(after.name)}** — {discord_timestamp(after.start_dt)} · {after.trainer_mention} · "  # noqa: RUF001 - the sign the copy asks for
+        f"{counted(after.seats, 'place', 'places')}",
+        f"-# À prévenir : {after.trainer_mention}",
+    ]
+
+
 def update_message(plan: UpdatePlan, channel_id: int, message_id: int) -> tuple[list[Embed], ui.View]:
     """Build the summary of an update: what changes, who is told, the sessions left as they are, and the way to confirm.
 
@@ -332,7 +343,7 @@ def update_message(plan: UpdatePlan, channel_id: int, message_id: int) -> tuple[
     """
     steps = [step for step in plan.steps if step.kind != "frozen"]
     blocks = [[f"Dans <#{channel_id}>. Les inscriptions et leur ordre d'arrivée restent.", ""]]
-    blocks += [_changed_block(step) for step in steps]
+    blocks += [_added_block(step) if step.kind == "added" else _changed_block(step) for step in steps]
     if plan.text_changes:
         blocks.append([f"💬 Texte de l'annonce : {', '.join(plan.text_changes)}"])
     footer = [""]
@@ -361,7 +372,9 @@ def update_message(plan: UpdatePlan, channel_id: int, message_id: int) -> tuple[
     return embeds, view
 
 
-def done_message(plan: UpdatePlan, channel_id: int, *, posted: bool = True) -> tuple[str, ui.View]:
+def done_message(
+    plan: UpdatePlan, channel_id: int, *, posted: bool = True, unreacted: tuple[str, ...] = ()
+) -> tuple[str, ui.View]:
     """Build the answer to a confirmed update: how much changed, and the way to the draft, which now says the same.
 
     Args:
@@ -369,6 +382,7 @@ def done_message(plan: UpdatePlan, channel_id: int, *, posted: bool = True) -> t
         channel_id (int): The channel of the announcement.
         posted (bool): False when the announcement is stored but Discord has not taken the edit of its message yet,
             which the next five-minute check retries.
+        unreacted (tuple[str, ...]): The emojis of added sessions the bot could not react with, for the staff to add.
 
     Returns:
         tuple[str, ui.View]: The text and the button that shows the draft.
@@ -385,9 +399,14 @@ def done_message(plan: UpdatePlan, channel_id: int, *, posted: bool = True) -> t
     view = ui.View()
     view.add_item(DraftButton("show"))
     late = "" if posted else "⚠️ Discord n'a pas accepté la modification du message : elle sera refaite d'ici 5 minutes.\n"
+    missing = (
+        f"⚠️ La réaction {' '.join(unreacted)} n'a pas pu être ajoutée : ajoute-la à la main sur l'annonce.\n"
+        if unreacted
+        else ""
+    )
     content = (
         f"✅ **Annonce mise à jour** dans <#{channel_id}> : {shown}.\n"
-        f"{late}-# Le brouillon reprend l'annonce telle qu'elle est maintenant."
+        f"{late}{missing}-# Le brouillon reprend l'annonce telle qu'elle est maintenant."
     )
     return content, view
 
@@ -415,7 +434,12 @@ async def _summarise_update(interaction: Interaction[Any]) -> None:
     if last is None:
         await _refuse(interaction, CHANGED_REFUSAL, RefusalKind.ANNOUNCEMENT_CHANGED)
         return
-    plan = plan_update(last.message, live_draft(guild, stored_draft(guild.id)), now=datetime.now(UTC))
+    plan = plan_update(
+        last.message,
+        live_draft(guild, stored_draft(guild.id)),
+        now=datetime.now(UTC),
+        retired=frozenset(formations.reacted_emojis(guild.id, last.message_id)),
+    )
     if isinstance(plan, str):
         await _refuse(interaction, plan, RefusalKind.DRAFT_NOT_READY)
         return

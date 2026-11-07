@@ -712,6 +712,7 @@ class FormationManagement(commands.Cog):
         if not isinstance(outcome, UpdatePlan):
             await self._refuse_update(interaction, *outcome, answered=True)
             return
+        unreacted = await self._react_to_added(guild, last, outcome)
         await self._remind_new_trainers(guild, message_id, outcome.trainers_to_remind)
         logger.info(
             f"[fm.brouillon] update guild_id={guild.id} user_id={interaction.user.id} message_id={message_id} "
@@ -719,8 +720,42 @@ class FormationManagement(commands.Cog):
             f"added={sum(step.kind == 'added' for step in outcome.steps)} "
             f"removed={sum(step.kind == 'removed' for step in outcome.steps)} text_changes={len(outcome.text_changes)}"
         )
-        content, view = done_message(outcome, last.channel_id, posted=not behind)
+        content, view = done_message(outcome, last.channel_id, posted=not behind, unreacted=unreacted)
         await interaction.edit_original_response(content=content, view=view, allowed_mentions=AllowedMentions.none())
+
+    async def _react_to_added(self, guild: Guild, last: PublishedMessage, plan: UpdatePlan) -> tuple[str, ...]:
+        """React with the emoji of each added session on the posted message, so that members can sign up from the first.
+
+        Done outside the lock, after the rebuild. A refusal is logged and the emoji kept to be named in the answer.
+
+        Args:
+            guild (Guild): The server.
+            last (PublishedMessage): The published message the update was made on.
+            plan (UpdatePlan): The update that was done.
+
+        Returns:
+            tuple[str, ...]: The emojis the bot could not add, which the staff adds by hand.
+        """
+        emojis = [step.after.emoji for step in plan.steps if step.kind == "added" and step.after is not None]
+        if not emojis:
+            return ()
+        channel = guild.get_channel(last.channel_id)
+        msg: Message | None = None
+        if isinstance(channel, TextChannel):
+            try:
+                msg = await channel.fetch_message(last.message_id)
+            except HTTPException:
+                logger.exception(f"Guild {guild.id} could not read message {last.message_id} to add the reactions.")
+        if msg is None:
+            return tuple(emojis)
+        failed: list[str] = []
+        for emoji in emojis:
+            try:
+                await msg.add_reaction(emoji)
+            except HTTPException:
+                logger.exception(f"Guild {guild.id} failed to add reaction {emoji!r} to the updated message {last.message_id}.")
+                failed.append(emoji)
+        return tuple(failed)
 
     async def _remind_new_trainers(self, guild: Guild, message_id: int, emojis: tuple[str, ...]) -> None:
         """Send the hour-before reminder to the new trainer alone of each session whose reminder already went out.
@@ -808,7 +843,12 @@ class FormationManagement(commands.Cog):
 
     def _confirmed_plan(self, guild: Guild, last: PublishedMessage, digest: str) -> UpdatePlan | tuple[str, RefusalKind]:
         """Plan the update from what is stored now, or give the refusal when it cannot be done or differs from the summary."""
-        plan = plan_update(last.message, live_draft(guild, stored_draft(guild.id)), now=datetime.now(UTC))
+        plan = plan_update(
+            last.message,
+            live_draft(guild, stored_draft(guild.id)),
+            now=datetime.now(UTC),
+            retired=frozenset(formations.reacted_emojis(guild.id, last.message_id)),
+        )
         if isinstance(plan, str):
             return plan, RefusalKind.DRAFT_NOT_READY
         if plan.digest(last.message_id) != digest:

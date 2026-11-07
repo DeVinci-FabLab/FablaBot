@@ -1013,6 +1013,21 @@ def test_user_guide_says_an_update_keeps_the_sign_ups_and_their_order() -> None:
     assert "does nothing yet" not in guide
 
 
+def test_user_guide_says_how_a_session_is_added_to_the_published_announcement() -> None:
+    """The draft section says where an added session goes, which emoji it gets and why, and the limit of 20."""
+    guide = " ".join(_section(_read("docs/USERGUIDE.md"), "### The draft").split())
+    for detail in (
+        "it goes last in the announcement, after the others, with no sign-up",
+        "The bot adds the session's reaction on the message once it is rewritten",
+        "no member ever reacted with it on this message",
+        "it gets the first free emoji of the bot's list",
+        "the draft then takes that emoji back with the rest of the announcement",
+        "An announcement holds at most 20 sessions",
+        "or when no free emoji is left",
+    ):
+        assert detail in guide, detail
+
+
 def test_user_guide_says_what_mettre_a_jour_l_annonce_shows_and_refuses() -> None:
     """The draft section says what the update summary lists, the sessions left as they are, the refusals and the length."""
     guide = _section(_read("docs/USERGUIDE.md"), "### The draft")

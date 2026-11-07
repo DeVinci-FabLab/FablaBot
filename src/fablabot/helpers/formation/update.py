@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Final, Literal
 
 from discord.utils import escape_markdown, escape_mentions
 
-from fablabot.helpers.constants import ANNOUNCEMENT_MAX_CHARS
+from fablabot.helpers.constants import ANNOUNCEMENT_MAX_CHARS, MAX_SESSIONS, SESSION_EMOJIS
 from fablabot.helpers.formation.catalogue import session_digest
 from fablabot.helpers.formation.rendering import announcement_length, grouped
 
@@ -187,6 +187,65 @@ def _refusal(draft: FmMessageDraft, sessions: list[Formation], now: datetime) ->
     return None
 
 
+def _given_emojis(sessions: list[Formation], taken: set[str]) -> list[str] | None:
+    """Give each added session an emoji: its own when nothing holds it, else the first of the pool nothing holds.
+
+    Args:
+        sessions (list[Formation]): The added sessions, in the order they are appended.
+        taken (set[str]): The emojis the announcement holds or that had reactions on it.
+
+    Returns:
+        list[str] | None: One emoji per session, or None when the pool has none left for one of them.
+    """
+    claimed = set(taken)
+    keeps: list[str | None] = []
+    for session in sessions:
+        keeps.append(None if session.emoji in claimed else session.emoji)
+        claimed.add(session.emoji)
+    given: list[str] = []
+    for keep in keeps:
+        emoji = keep or next((e for e in SESSION_EMOJIS if e not in claimed), None)
+        if emoji is None:
+            return None
+        claimed.add(emoji)
+        given.append(emoji)
+    return given
+
+
+def _appended(fresh: list[Formation], taken: set[str]) -> list[Formation] | None:
+    """Make the sessions to append from the draft's new ones, by start, each with its emoji and no sign-up.
+
+    Returns:
+        list[Formation] | None: The sessions, or None when the pool has no emoji left for one of them.
+    """
+    ordered = sorted(fresh, key=_moment)
+    emojis = _given_emojis(ordered, taken)
+    if emojis is None:
+        return None
+    return [
+        replace(
+            session,
+            emoji=emoji,
+            registered_users=[],
+            waitlisted_users=[],
+            notified_hour_before=False,
+            notified_at_start=False,
+        )
+        for session, emoji in zip(ordered, emojis, strict=True)
+    ]
+
+
+def _unfit(count: int, *, removed: int, has_emoji: bool) -> str | None:
+    """Tell why the sessions the update leaves cannot make an announcement: a removal, too many, or no emoji left."""
+    if removed:
+        return "Retirer une session d'une annonce publiée arrive bientôt : pour l'instant, publie une nouvelle annonce."
+    if count > MAX_SESSIONS:
+        return f"L'annonce compterait {count} sessions : Discord n'accepte pas plus de 20 réactions sur un message."
+    if not has_emoji:
+        return "Plus aucun émoji libre pour une session de plus sur cette annonce : publie une nouvelle annonce."
+    return None
+
+
 def _plain(session: Formation) -> str:
     """Write a session's name so that it shows as typed: no formatting, no mention."""
     return escape_mentions(escape_markdown(session.name))
@@ -228,7 +287,9 @@ def _sort_out(published: FmMessageDraft, draft: FmMessageDraft, now: datetime) -
     return wanted, fresh
 
 
-def plan_update(published: FmMessageDraft, draft: FmMessageDraft, *, now: datetime) -> UpdatePlan | str:
+def plan_update(
+    published: FmMessageDraft, draft: FmMessageDraft, *, now: datetime, retired: frozenset[str]
+) -> UpdatePlan | str:
     """Work out what an update of the published announcement by the draft would do, without doing it.
 
     A session is known by its emoji, the key of its sign-ups. A session started or about to start is left as published
@@ -238,6 +299,8 @@ def plan_update(published: FmMessageDraft, draft: FmMessageDraft, *, now: dateti
         published (FmMessageDraft): The announcement as stored, with its sign-ups.
         draft (FmMessageDraft): The draft, with the role to notify as the server still has it.
         now (datetime): The time to judge at, timezone-aware.
+        retired (frozenset[str]): The emojis members reacted with on the published message: none is given to a session
+            added by the update, since the reactions still on the message would count for it.
 
     Returns:
         UpdatePlan | str: The plan, or the reason it cannot be made, ending with the word that nothing was changed.
@@ -267,11 +330,11 @@ def plan_update(published: FmMessageDraft, draft: FmMessageDraft, *, now: dateti
         return f"{reason} {_UNCHANGED}"
     if reason := _refusal(draft, [*wanted.values(), *fresh], now):
         return f"{reason} {_UNCHANGED}"
-    if fresh or removed:
-        return (
-            "Ajouter ou retirer une session d'une annonce publiée arrive bientôt : pour l'instant, publie une nouvelle "
-            f"annonce. {_UNCHANGED}"
-        )
+    added = _appended(fresh, {fm.emoji for fm in published.fms} | retired)
+    if reason := _unfit(len(kept) + len(fresh), removed=removed, has_emoji=added is not None):
+        return f"{reason} {_UNCHANGED}"
+    assert added is not None  # _unfit refused the lack of an emoji
+    kept.extend(added)
 
     message = replace(
         published,
@@ -286,5 +349,6 @@ def plan_update(published: FmMessageDraft, draft: FmMessageDraft, *, now: dateti
             f"L'annonce mise à jour ferait {grouped(length)} caractères toutes places prises, Discord en accepte 2 000 : "
             f"retire une session ou raccourcis une description. {_UNCHANGED}"
         )
-    steps = (*sorted(changed, key=_by_start), *sorted(frozen, key=_by_start))
+    appended = [Step("added", None, session) for session in added]
+    steps = (*sorted(changed, key=_by_start), *appended, *sorted(frozen, key=_by_start))
     return UpdatePlan(message, steps, text_changes, moves={})

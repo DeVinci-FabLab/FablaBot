@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from fablabot.helpers.constants import PARIS_TZ
+from fablabot.helpers.constants import MAX_SESSIONS, PARIS_TZ, SESSION_EMOJIS
 from fablabot.helpers.formation.rendering import announcement_length, render_message
 from fablabot.helpers.formation.update import UpdatePlan, as_draft, is_frozen, plan_update
 from fablabot.models.formation import FmMessageDraft, Formation
@@ -16,10 +16,7 @@ from fablabot.models.formation import FmMessageDraft, Formation
 NOW = datetime(2026, 11, 10, 12, 0, tzinfo=PARIS_TZ)
 NBSP = "\N{NO-BREAK SPACE}"
 UNCHANGED = "Rien n'a été modifié."
-INTERIM = (
-    "Ajouter ou retirer une session d'une annonce publiée arrive bientôt : pour l'instant, publie une nouvelle annonce. "
-    f"{UNCHANGED}"
-)
+INTERIM = f"Retirer une session d'une annonce publiée arrive bientôt : pour l'instant, publie une nouvelle annonce. {UNCHANGED}"
 
 
 def _fm(emoji: str, *, hours: float = 48, name: str = "Soudure", seats: int = 5, signed: int = 0, **values: Any) -> Formation:
@@ -50,7 +47,7 @@ def _published() -> FmMessageDraft:
 
 def _plan(published: FmMessageDraft, draft: FmMessageDraft) -> UpdatePlan:
     """Plan an update at NOW and check that it is a plan."""
-    plan = plan_update(published, draft, now=NOW)
+    plan = plan_update(published, draft, now=NOW, retired=frozenset())
     assert isinstance(plan, UpdatePlan), plan
     return plan
 
@@ -130,7 +127,7 @@ def test_a_draft_saying_what_the_announcement_says_is_refused() -> None:
     """A draft that is the announcement as it stands, sign-ups apart, has nothing to update."""
     published = _published()
 
-    refusal = plan_update(published, as_draft(published), now=NOW)
+    refusal = plan_update(published, as_draft(published), now=NOW, retired=frozenset())
 
     assert refusal == f"Le brouillon dit déjà ce que dit l'annonce publiée : rien à mettre à jour. {UNCHANGED}"
 
@@ -141,7 +138,7 @@ def test_a_session_to_change_with_a_past_start_is_refused() -> None:
     draft = as_draft(published)
     draft.fms[1] = replace(draft.fms[1], start_iso=(NOW - timedelta(hours=1)).isoformat())
 
-    refusal = plan_update(published, draft, now=NOW)
+    refusal = plan_update(published, draft, now=NOW, retired=frozenset())
 
     assert refusal == f"La session **💛 Brodeuse** commence avant maintenant : change sa date ou retire-la. {UNCHANGED}"
 
@@ -153,7 +150,7 @@ def test_a_draft_differing_only_on_a_started_session_says_so() -> None:
     draft = as_draft(published)
     draft.fms[0] = replace(draft.fms[0], name="Autre nom", seats=9)
 
-    refusal = plan_update(published, draft, now=NOW)
+    refusal = plan_update(published, draft, now=NOW, retired=frozenset())
 
     assert refusal == (
         f"La session **🧡 Soudure** a déjà commencé ou commence dans moins de 5 minutes : elle reste telle quelle. {UNCHANGED}"
@@ -167,7 +164,7 @@ def test_a_session_moved_to_start_within_5_minutes_is_refused(minutes: int, refu
     draft = as_draft(published)
     draft.fms[1] = replace(draft.fms[1], start_iso=(NOW + timedelta(minutes=minutes)).isoformat())
 
-    result = plan_update(published, draft, now=NOW)
+    result = plan_update(published, draft, now=NOW, retired=frozenset())
 
     if refused:
         assert (
@@ -191,7 +188,7 @@ def test_no_role_intro_or_conclusion_is_refused(field: str, refusal: str) -> Non
     draft = replace(as_draft(published), **{field: 0 if field == "role_id" else "  "})
     draft.fms[0] = replace(draft.fms[0], seats=9)
 
-    assert plan_update(published, draft, now=NOW) == f"{refusal} {UNCHANGED}"
+    assert plan_update(published, draft, now=NOW, retired=frozenset()) == f"{refusal} {UNCHANGED}"
 
 
 def _sized(published: FmMessageDraft, target: int) -> FmMessageDraft:
@@ -208,13 +205,13 @@ def test_an_update_past_2000_characters_with_every_seat_taken_is_refused() -> No
     """The length is judged with every seat taken: 2 001 is refused with its length, exactly 2 000 passes."""
     published = _published()
 
-    refusal = plan_update(published, _sized(published, 2001), now=NOW)
+    refusal = plan_update(published, _sized(published, 2001), now=NOW, retired=frozenset())
 
     assert refusal == (
         f"L'annonce mise à jour ferait 2{NBSP}001 caractères toutes places prises, Discord en accepte 2 000 : "
         f"retire une session ou raccourcis une description. {UNCHANGED}"
     )
-    assert isinstance(plan_update(published, _sized(published, 2000), now=NOW), UpdatePlan)
+    assert isinstance(plan_update(published, _sized(published, 2000), now=NOW, retired=frozenset()), UpdatePlan)
 
 
 def test_the_length_counts_each_seat_as_taken() -> None:
@@ -336,23 +333,174 @@ def test_the_digest_sees_a_session_that_became_frozen() -> None:
 
     before = _plan(published, draft)
     later = NOW + timedelta(hours=47, minutes=57)
-    after = plan_update(published, draft, now=later)
+    after = plan_update(published, draft, now=later, retired=frozenset())
 
     assert isinstance(after, UpdatePlan)
     assert [s.kind for s in after.steps] == ["changed", "frozen"]
     assert after.digest(10) != before.digest(10)
 
 
-def test_an_added_or_removed_session_is_refused_for_now() -> None:
-    """A draft that adds a session, or drops one that is not frozen, is refused for the moment."""
+def test_a_removed_session_is_refused_for_now() -> None:
+    """A draft that drops a session that is not frozen is refused for the moment."""
     published = _published()
-    added = as_draft(published)
-    added.fms.append(_fm("💚", hours=90, name="Résine"))
     removed = as_draft(published)
     removed.fms.pop()
 
-    assert plan_update(published, added, now=NOW) == INTERIM
-    assert plan_update(published, removed, now=NOW) == INTERIM
+    assert plan_update(published, removed, now=NOW, retired=frozenset()) == INTERIM
+
+
+def _with_added(published: FmMessageDraft, *added: Formation) -> FmMessageDraft:
+    """The draft of ``published`` with these sessions added to it."""
+    draft = as_draft(published)
+    draft.fms.extend(added)
+    return draft
+
+
+def test_an_added_session_goes_last_with_no_sign_up() -> None:
+    """A session new to the announcement is appended after the kept ones, with no sign-up and no flag, as one added step."""
+    published = _message(_fm("🧡", hours=72, signed=2), _fm("💛", hours=96, name="Brodeuse"))
+    early = _fm("💚", hours=24, name="Résine", registered_users=[{"user_id": 1}], notified_hour_before=True)
+
+    plan = _plan(published, _with_added(published, early))
+
+    assert [fm.emoji for fm in plan.message.fms] == ["🧡", "💛", "💚"]
+    assert plan.message.fms[:2] == published.fms
+    added = plan.message.fms[2]
+    assert (added.registered_users, added.waitlisted_users) == ([], [])
+    assert (added.notified_hour_before, added.notified_at_start) == (False, False)
+    (step,) = [s for s in plan.steps if s.kind == "added"]
+    assert (step.before, step.after) == (None, added)
+    assert [s.kind for s in plan.steps] == ["added"]
+
+
+def test_added_sessions_are_appended_in_the_start_order_of_the_draft() -> None:
+    """Several added sessions follow the kept ones ordered by start, whatever their order in the draft."""
+    published = _published()
+    late = _fm("💚", hours=120, name="Résine")
+    early = _fm("💙", hours=100, name="Laser")
+
+    plan = _plan(published, _with_added(published, late, early))
+
+    assert [fm.emoji for fm in plan.message.fms] == ["🧡", "💛", "💙", "💚"]
+    assert [s.after.emoji for s in plan.steps if s.after and s.kind == "added"] == ["💙", "💚"]
+
+
+def test_an_added_session_keeps_its_emoji_when_free() -> None:
+    """A new session wearing an emoji no session of the announcement wears, and none was retired, keeps it."""
+    published = _published()
+
+    plan = _plan(published, _with_added(published, _fm("💜", hours=90, name="Résine")))
+
+    assert plan.message.fms[-1].emoji == "💜"
+
+
+def test_an_added_session_wearing_an_announced_emoji_gets_the_first_free_one() -> None:
+    """A new session whose emoji an announced session wears gets the first emoji of the pool the announcement lacks."""
+    published = _published()
+    twin = _fm("🧡", hours=90, name="Résine")
+    draft = _with_added(published, twin)
+
+    plan = _plan(published, draft)
+
+    assert plan.message.fms[-1].emoji == SESSION_EMOJIS[2]
+    assert plan.message.fms[-1].name == "Résine"
+    assert plan.message.fms[0] == published.fms[0]
+
+
+def test_an_emoji_worn_on_this_announcement_is_never_given_again() -> None:
+    """An emoji with reactions on this message is not given to a new session, which gets the next free one instead."""
+    published = _published()
+    draft = _with_added(published, _fm("💜", hours=90, name="Résine"))
+
+    plan = plan_update(published, draft, now=NOW, retired=frozenset({"💜", SESSION_EMOJIS[2]}))
+
+    assert isinstance(plan, UpdatePlan)
+    assert plan.message.fms[-1].emoji == SESSION_EMOJIS[3]
+
+
+def test_a_free_emoji_is_not_one_another_added_session_keeps() -> None:
+    """The first free emoji given to one added session is never one that another added session of the draft keeps."""
+    published = _published()
+    keeper = _fm(SESSION_EMOJIS[2], hours=100, name="Laser")
+    twin = _fm("🧡", hours=90, name="Résine")
+
+    plan = _plan(published, _with_added(published, keeper, twin))
+
+    assert {fm.name: fm.emoji for fm in plan.message.fms if fm.name in {"Laser", "Résine"}} == {
+        "Laser": SESSION_EMOJIS[2],
+        "Résine": SESSION_EMOJIS[3],
+    }
+
+
+def test_a_frozen_sessions_emoji_with_a_future_start_is_a_new_session() -> None:
+    """A draft session on a frozen session's emoji with another, future start is a new session; the frozen one stays."""
+    frozen = _fm("🧡", hours=-1, signed=2)
+    published = _message(frozen, _fm("💛", hours=72, name="Brodeuse"))
+    draft = as_draft(published)
+    draft.fms[0] = replace(draft.fms[0], name="Autre", start_iso=(NOW + timedelta(hours=90)).isoformat())
+
+    plan = _plan(published, draft)
+
+    assert plan.message.fms[0] == frozen
+    added = plan.message.fms[-1]
+    assert (added.name, added.emoji) == ("Autre", SESSION_EMOJIS[2])
+    assert [s.kind for s in plan.steps] == ["added", "frozen"]
+
+
+def test_more_than_twenty_sessions_is_refused() -> None:
+    """An announcement with more sessions than there are reactions to carry is refused, with its count."""
+    kept = [_fm(emoji, hours=48 + n, name=f"S{n}") for n, emoji in enumerate(SESSION_EMOJIS)]
+    published = _message(*kept)
+
+    refusal = plan_update(
+        published,
+        _with_added(published, _fm("🔥", hours=90, name="De trop")),
+        now=NOW,
+        retired=frozenset(),
+    )
+
+    assert len(kept) == MAX_SESSIONS
+    assert refusal == (
+        f"L'annonce compterait {MAX_SESSIONS + 1} sessions : Discord n'accepte pas plus de 20 réactions sur un message. "
+        f"{UNCHANGED}"
+    )
+
+
+def test_no_free_emoji_is_refused() -> None:
+    """When every emoji of the pool is held or retired, a new session that cannot keep its own is refused."""
+    published = _published()
+    draft = _with_added(published, _fm("🧡", hours=90, name="Résine"))
+
+    refusal = plan_update(published, draft, now=NOW, retired=frozenset(SESSION_EMOJIS))
+
+    assert refusal == (
+        f"Plus aucun émoji libre pour une session de plus sur cette annonce : publie une nouvelle annonce. {UNCHANGED}"
+    )
+
+
+def test_an_added_session_in_the_past_is_refused() -> None:
+    """A new session starting before now is refused like a kept one, naming it."""
+    published = _published()
+
+    refusal = plan_update(
+        published,
+        _with_added(published, _fm("💜", hours=-2, name="Résine")),
+        now=NOW,
+        retired=frozenset(),
+    )
+
+    assert refusal == f"La session **💜 Résine** commence avant maintenant : change sa date ou retire-la. {UNCHANGED}"
+
+
+def test_an_added_session_counts_in_the_length_and_the_digest() -> None:
+    """The announcement is measured with the added session, and the digest differs from the plan without it."""
+    published = _published()
+    plan = _plan(published, _with_added(published, _fm("💜", hours=90, name="Résine")))
+    other = _plan(published, _with_added(published, _fm("💜", hours=91, name="Résine")))
+
+    assert announcement_length(plan.message) > announcement_length(published)
+    assert plan.digest(10) != other.digest(10)
+    assert plan.digest(10) != _plan(published, replace(as_draft(published), intro="Autre")).digest(10)
 
 
 def test_as_draft_empties_the_lists_and_the_flags() -> None:

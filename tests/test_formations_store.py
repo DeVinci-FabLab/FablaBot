@@ -16,7 +16,8 @@ from fablabot.cogs import formation_management
 from fablabot.cogs.formation_management import FormationManagement
 from fablabot.helpers.constants import PARIS_TZ, ErrorMessages
 from fablabot.helpers.guild_access import GuildAccessPolicy
-from fablabot.models import FmMessageDraft, Formation, PublishedMessage
+from fablabot.helpers.reaction_log import ReactionLogManager
+from fablabot.models import FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
 from fablabot.services import formations
 
 GUILD_A = 111111111111111111
@@ -253,6 +254,28 @@ def test_an_update_writes_the_announcement_and_the_draft_together() -> None:
     assert formations.current_published(GUILD_A) == updated
     assert (formations.get_draft(GUILD_A) or message()).intro == "Après"
     assert formations.current_published(GUILD_B) == elsewhere
+
+
+def test_reacted_emojis_are_read_for_one_message_of_one_server() -> None:
+    """The emojis members reacted with on a message are listed for that message of that server only, formation scope only."""
+    logs = ReactionLogManager("formation", lambda now: now - timedelta(days=30), MagicMock())
+    other_scope = ReactionLogManager("message", lambda now: now - timedelta(days=30), MagicMock())
+    stamp = datetime.now(PARIS_TZ).isoformat(timespec="seconds")
+
+    def event(message_id: int, emoji: str, action: ReactionAction = ReactionAction.ADD) -> ReactionEvent:
+        return ReactionEvent(message_id=message_id, user_id=5, user_name="a", emoji=emoji, action=action, ts_iso=stamp)
+
+    logs.append(GUILD_A, event(FIRST, "💜"))
+    logs.append(GUILD_A, event(FIRST, "💜"))
+    logs.append(GUILD_A, event(FIRST, "💙", ReactionAction.REMOVE))
+    logs.append(GUILD_A, event(SECOND, "💚"))
+    logs.append(GUILD_B, event(FIRST, "🧡"))
+    other_scope.append(GUILD_A, event(FIRST, "🟥"))
+
+    assert formations.reacted_emojis(GUILD_A, FIRST) == {"💜", "💙"}
+    assert formations.reacted_emojis(GUILD_A, SECOND) == {"💚"}
+    assert formations.reacted_emojis(GUILD_B, FIRST) == {"🧡"}
+    assert formations.reacted_emojis(GUILD_B, SECOND) == set()
 
 
 @pytest.fixture

@@ -235,3 +235,20 @@ def reissued_positions(guild_id: int, message_id: int) -> set[int]:
         (guild_id, message_id),
     )
     return {row["position"] for row in rows}
+
+
+def reacted_emojis(guild_id: int, message_id: int) -> set[str]:
+    """List the emojis members reacted with on a published message, from the reaction log.
+
+    Args:
+        guild_id (int): The ID of the guild.
+        message_id (int): The ID of the published message.
+
+    Returns:
+        set[str]: Every emoji the log holds an add or a removal for on that message, whatever session wore it.
+    """
+    rows = db.connection().execute(
+        "SELECT DISTINCT emoji FROM reaction_event WHERE scope = 'formation' AND guild_id = ? AND message_id = ?",
+        (guild_id, message_id),
+    )
+    return {row["emoji"] for row in rows}

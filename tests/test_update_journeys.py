@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 import logging
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
@@ -31,9 +31,11 @@ from fablabot.helpers.constants import SESSION_EMOJIS, RoleNames
 from fablabot.helpers.formation import render_message
 from fablabot.helpers.formation.update import as_draft
 from fablabot.helpers.guild_access import GuildAccessPolicy
+from fablabot.helpers.reaction_log import ReactionLogManager
 from fablabot.helpers.utils import RIGHT_LOST_MESSAGE
+from fablabot.models import ReactionAction, ReactionEvent
 from fablabot.models.formation import FmMessageDraft, PublishedMessage
-from fablabot.services import formations
+from fablabot.services import attendance, formations
 from fablabot.ui import draft as draft_ui
 from fablabot.ui.draft import DRAFT_ITEMS
 
@@ -41,6 +43,7 @@ if TYPE_CHECKING:
     import simcord
 
 NBSP = "\N{NO-BREAK SPACE}"
+ADDED = "➕"  # noqa: RUF001 - the sign the copy asks for
 UNCHANGED = "Rien n'a été modifié."
 CONFIRM = "✅ Confirmer la mise à jour"
 CHANGED = f"L'annonce ou le brouillon a changé depuis ce résumé : presse de nouveau **Publier** pour le revoir. {UNCHANGED}"
@@ -81,6 +84,14 @@ def _change(emoji: str, **values: Any) -> None:
             fm = replace(fm, **moved, **values)
         fms.append(fm)
     formations.save_draft(GUILD_ID, replace(draft, fms=fms))
+
+
+def _add(lab: Lab, emoji: str, name: str, *, days: float = 5, **values: Any) -> None:
+    """Add a session to the stored draft, starting ``days`` from now, given by the member without a role."""
+    draft = formations.get_draft(GUILD_ID)
+    assert draft is not None
+    session = replace(_session(emoji, name, days=days, trainer=lab.plain), **values)
+    formations.save_draft(GUILD_ID, replace(draft, fms=[*draft.fms, session]))
 
 
 def _member(user_id: int) -> dict[str, Any]:
@@ -883,3 +894,135 @@ async def test_a_summary_past_the_room_of_a_message_is_refused_and_changes_nothi
     )
     assert not shown.response.embeds
     assert _snapshot(lab, posted) == before
+
+
+def _bot_id(lab: Lab) -> int:
+    """The ID of the bot's own user."""
+    assert lab.env.bot.user is not None
+    return lab.env.bot.user.id
+
+
+def _reacted_by(lab: Lab, posted: discord.Message, emoji: str) -> list[int]:
+    """The members who reacted to the posted message with an emoji."""
+    sent = lab.env.backend.get_message(lab.announce.id, posted.id)
+    return next((list(r.user_ids) for r in sent.reactions if r.emoji == emoji), [])
+
+
+async def test_an_added_session_appears_with_the_bots_reaction(lab: Lab) -> None:
+    """Confirming a draft with one more session edits the message to list it last and the bot reacts with its emoji."""
+    posted = await _announced(lab)
+    before = _snapshot(lab, posted)
+    _add(lab, "💜", "Découpe laser")
+
+    summary = await _summary(lab)
+    lines = _embed_lines(summary.response)
+    done = await _confirm(lab, summary)
+
+    assert any(line.startswith(f"{ADDED} 💜 **Découpe laser** — <t:") and line.endswith(" · 5 places") for line in lines)
+    assert f"-# À prévenir : <@{lab.plain.id}>" in lines
+    assert done.response.content == _done(lab, "1 ajoutée")
+    stored = _stored()
+    assert [fm.emoji for fm in stored.message.fms] == ["🧡", "💛", "💚", "💜"]
+    assert (stored.message.fms[3].registered_users, stored.message.fms[3].waitlisted_users) == ([], [])
+    sent = lab.env.backend.get_message(lab.announce.id, posted.id)
+    assert sent.content == render_message(stored.message)
+    assert "Découpe laser" in sent.content
+    assert _reacted_by(lab, posted, "💜") == [_bot_id(lab)]
+    assert [r for r in _snapshot(lab, posted).reactions if r[0] != "💜"] == before.reactions
+    assert len(lab.announce.history()) == 1
+
+
+async def test_a_member_signs_up_on_an_added_session_from_the_first_reaction(lab: Lab) -> None:
+    """A member reacting with the added session's emoji right after the update is registered on it."""
+    posted = await _announced(lab)
+    _add(lab, "💜", "Découpe laser")
+    await _updated(lab)
+
+    await lab.plain.react(posted, "💜")
+    await lab.env.advance_time(120)
+
+    assert _lists("💜") == ([lab.plain.id], [])
+    assert _lists("🧡")[0] == [lab.codir.id, lab.admin.id]
+    assert "1/5" in lab.env.backend.get_message(lab.announce.id, posted.id).content
+
+
+async def test_an_added_session_never_takes_an_emoji_with_reactions_on_this_announcement(lab: Lab) -> None:
+    """An emoji a member reacted with on this message, though no session wears it, is not given to the new session."""
+    posted = await _announced(lab)
+    ReactionLogManager("formation", lambda now: now - timedelta(days=30), logging.getLogger("test")).append(
+        GUILD_ID,
+        ReactionEvent(
+            message_id=posted.id,
+            user_id=lab.plain.id,
+            user_name="plain",
+            emoji="💜",
+            action=ReactionAction.ADD,
+            ts_iso=datetime.now(UTC).isoformat(timespec="seconds"),
+        ),
+    )
+    _add(lab, "💜", "Découpe laser")
+
+    summary = await _summary(lab)
+    lines = _embed_lines(summary.response)
+    await _confirm(lab, summary)
+
+    assert any(line.startswith(f"{ADDED} {SESSION_EMOJIS[3]} **Découpe laser**") for line in lines)
+    assert [fm.emoji for fm in _stored().message.fms] == ["🧡", "💛", "💚", SESSION_EMOJIS[3]]
+    assert _reacted_by(lab, posted, SESSION_EMOJIS[3]) == [_bot_id(lab)]
+    assert _reacted_by(lab, posted, "💜") == []
+
+
+async def test_the_draft_takes_the_emoji_the_update_gave(lab: Lab) -> None:
+    """A new session that had to change emoji is written back in the draft under the emoji the announcement gave it."""
+    await _announced(lab)
+    _add(lab, "🧡", "Découpe laser")
+
+    await _updated(lab)
+
+    stored = _stored()
+    assert stored.message.fms[3].emoji == SESSION_EMOJIS[3]
+    assert formations.get_draft(GUILD_ID) == as_draft(stored.message)
+    refused = await _publier(lab)
+    assert "déjà publiée" in refused.response.content
+
+
+async def test_adding_keeps_every_check_on_its_training(lab: Lab) -> None:
+    """A session added before the others by its start is still placed last, so a check at index 0 stays on its training."""
+    posted = await _announced(lab)
+    first = _stored()
+    _flag("🧡", notified_at_start=True)
+    start = _session_of("🧡").start_dt
+    attendance.open_appel(
+        GUILD_ID, first.message_id, 0, trainer_id=lab.plain.id, starts_at=start, ends_at=start + timedelta(hours=1)
+    )
+    _add(lab, "💜", "Découpe laser", days=1)
+
+    await _updated(lab)
+
+    stored = _stored()
+    assert [fm.name for fm in stored.message.fms] == ["Soudure", "Brodeuse", "Résine", "Découpe laser"]
+    assert attendance.is_open(GUILD_ID, stored.message_id, 0)
+    assert not attendance.is_open(GUILD_ID, stored.message_id, 3)
+    assert stored.message.fms[0].emoji == "🧡"
+    assert _reacted_by(lab, posted, "💜") == [_bot_id(lab)]
+
+
+async def test_a_reaction_the_bot_cannot_add_is_named_in_the_answer(lab: Lab, monkeypatch: pytest.MonkeyPatch) -> None:
+    """When Discord refuses the bot's reaction, the update stands and the answer names the emoji to add by hand."""
+    posted = await _announced(lab)
+    _add(lab, "💜", "Découpe laser")
+    summary = await _summary(lab)
+    with monkeypatch.context() as refusing:
+        refusing.setattr(
+            discord.Message,
+            "add_reaction",
+            AsyncMock(side_effect=discord.HTTPException(MagicMock(status=500, reason="x"), "x")),
+        )
+        done = await _confirm(lab, summary)
+
+    assert done.response.content == _done(lab, "1 ajoutée").replace(
+        "\n-# Le brouillon",
+        "\n⚠️ La réaction 💜 n'a pas pu être ajoutée : ajoute-la à la main sur l'annonce.\n-# Le brouillon",
+    )
+    assert [fm.emoji for fm in _stored().message.fms][-1] == "💜"
+    assert _reacted_by(lab, posted, "💜") == []
