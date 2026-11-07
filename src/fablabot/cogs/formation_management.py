@@ -986,7 +986,15 @@ class FormationManagement(commands.Cog):
             return RETRY_REFUSAL, RefusalKind.UPDATE_STORAGE_FAILED
         self._retry_guilds.discard(guild.id)  # as a scheduled update does: what is left after the rebuild is its own failure
         try:
-            await self._update_published_message_locked(guild.id, tally)
+            lowered = frozenset(
+                step.after.emoji
+                for step in plan.steps
+                if step.kind == "changed"
+                and step.before is not None
+                and step.after is not None
+                and step.after.seats < step.before.seats
+            )
+            await self._update_published_message_locked(guild.id, tally, lowered)
         except sqlite3.Error:
             logger.exception(f"Guild {guild.id} stored the update of message {message_id} but could not rebuild it.")
             self._stale_guilds.add(guild.id)
@@ -1554,13 +1562,16 @@ class FormationManagement(commands.Cog):
             await self._update_published_message_locked(guild_id)
 
     async def _update_published_message_locked(  # noqa: PLR0912, PLR0915 - split once formations have tests
-        self, guild_id: int, tally: DmTally | None = None
+        self, guild_id: int, tally: DmTally | None = None, lowered: frozenset[str] = frozenset()
     ) -> None:
         """Reload the published message, rebuild registrations from reactions, save and notify.
 
         Args:
             guild_id (int): The ID of the guild.
             tally (DmTally | None): Where an update notes the members told that a lost seat put them on the waitlist.
+            lowered (frozenset[str]): The sessions whose seats this update cut: only their members moved to the waitlist
+                by the cut are told the session has fewer places; any other member who lands there is told the usual
+                waitlist place.
         """
         pub = self._get_last_published_in_guild(guild_id)
         if not pub:
@@ -1691,7 +1702,7 @@ class FormationManagement(commands.Cog):
                         registration_notifications.append((uid, fm))
                 else:
                     waitlisted.append(entry)
-                    if uid in cut_ids:
+                    if uid in cut_ids and fm.emoji in lowered:
                         demotion_notifications.append((uid, fm, len(waitlisted)))
                     elif uid not in prev_waitlisted_ids:
                         waitlist_notifications.append((uid, fm.name, len(waitlisted)))

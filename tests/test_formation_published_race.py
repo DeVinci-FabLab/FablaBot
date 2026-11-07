@@ -17,6 +17,7 @@ import pytest
 from fablabot import db
 from fablabot.cogs import formation_management as fm_cog
 from fablabot.helpers.constants import PARIS_TZ
+from fablabot.helpers.formation import DmTally
 from fablabot.helpers.guild_access import GuildAccessPolicy
 from fablabot.logging_handlers.guild_context import GuildContextFilter
 from fablabot.models import FmMessageDraft, Formation, PublishedMessage, ReactionAction, ReactionEvent
@@ -445,7 +446,37 @@ async def test_seats_taken_before_the_journal_retention_keep_their_order_and_a_l
 async def test_a_member_moved_to_the_waitlist_gets_the_seats_message_not_the_full_one(
     started_bot: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A member who held a seat and loses it to fewer places is told the seats changed, not that the session was full."""
+    """A member who held a seat and loses it to fewer places in this update is told the seats changed, not that it was full."""
+    env = _Env(started_bot.get_cog("FormationManagement"), monkeypatch, seats=1, reactors=(MEMBER_ID, OTHER_MEMBER_ID))
+    waitlist_dm = AsyncMock()
+    demotion_dm = AsyncMock()
+    monkeypatch.setattr(fm_cog, "send_waitlist_dm", waitlist_dm)
+    monkeypatch.setattr(fm_cog, "send_demotion_dm", demotion_dm)
+    _log_events(env, (MEMBER_ID, ReactionAction.ADD, 10), (OTHER_MEMBER_ID, ReactionAction.ADD, 5))
+    pub = env.cog._get_last_published_in_guild(GUILD_ID)
+    assert pub is not None
+    stamp = datetime.now(PARIS_TZ).isoformat(timespec="seconds")
+    pub.message.fms[0].registered_users = [
+        {"user_id": MEMBER_ID, "username": "alice", "ts_iso": stamp},
+        {"user_id": OTHER_MEMBER_ID, "username": "bob", "ts_iso": stamp},
+    ]
+    env.cog._set_last_published_in_guild(GUILD_ID, pub)
+
+    async with env.cog._published_lock(GUILD_ID):
+        await env.cog._update_published_message_locked(GUILD_ID, DmTally(), frozenset({EMOJI}))
+
+    assert _seats(env) == ([MEMBER_ID], [OTHER_MEMBER_ID])
+    waitlist_dm.assert_not_awaited()
+    assert demotion_dm.await_count == 1
+    assert demotion_dm.await_args is not None
+    args = demotion_dm.await_args.args
+    assert (args[1], args[3]) == (OTHER_MEMBER_ID, 1)
+
+
+async def test_a_member_past_the_seats_outside_an_update_of_the_seats_gets_the_waitlist_message(
+    started_bot: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A rebuild that finds more registered than seats, with no seat cut in this update, tells the usual waitlist place."""
     env = _Env(started_bot.get_cog("FormationManagement"), monkeypatch, seats=1, reactors=(MEMBER_ID, OTHER_MEMBER_ID))
     waitlist_dm = AsyncMock()
     demotion_dm = AsyncMock()
@@ -464,11 +495,10 @@ async def test_a_member_moved_to_the_waitlist_gets_the_seats_message_not_the_ful
     await env.cog._update_published_message(GUILD_ID)
 
     assert _seats(env) == ([MEMBER_ID], [OTHER_MEMBER_ID])
-    waitlist_dm.assert_not_awaited()
-    assert demotion_dm.await_count == 1
-    assert demotion_dm.await_args is not None
-    args = demotion_dm.await_args.args
-    assert (args[1], args[3]) == (OTHER_MEMBER_ID, 1)
+    demotion_dm.assert_not_awaited()
+    assert waitlist_dm.await_count == 1
+    assert waitlist_dm.await_args is not None
+    assert waitlist_dm.await_args.args[1] == OTHER_MEMBER_ID
 
 
 async def test_a_member_who_re_adds_a_reaction_on_a_full_session_gets_the_waitlist_message_not_the_seats_one(
